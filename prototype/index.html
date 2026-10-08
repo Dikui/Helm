@@ -11,6 +11,7 @@
   --accent: #2f5bd3; --accent-soft: #e6ecfb;
   --ok: #1f8a4c; --ok-soft: #e3f3ea; --warn: #b26a00; --warn-soft: #fbf0dc;
   --bad: #c0392b; --bad-soft: #fbe6e3; --agent: #7a4fc4; --agent-soft: #efe8fa;
+  --overlay: #00000066;
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
     --accent: #7c9cf0; --accent-soft: #232c45;
     --ok: #5cc48a; --ok-soft: #1d3326; --warn: #e3a64a; --warn-soft: #3a2d17;
     --bad: #ef7d70; --bad-soft: #3d2220; --agent: #b598ea; --agent-soft: #2e2540;
+    --overlay: #00000099;
   }
 }
 * { box-sizing: border-box; }
@@ -31,6 +33,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
 button.bad { color: var(--bad); }
 button.small { padding: 3px 9px; font-size: 12px; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+select { font: inherit; border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; background: var(--panel); color: var(--text); }
 textarea, input[type=text] { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--panel); color: var(--text); }
 textarea { resize: vertical; min-height: 60px; }
 
@@ -59,6 +63,7 @@ main { overflow-y: auto; padding: 22px 28px 60px; }
 .s-in_review { background: var(--warn-soft); color: var(--warn); } .d-in_review { background: var(--warn); }
 .s-changes_requested { background: var(--bad-soft); color: var(--bad); } .d-changes_requested { background: var(--bad); }
 .s-accepted { background: var(--ok-soft); color: var(--ok); } .d-accepted { background: var(--ok); }
+.s-abandoned { background: var(--panel-2); color: var(--muted); } .d-abandoned { background: var(--faint); }
 .k { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
 .who-agent { color: var(--agent); } .who-human { color: var(--accent); }
 
@@ -76,6 +81,7 @@ h2 .hint { font-weight: 400; font-size: 12px; color: var(--faint); }
 .banner.warn { background: var(--warn-soft); }
 .banner.agent { background: var(--agent-soft); }
 .banner.ok { background: var(--ok-soft); }
+.banner.neutral { background: var(--panel-2); color: var(--muted); }
 .banner .grow { flex: 1; }
 .banner b { display: block; margin-bottom: 2px; }
 
@@ -92,6 +98,7 @@ h2 .hint { font-weight: 400; font-size: 12px; color: var(--faint); }
 
 .verdict { font-size: 12px; font-weight: 600; white-space: nowrap; }
 .v-pass { color: var(--ok); } .v-fail { color: var(--bad); } .v-unchecked { color: var(--faint); }
+.v-unresolved { color: var(--warn); }
 details.ev { margin-top: 6px; }
 details.ev summary { font-size: 12px; color: var(--muted); cursor: pointer; }
 .ev-item { margin: 6px 0 0 4px; padding: 7px 10px; background: var(--panel-2); border-radius: 6px; font-size: 12.5px; }
@@ -123,17 +130,50 @@ details.process > summary::-webkit-details-marker { display: none; }
 .intro { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 22px; font-size: 13px; color: var(--muted); }
 .intro b { color: var(--text); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast { position: fixed; z-index: 20; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: 1; }
 .add-row { display: flex; gap: 6px; margin-top: 10px; }
+.add-row input { flex: 1; min-width: 0; }
+.add-row select, .add-row button { flex: none; }
+.info-band { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 18px; margin-bottom: 16px; }
+.info-band > div, .cols > div, .below > div { min-width: 0; overflow-wrap: anywhere; }
+.info-band ul, .handoff ul { padding-left: 18px; margin: 4px 0 10px; }
+.limit-row { margin-top: 6px; font-size: 12px; }
+.limit-row .meta { justify-content: space-between; }
+.progress { height: 6px; border-radius: 6px; background: var(--panel-2); overflow: hidden; margin-top: 4px; }
+.progress span { display: block; height: 100%; background: var(--accent); }
+.limit-row.warning { color: var(--warn); } .limit-row.warning .progress span { background: var(--warn); }
+.limit-row.exhausted { color: var(--bad); } .limit-row.exhausted .progress span { background: var(--bad); }
+.handoff { grid-column: 1 / -1; }
+.handoff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; margin-top: 10px; }
+.tabs { display: flex; gap: 6px; margin: 12px 0 8px; }
+.tabs .active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.attempt { margin-top: 8px; padding: 10px; background: var(--panel-2); border-radius: 7px; }
+.attempt.failed { border-left: 3px solid var(--bad); background: var(--bad-soft); }
+.attempt.limited { border-left: 3px solid var(--warn); }
+.attempt .reason { margin-top: 6px; color: var(--bad); font-size: 12px; }
+.check { margin-top: 5px; }
+.resolution { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.action-hint { width: 100%; text-align: right; color: var(--warn); font-size: 12px; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; background: var(--overlay); display: grid; place-items: center; padding: 20px; }
+.modal { width: min(820px, 100%); max-height: 90vh; display: flex; flex-direction: column; }
+.modal h2 { justify-content: space-between; flex-wrap: wrap; }
+.prompt-preview { margin: 6px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; font: 12px/1.65 var(--mono); }
+[hidden] { display: none !important; }
 
-@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .below { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .below { grid-template-columns: 1fr; } .info-band { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; height: auto; }
   aside { border-right: none; border-bottom: 1px solid var(--line); max-height: 45vh; }
   main { padding: 16px; }
   .head { flex-direction: column; }
   .actions { justify-content: flex-start; }
+  .action-hint { text-align: left; }
+  .handoff-grid { grid-template-columns: 1fr; }
+  .add-row { flex-wrap: wrap; }
+  .add-row input { flex-basis: 100%; }
+  .inbox-item { flex-wrap: wrap; }
+  .modal-backdrop { padding: 12px; }
   .tl-item { grid-template-columns: 46px 1fr; } .tl-item .who { grid-column: 2; }
 }
 </style>
@@ -144,12 +184,13 @@ details.process > summary::-webkit-details-marker { display: none; }
   <main id="main"></main>
 </div>
 <div class="toast" id="toast"></div>
+<div id="modal-root"></div>
 
 <script>
 // ---------- mock data: two chained cases ----------
 const STATUS = {
   draft: '草稿·待批准', ready: '就绪', running: '代理执行中', blocked: '阻塞·等你回答',
-  verifying: '验证中', in_review: '待签收', changes_requested: '已打回', accepted: '已签收',
+  verifying: '验证中', in_review: '待签收', changes_requested: '已打回', accepted: '已签收', abandoned: '已终止',
 };
 const KIND = { deterministic: '确定性', evidence: '证据型', adversarial: '对抗型', judgment: '判断型' };
 const KIND_HINT = {
@@ -160,11 +201,14 @@ const db = {
   c1: {
     id: 'c1', parent: null, title: '客户 A · 智能排产需求能否承接', status: 'running', version: 2, owner: 'chief',
     need: '客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。',
+    deliverable: 'Markdown 承接评估报告：evidence/c1/承接评估.md（含结论、依据、风险、条件及子契约证据索引）',
+    sources: ['公开行业数据与企业官网', 'experience/ 内部项目、基准与资源资料', '已批准的子契约结论与证据'],
+    limit: { deadline: '2026-10-10 18:00', maxAttempts: 3, tokenBudget: 30000, usedAttempts: 1, usedTokens: 6800 },
     boundaries: [
-      { text: '只使用公开数据与内部资料', src: 'human', ok: true },
-      { text: '不直接联系客户', src: 'human', ok: true },
-      { text: '3 个工作日内给出结论（截止 10/10）', src: 'human', ok: true },
-      { text: '不承诺超出当前交付产能的上线时间', src: 'agent_draft', ok: true, why: '起草自经验库：P-2024-11 因过度承诺工期导致违约' },
+      { text: '只使用公开数据与内部资料', src: 'human', ok: true, enf: 'enforced', mech: 'worker 的资料工具仅开放公开网页检索与 experience/ 内部资料读取' },
+      { text: '不直接联系客户', src: 'human', ok: true, enf: 'enforced', mech: 'worker 未被授予邮件 / IM 类工具' },
+      { text: '3 个工作日内给出结论（截止 10/10）', src: 'human', ok: true, enf: 'advisory' },
+      { text: '不承诺超出当前交付产能的上线时间', src: 'agent_draft', ok: true, enf: 'advisory', why: '起草自经验库：P-2024-11 因过度承诺工期导致违约' },
     ],
     tests: [
       { id: 't1', kind: 'deterministic', text: '结论包含：结论、依据、风险、条件 四部分', v: 'unchecked' },
@@ -173,34 +217,63 @@ const db = {
       { id: 't4', kind: 'judgment', text: '技术 / 产能 / 成本 三个子契约均已签收，结论可对外沟通', v: 'unchecked' },
     ],
     evidence: {},
+    handoff: {
+      updated: '10/07 09:18 · agent:chief',
+      baseline: '已有技术、交付产能、成本与报价三份子契约；承接结论尚未形成',
+      done: ['已批准需求与边界', '已派发技术、产能、成本子契约', '已补充竞品与市场规模调研子契约'],
+      decisions: ['先核对当前能力与产能，再汇总结论：避免在子契约未确认前承诺交付'],
+      open: ['交付产能缺少 Q4 排期', '成本子契约的毛利下限变更待批准', '技术对接先例仍需人工确认', '市场调研达到 token 上限'],
+      next: '处理子契约阻塞与待判定检查，待证据齐备后汇总承接结论',
+      outputs: ['evidence/c1/承接评估-提纲.md'],
+    },
+    attempts: [
+      { number: 1, actor: 'agent:chief', model: 'opus-5.5 · high', method: '拆解技术、产能、成本与市场调研，逐项汇总证据', result: 'running', failure: '', tokens: 6800, duration: '持续 2 小时' },
+    ],
     log: [
       ['10/07 09:12', 'human', '创建契约并批准'],
       ['10/07 09:14', 'agent:chief', '拆解为 3 个子契约：技术可行性、交付产能、成本与报价'],
       ['10/07 09:15', 'agent:chief', '等待子契约完成后汇总结论'],
+      ['10/07 09:18', 'agent:chief', '补充第 4 个子契约：竞品与市场规模调研'],
     ],
   },
   c1a: {
     id: 'c1a', parent: 'c1', title: '技术可行性', status: 'in_review', version: 1, owner: 'worker',
     need: '评估现有平台能否支撑客户 A 的排产需求：约束求解规模、ERP 对接方式、数据前置条件。',
+    deliverable: 'Markdown 技术可行性报告：evidence/c1a/技术可行性.md（附基准、ERP 文档引用与风险回应）',
+    sources: ['experience/specs/engine-v3.md 调度引擎 v3 官方规格', 'experience/benchmarks/engine-v3-2025Q2.md', 'experience/projects/ 既有实施与复盘记录', 'SAP / 用友公开接口文档'],
+    limit: { deadline: '2026-10-08 18:00', maxAttempts: 3, tokenBudget: 18000, usedAttempts: 2, usedTokens: 8400 },
     boundaries: [
-      { text: '以现有「调度引擎 v3」为基础，不评估自研新引擎', src: 'human', ok: true },
-      { text: '客户 ERP 型号未知时，按主流两种（SAP / 用友）分别评估', src: 'agent_draft', ok: true },
+      { text: '以现有「调度引擎 v3」为基础，不评估自研新引擎', src: 'human', ok: true, enf: 'enforced', mech: 'worker 的引擎规格读取白名单仅包含 experience/specs/engine-v3.md' },
+      { text: '客户 ERP 型号未知时，按主流两种（SAP / 用友）分别评估', src: 'agent_draft', ok: true, enf: 'advisory' },
     ],
     tests: [
       { id: 't1', kind: 'evidence', text: '求解规模结论有基准测试或过往项目数据支撑', v: 'pass' },
-      { id: 't2', kind: 'evidence', text: 'ERP 对接方式有接口文档或过往实施记录支撑', v: 'pass' },
+      { id: 't2', kind: 'evidence', text: 'ERP 对接方式有接口文档或过往实施记录支撑', v: 'unresolved' },
       { id: 't3', kind: 'adversarial', text: '红队质疑全部得到回应', v: 'pass' },
       { id: 't4', kind: 'judgment', text: '技术负责人认可结论', v: 'unchecked' },
     ],
     result: '有条件可行：200 台设备 × 3000 工单/周 在引擎 v3 基准内（求解 < 4 分钟）。ERP 单向导入可行；双向实时同步无先例，建议首期不含。前提：客户提供 ≥ 6 个月历史工单数据。',
     evidence: {
-      t1: [{ claim: '引擎 v3 在 250 台 × 4000 工单规模下求解 3.2 分钟', ref: 'experience/benchmarks/engine-v3-2025Q2.md#L40', by: 'agent:worker', checks: [['agent:verifier', 'pass', '数字与原文一致']] }],
+      t1: [{ claim: '引擎 v3 在 250 台 × 4000 工单规模下求解 3.2 分钟', ref: 'experience/benchmarks/engine-v3-2025Q2.md#L40', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'pass', note: '数字与原文一致', method: '独立代理复核', correction: '' }] }],
       t2: [
-        { claim: 'SAP 单向导入已在 P-2025-03 实施', ref: 'experience/projects/P-2025-03/交付报告.md', by: 'agent:worker', checks: [['agent:verifier', 'pass', '原文确认']] },
-        { claim: '无双向实时同步的交付记录', ref: 'experience/projects/ (全量检索 "双向同步")', by: 'agent:worker', checks: [['agent:verifier', 'pass', '复核检索，0 条命中']] },
+        { claim: 'SAP 单向导入已在 P-2025-03 实施', ref: 'experience/projects/P-2025-03/交付报告.md', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'pass', note: '原文确认', method: '独立代理复核', correction: '' }] },
+        { claim: '无双向实时同步的交付记录', ref: 'experience/projects/ (全量检索 "双向同步")', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'unresolved', note: '检索为空只能证明经验库无记录，不能证明公司从未做过，需人确认', method: '独立代理复核', correction: '' }] },
       ],
-      t3: [{ claim: '质疑：基准数据来自理想化排产，客户插单频繁会怎样？ → 回应：P-2024-07 插单率 18% 场景下求解仍 < 6 分钟，已写入风险', ref: 'experience/projects/P-2024-07/复盘.md', by: 'agent:worker', checks: [['agent:redteam', 'fail', '基准未覆盖插单'], ['agent:redteam', 'pass', '回应充分']] }],
+      t3: [{ claim: '质疑：基准数据来自理想化排产，客户插单频繁会怎样？ → 回应：P-2024-07 插单率 18% 场景下求解仍 < 6 分钟，已写入风险', ref: 'experience/projects/P-2024-07/复盘.md', by: 'agent:worker', checks: [{ checker: 'agent:redteam', result: 'fail', note: '基准未覆盖插单', method: '独立代理复核', correction: '' }, { checker: 'agent:redteam', result: 'pass', note: '回应充分', method: '独立代理复核', correction: '补充 P-2024-07 插单率 18% 场景数据' }] }],
     },
+    handoff: {
+      updated: '10/07 10:38 · agent:worker',
+      baseline: '引擎 v3 官方规格支持 ≤ 200 台设备；已知无双向同步交付记录',
+      done: ['核对求解基准与 SAP 单向导入记录', '补充 P-2024-07 插单率 18% 场景', '提交技术结论与四条可追溯证据'],
+      decisions: ['首期采用 ERP 单向导入：已有 P-2025-03 实施依据', '双向同步仅作为风险建议：经验库空检索不足以证明公司从未实施'],
+      open: ['需人确认双向实时同步是否存在经验库外的交付记录', '官方 ≤ 200 台规格与 250 台基准的适用范围需要核对，当前结论限定为 200 台'],
+      next: '由人判定 t2，技术负责人确认结论后签收',
+      outputs: ['evidence/c1a/技术可行性.md', 'evidence/c1a/证据索引.md'],
+    },
+    attempts: [
+      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '仅按理想化排产基准评估求解规模，再检索 ERP 实施记录', result: 'failed', failure: 'redteam：基准未覆盖插单场景', tokens: 4800, duration: '49 分钟' },
+      { number: 2, actor: 'agent:worker', model: 'opus-5.5 · high', method: '补充 P-2024-07 插单率 18% 场景，明确首期单向导入与数据前置条件', result: 'success', failure: '', tokens: 3600, duration: '27 分钟' },
+    ],
     log: [
       ['10/07 09:20', 'agent:worker', '认领'],
       ['10/07 10:05', 'agent:worker', '提交 4 条证据'],
@@ -209,18 +282,34 @@ const db = {
       ['10/07 10:31', 'agent:worker', '补充 P-2024-07 插单数据，重新提交'],
       ['10/07 10:34', 'agent:verifier', 't1、t2 通过'],
       ['10/07 10:36', 'agent:redteam', 't3 通过 → 进入待签收'],
+      ['10/07 10:38', 'agent:verifier', '补充复核：t2 无法判定，空检索不能证明公司从未做过双向同步，需人确认'],
     ],
   },
   c1b: {
-    id: 'c1b', parent: 'c1', title: '交付产能', status: 'blocked', version: 1, owner: 'worker',
+    id: 'c1b', parent: 'c1', title: '交付产能', status: 'blocked', blockedType: 'question', version: 1, owner: 'worker',
     need: '评估 Q4–Q1 交付团队能否承接一个排产实施项目（预计 3 人 × 4 个月）。',
-    boundaries: [{ text: '以现有人员为准，不假设新招聘', src: 'human', ok: true }],
+    deliverable: 'Markdown 产能评估与 CSV 人员占用表：evidence/c1b/交付产能.md、evidence/c1b/人员占用.csv',
+    sources: ['experience/resources/2026-09-台账.xlsx', '人确认的 Q4 项目排期与人员占用'],
+    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 8000, usedAttempts: 1, usedTokens: 2400 },
+    boundaries: [{ text: '以现有人员为准，不假设新招聘', src: 'human', ok: true, enf: 'advisory' }],
     tests: [
       { id: 't1', kind: 'evidence', text: '产能结论基于排期表或资源台账', v: 'unchecked' },
       { id: 't2', kind: 'judgment', text: '交付经理认可', v: 'unchecked' },
     ],
     question: '经验库中只有截至 9 月的资源台账，没有 Q4 排期。交付团队 Q4 是否已有确定项目？如有，请告诉我占用几人、到何时。',
     evidence: {},
+    handoff: {
+      updated: '10/07 09:52 · agent:worker',
+      baseline: '现有资源台账截至 2026 年 9 月，尚无 Q4 已签约项目排期',
+      done: ['读取 9 月资源台账', '整理实施项目预计需要 3 人 × 4 个月的产能假设'],
+      decisions: ['缺少 Q4 排期时先提问：不将未知占用推定为可用产能'],
+      open: ['Q4 已确定项目占用人数与结束时间未知'],
+      next: '等待人补充 Q4 排期，再计算 Q4–Q1 可用产能',
+      outputs: ['evidence/c1b/人员占用-草稿.csv'],
+    },
+    attempts: [
+      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '核对资源台账并与 Q4 项目排期对照；缺失信息提交问题', result: 'running', failure: '', tokens: 2400, duration: '31 分钟（等待回答）' },
+    ],
     log: [
       ['10/07 09:21', 'agent:worker', '认领'],
       ['10/07 09:50', 'agent:worker', '读取 experience/resources/2026-09-台账.xlsx'],
@@ -230,7 +319,10 @@ const db = {
   c1c: {
     id: 'c1c', parent: 'c1', title: '成本与报价', status: 'running', version: 1, owner: 'worker',
     need: '估算实施成本，给出报价区间。',
-    boundaries: [{ text: '报价区间参考近 2 年同类项目', src: 'human', ok: true }],
+    deliverable: 'Markdown 报价说明与 CSV 成本明细：evidence/c1c/成本与报价.md、evidence/c1c/成本明细.csv',
+    sources: ['experience/projects/P-2024-07/ 报价、工时与采购记录', 'experience/projects/P-2025-01/ 报价、工时与采购记录', '内部人力成本与采购价目表'],
+    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 15000, usedAttempts: 1, usedTokens: 12300 },
+    boundaries: [{ text: '报价区间参考近 2 年同类项目', src: 'human', ok: true, enf: 'advisory' }],
     tests: [
       { id: 't1', kind: 'evidence', text: '成本每一项有工时或采购依据', v: 'unchecked' },
       { id: 't2', kind: 'judgment', text: '财务认可报价区间', v: 'unchecked' },
@@ -240,21 +332,76 @@ const db = {
       add: ['毛利率不低于 35%'], remove: [],
     },
     evidence: {},
+    handoff: {
+      updated: '10/07 10:15 · agent:worker',
+      baseline: '已有 P-2024-07、P-2025-01 两个同类项目，历史毛利分别为 22%、19%',
+      done: ['检索两份同类项目报价', '对照工时与采购项目', '提出毛利下限 35% 的边界变更请求'],
+      decisions: ['先请求人批准毛利下限：避免将建议直接当成既定契约'],
+      open: ['毛利下限变更待批准', '部分采购依据尚需核对'],
+      next: '按批准后的契约补齐成本证据并形成报价区间',
+      outputs: ['evidence/c1c/成本明细-草稿.csv'],
+    },
+    attempts: [
+      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '参考近两年同类项目，逐项汇总工时、采购与毛利区间', result: 'running', failure: '', tokens: 12300, duration: '53 分钟' },
+    ],
     log: [
       ['10/07 09:22', 'agent:worker', '认领'],
       ['10/07 10:12', 'agent:worker', '检索到 2 个同类项目报价'],
       ['10/07 10:15', 'agent:worker', '提出契约变更：新增边界「毛利率不低于 35%」'],
     ],
   },
+  c1d: {
+    id: 'c1d', parent: 'c1', title: '竞品与市场规模调研', status: 'blocked', blockedType: 'limit', version: 1, owner: 'worker',
+    need: '调研离散制造智能排产的主要竞品与市场规模，区分已确认数据、估算口径及资料时效，给承接判断提供市场依据。',
+    deliverable: 'Markdown 市场调研报告与 CSV 竞品对照表：evidence/c1d/市场调研.md、evidence/c1d/竞品对照.csv',
+    sources: ['experience/market/2025-智能排产行业报告.md（可能过期）', '竞品官网公开产品资料', '公开行业协会统计与研究报告'],
+    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 12000, usedAttempts: 1, usedTokens: 12000 },
+    boundaries: [
+      { text: '只引用公开资料与内部已有报告，不采购付费报告', src: 'human', ok: true, enf: 'enforced', mech: 'worker 未被授予采购或支付工具，资料来源限定为公开页面与已有内部报告' },
+      { text: '市场规模必须注明年份、地区与统计口径；过期资料标明风险', src: 'human', ok: true, enf: 'advisory' },
+    ],
+    tests: [
+      { id: 't1', kind: 'evidence', text: '主要竞品的能力、定位与公开报价都有可追溯来源', v: 'unchecked' },
+      { id: 't2', kind: 'evidence', text: '市场规模注明年份、地区、统计口径及资料时效', v: 'unchecked' },
+      { id: 't3', kind: 'judgment', text: '你确认市场依据足以用于承接判断', v: 'unchecked' },
+    ],
+    partial: {
+      done: ['整理 3 家竞品的公开能力与定位', '核对已有 2025 年行业报告的统计范围', '建立竞品对照表与来源索引'],
+      remaining: ['核对 2026 年最新市场规模与公开报价', '交叉验证地区口径差异', '完成市场风险结论与验证证据'],
+      estimate: '预计还需约 6000 token、1 次尝试、45 分钟；可先缩小为已有资料的带时效说明摘要',
+    },
+    evidence: {},
+    handoff: {
+      updated: '10/07 11:10 · agent:worker',
+      baseline: '已有 2025 年行业报告 1 份（可能过期）',
+      done: ['整理 3 家竞品的公开能力与定位', '核对 2025 年报告统计范围', '保存部分完成报告及竞品对照草稿'],
+      decisions: ['不把 2025 年数据直接称为当前市场规模：需补充时效核对', 'token 达到上限即停止，交由人决定追加预算、调整范围或终止'],
+      open: ['2026 年最新市场规模尚未交叉验证', '部分竞品缺少公开报价', 'token 预算已全部用完'],
+      next: '等人决定预算或契约范围，再从未完成项目继续',
+      outputs: ['evidence/c1d/市场调研-部分完成.md', 'evidence/c1d/竞品对照.csv', 'evidence/c1d/来源索引.md'],
+    },
+    attempts: [
+      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '从 2025 年行业报告建立基线，检索竞品官网并交叉核对最新统计', result: 'limit', failure: 'token 已用 12000 / 12000，最新市场规模与报价核对未完成', tokens: 12000, duration: '1 小时 40 分钟' },
+    ],
+    log: [
+      ['10/07 09:18', 'agent:chief', '起草并派发第 4 个子契约'],
+      ['10/07 09:30', 'agent:worker', '认领并记录 2025 年行业报告基线'],
+      ['10/07 10:40', 'agent:worker', '保存 3 家竞品对照与来源索引'],
+      ['10/07 11:10', 'agent:worker', '已达上限：token 12000 / 12000，保存部分完成报告后停止'],
+    ],
+  },
   c2: {
     id: 'c2', parent: null, title: '交付功能：排产看板 v1', status: 'draft', version: 1, owner: 'chief',
     trigger: '由 chief 起草：若「客户 A · 智能排产」签收为有条件可行，则启动此契约。边界中的条件继承自 c1a 的结论。',
     need: '在现有产品中新增「排产看板」：展示周排产计划（设备 × 时间甘特图），支持手动拖拽调整，并从 ERP 单向导入工单。',
+    deliverable: '代码补丁与 Markdown 交付说明：evidence/c2/排产看板.patch、evidence/c2/交付说明.md；验证证据：evidence/c2/测试证据/',
+    sources: ['现有产品仓库与 CONTRIBUTING.md', '调度引擎 v3 接口文档', 'c1 / c1a 已签收结论与边界', '现有图表库官方文档'],
+    limit: { deadline: '2026-10-18 18:00', maxAttempts: 6, tokenBudget: 90000, usedAttempts: 0, usedTokens: 0 },
     boundaries: [
-      { text: '首期不含 ERP 双向同步', src: 'agent_draft', ok: false, why: '继承自 c1a 结论：双向同步无交付先例' },
-      { text: '复用调度引擎 v3，不修改 engine/ 目录', src: 'agent_draft', ok: false, why: '继承自 c1a 边界' },
-      { text: '不新增第三方依赖（甘特图用现有图表库）', src: 'agent_draft', ok: false, why: '起草自仓库约定 CONTRIBUTING.md' },
-      { text: '页面首屏加载 < 2s（200 台设备）', src: 'agent_draft', ok: false, why: '起草自产品性能基线' },
+      { text: '首期不含 ERP 双向同步', src: 'agent_draft', ok: false, enf: 'advisory', why: '继承自 c1a 结论：双向同步无交付先例' },
+      { text: '复用调度引擎 v3，不修改 engine/ 目录', src: 'agent_draft', ok: false, enf: 'enforced', mech: 'Claude Code 权限规则 deny Edit(engine/**) + 确定性测试 t2', why: '继承自 c1a 边界' },
+      { text: '不新增第三方依赖（甘特图用现有图表库）', src: 'agent_draft', ok: false, enf: 'enforced', mech: '确定性测试 t2', why: '起草自仓库约定 CONTRIBUTING.md' },
+      { text: '页面首屏加载 < 2s（200 台设备）', src: 'agent_draft', ok: false, enf: 'advisory', why: '起草自产品性能基线' },
     ],
     tests: [
       { id: 't1', kind: 'deterministic', text: '单元测试与 CI 全部通过', v: 'unchecked' },
@@ -263,28 +410,72 @@ const db = {
       { id: 't4', kind: 'adversarial', text: '红队针对拖拽冲突、空数据、超大数据给出用例并全部通过', v: 'unchecked' },
       { id: 't5', kind: 'judgment', text: '你在预览环境中验收交互', v: 'unchecked' },
     ],
-    evidence: {},
+    evidence: {}, attempts: [],
     log: [['10/07 10:40', 'agent:chief', '起草契约（待 c1 签收后启动）']],
   },
-  c2a: { id: 'c2a', parent: 'c2', title: 'PRD 与方案设计', status: 'draft', version: 1, owner: 'chief', need: '输出 PRD 和技术方案。', boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你确认方案', v: 'unchecked' }], evidence: {}, log: [] },
-  c2b: { id: 'c2b', parent: 'c2', title: '实现', status: 'draft', version: 1, owner: 'chief', need: '按方案实现前端看板与导入接口。', boundaries: [], tests: [{ id: 't1', kind: 'deterministic', text: 'CI 通过', v: 'unchecked' }], evidence: {}, log: [] },
-  c2c: { id: 'c2c', parent: 'c2', title: '验收与发布', status: 'draft', version: 1, owner: 'chief', need: '预览环境验收并发布。', boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你验收', v: 'unchecked' }], evidence: {}, log: [] },
+  c2a: {
+    id: 'c2a', parent: 'c2', title: 'PRD 与方案设计', status: 'draft', version: 1, owner: 'chief',
+    need: '输出 PRD 和技术方案。',
+    deliverable: 'Markdown PRD 与技术方案：evidence/c2a/PRD.md、evidence/c2a/技术方案.md',
+    sources: ['c2 已批准的需求、边界与测试', '现有产品交互与代码结构', '调度引擎 v3 与现有图表库接口文档'],
+    limit: { deadline: '2026-10-12 18:00', maxAttempts: 3, tokenBudget: 15000, usedAttempts: 0, usedTokens: 0 },
+    boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你确认方案', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
+  },
+  c2b: {
+    id: 'c2b', parent: 'c2', title: '实现', status: 'draft', version: 1, owner: 'chief',
+    need: '按方案实现前端看板与导入接口。',
+    deliverable: '前端看板与导入接口代码补丁，以及 Markdown 实现说明：evidence/c2b/实现.patch、evidence/c2b/实现说明.md',
+    sources: ['c2a 已签收 PRD 与技术方案', '现有产品仓库及测试', '调度引擎 v3 与现有图表库官方接口文档'],
+    limit: { deadline: '2026-10-16 18:00', maxAttempts: 5, tokenBudget: 50000, usedAttempts: 0, usedTokens: 0 },
+    boundaries: [], tests: [{ id: 't1', kind: 'deterministic', text: 'CI 通过', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
+  },
+  c2c: {
+    id: 'c2c', parent: 'c2', title: '验收与发布', status: 'draft', version: 1, owner: 'chief',
+    need: '预览环境验收并发布。',
+    deliverable: 'Markdown 验收与发布记录：evidence/c2c/验收记录.md、evidence/c2c/发布记录.md（附预览环境地址）',
+    sources: ['c2 已批准验收标准', 'c2b 已签收实现与 CI 结果', '产品预览环境与既有发布流程'],
+    limit: { deadline: '2026-10-18 18:00', maxAttempts: 3, tokenBudget: 18000, usedAttempts: 0, usedTokens: 0 },
+    boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你验收', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
+  },
 };
 
 let view = { page: 'inbox', id: null };
+const templates = [];
+let modalContract = null;
+let modalReturnFocus = null;
 
 // ---------- helpers ----------
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const kids = (id) => Object.values(db).filter((c) => c.parent === id);
-const chip = (s) => `<span class="chip s-${s}">${STATUS[s]}</span>`;
+const chip = (s, blockedType) => `<span class="chip s-${s}">${s === 'blocked' && blockedType === 'limit' ? '阻塞·已达上限' : STATUS[s]}</span>`;
 const who = (a) => a === 'human'
   ? '<span class="who-human">你</span>'
   : `<span class="who-agent">${esc(a.replace('agent:', ''))}</span>`;
-const stamp = () => { const d = new Date(); return `10/07 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const stamp = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
 function go(page, id = null) { view = { page, id }; render(); $('main').scrollTop = 0; }
 function log(c, actor, text) { c.log.push([stamp(), actor, text]); }
+const VERDICT = { pass: '✓ 通过', fail: '✗ 不通过', unresolved: '? 无法判定', unchecked: '— 未检查' };
+const ATTEMPT_RESULT = { success: '成功', failed: '失败', running: '进行中', limit: '达到上限' };
+const list = (items) => items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="empty">暂无</div>';
+const unresolvedTests = (c) => c.tests.filter((t) => t.v === 'unresolved');
+function signoffBlocker(c) {
+  if (unresolvedTests(c).length) return '仍有无法判定的测试，请先人工判定后签收';
+  if (c.tests.some((t) => t.kind !== 'judgment' && t.v !== 'pass')) return '仍有未通过的测试，请打回后补充验证';
+  return '';
+}
+function ensureStarted(c) {
+  c.attempts ||= [];
+  c.handoff ||= {
+    updated: `${stamp()} · agent:chief`, baseline: '刚批准，worker 首步需读取允许资料、记录并验证基线',
+    done: ['需求、边界和测试已由人确认'], decisions: ['按批准的契约执行，尚未开始验证'],
+    open: ['基线和资料路径待 worker 实际核对'], next: '核对资料来源与文件，记录基线后开始执行', outputs: [],
+  };
+}
+function updateHandoff(c, next) {
+  ensureStarted(c); c.handoff.updated = `${stamp()} · human`; c.handoff.next = next;
+}
 
 function inbox() {
   const all = Object.values(db);
@@ -300,7 +491,7 @@ const inboxCount = () => { const b = inbox(); return b.drafts.length + b.changes
 // ---------- sidebar ----------
 function renderSide() {
   const node = (c, depth) => `
-    <div class="tree-node ${view.id === c.id ? 'active' : ''}" style="padding-left:${8 + depth * 16}px" onclick="go('contract','${c.id}')">
+    <div class="tree-node ${view.page === 'contract' && view.id === c.id ? 'active' : ''}" style="padding-left:${8 + depth * 16}px" onclick="go('contract','${c.id}')">
       <span class="dot d-${c.status}"></span><span class="t">${esc(c.title)}</span>
       ${c.change ? '<span class="count" title="变更请求">1</span>' : ''}
     </div>` + kids(c.id).map((k) => node(k, depth + 1)).join('');
@@ -313,6 +504,8 @@ function renderSide() {
     </div>
     <div class="section-label">契约树</div>
     ${roots.map((r) => node(r, 0)).join('')}
+    <div class="section-label">模板</div>
+    ${templates.length ? templates.map((t) => `<div class="nav-item ${view.page === 'template' && view.id === t.id ? 'active' : ''}" onclick="go('template','${t.id}')">${esc(t.title)}</div>`).join('') : '<div class="empty" style="padding-left:10px">签收后可沉淀为模板</div>'}
     <div class="section-label">角色</div>
     <div style="padding:0 10px;font-size:12px;color:var(--muted);line-height:1.9">
       <div>${who('human')} 定义需求 / 边界 / 测试，签收</div>
@@ -330,7 +523,7 @@ function renderInbox() {
     <div class="inbox-item" onclick="go('contract','${c.id}')">
       <span class="dot d-${c.status}"></span>
       <div class="grow"><div>${esc(c.title)}</div><div class="sub">${sub}</div></div>
-      ${extra}${chip(c.status)}
+      ${extra}${chip(c.status, c.blockedType)}
     </div>`;
   const group = (title, hint, items) => `
     <div class="inbox-group"><h2>${title} <span class="hint">${hint}</span></h2>
@@ -342,149 +535,348 @@ function renderInbox() {
     <div class="intro">
       你只需要处理这里的事：<b>批准契约</b>（需求、边界、测试是否写对）、<b>回答阻塞</b>、<b>审批变更请求</b>、<b>签收结果</b>。
       开发过程由代理完成，默认折叠，需要时可以展开查看。
-      <div class="legend">${Object.keys(KIND).map((k) => `<span class="k">${KIND[k]}测试 · ${KIND_HINT[k]}</span>`).join('')}</div>
+      <div class="legend">${Object.keys(KIND).map((k) => `<span class="k">${KIND[k]}测试 · ${KIND_HINT[k]}</span>`).join('')}<span class="k">🔒 强制边界 · 权限规则 / 确定性测试保证</span><span class="k">建议边界 · verifier 核对</span></div>
     </div>
-    ${group('阻塞 · 等你回答', '代理卡住了，回答后继续', b.blocked.map((c) => item(c, esc(c.question), blocks(c))))}
+    ${group('阻塞 · 等你处理', '回答提问，或决定达到上限后的处理方式', b.blocked.map((c) => item(c, c.blockedType === 'limit' ? '达到上限型 · 已达 token 上限，部分完成报告待处理' : `提问型 · ${esc(c.question)}`, blocks(c))))}
     ${group('变更请求', '代理不能自己改契约，只能提议', b.changes.map((c) => item(c, `${who(c.change.by)} 提议：${c.change.add.map((x) => '+ ' + esc(x)).join('；')}`, blocks(c))))}
-    ${group('待签收', '所有自动检查已通过，等你判断', b.review.map((c) => item(c, esc(c.result || ''), blocks(c))))}
+    ${group('待签收', '核对结果；无法判定的测试需先由你判定', b.review.map((c) => item(c, `${unresolvedTests(c).length ? '<span class="v-unresolved">? 还有无法判定的测试 · </span>' : ''}${esc(c.result || '')}`, blocks(c))))}
     ${group('待批准契约', '代理起草的契约，确认后才会开工', b.drafts.map((c) => item(c, `${kids(c.id).length} 个子契约 · ${c.boundaries.filter((x) => !x.ok).length} 条边界待确认`)))}
   `;
 }
 
 // ---------- contract detail ----------
+function renderBounds(c, readonly = false) {
+  return c.boundaries.map((b, i) => `
+    <div class="row ${!readonly && !b.ok ? 'unconfirmed' : ''}">
+      <div class="row-top">
+        ${!readonly && c.status === 'draft' ? `<input type="checkbox" aria-label="确认边界 ${i + 1}" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
+        <div class="grow">${b.enf === 'enforced' ? '<span class="chip s-ready">🔒 强制</span> ' : ''}${esc(b.text)}
+          <div class="src">${b.src === 'human' ? '你写的' : `${who('agent:chief')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}
+            · ${b.enf === 'enforced' ? `机制：${esc(b.mech)}` : '建议 · verifier 核对'}${!readonly && !b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}
+          </div>
+        </div>
+      </div>
+    </div>`).join('') || '<div class="empty">尚无边界</div>';
+}
+function renderChecks(checks) {
+  return checks.map((check) => `<div class="check">${who(check.checker)} <span class="verdict v-${check.result}">${VERDICT[check.result]}</span> · ${esc(check.method)}（${esc(check.note)}）${check.correction ? `<div>修正：${esc(check.correction)}</div>` : ''}</div>`).join('');
+}
+function renderTests(c, readonly = false) {
+  return c.tests.map((t) => {
+    const ev = (c.evidence || {})[t.id] || [];
+    return `
+      <div class="row">
+        <div class="row-top">
+          <div class="grow">${esc(t.text)}<div class="src"><span class="k">${KIND[t.kind]}</span> ${KIND_HINT[t.kind]}</div></div>
+          ${readonly ? '' : `<span class="verdict v-${t.v}">${VERDICT[t.v]}</span>`}
+        </div>
+        ${!readonly && c.status === 'in_review' && t.v === 'unresolved' ? `<div class="resolution"><button class="ok small" onclick="resolveTest('${c.id}','${t.id}',true)">判为通过</button><button class="bad small" onclick="resolveTest('${c.id}','${t.id}',false)">判为不通过</button><span class="src">仅由你人工判定</span></div>` : ''}
+        ${readonly ? '' : renderChecks(t.checks || [])}
+        ${!readonly && ev.length ? `<details class="ev"><summary>${ev.length} 条证据</summary>${ev.map((e) => `
+          <div class="ev-item">${esc(e.claim)}<div><code>${esc(e.ref)}</code></div>
+            <div class="by">提交：${who(e.by)}${renderChecks(e.checks)}</div>
+          </div>`).join('')}</details>` : ''}
+      </div>`;
+  }).join('');
+}
+function renderUsage(label, used, max) {
+  const ratio = max > 0 ? used / max : 1;
+  const level = ratio >= 1 ? 'exhausted' : ratio > .8 ? 'warning' : '';
+  return `<div class="limit-row ${level}"><div>${label}：${used.toLocaleString('zh-CN')} / ${max.toLocaleString('zh-CN')}${ratio >= 1 ? ' · 已达上限' : ratio > .8 ? ' · 接近上限' : ''}</div><div class="progress" role="progressbar" aria-label="${label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, Math.max(0, ratio * 100))}"><span style="width:${Math.min(100, Math.max(0, ratio * 100))}%"></span></div></div>`;
+}
+function renderInfo(c) {
+  const l = c.limit;
+  return `<div class="card info-band">
+    <div><div class="col-label">交付物 · 形式与路径</div><div>${esc(c.deliverable)}</div></div>
+    <div><div class="col-label">资料来源 · 允许使用</div>${list(c.sources)}</div>
+    <div><div class="col-label">上限 · 达到即停止</div><div class="meta">截止：${esc(l.deadline)}</div>${renderUsage('尝试次数', l.usedAttempts, l.maxAttempts)}${renderUsage('token', l.usedTokens, l.tokenBudget)}</div>
+  </div>`;
+}
+function renderHandoff(c) {
+  const h = c.handoff;
+  if (!h) return '';
+  return `<div class="card handoff"><h2>交接记录 <span class="hint">${esc(h.updated)}</span></h2>
+    <div class="src">新会话认领时先读这里，并核对引用的文件</div>
+    <div class="handoff-grid">
+      <div><b>基线</b><div>${esc(h.baseline)}</div></div>
+      <div><b>已完成</b>${list(h.done)}</div>
+      <div><b>决策及依据</b>${list(h.decisions)}</div>
+      <div><b>未解决问题</b>${list(h.open)}</div>
+      <div><b>下一步动作</b><div>${esc(h.next)}</div></div>
+      <div><b>产出路径</b>${list(h.outputs)}</div>
+    </div></div>`;
+}
+function renderAttempts(c) {
+  return (c.attempts || []).map((a) => `<div class="attempt ${a.result === 'failed' ? 'failed' : a.result === 'limit' ? 'limited' : ''}">
+    <div class="row-top"><b class="grow">#${a.number} · ${who(a.actor)}</b><span class="verdict ${a.result === 'failed' ? 'v-fail' : a.result === 'success' ? 'v-pass' : a.result === 'limit' ? 'v-unresolved' : 'who-agent'}">${ATTEMPT_RESULT[a.result]}</span></div>
+    <div class="src">模型与 effort：${esc(a.model)} · ${a.tokens.toLocaleString('zh-CN')} token · 耗时 ${esc(a.duration)}</div>
+    <div>方法：${esc(a.method)}</div>
+    ${a.failure ? `<div class="reason">${a.result === 'failed' ? '失败原因' : '停止原因'}：${esc(a.failure)}</div>` : ''}
+    ${a.result === 'failed' ? '<div class="reason"><b>后续尝试不得重复此方法，除非有新理由</b></div>' : ''}
+  </div>`).join('') || '<div class="empty">尚无执行记录，认领后记录基线和首次尝试</div>';
+}
+function setProcessTab(tab) {
+  const attempts = tab === 'attempts';
+  $('#attempts-panel').hidden = !attempts; $('#timeline-panel').hidden = attempts;
+  $('#attempts-tab').className = `small${attempts ? ' active' : ''}`;
+  $('#timeline-tab').className = `small${attempts ? '' : ' active'}`;
+  $('#attempts-tab').setAttribute?.('aria-pressed', String(attempts));
+  $('#timeline-tab').setAttribute?.('aria-pressed', String(!attempts));
+}
 function renderContract(c) {
   const parent = c.parent ? db[c.parent] : null;
   const k = kids(c.id);
   const human = c.status === 'draft' || c.status === 'in_review' || c.status === 'blocked';
-
+  const blocker = signoffBlocker(c);
+  const saved = templates.find((t) => t.sourceId === c.id);
   const actions = {
     draft: `<button class="primary" onclick="approve('${c.id}')">批准契约，开工</button>`,
-    in_review: `<button class="bad" onclick="signoff('${c.id}', false)">打回</button><button class="ok" onclick="signoff('${c.id}', true)">签收</button>`,
+    in_review: `<button class="bad" onclick="signoff('${c.id}', false)">打回</button><button class="ok" ${blocker ? 'disabled' : ''} onclick="signoff('${c.id}', true)">签收</button>`,
   }[c.status] || '';
 
   let banner = '';
   if (c.trigger) banner += `<div class="banner agent"><div class="grow"><b>由代理起草</b>${esc(c.trigger)}</div></div>`;
-  if (c.status === 'blocked') banner += `
+  if (c.status === 'blocked' && c.blockedType === 'limit') banner += `
+    <div class="banner warn"><div class="grow"><b>已达上限 · token 预算已用完</b>
+      <div>部分完成报告</div><div><strong>已完成</strong>${list(c.partial.done)}</div>
+      <div><strong>未完成</strong>${list(c.partial.remaining)}</div><div>继续完成预计还需：${esc(c.partial.estimate)}</div>
+      <div class="resolution"><button class="primary" onclick="extendBudget('${c.id}')">追加预算</button><button onclick="adjustContract('${c.id}')">调整契约</button><button class="bad" onclick="abandon('${c.id}')">终止</button></div>
+    </div></div>`;
+  else if (c.status === 'blocked') banner += `
     <div class="banner warn"><div class="grow"><b>${who('agent:' + c.owner)} 需要你回答</b>${esc(c.question)}
       <textarea id="answer" style="margin-top:8px" placeholder="例：Q4 已有 P-2026-09 占用 2 人至 12 月底"></textarea>
       <div style="margin-top:8px"><button class="primary" onclick="answer('${c.id}')">回答并继续</button></div></div></div>`;
-  if (c.status === 'running') banner += `<div class="banner agent"><div class="grow"><b>${who('agent:' + c.owner)} 正在执行</b>${k.length ? `等待 ${k.filter((x) => x.status !== 'accepted').length} 个子契约完成后汇总` : '你暂时不需要做什么'}</div></div>`;
+  if (c.status === 'running') banner += `<div class="banner agent"><div class="grow"><b>${who('agent:' + c.owner)} 正在执行</b>${k.length ? `等待 ${k.filter((x) => x.status !== 'accepted' && x.status !== 'abandoned').length} 个子契约完成后汇总` : '你暂时不需要做什么'}</div></div>`;
   if (c.status === 'in_review' && c.result) banner += `<div class="banner ok"><div class="grow"><b>产出结论</b>${esc(c.result)}</div></div>`;
-  if (c.status === 'accepted') banner += `<div class="banner ok"><div class="grow"><b>已签收</b>${esc(c.signNote || '')}</div></div>`;
+  if (c.status === 'accepted') banner += `<div class="banner ok"><div class="grow"><b>已签收</b>${esc(c.signNote || '')}<div style="margin-top:8px">${saved ? `<button class="small" disabled>已保存为模板「${esc(saved.title)}」</button>` : `<button class="small" onclick="saveTemplate('${c.id}')">保存为模板</button>`}</div></div></div>`;
   if (c.status === 'changes_requested') banner += `<div class="banner warn"><div class="grow"><b>已打回</b>${esc(c.signNote || '')}，代理将重新认领</div></div>`;
+  if (c.status === 'abandoned') banner += '<div class="banner neutral"><div class="grow"><b>已终止</b>保留部分完成报告、证据与交接记录，供后续参考。</div></div>';
 
   const change = c.change ? `
     <div class="change">
       <h2>变更请求 <span class="hint">${who(c.change.by)} 提议 · 批准后契约版本 v${c.version} → v${c.version + 1}</span></h2>
       <div>${esc(c.change.reason)}</div>
-      <div class="diff">${c.change.add.map((x) => `<div class="add">+ 边界：${esc(x)}</div>`).join('')}${c.change.remove.map((x) => `<div class="del">− 边界：${esc(x)}</div>`).join('')}</div>
+      <div class="diff">${c.change.add.map((x) => `<div class="add">+ 边界：${esc(x)} <span class="k">建议 · verifier 核对</span></div>`).join('')}${c.change.remove.map((x) => `<div class="del">− 边界：${esc(x)}</div>`).join('')}</div>
       <button class="ok small" onclick="decide('${c.id}', true)">批准</button>
       <button class="bad small" onclick="decide('${c.id}', false)">驳回</button>
     </div>` : '';
-
-  const bounds = c.boundaries.map((b, i) => `
-    <div class="row ${!b.ok ? 'unconfirmed' : ''}">
-      <div class="row-top">
-        ${c.status === 'draft' ? `<input type="checkbox" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
-        <div class="grow">${esc(b.text)}
-          <div class="src">${b.src === 'human' ? '你写的' : `${who('agent:chief')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}${!b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}</div>
-        </div>
-      </div>
-    </div>`).join('') || '<div class="empty">尚无边界</div>';
-
-  const tests = c.tests.map((t) => {
-    const ev = c.evidence[t.id] || [];
-    const vText = { pass: '✓ 通过', fail: '✗ 不通过', unchecked: '— 未检查' }[t.v];
-    return `
-      <div class="row">
-        <div class="row-top">
-          <div class="grow">${esc(t.text)}<div class="src"><span class="k">${KIND[t.kind]}</span> ${KIND_HINT[t.kind]}</div></div>
-          <span class="verdict v-${t.v}">${vText}</span>
-        </div>
-        ${ev.length ? `<details class="ev"><summary>${ev.length} 条证据</summary>${ev.map((e) => `
-          <div class="ev-item">${esc(e.claim)}<div><code>${esc(e.ref)}</code></div>
-            <div class="by">提交：${who(e.by)} · ${e.checks.map(([a, v, n]) => `${who(a)} <span class="v-${v}">${v === 'pass' ? '通过' : '不通过'}</span>（${esc(n)}）`).join(' → ')}</div>
-          </div>`).join('')}</details>` : ''}
-      </div>`;
-  }).join('');
-
   const timeline = c.log.slice().reverse().map(([t, a, x]) => `
-    <div class="tl-item"><span class="time">${t.slice(6)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('') || '<div class="empty">暂无</div>';
+    <div class="tl-item"><span class="time" title="${esc(t)}">${esc(t.slice(6))}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('') || '<div class="empty">暂无</div>';
 
   $('#main').innerHTML = `
     <div class="head">
       <div>
         <div class="crumb">${parent ? `<a onclick="go('contract','${parent.id}')">${esc(parent.title)}</a> / ` : ''}${c.id}</div>
         <h1>${esc(c.title)}</h1>
-        <div class="meta">${chip(c.status)}<span>契约 v${c.version}</span><span>负责：${who('agent:' + c.owner)}</span>${human ? '<span style="color:var(--warn)">● 需要你处理</span>' : ''}</div>
+        <div class="meta">${chip(c.status, c.blockedType)}<span>契约 v${c.version}</span><span>负责：${who('agent:' + c.owner)}</span>${human ? '<span style="color:var(--warn)">● 需要你处理</span>' : ''}</div>
       </div>
-      <div class="actions">${actions}</div>
+      <div class="actions">${actions}<button onclick="openWorkerPrompt('${c.id}')">worker 启动 prompt</button>${c.status === 'in_review' && blocker ? `<div class="action-hint">${esc(blocker)}</div>` : ''}</div>
     </div>
-    ${banner}${change}
+    ${renderInfo(c)}${banner}${change}
     <div class="cols">
       <div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div>
-      <div class="card"><div class="col-label">边界 · 不能怎样</div>${bounds}
-        ${c.status === 'draft' ? `<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><button class="small" onclick="addBound('${c.id}')">添加</button></div>` : ''}
+      <div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}
+        ${c.status === 'draft' ? `<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden style="margin-top:6px" placeholder="保证机制（权限规则或确定性测试，必填）">` : ''}
       </div>
-      <div class="card"><div class="col-label">测试 · 怎么算对</div>${tests}</div>
+      <div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div>
     </div>
     <div class="below">
+      ${renderHandoff(c)}
       <div class="card">
         <details class="process">
-          <summary><h2 style="margin:0">▸ 开发过程 <span class="hint">代理的工作，默认折叠 · ${c.log.length} 条记录</span></h2></summary>
-          <div class="tl">${timeline}</div>
+          <summary><h2 style="margin:0">▸ 开发过程 <span class="hint">代理的工作，默认折叠 · ${(c.attempts || []).length} 次尝试 / ${c.log.length} 条日志</span></h2></summary>
+          <div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">执行记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button></div>
+          <div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div>
         </details>
       </div>
       <div class="card"><h2>子契约 <span class="hint">${k.length ? `${k.filter((x) => x.status === 'accepted').length}/${k.length} 已签收` : '无'}</span></h2>
-        ${k.map((x) => `<div class="kid" onclick="go('contract','${x.id}')"><span class="dot d-${x.status}"></span><span class="t">${esc(x.title)}</span>${chip(x.status)}</div>`).join('') || '<div class="empty">这是叶子契约，由 worker 直接执行</div>'}
+        ${k.map((x) => `<div class="kid" onclick="go('contract','${x.id}')"><span class="dot d-${x.status}"></span><span class="t">${esc(x.title)}</span>${chip(x.status, x.blockedType)}</div>`).join('') || '<div class="empty">这是叶子契约，由 worker 直接执行</div>'}
       </div>
     </div>`;
+}
+function renderTemplate(t) {
+  $('#main').innerHTML = `<div class="head"><div><div class="crumb">模板 · 只读</div><h1>${esc(t.title)}</h1><div class="meta">来源：${esc(db[t.sourceId].title)} · 契约 v${t.sourceVersion}</div></div></div>
+    <div class="intro">chief 下次起草同类契约时会以此为起点，你需要确认的内容会更少</div>
+    <div class="cols">
+      <div class="card"><div class="col-label">需求 · 说明</div><div class="need">${esc(t.need)}</div></div>
+      <div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(t, true)}</div>
+      <div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(t, true)}</div>
+    </div><div class="below"><div class="card"><h2>子契约标题</h2>${list(t.children)}</div></div>`;
 }
 
 // ---------- human actions (simulated) ----------
 function approve(id) {
   const c = db[id];
+  if (c.status !== 'draft') return;
   if (c.boundaries.some((b) => !b.ok)) { toast('还有边界未确认：请勾选或删除'); return; }
-  const tree = [c, ...kids(id)];
-  tree.forEach((x) => { x.status = 'ready'; x.boundaries.forEach((b) => (b.ok = true)); log(x, 'human', '批准契约'); });
+  const descendants = (x) => [x, ...kids(x.id).flatMap(descendants)];
+  const tree = descendants(c);
+  tree.forEach((x) => { x.status = 'ready'; x.boundaries.forEach((b) => (b.ok = true)); ensureStarted(x); log(x, 'human', '批准契约'); });
   log(c, 'agent:chief', '开始派单');
   c.status = 'running';
-  toast(`已批准 ${tree.length} 个契约，chief 开始派单`);
-  render();
+  toast(`已批准 ${tree.length} 个契约，chief 开始派单`); render();
 }
-function toggleBound(id, i) { db[id].boundaries[i].ok = !db[id].boundaries[i].ok; render(); }
+function toggleBound(id, i) {
+  const c = db[id]; if (c.status !== 'draft') return;
+  c.boundaries[i].ok = !c.boundaries[i].ok; render();
+}
+function toggleMechanism() { $('#newMech').hidden = $('#boundEnf').value !== 'enforced'; }
 function addBound(id) {
+  const c = db[id]; if (c.status !== 'draft') return;
   const v = $('#newBound').value.trim(); if (!v) return;
-  db[id].boundaries.push({ text: v, src: 'human', ok: true }); log(db[id], 'human', `添加边界：${v}`); render();
+  const enf = $('#boundEnf').value === 'enforced' ? 'enforced' : 'advisory';
+  const mech = enf === 'enforced' ? $('#newMech').value.trim() : '';
+  if (enf === 'enforced' && !mech) { toast('请填写强制边界的保证机制'); return; }
+  c.boundaries.push({ text: v, src: 'human', ok: true, enf, ...(mech ? { mech } : {}) });
+  log(c, 'human', `添加${enf === 'enforced' ? '强制' : '建议'}边界：${v}`); render();
 }
 function answer(id) {
-  const c = db[id]; const v = $('#answer').value.trim();
+  const c = db[id]; if (c.status !== 'blocked' || c.blockedType === 'limit') return;
+  const v = $('#answer').value.trim();
   if (!v) { toast('请先输入回答'); return; }
   c.status = 'running'; delete c.question; log(c, 'human', `回答：${v}`); log(c, 'agent:worker', '继续执行');
+  c.handoff.decisions.push(`人补充排期：${v}`);
+  updateHandoff(c, '核对人补充的排期并继续计算可用产能');
   toast('已回答，worker 继续执行'); render();
 }
+function isLimitBlocked(c) { return c.status === 'blocked' && c.blockedType === 'limit'; }
+function extendBudget(id) {
+  const c = db[id]; if (!isLimitBlocked(c)) return;
+  const before = c.limit.tokenBudget; c.limit.tokenBudget = before * 1.5; c.status = 'running';
+  log(c, 'human', `追加预算：token 上限 ${before} → ${c.limit.tokenBudget}（+50%）`);
+  updateHandoff(c, '核对部分报告与引用文件，在追加预算内继续未完成工作');
+  c.handoff.open = c.handoff.open.filter((x) => x !== 'token 预算已全部用完');
+  c.handoff.decisions.push(`人追加 token 预算至 ${c.limit.tokenBudget}，保留已用 ${c.limit.usedTokens} 的记录`);
+  toast('已追加 50% token 预算，worker 继续执行'); render();
+}
+function adjustContract(id) {
+  const c = db[id]; if (!isLimitBlocked(c)) return;
+  const text = prompt('追加需求调整（例如缩小范围，保留当前部分结果）', '');
+  if (text === null || !text.trim()) return;
+  c.need += `\n\n契约调整：${text.trim()}`; c.version++; c.status = 'running';
+  log(c, 'human', `调整契约至 v${c.version}：${text.trim()}`);
+  updateHandoff(c, '按调整后的需求核对已有结果与剩余工作；达到测试或上限即停止');
+  toast(`契约升至 v${c.version}，worker 继续执行`); render();
+}
+function abandon(id) {
+  const c = db[id]; if (!isLimitBlocked(c)) return;
+  c.status = 'abandoned'; log(c, 'human', '终止契约：达到上限后保留部分完成结果');
+  updateHandoff(c, '已终止，保留产出与未解决问题供后续参考');
+  toast('契约已终止'); render();
+}
 function decide(id, ok) {
-  const c = db[id]; const ch = c.change;
-  if (ok) { ch.add.forEach((t) => c.boundaries.push({ text: t, src: 'agent_draft', ok: true, why: '经你批准的变更请求' })); c.version++; }
+  const c = db[id]; const ch = c.change; if (!ch) return;
+  if (ok) {
+    ch.add.forEach((t) => c.boundaries.push({ text: t, src: 'agent_draft', ok: true, enf: 'advisory', why: '经你批准的变更请求' }));
+    c.version++;
+  }
   log(c, 'human', `${ok ? '批准' : '驳回'}变更请求`); delete c.change;
   toast(ok ? `边界已更新，契约升至 v${c.version}` : '已驳回，代理按原契约继续'); render();
 }
+function resolveTest(id, testId, pass, actor = 'human') {
+  const c = db[id]; const t = c.tests.find((x) => x.id === testId);
+  if (actor !== 'human') { toast('无法判定的测试只能由人判定'); return; }
+  if (c.status !== 'in_review' || !t || t.v !== 'unresolved' || typeof pass !== 'boolean') return;
+  const check = { checker: 'human', result: pass ? 'pass' : 'fail', note: `由你将「${t.text}」判为${pass ? '通过' : '不通过'}`, method: '人工判定', correction: '' };
+  const ev = c.evidence[t.id] || [];
+  const pending = ev.filter((e) => e.checks[e.checks.length - 1]?.result === 'unresolved');
+  if (pending.length) pending.forEach((e) => e.checks.push({ ...check }));
+  else if (ev.length) ev[0].checks.push(check);
+  else { t.checks ||= []; t.checks.push(check); }
+  t.v = check.result; log(c, 'human', `${t.id} 人工判为${pass ? '通过' : '不通过'}`);
+  toast(pass ? '已记录人工判定：通过' : '已记录人工判定：不通过，可打回补充'); render();
+}
 function signoff(id, ok) {
-  const c = db[id];
+  const c = db[id]; if (c.status !== 'in_review') return;
+  const blocker = signoffBlocker(c);
+  if (ok && blocker) { toast(blocker); return; }
   const note = prompt(ok ? '签收备注（可选）' : '打回原因（必填）', '');
   if (note === null || (!ok && !note.trim())) return;
   c.signNote = note;
-  c.tests.filter((t) => t.kind === 'judgment').forEach((t) => (t.v = ok ? 'pass' : 'fail'));
+  c.tests.filter((t) => t.kind === 'judgment').forEach((t) => {
+    t.v = ok ? 'pass' : 'fail'; t.checks ||= [];
+    t.checks.push({ checker: 'human', result: t.v, note: note || '人工签收确认', method: '人工判定', correction: '' });
+  });
   c.status = ok ? 'accepted' : 'changes_requested';
   log(c, 'human', ok ? '签收' : `打回：${note}`);
   if (ok && c.parent) log(db[c.parent], 'agent:chief', `子契约「${c.title}」已签收`);
   toast(ok ? '已签收' : '已打回'); render();
 }
+function saveTemplate(id) {
+  const c = db[id]; if (c.status !== 'accepted') return;
+  if (templates.some((t) => t.sourceId === id)) { toast('此契约已保存为模板'); return; }
+  const title = prompt('模板名称', c.title);
+  if (title === null) return;
+  if (!title.trim()) { toast('请输入模板名称'); return; }
+  templates.push({
+    id: `tpl${templates.length + 1}`, sourceId: id, sourceVersion: c.version, title: title.trim(), need: c.need,
+    boundaries: c.boundaries.map((b) => ({ ...b })),
+    tests: c.tests.map(({ id, kind, text }) => ({ id, kind, text })), children: kids(id).map((x) => x.title),
+  });
+  log(c, 'human', `保存为模板「${title.trim()}」`); toast('模板已保存到侧栏'); render();
+}
+
+// ---------- worker startup prompt ----------
+function workerPrompt(id) {
+  const c = db[id]; const l = c.limit; const h = c.handoff;
+  const checks = c.tests.map((t) => `${t.id} [${KIND[t.kind]}] ${t.text}`).join('\n');
+  const scope = c.boundaries.map((b) => `${b.enf === 'enforced' ? '[强制]' : '[建议]'} ${b.text}${b.enf === 'enforced' ? `（机制：${b.mech}）` : '（verifier 核对）'}`).join('\n') || '无额外边界';
+  const failed = (c.attempts || []).filter((a) => a.result === 'failed').map((a) => `#${a.number} ${a.actor} · ${a.model}；方法：${a.method}；失败原因：${a.failure}；${a.tokens} token，耗时 ${a.duration}`).join('\n') || '暂无失败尝试';
+  const handoff = h ? `更新：${h.updated}\n基线：${h.baseline}\n已完成：${h.done.join('；') || '暂无'}\n决策及依据：${h.decisions.join('；') || '暂无'}\n未解决：${h.open.join('；') || '暂无'}\n下一步：${h.next}\n产出路径：${h.outputs.join('；') || '暂无'}` : '尚未开工，无交接记录；第一步记录基线';
+  return `<goal>完成 ${c.need}。在 ${c.deliverable} 留下可用结果、验证证据和交接记录。达到全部测试或上限即停止。</goal>
+<inputs>
+Task: ${c.need}
+Output: ${c.deliverable}
+Checks: ${checks}
+Sources: ${c.sources.join('；')}
+Scope: ${scope}
+Limit: 截止 ${l.deadline} / 尝试次数 ${l.usedAttempts}/${l.maxAttempts} / token ${l.usedTokens}/${l.tokenBudget}
+Handoff:
+${handoff}
+</inputs>
+<rules>
+- 先读 handoff，再核对其引用的文件，不要直接相信记录的状态
+- 第一步记录基线
+- 不得放宽测试来换取通过；契约问题只能通过 propose_change 提出
+- 不得重复已失败的方法，除非有新理由（失败记录摘要：
+${failed}）
+- 每完成一个阶段调用 save_handoff
+- 证据通过 submit_evidence 提交；验证由 verifier 完成，你不自评
+</rules>`;
+}
+function openWorkerPrompt(id) {
+  modalContract = id; modalReturnFocus = document.activeElement;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop" onclick="if(event.target === this) closeWorkerPrompt()"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+    <h2 id="prompt-title">worker 启动 prompt · ${esc(db[id].title)}<button id="close-prompt" class="small" onclick="closeWorkerPrompt()">关闭</button></h2>
+    <pre class="prompt-preview">${esc(workerPrompt(id))}</pre><div class="actions"><button id="copy-prompt" class="primary" onclick="copyWorkerPrompt()">复制</button></div>
+  </div></div>`;
+  $('#close-prompt').focus?.();
+}
+function closeWorkerPrompt() {
+  modalContract = null; $('#modal-root').innerHTML = ''; modalReturnFocus?.focus?.(); modalReturnFocus = null;
+}
+async function copyWorkerPrompt() {
+  if (!modalContract) return;
+  try { await navigator.clipboard.writeText(workerPrompt(modalContract)); toast('已复制'); }
+  catch { toast('复制失败'); }
+}
+if (typeof document.addEventListener === 'function') document.addEventListener('keydown', (event) => {
+  if (!modalContract) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeWorkerPrompt(); }
+  if (event.key === 'Tab') {
+    const first = $('#close-prompt'); const last = $('#copy-prompt');
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
 
 function render() {
   renderSide();
-  if (view.page === 'inbox') renderInbox(); else renderContract(db[view.id]);
+  if (view.page === 'inbox') renderInbox();
+  else if (view.page === 'template') renderTemplate(templates.find((t) => t.id === view.id));
+  else renderContract(db[view.id]);
 }
+window.helm = { db, templates, inbox, approve, toggleBound, decide, signoff, extendBudget, adjustContract, abandon, resolveTest, saveTemplate, workerPrompt, go, addBound, answer, openWorkerPrompt, closeWorkerPrompt, copyWorkerPrompt };
 render();
 </script>
 </body>

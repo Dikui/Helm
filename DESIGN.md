@@ -75,10 +75,30 @@ draft → ready → running ⇄ blocked → verifying → in_review → accepted
                    └──────── changes_requested ◀─────┘
 ```
 
+另有终止状态 `abandoned`（人决定终止，例如达到上限后不再追加）。
+
 规则：
 - 存在 `pending` 变更请求时不得进入 `verifying`
 - 进入 `in_review` 前，所有非 judgment 测试必须有通过的检查
 - `accepted` 只能由人设置
+
+## 长任务纪律：从 prompt 搬进系统
+
+参考 Karpathy autoresearch 风格的长任务 prompt。核心观点：**prose alone is not a boundary**——那份 prompt 靠代理自觉，Helm 由 Hub 强制。
+
+| 纪律 | Helm 中的落点 |
+|---|---|
+| 先定义完成标准；固定评估器；不得放宽检查 | 测试由人定义；代理只能 `propose_change` |
+| 独立复核 | verifier / redteam ≠ worker |
+| 交接记录（progress.md） | `handoff`：基线、已完成、决策、未解决、下一步、产出路径；新会话先读并核对引用文件 |
+| 记录失败尝试，不重复失败方法 | `attempts`：方法、结果、失败原因、模型/effort、用量 |
+| 光写文字不算边界 | 边界分 `enforced`（权限规则 / hook / 确定性测试）与 `advisory`（verifier 核对） |
+| Task / Output / Sources / Scope / Checks / Limit | 契约补充 `deliverable`、`sources`、`limit`；达到上限 → 阻塞并附部分完成报告 |
+| 首次通过后保存流程 | 签收后沉淀为模板，chief 下次以此起草 |
+| pass / fail / unresolved + correction | 检查结果增加 `unresolved`（需人判定，未判定前不能签收），记录 `method` 与 `correction` |
+| 先测基线 | worker 标准流程第一步；写入 handoff |
+
+worker 认领契约时，Hub 用契约字段生成启动 prompt（goal / inputs / rules），作为执行端的第二道保障。
 
 ## 向多人版本演进（不在 Demo 中实现）
 
