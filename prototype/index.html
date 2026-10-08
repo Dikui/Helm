@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helm 原型</title>
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f0efea; --line: #e2e0d8;
+  --text: #1d1d1b; --muted: #6b6a64; --faint: #9a988f;
+  --accent: #2f5bd3; --accent-soft: #e6ecfb;
+  --ok: #1f8a4c; --ok-soft: #e3f3ea; --warn: #b26a00; --warn-soft: #fbf0dc;
+  --bad: #c0392b; --bad-soft: #fbe6e3; --agent: #7a4fc4; --agent-soft: #efe8fa;
+  --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --panel: #1f1f1d; --panel-2: #282825; --line: #34332f;
+    --text: #ecebe6; --muted: #a3a197; --faint: #75736b;
+    --accent: #7c9cf0; --accent-soft: #232c45;
+    --ok: #5cc48a; --ok-soft: #1d3326; --warn: #e3a64a; --warn-soft: #3a2d17;
+    --bad: #ef7d70; --bad-soft: #3d2220; --agent: #b598ea; --agent-soft: #2e2540;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+button { font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 6px 12px; }
+button:hover { border-color: var(--faint); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+button.bad { color: var(--bad); }
+button.small { padding: 3px 9px; font-size: 12px; }
+textarea, input[type=text] { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--panel); color: var(--text); }
+textarea { resize: vertical; min-height: 60px; }
+
+.app { display: grid; grid-template-columns: 290px 1fr; height: 100vh; }
+aside { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 14px 10px; }
+main { overflow-y: auto; padding: 22px 28px 60px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; padding: 2px 8px 14px; }
+.brand small { font-weight: 400; color: var(--faint); font-size: 12px; }
+.nav-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
+.nav-item:hover { background: var(--panel-2); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.count { background: var(--bad); color: #fff; border-radius: 10px; font-size: 11px; padding: 0 7px; font-weight: 600; }
+.section-label { font-size: 11px; color: var(--faint); letter-spacing: .06em; padding: 16px 10px 6px; }
+.tree-node { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.tree-node:hover { background: var(--panel-2); }
+.tree-node.active { background: var(--accent-soft); }
+.tree-node .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.s-draft { background: var(--panel-2); color: var(--muted); } .d-draft { background: var(--faint); }
+.s-ready { background: var(--accent-soft); color: var(--accent); } .d-ready { background: var(--accent); }
+.s-running { background: var(--agent-soft); color: var(--agent); } .d-running { background: var(--agent); }
+.s-blocked { background: var(--warn-soft); color: var(--warn); } .d-blocked { background: var(--warn); }
+.s-verifying { background: var(--agent-soft); color: var(--agent); } .d-verifying { background: var(--agent); }
+.s-in_review { background: var(--warn-soft); color: var(--warn); } .d-in_review { background: var(--warn); }
+.s-changes_requested { background: var(--bad-soft); color: var(--bad); } .d-changes_requested { background: var(--bad); }
+.s-accepted { background: var(--ok-soft); color: var(--ok); } .d-accepted { background: var(--ok); }
+.k { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.who-agent { color: var(--agent); } .who-human { color: var(--accent); }
+
+h1 { font-size: 21px; margin: 4px 0 6px; }
+h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+h2 .hint { font-weight: 400; font-size: 12px; color: var(--faint); }
+.crumb { color: var(--faint); font-size: 12px; }
+.crumb a { color: var(--muted); cursor: pointer; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 18px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.banner { border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px; display: flex; gap: 12px; align-items: flex-start; }
+.banner.warn { background: var(--warn-soft); }
+.banner.agent { background: var(--agent-soft); }
+.banner.ok { background: var(--ok-soft); }
+.banner .grow { flex: 1; }
+.banner b { display: block; margin-bottom: 2px; }
+
+.cols { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.col-label { font-size: 11px; letter-spacing: .08em; color: var(--faint); margin-bottom: 4px; }
+.need { white-space: pre-wrap; }
+.row { padding: 9px 0; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: none; }
+.row-top { display: flex; gap: 8px; align-items: flex-start; }
+.row-top .grow { flex: 1; }
+.src { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.unconfirmed { background: var(--warn-soft); margin: 0 -8px; padding: 9px 8px; border-radius: 6px; }
+
+.verdict { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.v-pass { color: var(--ok); } .v-fail { color: var(--bad); } .v-unchecked { color: var(--faint); }
+details.ev { margin-top: 6px; }
+details.ev summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.ev-item { margin: 6px 0 0 4px; padding: 7px 10px; background: var(--panel-2); border-radius: 6px; font-size: 12.5px; }
+.ev-item code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.ev-item .by { font-size: 11px; color: var(--faint); }
+
+.change { border: 1px dashed var(--warn); border-radius: var(--radius); padding: 12px 14px; background: var(--panel); margin-bottom: 14px; }
+.diff { font-family: var(--mono); font-size: 12.5px; background: var(--panel-2); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.diff .add { color: var(--ok); } .diff .del { color: var(--bad); }
+
+.below { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+details.process > summary { cursor: pointer; list-style: none; }
+details.process > summary::-webkit-details-marker { display: none; }
+.tl { margin-top: 10px; }
+.tl-item { display: grid; grid-template-columns: 52px 92px 1fr; gap: 8px; font-size: 12.5px; padding: 5px 0; border-top: 1px solid var(--line); }
+.tl-item .time { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+.kid { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.kid:first-child { border-top: none; }
+.kid:hover .t { color: var(--accent); }
+.kid .t { flex: 1; }
+
+.inbox-group { margin-bottom: 22px; }
+.inbox-item { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; cursor: pointer; }
+.inbox-item:hover { border-color: var(--faint); }
+.inbox-item .grow { flex: 1; min-width: 0; }
+.inbox-item .sub { font-size: 12px; color: var(--muted); }
+.impact { font-size: 11px; color: var(--bad); white-space: nowrap; }
+.empty { color: var(--faint); font-size: 13px; padding: 4px 2px 10px; }
+.intro { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 22px; font-size: 13px; color: var(--muted); }
+.intro b { color: var(--text); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.add-row { display: flex; gap: 6px; margin-top: 10px; }
+
+@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .below { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  aside { border-right: none; border-bottom: 1px solid var(--line); max-height: 45vh; }
+  main { padding: 16px; }
+  .head { flex-direction: column; }
+  .actions { justify-content: flex-start; }
+  .tl-item { grid-template-columns: 46px 1fr; } .tl-item .who { grid-column: 2; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside id="side"></aside>
+  <main id="main"></main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- mock data: two chained cases ----------
+const STATUS = {
+  draft: '草稿·待批准', ready: '就绪', running: '代理执行中', blocked: '阻塞·等你回答',
+  verifying: '验证中', in_review: '待签收', changes_requested: '已打回', accepted: '已签收',
+};
+const KIND = { deterministic: '确定性', evidence: '证据型', adversarial: '对抗型', judgment: '判断型' };
+const KIND_HINT = {
+  deterministic: '自动执行', evidence: 'verifier 逐条核对来源', adversarial: 'redteam 挑错，须全部回应', judgment: '由你签字',
+};
+
+const db = {
+  c1: {
+    id: 'c1', parent: null, title: '客户 A · 智能排产需求能否承接', status: 'running', version: 2, owner: 'chief',
+    need: '客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。',
+    boundaries: [
+      { text: '只使用公开数据与内部资料', src: 'human', ok: true },
+      { text: '不直接联系客户', src: 'human', ok: true },
+      { text: '3 个工作日内给出结论（截止 10/10）', src: 'human', ok: true },
+      { text: '不承诺超出当前交付产能的上线时间', src: 'agent_draft', ok: true, why: '起草自经验库：P-2024-11 因过度承诺工期导致违约' },
+    ],
+    tests: [
+      { id: 't1', kind: 'deterministic', text: '结论包含：结论、依据、风险、条件 四部分', v: 'unchecked' },
+      { id: 't2', kind: 'evidence', text: '每条依据可追溯至市场数据或过往项目编号', v: 'unchecked' },
+      { id: 't3', kind: 'adversarial', text: '红队质疑全部得到回应', v: 'unchecked' },
+      { id: 't4', kind: 'judgment', text: '技术 / 产能 / 成本 三个子契约均已签收，结论可对外沟通', v: 'unchecked' },
+    ],
+    evidence: {},
+    log: [
+      ['10/07 09:12', 'human', '创建契约并批准'],
+      ['10/07 09:14', 'agent:chief', '拆解为 3 个子契约：技术可行性、交付产能、成本与报价'],
+      ['10/07 09:15', 'agent:chief', '等待子契约完成后汇总结论'],
+    ],
+  },
+  c1a: {
+    id: 'c1a', parent: 'c1', title: '技术可行性', status: 'in_review', version: 1, owner: 'worker',
+    need: '评估现有平台能否支撑客户 A 的排产需求：约束求解规模、ERP 对接方式、数据前置条件。',
+    boundaries: [
+      { text: '以现有「调度引擎 v3」为基础，不评估自研新引擎', src: 'human', ok: true },
+      { text: '客户 ERP 型号未知时，按主流两种（SAP / 用友）分别评估', src: 'agent_draft', ok: true },
+    ],
+    tests: [
+      { id: 't1', kind: 'evidence', text: '求解规模结论有基准测试或过往项目数据支撑', v: 'pass' },
+      { id: 't2', kind: 'evidence', text: 'ERP 对接方式有接口文档或过往实施记录支撑', v: 'pass' },
+      { id: 't3', kind: 'adversarial', text: '红队质疑全部得到回应', v: 'pass' },
+      { id: 't4', kind: 'judgment', text: '技术负责人认可结论', v: 'unchecked' },
+    ],
+    result: '有条件可行：200 台设备 × 3000 工单/周 在引擎 v3 基准内（求解 < 4 分钟）。ERP 单向导入可行；双向实时同步无先例，建议首期不含。前提：客户提供 ≥ 6 个月历史工单数据。',
+    evidence: {
+      t1: [{ claim: '引擎 v3 在 250 台 × 4000 工单规模下求解 3.2 分钟', ref: 'experience/benchmarks/engine-v3-2025Q2.md#L40', by: 'agent:worker', checks: [['agent:verifier', 'pass', '数字与原文一致']] }],
+      t2: [
+        { claim: 'SAP 单向导入已在 P-2025-03 实施', ref: 'experience/projects/P-2025-03/交付报告.md', by: 'agent:worker', checks: [['agent:verifier', 'pass', '原文确认']] },
+        { claim: '无双向实时同步的交付记录', ref: 'experience/projects/ (全量检索 "双向同步")', by: 'agent:worker', checks: [['agent:verifier', 'pass', '复核检索，0 条命中']] },
+      ],
+      t3: [{ claim: '质疑：基准数据来自理想化排产，客户插单频繁会怎样？ → 回应：P-2024-07 插单率 18% 场景下求解仍 < 6 分钟，已写入风险', ref: 'experience/projects/P-2024-07/复盘.md', by: 'agent:worker', checks: [['agent:redteam', 'fail', '基准未覆盖插单'], ['agent:redteam', 'pass', '回应充分']] }],
+    },
+    log: [
+      ['10/07 09:20', 'agent:worker', '认领'],
+      ['10/07 10:05', 'agent:worker', '提交 4 条证据'],
+      ['10/07 10:06', 'agent:worker', '提交验证'],
+      ['10/07 10:09', 'agent:redteam', 't3 不通过：基准未覆盖插单场景 → 退回执行'],
+      ['10/07 10:31', 'agent:worker', '补充 P-2024-07 插单数据，重新提交'],
+      ['10/07 10:34', 'agent:verifier', 't1、t2 通过'],
+      ['10/07 10:36', 'agent:redteam', 't3 通过 → 进入待签收'],
+    ],
+  },
+  c1b: {
+    id: 'c1b', parent: 'c1', title: '交付产能', status: 'blocked', version: 1, owner: 'worker',
+    need: '评估 Q4–Q1 交付团队能否承接一个排产实施项目（预计 3 人 × 4 个月）。',
+    boundaries: [{ text: '以现有人员为准，不假设新招聘', src: 'human', ok: true }],
+    tests: [
+      { id: 't1', kind: 'evidence', text: '产能结论基于排期表或资源台账', v: 'unchecked' },
+      { id: 't2', kind: 'judgment', text: '交付经理认可', v: 'unchecked' },
+    ],
+    question: '经验库中只有截至 9 月的资源台账，没有 Q4 排期。交付团队 Q4 是否已有确定项目？如有，请告诉我占用几人、到何时。',
+    evidence: {},
+    log: [
+      ['10/07 09:21', 'agent:worker', '认领'],
+      ['10/07 09:50', 'agent:worker', '读取 experience/resources/2026-09-台账.xlsx'],
+      ['10/07 09:52', 'agent:worker', '阻塞：缺少 Q4 排期信息'],
+    ],
+  },
+  c1c: {
+    id: 'c1c', parent: 'c1', title: '成本与报价', status: 'running', version: 1, owner: 'worker',
+    need: '估算实施成本，给出报价区间。',
+    boundaries: [{ text: '报价区间参考近 2 年同类项目', src: 'human', ok: true }],
+    tests: [
+      { id: 't1', kind: 'evidence', text: '成本每一项有工时或采购依据', v: 'unchecked' },
+      { id: 't2', kind: 'judgment', text: '财务认可报价区间', v: 'unchecked' },
+    ],
+    change: {
+      by: 'agent:worker', reason: '经验库 P-2024-07、P-2025-01 两个排产项目毛利分别为 22%、19%，均被财务事后否决续签。建议把毛利下限写入边界，避免报价时遗漏。',
+      add: ['毛利率不低于 35%'], remove: [],
+    },
+    evidence: {},
+    log: [
+      ['10/07 09:22', 'agent:worker', '认领'],
+      ['10/07 10:12', 'agent:worker', '检索到 2 个同类项目报价'],
+      ['10/07 10:15', 'agent:worker', '提出契约变更：新增边界「毛利率不低于 35%」'],
+    ],
+  },
+  c2: {
+    id: 'c2', parent: null, title: '交付功能：排产看板 v1', status: 'draft', version: 1, owner: 'chief',
+    trigger: '由 chief 起草：若「客户 A · 智能排产」签收为有条件可行，则启动此契约。边界中的条件继承自 c1a 的结论。',
+    need: '在现有产品中新增「排产看板」：展示周排产计划（设备 × 时间甘特图），支持手动拖拽调整，并从 ERP 单向导入工单。',
+    boundaries: [
+      { text: '首期不含 ERP 双向同步', src: 'agent_draft', ok: false, why: '继承自 c1a 结论：双向同步无交付先例' },
+      { text: '复用调度引擎 v3，不修改 engine/ 目录', src: 'agent_draft', ok: false, why: '继承自 c1a 边界' },
+      { text: '不新增第三方依赖（甘特图用现有图表库）', src: 'agent_draft', ok: false, why: '起草自仓库约定 CONTRIBUTING.md' },
+      { text: '页面首屏加载 < 2s（200 台设备）', src: 'agent_draft', ok: false, why: '起草自产品性能基线' },
+    ],
+    tests: [
+      { id: 't1', kind: 'deterministic', text: '单元测试与 CI 全部通过', v: 'unchecked' },
+      { id: 't2', kind: 'deterministic', text: 'diff 未触及 engine/ 目录，package.json 无新增依赖', v: 'unchecked' },
+      { id: 't3', kind: 'evidence', text: '200 台设备场景首屏 < 2s，附性能测试截图', v: 'unchecked' },
+      { id: 't4', kind: 'adversarial', text: '红队针对拖拽冲突、空数据、超大数据给出用例并全部通过', v: 'unchecked' },
+      { id: 't5', kind: 'judgment', text: '你在预览环境中验收交互', v: 'unchecked' },
+    ],
+    evidence: {},
+    log: [['10/07 10:40', 'agent:chief', '起草契约（待 c1 签收后启动）']],
+  },
+  c2a: { id: 'c2a', parent: 'c2', title: 'PRD 与方案设计', status: 'draft', version: 1, owner: 'chief', need: '输出 PRD 和技术方案。', boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你确认方案', v: 'unchecked' }], evidence: {}, log: [] },
+  c2b: { id: 'c2b', parent: 'c2', title: '实现', status: 'draft', version: 1, owner: 'chief', need: '按方案实现前端看板与导入接口。', boundaries: [], tests: [{ id: 't1', kind: 'deterministic', text: 'CI 通过', v: 'unchecked' }], evidence: {}, log: [] },
+  c2c: { id: 'c2c', parent: 'c2', title: '验收与发布', status: 'draft', version: 1, owner: 'chief', need: '预览环境验收并发布。', boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你验收', v: 'unchecked' }], evidence: {}, log: [] },
+};
+
+let view = { page: 'inbox', id: null };
+
+// ---------- helpers ----------
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const kids = (id) => Object.values(db).filter((c) => c.parent === id);
+const chip = (s) => `<span class="chip s-${s}">${STATUS[s]}</span>`;
+const who = (a) => a === 'human'
+  ? '<span class="who-human">你</span>'
+  : `<span class="who-agent">${esc(a.replace('agent:', ''))}</span>`;
+const stamp = () => { const d = new Date(); return `10/07 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
+function go(page, id = null) { view = { page, id }; render(); $('main').scrollTop = 0; }
+function log(c, actor, text) { c.log.push([stamp(), actor, text]); }
+
+function inbox() {
+  const all = Object.values(db);
+  return {
+    drafts: all.filter((c) => c.status === 'draft' && !c.parent),
+    changes: all.filter((c) => c.change),
+    blocked: all.filter((c) => c.status === 'blocked'),
+    review: all.filter((c) => c.status === 'in_review'),
+  };
+}
+const inboxCount = () => { const b = inbox(); return b.drafts.length + b.changes.length + b.blocked.length + b.review.length; };
+
+// ---------- sidebar ----------
+function renderSide() {
+  const node = (c, depth) => `
+    <div class="tree-node ${view.id === c.id ? 'active' : ''}" style="padding-left:${8 + depth * 16}px" onclick="go('contract','${c.id}')">
+      <span class="dot d-${c.status}"></span><span class="t">${esc(c.title)}</span>
+      ${c.change ? '<span class="count" title="变更请求">1</span>' : ''}
+    </div>` + kids(c.id).map((k) => node(k, depth + 1)).join('');
+  const roots = Object.values(db).filter((c) => !c.parent);
+  const n = inboxCount();
+  $('#side').innerHTML = `
+    <div class="brand">⎈ Helm <small>契约驱动的 ADE · 原型</small></div>
+    <div class="nav-item ${view.page === 'inbox' ? 'active' : ''}" onclick="go('inbox')">
+      <span>收件箱</span>${n ? `<span class="count">${n}</span>` : ''}
+    </div>
+    <div class="section-label">契约树</div>
+    ${roots.map((r) => node(r, 0)).join('')}
+    <div class="section-label">角色</div>
+    <div style="padding:0 10px;font-size:12px;color:var(--muted);line-height:1.9">
+      <div>${who('human')} 定义需求 / 边界 / 测试，签收</div>
+      <div>${who('agent:chief')} 拆解、派单、汇总</div>
+      <div>${who('agent:worker')} 执行（开发）</div>
+      <div>${who('agent:verifier')} 核对证据</div>
+      <div>${who('agent:redteam')} 挑错</div>
+    </div>`;
+}
+
+// ---------- inbox ----------
+function renderInbox() {
+  const b = inbox();
+  const item = (c, sub, extra = '') => `
+    <div class="inbox-item" onclick="go('contract','${c.id}')">
+      <span class="dot d-${c.status}"></span>
+      <div class="grow"><div>${esc(c.title)}</div><div class="sub">${sub}</div></div>
+      ${extra}${chip(c.status)}
+    </div>`;
+  const group = (title, hint, items) => `
+    <div class="inbox-group"><h2>${title} <span class="hint">${hint}</span></h2>
+    ${items.length ? items.join('') : '<div class="empty">没有待处理事项</div>'}</div>`;
+  const blocks = (c) => { const p = c.parent ? db[c.parent] : null; return p ? `<span class="impact">阻塞上层「${esc(p.title)}」</span>` : ''; };
+
+  $('#main').innerHTML = `
+    <h1>收件箱</h1>
+    <div class="intro">
+      你只需要处理这里的事：<b>批准契约</b>（需求、边界、测试是否写对）、<b>回答阻塞</b>、<b>审批变更请求</b>、<b>签收结果</b>。
+      开发过程由代理完成，默认折叠，需要时可以展开查看。
+      <div class="legend">${Object.keys(KIND).map((k) => `<span class="k">${KIND[k]}测试 · ${KIND_HINT[k]}</span>`).join('')}</div>
+    </div>
+    ${group('阻塞 · 等你回答', '代理卡住了，回答后继续', b.blocked.map((c) => item(c, esc(c.question), blocks(c))))}
+    ${group('变更请求', '代理不能自己改契约，只能提议', b.changes.map((c) => item(c, `${who(c.change.by)} 提议：${c.change.add.map((x) => '+ ' + esc(x)).join('；')}`, blocks(c))))}
+    ${group('待签收', '所有自动检查已通过，等你判断', b.review.map((c) => item(c, esc(c.result || ''), blocks(c))))}
+    ${group('待批准契约', '代理起草的契约，确认后才会开工', b.drafts.map((c) => item(c, `${kids(c.id).length} 个子契约 · ${c.boundaries.filter((x) => !x.ok).length} 条边界待确认`)))}
+  `;
+}
+
+// ---------- contract detail ----------
+function renderContract(c) {
+  const parent = c.parent ? db[c.parent] : null;
+  const k = kids(c.id);
+  const human = c.status === 'draft' || c.status === 'in_review' || c.status === 'blocked';
+
+  const actions = {
+    draft: `<button class="primary" onclick="approve('${c.id}')">批准契约，开工</button>`,
+    in_review: `<button class="bad" onclick="signoff('${c.id}', false)">打回</button><button class="ok" onclick="signoff('${c.id}', true)">签收</button>`,
+  }[c.status] || '';
+
+  let banner = '';
+  if (c.trigger) banner += `<div class="banner agent"><div class="grow"><b>由代理起草</b>${esc(c.trigger)}</div></div>`;
+  if (c.status === 'blocked') banner += `
+    <div class="banner warn"><div class="grow"><b>${who('agent:' + c.owner)} 需要你回答</b>${esc(c.question)}
+      <textarea id="answer" style="margin-top:8px" placeholder="例：Q4 已有 P-2026-09 占用 2 人至 12 月底"></textarea>
+      <div style="margin-top:8px"><button class="primary" onclick="answer('${c.id}')">回答并继续</button></div></div></div>`;
+  if (c.status === 'running') banner += `<div class="banner agent"><div class="grow"><b>${who('agent:' + c.owner)} 正在执行</b>${k.length ? `等待 ${k.filter((x) => x.status !== 'accepted').length} 个子契约完成后汇总` : '你暂时不需要做什么'}</div></div>`;
+  if (c.status === 'in_review' && c.result) banner += `<div class="banner ok"><div class="grow"><b>产出结论</b>${esc(c.result)}</div></div>`;
+  if (c.status === 'accepted') banner += `<div class="banner ok"><div class="grow"><b>已签收</b>${esc(c.signNote || '')}</div></div>`;
+  if (c.status === 'changes_requested') banner += `<div class="banner warn"><div class="grow"><b>已打回</b>${esc(c.signNote || '')}，代理将重新认领</div></div>`;
+
+  const change = c.change ? `
+    <div class="change">
+      <h2>变更请求 <span class="hint">${who(c.change.by)} 提议 · 批准后契约版本 v${c.version} → v${c.version + 1}</span></h2>
+      <div>${esc(c.change.reason)}</div>
+      <div class="diff">${c.change.add.map((x) => `<div class="add">+ 边界：${esc(x)}</div>`).join('')}${c.change.remove.map((x) => `<div class="del">− 边界：${esc(x)}</div>`).join('')}</div>
+      <button class="ok small" onclick="decide('${c.id}', true)">批准</button>
+      <button class="bad small" onclick="decide('${c.id}', false)">驳回</button>
+    </div>` : '';
+
+  const bounds = c.boundaries.map((b, i) => `
+    <div class="row ${!b.ok ? 'unconfirmed' : ''}">
+      <div class="row-top">
+        ${c.status === 'draft' ? `<input type="checkbox" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
+        <div class="grow">${esc(b.text)}
+          <div class="src">${b.src === 'human' ? '你写的' : `${who('agent:chief')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}${!b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}</div>
+        </div>
+      </div>
+    </div>`).join('') || '<div class="empty">尚无边界</div>';
+
+  const tests = c.tests.map((t) => {
+    const ev = c.evidence[t.id] || [];
+    const vText = { pass: '✓ 通过', fail: '✗ 不通过', unchecked: '— 未检查' }[t.v];
+    return `
+      <div class="row">
+        <div class="row-top">
+          <div class="grow">${esc(t.text)}<div class="src"><span class="k">${KIND[t.kind]}</span> ${KIND_HINT[t.kind]}</div></div>
+          <span class="verdict v-${t.v}">${vText}</span>
+        </div>
+        ${ev.length ? `<details class="ev"><summary>${ev.length} 条证据</summary>${ev.map((e) => `
+          <div class="ev-item">${esc(e.claim)}<div><code>${esc(e.ref)}</code></div>
+            <div class="by">提交：${who(e.by)} · ${e.checks.map(([a, v, n]) => `${who(a)} <span class="v-${v}">${v === 'pass' ? '通过' : '不通过'}</span>（${esc(n)}）`).join(' → ')}</div>
+          </div>`).join('')}</details>` : ''}
+      </div>`;
+  }).join('');
+
+  const timeline = c.log.slice().reverse().map(([t, a, x]) => `
+    <div class="tl-item"><span class="time">${t.slice(6)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('') || '<div class="empty">暂无</div>';
+
+  $('#main').innerHTML = `
+    <div class="head">
+      <div>
+        <div class="crumb">${parent ? `<a onclick="go('contract','${parent.id}')">${esc(parent.title)}</a> / ` : ''}${c.id}</div>
+        <h1>${esc(c.title)}</h1>
+        <div class="meta">${chip(c.status)}<span>契约 v${c.version}</span><span>负责：${who('agent:' + c.owner)}</span>${human ? '<span style="color:var(--warn)">● 需要你处理</span>' : ''}</div>
+      </div>
+      <div class="actions">${actions}</div>
+    </div>
+    ${banner}${change}
+    <div class="cols">
+      <div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div>
+      <div class="card"><div class="col-label">边界 · 不能怎样</div>${bounds}
+        ${c.status === 'draft' ? `<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><button class="small" onclick="addBound('${c.id}')">添加</button></div>` : ''}
+      </div>
+      <div class="card"><div class="col-label">测试 · 怎么算对</div>${tests}</div>
+    </div>
+    <div class="below">
+      <div class="card">
+        <details class="process">
+          <summary><h2 style="margin:0">▸ 开发过程 <span class="hint">代理的工作，默认折叠 · ${c.log.length} 条记录</span></h2></summary>
+          <div class="tl">${timeline}</div>
+        </details>
+      </div>
+      <div class="card"><h2>子契约 <span class="hint">${k.length ? `${k.filter((x) => x.status === 'accepted').length}/${k.length} 已签收` : '无'}</span></h2>
+        ${k.map((x) => `<div class="kid" onclick="go('contract','${x.id}')"><span class="dot d-${x.status}"></span><span class="t">${esc(x.title)}</span>${chip(x.status)}</div>`).join('') || '<div class="empty">这是叶子契约，由 worker 直接执行</div>'}
+      </div>
+    </div>`;
+}
+
+// ---------- human actions (simulated) ----------
+function approve(id) {
+  const c = db[id];
+  if (c.boundaries.some((b) => !b.ok)) { toast('还有边界未确认：请勾选或删除'); return; }
+  const tree = [c, ...kids(id)];
+  tree.forEach((x) => { x.status = 'ready'; x.boundaries.forEach((b) => (b.ok = true)); log(x, 'human', '批准契约'); });
+  log(c, 'agent:chief', '开始派单');
+  c.status = 'running';
+  toast(`已批准 ${tree.length} 个契约，chief 开始派单`);
+  render();
+}
+function toggleBound(id, i) { db[id].boundaries[i].ok = !db[id].boundaries[i].ok; render(); }
+function addBound(id) {
+  const v = $('#newBound').value.trim(); if (!v) return;
+  db[id].boundaries.push({ text: v, src: 'human', ok: true }); log(db[id], 'human', `添加边界：${v}`); render();
+}
+function answer(id) {
+  const c = db[id]; const v = $('#answer').value.trim();
+  if (!v) { toast('请先输入回答'); return; }
+  c.status = 'running'; delete c.question; log(c, 'human', `回答：${v}`); log(c, 'agent:worker', '继续执行');
+  toast('已回答，worker 继续执行'); render();
+}
+function decide(id, ok) {
+  const c = db[id]; const ch = c.change;
+  if (ok) { ch.add.forEach((t) => c.boundaries.push({ text: t, src: 'agent_draft', ok: true, why: '经你批准的变更请求' })); c.version++; }
+  log(c, 'human', `${ok ? '批准' : '驳回'}变更请求`); delete c.change;
+  toast(ok ? `边界已更新，契约升至 v${c.version}` : '已驳回，代理按原契约继续'); render();
+}
+function signoff(id, ok) {
+  const c = db[id];
+  const note = prompt(ok ? '签收备注（可选）' : '打回原因（必填）', '');
+  if (note === null || (!ok && !note.trim())) return;
+  c.signNote = note;
+  c.tests.filter((t) => t.kind === 'judgment').forEach((t) => (t.v = ok ? 'pass' : 'fail'));
+  c.status = ok ? 'accepted' : 'changes_requested';
+  log(c, 'human', ok ? '签收' : `打回：${note}`);
+  if (ok && c.parent) log(db[c.parent], 'agent:chief', `子契约「${c.title}」已签收`);
+  toast(ok ? '已签收' : '已打回'); render();
+}
+
+function render() {
+  renderSide();
+  if (view.page === 'inbox') renderInbox(); else renderContract(db[view.id]);
+}
+render();
+</script>
+</body>
+</html>

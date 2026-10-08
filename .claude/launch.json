@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "prototype", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "python3 -m http.server $PORT -d prototype"], "port": 8787, "autoPort": true }
+  ]
+}
