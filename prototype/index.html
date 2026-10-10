@@ -14,6 +14,10 @@
   --on-accent: #ffffff; --on-ok: #ffffff; --on-bad: #ffffff;
   --overlay: #00000066;
   --flow-label: #605e57;
+  --result-pass: #005b70; --result-pass-bg: #dff3f7;
+  --result-fail: #8b2357; --result-fail-bg: #fae6f0;
+  --result-unverifiable: #55429b; --result-unverifiable-bg: #efebfa;
+  --result-unprocessed: #55565f; --result-unprocessed-bg: #ececf0;
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -26,6 +30,10 @@
     --on-accent: #161615; --on-ok: #161615; --on-bad: #161615;
     --overlay: #00000099;
     --flow-label: #c0beb5;
+    --result-pass: #73d5e7; --result-pass-bg: #18343b;
+    --result-fail: #ffa0ca; --result-fail-bg: #412337;
+    --result-unverifiable: #c1b1ff; --result-unverifiable-bg: #302842;
+    --result-unprocessed: #c1c2ce; --result-unprocessed-bg: #2b2c33;
   }
 }
 * { box-sizing: border-box; }
@@ -228,6 +236,24 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
   .flow-node .chip { white-space: normal; }
   .autonomy-row { flex-wrap: wrap; }
 }
+.result-pass { color: var(--result-pass); background: var(--result-pass-bg); }
+.result-fail { color: var(--result-fail); background: var(--result-fail-bg); }
+.result-unverifiable { color: var(--result-unverifiable); background: var(--result-unverifiable-bg); }
+.result-unprocessed { color: var(--result-unprocessed); background: var(--result-unprocessed-bg); }
+.result-chip { display: inline-flex; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.orchestration-grid { display: grid; gap: 10px; margin: 12px 0; }
+.orchestration-row { display: grid; grid-template-columns: repeat(var(--step-columns, 1), minmax(0, 1fr)); gap: 10px; }
+.orchestration-step { color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 10px; min-width: 0; }
+.orchestration-step summary { color: var(--text); background: var(--panel-2); cursor: pointer; }
+.orchestration-step .step-body { color: var(--muted); background: var(--panel-2); margin-top: 10px; }
+.orchestration-step .step-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); }
+.inbox-label { color: var(--text); background: var(--panel-2); padding: 2px 7px; border-radius: 5px; }
+.plan-check { color: var(--text); background: var(--panel-2); padding: 8px 10px; margin: 5px 0; border-radius: 5px; }
+.v4-note { color: var(--muted); font-size: 12px; }
+.memory-item { margin: 10px 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.checklist-item { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.budget-band { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+@media (max-width: 760px) { .orchestration-row { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -2678,7 +2704,7 @@ const db = {
 
 // ---------- 数据、规则与决策 ----------
 const cloneData = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-const AUTONOMY_LABELS = { approval:'批准节点项目',change:'审批变更请求',return:'退回请求',limit:'处理达到上限',unresolved:'判定「无法判定」',acceptance:'验收',context:'上下文包确认',experience:'经验库入库',external:'不可逆或对外动作' };
+const AUTONOMY_LABELS = { approval:'批准节点项目',change:'审批变更请求',return:'退回请求',limit:'处理达到上限',unresolved:'判定「无法判定」',acceptance:'验收',context:'上下文包确认',experience:'经验库入库',external:'不可逆或对外动作',orchestration:'执行编排确认',discovery:'发现转新节点',caution:'项目记忆·注意事项',designDecision:'项目记忆·设计决策',sideEffect:'副作用状态不明' };
 const getNode = (id) => db.nodes[id];
 const getProject = (id) => db.projects.find((p) => p.id === id);
 const getAgent = (id) => db.agents.find((a) => a.id === id);
@@ -2686,7 +2712,7 @@ const coreTime = () => typeof stamp === 'function' ? stamp() : new Date().toISOS
 const coreId = (prefix) => `${prefix}-${++db.serial}`;
 const coreActor = (actor) => actor === 'automatic' || actor === 'auto' ? '自动' : ['leader','agent:leader'].includes(actor) ? 'leader' : '你';
 function coreFinish(message) { if (message && typeof toast === 'function') toast(message); if (typeof render === 'function') render(); }
-function coreLog(node,actor,text) { if (!node) return; node.log ||= []; node.log.push([coreTime(),coreActor(actor),text]); }
+function coreLog(node,actor,text) { if (!node) return; node.log ||= []; node.log.push([coreTime(),getAgent(actor)?actor:coreActor(actor),text]); }
 function recordDecision(type,nodeId,text,actor='human',outcome='原样采纳',extra={}) {
   const node=getNode(nodeId);
   const decision={id:coreId('decision'),nodeId:nodeId||null,projectId:node?.projectId||extra.projectId||null,type:AUTONOMY_LABELS[type]||type,title:extra.title||text,text,decisionMaker:coreActor(actor),outcome,time:coreTime(),...extra};
@@ -2695,6 +2721,7 @@ function recordDecision(type,nodeId,text,actor='human',outcome='原样采纳',ex
 function coreRefuse(reason,nodeId=null,actor='human',type='规则检查') { recordDecision(type,nodeId,reason,actor,'驳回');coreFinish(reason);return {ok:false,reason}; }
 function coreAuto(node,key) { const p=getProject(node.projectId); return db.autonomy[p.type]?.[key] === 'auto'; }
 function ensureStarted(node) {
+  normalizeV4Node(node);
   node.attempts ||= []; node.handoff ||= {updated:`${coreTime()} · leader`,baseline:'读取允许的资料并核对基线',done:[],decisions:[],open:[],next:'按批准的需求执行，先核对引用文件',outputs:[]};
   node.context ||= {sent:[{info:'本节点需求、边界、测试、交付物、上限与席位安排',reason:'执行本节点所需'},{info:node.deps.map(d=>getNode(d)?.result||getNode(d)?.deliverable||d).join('；')||'节点资料来源',reason:'相关上游的已验收产出'},{info:node.sources.join('；'),reason:'提供允许读取的资料'}],omitted:[{info:'独立核对与挑错的检查思路、完整对话',reason:'保持复核独立'},{info:node.projectId==='project-b'?'客户报价、商务谈判与无关项目资料':'其他项目的开发过程',reason:'与本节点无关'}],confirmed:coreAuto(node,'context')};
 }
@@ -2704,7 +2731,7 @@ function branchBlocker(node) { if(!node.branchCondition)return '';const p=getPro
 function signoffBlocker(node) {if(node.tests.some(t=>t.v==='unresolved'))return '仍有无法判定的测试，请先判定后验收';if(node.tests.some(t=>t.kind!=='judgment'&&t.v!=='pass'))return '仍有未通过的测试，请打回后补充验证';return '';}
 const unresolvedTests = (node) => node.tests.filter(t=>t.v==='unresolved');
 function inbox() {
-  const result={approval:[],questions:[],limits:[],requests:[],review:[],experience:[]};
+  const result={approval:[],questions:[],limits:[],requests:[],discoveries:[],gates:[],review:[],designDecisions:[],experience:[],sideEffects:[]};
   const push=(key,id,nodeId,title,summary,kind)=>result[key].push({id,nodeId,title,summary,kind,type:kind});
   for(const n of Object.values(db.nodes)) {
     if(n.archived)continue;
@@ -2720,6 +2747,16 @@ function inbox() {
   for(const p of db.lessonProposals)if(p.status==='pending')push('approval',p.id,p.nodeId,p.title,p.reason,'lesson');
   for(const e of db.experience)if(e.status==='pending')push('experience',e.id,e.nodeId,e.title,e.content,'experience');
   for(const p of db.projects)if(p.flowChange)push('requests',p.flowChange.id,p.flowChange.nodeId||p.nodeIds[0],`${p.name} · 项目流程变更`,p.flowChange.reason,'flow');
+  for(const d of db.discoveries)if(d.status==='pending'&&!getNode(d.nodeId)?.archived)push('discoveries',d.id,d.nodeId,d.description,'leader 建议：'+({ignore:'忽略',merge:'并入已有节点',draft:'起草新节点'}[d.recommendation?.action]||'起草新节点')+' · '+(d.recommendation?.reason||''),'discovery');
+  for(const n of Object.values(db.nodes).filter(n=>!n.archived)) {
+    for(const step of n.orchestration?.steps||[])if(step.type==='gate'&&step.gateState==='pending')push('gates',step.id,n.id,step.title||'人工关卡',String(typeof step.approvalObject==='string'?step.approvalObject:JSON.stringify(step.approvalObject))+' · 内容哈希（示意）：'+step.contentHash,'gate');
+    if(n.orchestration?.state==='awaiting_confirmation')push('approval','plan-'+n.id,n.id,n.title,'执行编排待你确认 · '+n.orchestration.version,'orchestration');
+  }
+  for(const p of db.projects) {
+    for(const d of p.memory.decisions)if(d.status==='proposed')push('designDecisions',d.id,d.refs?.[0]||p.nodeIds[0],d.title||d.text,d.text,'designDecision');
+    for(const c of p.memory.cautions)if(c.status==='proposed')push('approval',c.id,c.refs?.[0]||p.nodeIds[0],c.text,'项目记忆·注意事项待你确认','caution');
+  }
+  for(const effect of db.sideEffects)if(effect.status==='unknown')push('sideEffects',effect.id,effect.nodeId,effect.title,'回执未知 · 核对目标现场后由你处理（示例）','sideEffect');
   return result;
 }
 const inboxCount = () => Object.values(inbox()).reduce((n,items)=>n+items.length,0);
@@ -2734,6 +2771,7 @@ function startNode(id) {
   recordDecision('context',id,n.context.confirmed?'确认节点派单上下文包':'上下文包待确认',coreAuto(n,'context')?'automatic':'human');
   n.started=true;n.status='running';delete n.blockedType;n.limit.usedAttempts=(n.limit.usedAttempts||0)+1;
   n.attempts.push({number:n.attempts.length+1,actor:n.seats.human?'你':getAgent(n.seats.execute)?.name||'执行代理',model:n.seats.human?'人工':`${getAgent(n.seats.execute)?.model||'未记录'} · ${getAgent(n.seats.execute)?.strength||'未记录'}`,method:'核对上下文包和交接记录，记录基线后按批准的节点项目执行',result:'running',failure:'',tokens:null,duration:'进行中',sessionId:null});
+  normalizeV4Attempt(n,n.attempts.at(-1));if(!n.seats.human)wakeMainAgent(id,'开工');
   coreLog(n,'leader',n.seats.human?'人工节点就绪，等待你执行':'组装上下文包，通过 Codex CLI 启动执行代理');
   updateHandoff(n,n.seats.human?'由你执行本人工节点':'核对引用文件并继续执行','leader');
   coreFinish('节点已开工');return {ok:true};
@@ -2784,7 +2822,7 @@ function addBound(id,data) {const n=getNode(id);if(!n||!['draft','needs_revalida
 function normalizeNode(projectId,data) {
   const p=getProject(projectId);const agent=getAgent(data.seats?.execute||'agent-frontend');
   const n={id:data.id||coreId('node'),projectId,title:data.title||'新节点',deps:data.deps||data.dependencies||[],status:'draft',version:1,approved:false,started:false,need:data.need||'请补充需求',deliverable:data.deliverable||'Markdown 节点报告：交付目录/新节点.md',sources:data.sources||[],limit:{deadline:'待确认',maxAttempts:3,tokenBudget:12000,usedAttempts:0,usedTokens:0},boundaries:[],tests:[{id:'t1',kind:'judgment',text:'你确认节点产出满足需求',v:'unchecked'}],evidence:{},attempts:[],log:[],seats:{execute:agent?.id||'agent-frontend',verify:'agent-check',challenge:null,human:false},refinement:{changed:false,applied:false,changes:[]},...cloneData(data),projectId};
-  n.deps=[...new Set(n.deps)];const defaults=getAgent(n.seats.execute);n.boundaries=[...n.boundaries,...(defaults?.defaultBoundaries||[]).map(b=>({...cloneData(b),src:'agent_default',why:'执行代理默认边界：'+defaults.name,ok:false}))];n.tests=[...n.tests,...(defaults?.defaultTests||[]).map((t,i)=>({...cloneData(t),id:'agent-default-'+(t.id||i),src:'agent_default',sourceName:defaults.name,v:'unchecked'}))];n.boundaries=n.boundaries.map(b=>({enf:'advisory',ok:false,src:'agent_draft',...b}));n.tests=n.tests.map(t=>({v:'unchecked',...t}));if(n.approved)n.status='ready';if(n.tests.some(t=>t.kind==='adversarial')&&!n.seats.challenge)n.seats.challenge='agent-critic';return n;
+  n.deps=[...new Set(n.deps)];const defaults=getAgent(n.seats.execute);n.boundaries=[...n.boundaries,...(defaults?.defaultBoundaries||[]).map(b=>({...cloneData(b),src:'agent_default',why:'执行代理默认边界：'+defaults.name,ok:false}))];n.tests=[...n.tests,...(defaults?.defaultTests||[]).map((t,i)=>({...cloneData(t),id:'agent-default-'+(t.id||i),src:'agent_default',sourceName:defaults.name,v:'unchecked'}))];n.boundaries=n.boundaries.map(b=>({enf:'advisory',ok:false,src:'agent_draft',...b}));n.tests=n.tests.map(t=>({v:'unchecked',...t}));if(n.approved)n.status='ready';if(n.tests.some(t=>t.kind==='adversarial')&&!n.seats.challenge)n.seats.challenge='agent-critic';normalizeV4Node(n);return n;
 }
 function draftNode(projectId,data={},actor='leader') {
   const p=getProject(projectId);if(!p)return {ok:false,reason:'项目不存在'};
@@ -2842,7 +2880,7 @@ function editNode(id,patch,actor='human') {
   const nextBounds=changes.boundaries||n.boundaries;if(nextBounds.some(b=>b.enf==='enforced'&&!b.mech?.trim()))return coreRefuse('强制边界必须填写保证机制',id,actor,'change');
   if(!validSeats(changes.seats||n.seats,changes.tests||n.tests))return coreRefuse('席位安排与测试不匹配',id,actor,'change');
   const diffs=Object.entries(changes).filter(([k,v])=>JSON.stringify(n[k])!==JSON.stringify(v)).map(([field,after])=>({field,before:cloneData(n[field]),after:cloneData(after)}));if(!diffs.length)return {ok:true,unchanged:true};
-  n.versions||=[];n.versions.push({version:n.version,diff:diffs,time:coreTime()});Object.assign(n,cloneData(changes));n.lastDiff=diffs;delete n.context;if(n.started)ensureStarted(n);
+  n.versions||=[];n.versions.push({version:n.version,diff:diffs,time:coreTime()});Object.assign(n,cloneData(changes));normalizeV4Node(n);n.lastDiff=diffs;delete n.context;if(n.started)ensureStarted(n);
   if(n.approved){
     n.version++;invalidateChecks(n);if(['verifying','in_review','accepted'].includes(n.status))n.status='running';
     for(const downstreamId of downstreamOf(n.id)){
@@ -2878,7 +2916,7 @@ function signoff(id,ok,actor='human') {
   const note=actor==='human'&&typeof prompt==='function'?prompt(ok?'验收备注（可选）':'打回原因（必填）',''):(ok?'全部测试通过，自动验收':'自动打回');if(note===null||!ok&&!note.trim())return {ok:false,reason:'已取消'};
   n.signNote=note;n.tests.filter(t=>t.kind==='judgment').forEach(t=>{t.v=ok?'pass':'fail';t.checks||=[];t.checks.push({checker:'human',result:t.v,note:note||'人工验收确认',method:'人工判定',correction:''});});n.status=ok?'accepted':'changes_requested';n.needsRevalidation=false;recordDecision('acceptance',id,ok?'验收节点':'打回：'+note,actor,ok?'原样采纳':'驳回');coreLog(n,actor,ok?'已验收':'打回：'+note);
   const agent=getAgent(n.seats.execute);if(agent){agent.stat||={firstPass:0,total:0,failures:[]};agent.stat.total++;if(ok&&n.attempts.filter(a=>a.result==='failed').length===0&&(n.returnCount||0)===0)agent.stat.firstPass++;if(!ok)agent.stat.failures.push(note);}
-  if(ok){const p=getProject(n.projectId);if(p.edges.some(edge=>edge.from===n.id&&edge.condition)){p.branchResult=n.result?.includes('不可行')&&!n.result?.includes('有条件可行')?'infeasible':'feasible';}completeReadyNodes(n.projectId);}
+  if(ok){resumeBlockedDiscoveries(n.projectId);const p=getProject(n.projectId);if(p.edges.some(edge=>edge.from===n.id&&edge.condition)){p.branchResult=n.result?.includes('不可行')&&!n.result?.includes('有条件可行')?'infeasible':'feasible';}completeReadyNodes(n.projectId);}
   coreFinish(ok?'已验收':'已打回');return {ok:true};
 }
 function isLimitBlocked(n) {return n?.status==='blocked'&&n.blockedType==='limit';}
@@ -2892,8 +2930,10 @@ function abandon(id,actor='human') {const n=getNode(id);if(!isLimitBlocked(n))re
 function saveTemplate(id,title) {const n=getNode(id);if(n?.status!=='accepted')return {ok:false};if(db.templates.some(t=>t.sourceId===id)){coreFinish('此节点已保存为模板');return {ok:false,reason:'已保存'};}const name=title??(typeof prompt==='function'?prompt('模板名称',n.title):n.title);if(name===null||!name.trim())return {ok:false};const p=getProject(n.projectId),t={id:coreId('template'),sourceId:id,sourceVersion:n.version,projectType:p.type,title:name.trim(),need:n.need,boundaries:cloneData(n.boundaries),tests:n.tests.map(({id,kind,text})=>({id,kind,text})),children:[],flow:{nodeTitles:p.nodeIds.map(id=>getNode(id).title),edges:cloneData(p.edges)},nodesSnapshot:p.nodeIds.map(id=>{const source=getNode(id);return cloneData({id:source.id,title:source.title,need:source.need,deliverable:source.deliverable,sources:source.sources,limit:{...source.limit,usedAttempts:0,usedTokens:source.limit.tokenBudget===null?null:0},boundaries:source.boundaries,tests:source.tests.map(({id,kind,text})=>({id,kind,text,v:'unchecked'})),seats:source.seats,deps:source.deps,branchCondition:source.branchCondition||null});})};db.templates.push(t);recordDecision('保存模板',id,'保存为模板：'+t.title,'human');coreLog(n,'human','保存为模板：'+t.title);coreFinish('模板已保存');return t;}
 function setAutonomy(type,key,value) {
   key=Object.entries(AUTONOMY_LABELS).find(([k,v])=>k===key||v===key)?.[0]||key;if(!db.autonomy[type]||!(key in AUTONOMY_LABELS))return {ok:false,reason:'未知决策点'};
-  const mode=['auto','代理自动','自动',true].includes(value)?'auto':'human';if(['experience','external'].includes(key)&&mode==='auto')return coreRefuse('经验库入库与不可逆或对外动作始终由你决定');db.autonomy[type][key]=mode;recordDecision('自主度设置',null,`${type} · ${AUTONOMY_LABELS[key]}：${mode==='auto'?'代理自动':'由我决定'}`,'human');
+  const mode=['auto','代理自动','自动',true].includes(value)?'auto':'human';if(['experience','external','designDecision','sideEffect'].includes(key)&&mode==='auto')return coreRefuse('项目记忆·设计决策、经验库入库、不可逆或对外动作及副作用状态不明始终由你决定');db.autonomy[type][key]=mode;recordDecision('自主度设置',null,`${type} · ${AUTONOMY_LABELS[key]}：${mode==='auto'?'代理自动':'由我决定'}`,'human');
   for(const n of Object.values(db.nodes).filter(n=>getProject(n.projectId)?.type===type)) {
+    if(key==='discovery'&&mode==='auto')for(const d of db.discoveries.filter(d=>d.nodeId===n.id&&d.status==='pending'))decideDiscovery(d.id,d.recommendation?.action||'draft','automatic');
+    if(key==='orchestration'&&mode==='auto'&&n.orchestration?.state==='awaiting_confirmation')confirmOrchestration(n.id,true,'automatic');
     if(key==='approval'&&mode==='auto'&&n.status==='draft')approve(n.id,'automatic');
     if(key==='change'&&mode==='auto'&&n.change)decide(n.id,true,'automatic');
     if(key==='return'&&mode==='auto')for(const r of db.returns.filter(r=>r.targetId===n.id&&r.status==='pending'))decideReturn(r.id,true,'leader');
@@ -2902,9 +2942,10 @@ function setAutonomy(type,key,value) {
     if(key==='unresolved'&&mode==='auto'&&n.status==='in_review')recheckUnresolved(n.id);
     if(key==='acceptance'&&mode==='auto'&&n.status==='in_review'&&n.tests.every(t=>t.v==='pass'))signoff(n.id,true,'automatic');
   }
+  if(key==='caution'&&mode==='auto')for(const p of db.projects.filter(p=>p.type===type))for(const c of p.memory.cautions.filter(c=>c.status==='proposed'))confirmCaution(p.id,c.id,'automatic');
   coreFinish('自主度已按项目类型保存');return {ok:true};
 }
-function normalizeAgent(data) { const seats=data.seats||['execute'];return {id:coreId('agent'),name:data.name?.trim()||'',tasks:data.tasks||data.specialty||'',model:data.model||'gpt-6.1-sol',strength:data.strength||data.effort||'ultra',instructions:data.instructions||'',tools:data.tools||[],permissions:data.permissions||'按节点授权',sources:data.sources||[],defaultBoundaries:data.defaultBoundaries||[],defaultTests:data.defaultTests||[],seats:seats.filter(s=>['leader','execute','verify','challenge'].includes(s)),stat:{firstPass:0,total:0,failures:[]}}; }
+function normalizeAgent(data) { const seats=data.seats||['execute'];return {mainModel:data.mainModel||data.model||'gpt-6.1-sol',mainStrength:data.mainStrength||data.strength||'ultra',stepModel:Object.hasOwn(data,'stepModel')?data.stepModel:seats.includes('execute')?'gpt-6.1-sol':null,stepStrength:Object.hasOwn(data,'stepModel')?data.stepModel?(data.stepStrength||'high'):null:seats.includes('execute')?'high':null,id:coreId('agent'),name:data.name?.trim()||'',tasks:data.tasks||data.specialty||'',model:data.mainModel||data.model||'gpt-6.1-sol',strength:data.mainStrength||data.strength||data.effort||'ultra',instructions:data.instructions||'',tools:data.tools||[],permissions:data.permissions||'按节点授权',sources:data.sources||[],defaultBoundaries:data.defaultBoundaries||[],defaultTests:data.defaultTests||[],seats:seats.filter(s=>['leader','execute','verify','challenge'].includes(s)),stat:{firstPass:0,total:0,failures:[]}}; }
 function createAgent(data,actor='human') {if(actor!=='human')return coreRefuse('leader 只能提议新代理，由你批准后入库',null,actor);const a=normalizeAgent(data);if(!a.name||!a.tasks?.trim()||!a.seats.length)return {ok:false,reason:'请填写名称、擅长任务与可以担任的席位'};db.agents.push(a);recordDecision('创建代理',null,'直接创建代理：'+a.name,actor);coreFinish('代理已加入代理库');return a;}
 function proposeAgent(data) {const p={id:coreId('agent-proposal'),nodeId:data.nodeId||'a-tech',status:'pending',data:cloneData(data),reason:data.reason||'leader 建议补充专业代理'};db.agentProposals.push(p);recordDecision('代理提议',p.nodeId,'提议创建代理：'+data.name,'leader');coreFinish('代理提议等待你批准');return p;}
 function approveAgent(id,ok=true,actor='human') {if(actor!=='human')return coreRefuse('代理提议必须由你批准',null,actor);const p=db.agentProposals.find(p=>p.id===id);if(p?.status!=='pending')return {ok:false};if(ok){const agent=createAgent(p.data);if(agent.ok===false)return agent;p.agentId=agent.id;}p.status=ok?'approved':'rejected';recordDecision('代理提议',p.nodeId,(ok?'批准':'驳回')+'代理提议：'+p.data.name,actor,ok?'原样采纳':'驳回');coreFinish('代理提议已处理');return {ok:true};}
@@ -2920,7 +2961,7 @@ function createProject(data,actor='human') {
   const saved=db.templates.find(t=>t.title===data.type||t.id===data.type);
   if(!data.name?.trim()||!saved&&!['产品开发','客户交付','调研','空白'].includes(data.type))return coreRefuse('请填写项目名称并选择类型');
   if(saved)data={...data,type:saved.projectType};
-  const p={id:coreId('project'),name:data.name.trim(),type:data.type,goal:data.goal||'请补充总目标',site:data.site||'待绑定工作现场',leader:data.leader||(['产品开发','空白'].includes(data.type)?'agent-pm-dev':'agent-pm-client'),executor:'Codex CLI',nodeIds:[],edges:[],branchResult:null};db.projects.push(p);
+  const p={id:coreId('project'),name:data.name.trim(),type:data.type,goal:data.goal||'请补充总目标',site:data.site||'待绑定工作现场',leader:data.leader||(['产品开发','空白'].includes(data.type)?'agent-pm-dev':'agent-pm-client'),executor:'Codex CLI',nodeIds:[],edges:[],branchResult:null};normalizeV4Project(p);db.projects.push(p);
   if(saved){const ids=new Map(saved.nodesSnapshot.map(n=>[n.id,coreId('node')]));for(const spec of saved.nodesSnapshot){const n=normalizeNode(p.id,{...cloneData(spec),id:ids.get(spec.id),deps:spec.deps.map(id=>ids.get(id)),boundaries:spec.boundaries.map(b=>({...b,ok:false,src:'agent_draft',why:'从已验收模板继承，需重新确认'}))});db.nodes[n.id]=n;p.nodeIds.push(n.id);}p.edges=saved.flow.edges.map(edge=>({...cloneData(edge),from:ids.get(edge.from),to:ids.get(edge.to)}));p.templateId=saved.id;recordDecision('创建项目',p.nodeIds[0],'从已验收模板起草项目：'+saved.title,actor);for(const id of p.nodeIds)if(coreAuto(getNode(id),'approval'))approve(id,'automatic');coreFinish('项目已从模板起草，节点主体待批准');return p;}
   const specs=data.type==='产品开发'?[['功能规格','agent-pm-dev'],['实现（Codex）','agent-frontend'],['浏览器检查','agent-browser'],['你审核',null]]:data.type==='客户交付'?[['需求澄清','agent-pm-client'],['技术可行性','agent-tech'],['交付产能','agent-capacity'],['成本报价','agent-finance'],['市场调研','agent-market'],['汇总结论','agent-pm-client'],['起草交付项目','agent-pm-client'],['婉拒说明','agent-pm-client']]:data.type==='调研'?[['调研问题','agent-pm-client'],['收集资料','agent-market'],['形成结论','agent-market']]:[['开始节点','agent-frontend']];
   const ids=specs.map(()=>coreId('node'));
@@ -2968,7 +3009,7 @@ function submitForReview(id,result) {
     const check={checker,result:'pass',method:t.kind==='deterministic'?'模拟执行确定性检查':'独立代理复核 · 只读 · 新上下文',note:'原型演示：按批准的测试提交检查记录，不代表在当前会话真实执行',correction:''};
     t.v='pass';t.checks||=[];t.checks.push(check);n.evidence[t.id]||=[];n.evidence[t.id].push({claim:'原型演示产出满足本条测试，实际项目需提交对应证据',ref:n.deliverable,by:n.seats.human?'human':n.seats.execute,checks:[{...check}]});
   }
-  n.result=result?.trim()||'原型模拟执行已完成；验收报告见下方测试与证据。';n.status='in_review';n.needsRevalidation=false;const attempt=n.attempts.at(-1);if(attempt?.result==='running')attempt.result='success';ensureStarted(n);n.handoff.done.push('提交节点产出与验收报告（原型演示）');updateHandoff(n,'等待你判定无法判定项与最终验收','leader');coreLog(n,'leader','审阅验收报告，提交给你验收');recordDecision('提交验收报告',id,'leader 审阅模拟验收报告并提交给你','leader');
+  n.result=result?.trim()||'原型模拟执行已完成；验收报告见下方测试与证据。';n.status='in_review';n.needsRevalidation=false;const attempt=n.attempts.at(-1);if(attempt?.result==='running'){attempt.result='success';attempt.endReason='完成';normalizeV4Attempt(n,attempt);}ensureStarted(n);n.handoff.done.push('提交节点产出与验收报告（原型演示）');updateHandoff(n,'等待你判定无法判定项与最终验收','leader');coreLog(n,'leader','审阅验收报告，提交给你验收');recordDecision('提交验收报告',id,'leader 审阅模拟验收报告并提交给你','leader');
   if(coreAuto(n,'acceptance')&&n.tests.every(t=>t.v==='pass'))signoff(id,true,'automatic');coreFinish('已提交验收报告；等待你验收');return {ok:true};
 }
 function recheckUnresolved(id) {
@@ -2985,7 +3026,7 @@ function renderBounds(c, readonly = false) {
       <div class="row-top">
         ${!readonly && (['draft', 'pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation') ? `<input type="checkbox" aria-label="确认边界 ${i + 1}" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
         <div class="grow">${b.enf === 'enforced' ? '<span class="chip s-ready">🔒 强制</span> ' : ''}${esc(b.text)}
-          <div class="src">${b.src === 'human' ? '你写的' : b.src === 'agent_default' ? '执行代理默认边界' : `${who('leader')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}
+          <div class="src">${b.src === 'project_instruction' ? '来源：项目指令' : b.src === 'human' ? '你写的' : b.src === 'agent_default' ? '执行代理默认边界' : `${who('leader')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}
             · ${b.enf === 'enforced' ? `机制：${esc(b.mech)}` : '建议 · 核对席位 核对'}${!readonly && !b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}
           </div>
         </div>
@@ -3024,7 +3065,7 @@ function renderInfo(c) {
   return `<div class="card info-band">
     <div><div class="col-label">交付物 · 形式与路径</div><div>${esc(c.deliverable)}</div></div>
     <div><div class="col-label">资料来源 · 允许使用</div>${list(c.sources)}</div>
-    <div><div class="col-label">上限 · 达到即停止</div><div class="meta">截止：${esc(l.deadline)}</div>${renderUsage('尝试次数', l.usedAttempts, l.maxAttempts)}${renderUsage('token', l.usedTokens, l.tokenBudget)}</div>
+    <div><div class="col-label">上限 · 达到即停止</div><div class="meta">截止：${esc(l.deadline)}</div>${renderUsage('尝试次数', l.usedAttempts, l.maxAttempts)}${renderUsage('重新规划次数', l.usedReplans, l.maxReplans)}${renderUsage('token', l.usedTokens, l.tokenBudget)}<div class="limit-row">本节点花费：${money(c.cost)}（示例）</div></div>
   </div>`;
 }
 function renderHandoff(c) {
@@ -3044,19 +3085,1489 @@ function renderHandoff(c) {
 function renderAttempts(c) {
   return (c.attempts || []).map((a) => `<div class="attempt ${a.result === 'failed' ? 'failed' : a.result === 'limit' ? 'limited' : ''}">
     <div class="row-top"><b class="grow">#${a.number} · ${who(actorAt(c, a.actor))}</b><span class="verdict ${a.result === 'failed' ? 'v-fail' : a.result === 'success' ? 'v-pass' : a.result === 'limit' ? 'v-unresolved' : 'who-agent'}">${ATTEMPT_RESULT[a.result]}</span></div>
-    <div class="src">模型与强度：${esc(a.model || '未记录')} · ${formatNumber(a.tokens)} token · 耗时 ${esc(a.duration || '未记录')}</div>
-    <div>方法：${esc(a.method)}</div><div class="src">会话 ID：${esc(a.sessionId || '未记录')}${a.score ? ' · 检查：' + esc(a.score) : ''}</div>
+    <div class="src">模型与强度：${esc(a.model || '未记录')} · token：${formatNumber(a.tokens)} · 耗时 ${esc(a.duration || '未记录')}</div>
+    <div>方法：${esc(a.method)}</div><div class="v4-note">会话 ID：${esc(a.sessionId || '未记录')}${a.score ? ' · 检查：' + esc(a.score) : ''}</div>
+    <div>快照分支：<code>${esc(a.snapshotBranch)}</code>（示例） · 编排计划版本：${esc(a.planVersion)}</div>
+    <div>步骤结果汇总：${esc(typeof a.stepSummary==='string'?a.stepSummary:Object.entries(a.stepSummary||{}).map(([key,count])=>(FOUR_STATE_UI[key]||key)+' '+count).join(' / '))}</div>
+    <div>结束原因：${esc(a.endReason||'未结束（进行中）')} · 花费：${money(a.cost)}（示例）</div>
+    <div>下一次如何接上：${esc(a.continuation)}</div>
     ${a.failure ? `<div class="reason">${a.result === 'failed' ? '失败原因' : '停止原因'}：${esc(a.failure)}</div>` : ''}
-    ${a.result === 'failed' ? '<div class="reason"><b>后续尝试不得重复此方法，除非有新理由</b></div>' : ''}
-  </div>`).join('') || '<div class="empty">尚无执行记录，认领后记录基线和首次尝试</div>';
+    ${a.result === 'failed' ? '<div class="reason"><b>失败方法不得重复，除非有新理由；后续尝试不得重复此方法，除非有新理由</b></div>' : ''}
+    ${a.orchestration?`<details><summary>本次编排与清单 · ${esc(a.orchestration.template)} · ${esc(a.planVersion)}（编排为示例，检查结果依历史证据）</summary>${renderStepGraph(c,a.orchestration)}${renderChecklist(a.orchestration)}${renderResultGroups(a.orchestration)}</details>`:''}
+  </div>`).join('') || '<div class="empty">尚无尝试记录，开工后记录基线和首次尝试</div>';
 }
 function setProcessTab(tab) {
   const attempts = tab === 'attempts';
-  $('#attempts-panel').hidden = !attempts; $('#timeline-panel').hidden = attempts;
+  $('#attempts-panel').hidden = !attempts; $('#timeline-panel').hidden = tab!=='timeline';
+  $('#execution-panel').hidden = tab!=='execution';
   $('#attempts-tab').className = `small${attempts ? ' active' : ''}`;
-  $('#timeline-tab').className = `small${attempts ? '' : ' active'}`;
+  $('#timeline-tab').className = `small${tab==='timeline' ? ' active' : ''}`;
+  $('#execution-tab').className = `small${tab==='execution' ? ' active' : ''}`;
   $('#attempts-tab').setAttribute?.('aria-pressed', String(attempts));
-  $('#timeline-tab').setAttribute?.('aria-pressed', String(!attempts));
+  $('#timeline-tab').setAttribute?.('aria-pressed', String(tab==='timeline'));
+  $('#execution-tab').setAttribute?.('aria-pressed', String(tab==='execution'));
+}
+
+// ---------- v4 编排与项目记忆；全部动作均为前端模拟 ----------
+const FOUR_RESULTS = {pass:'通过',fail:'失败',unverifiable:'无法验证',unprocessed:'未处理'};
+const V4_STEP_TYPES = ['agent','registered_test','sequence','parallel_join','foreach','branch','bounded_loop','gate','timer'];
+const V4_WAKE_REASONS = ['开工','编排结束','步骤异常','预设决策点'];
+function v4Money(value) { return Math.round((Number(value)||0)*100)/100; }
+function projectSpent(projectId) { return v4Money(Object.values(db.nodes).filter(node=>node.projectId===projectId).reduce((sum,node)=>sum+(node.cost||0),0)); }
+function normalizeV4Attempt(node,attempt) {
+  attempt.sessionId ||= '未记录';
+  attempt.snapshotBranch ||= `示例：helm/${node.id}/attempt-${attempt.number}`;
+  attempt.planVersion ||= attempt.orchestration?.version || '示例：直接执行 v1';
+  const orchestration=attempt.orchestration||(attempt.result==='running'?node.orchestration:null);
+  attempt.stepSummary ||= orchestration?resultSummary(orchestration):{pass:attempt.result==='success'?1:0,fail:attempt.result==='failed'?1:0,unverifiable:0,unprocessed:attempt.result==='limit'?1:0};
+  if(attempt.result==='running'){attempt.endReason=null;attempt.phase='进行中';}else attempt.endReason ||= ({success:'完成',failed:'验证失败',limit:'达到上限',interrupted:'被中断',canceled:'被取消',unresolved:'无法判定',exception:'步骤异常'})[attempt.result] || '无法判定';
+  attempt.continuation ||= attempt.orchestration?.template==='批量清单'?'只重做失败与未处理项':attempt.result==='failed'?'新会话带失败摘要':'续接原会话';
+  attempt.cost = v4Money(attempt.cost);
+  attempt.simulatedFields ||= ['snapshotBranch','planVersion','stepSummary','cost'];
+  attempt.metadataNote ||= '快照分支、计划版本、步骤汇总与花费为示例；真实来源记录未记载的模型、token、会话不补造。';
+  return attempt;
+}
+function normalizeV4Node(node) {
+  node.mainAgent=node.seats?.human?null:node.seats?.execute;
+  node.cost=v4Money(node.cost);node.costNote='示例 · 模拟花费，单位为元';
+  node.limit ||= {};
+  for(const [key,value] of Object.entries({maxReplans:3,usedReplans:0,maxConcurrency:4,maxCalls:100,maxRetries:3,timeLimit:3600,moneyBudget:100}))if(node.limit[key]===undefined)node.limit[key]=value;
+  node.executionEvents ||= [];node.mainAgentWakes ||= [];
+  for(const attempt of node.attempts||[])normalizeV4Attempt(node,attempt);
+  mergeV4Instructions(node);
+  return node;
+}
+function resultSummary(orchestration) {
+  const summary={pass:0,fail:0,unverifiable:0,unprocessed:0};
+  for(const entry of orchestration?.items||orchestration?.steps||[])if(Object.hasOwn(summary,entry.status))summary[entry.status]++;
+  return summary;
+}
+function orchestrationExceptions(orchestration) {
+  const entries=orchestration?.items||orchestration?.steps||[];
+  return {fail:entries.filter(v=>v.status==='fail'),unverifiable:entries.filter(v=>v.status==='unverifiable'),unprocessed:entries.filter(v=>v.status==='unprocessed')};
+}
+function freezeChecklist(orchestration,items) {
+  if(!orchestration||!Array.isArray(items))return {ok:false,reason:'请提供编排与完整清单'};
+  if(orchestration.frozenCount!==undefined)return {ok:false,reason:'清单已冻结，条目全集不可改变'};
+  if(items.some(item=>!item.id||!Object.hasOwn(FOUR_RESULTS,item.status)||item.status==='unprocessed'&&!item.reason?.trim())||new Set(items.map(item=>item.id)).size!==items.length)return {ok:false,reason:'每条清单须有唯一 ID、四态结果；未处理须注明原因'};
+  orchestration.items=cloneData(items);orchestration.frozenCount=items.length;orchestration.frozenIds=items.map(item=>item.id);orchestration.frozen=true;
+  return {ok:true,count:items.length};
+}
+function updateChecklistItem(orchestration,itemId,patch) {
+  const items=orchestration?.items||[],item=items.find(entry=>entry.id===itemId);
+  if(!orchestration?.frozen||items.length!==orchestration.frozenCount||!item||Object.hasOwn(patch||{},'id')&&patch.id!==itemId)return {ok:false,reason:'冻结清单不能插入、删除或改变条目 ID'};
+  const next={...item,...cloneData(patch||{})};
+  if(!Object.hasOwn(FOUR_RESULTS,next.status)||next.status==='unprocessed'&&!next.reason?.trim())return {ok:false,reason:'每项必须保留四态结果，未处理必须附原因'};
+  Object.assign(item,next);return {ok:true,item};
+}
+function demoPlan(node,template,steps,version='示例 v1') {
+  return {notice:'示意，非最终接口',nodeId:node.id,nodeVersion:node.version,template,version,
+    inputs:{source:'节点允许资料与上下文摘要'},outputSchema:{type:'object',required:['summary','results']},
+    limits:{concurrency:Math.min(3,node.limit.maxConcurrency),calls:Math.min(80,node.limit.maxCalls),retries:Math.min(2,node.limit.maxRetries),time:Math.min(1800,node.limit.timeLimit)},
+    steps:steps.map(step=>({id:step.id,type:step.type||'agent',deps:step.deps||[],inputType:'object',outputType:'object',...(step.type==='bounded_loop'?{maxRounds:3,stopWhen:'固定测试通过',noProgressRounds:2}:{})})),
+    protections:{testsUnchanged:true,seatsUnchanged:true,permissionsUnchanged:true}};
+}
+function validatePlan(nodeId,plan) {
+  const node=getNode(nodeId),steps=Array.isArray(plan?.steps)?plan.steps:[],ids=steps.map(step=>step.id),byId=new Map(steps.map(step=>[step.id,step]));
+  const fields=Boolean(node&&plan&&typeof plan==='object'&&typeof plan.template==='string'&&typeof plan.version==='string'&&steps.length&&steps.every(step=>typeof step.id==='string'&&Array.isArray(step.deps)&&V4_STEP_TYPES.includes(step.type)&&typeof step.inputType==='string'&&typeof step.outputType==='string')&&(!plan.nodeId||plan.nodeId===nodeId));
+  const references=steps.length>0&&new Set(ids).size===ids.length&&steps.every(step=>(step.deps||[]).every(id=>byId.has(id)&&byId.get(id).outputType===step.inputType));
+  const visiting=new Set(),visited=new Set();let cyclic=false;
+  function visit(id){if(visiting.has(id)){cyclic=true;return;}if(visited.has(id))return;visiting.add(id);for(const dep of byId.get(id)?.deps||[])if(byId.has(dep))visit(dep);visiting.delete(id);visited.add(id);}
+  for(const id of ids)visit(id);
+  const bounded=!cyclic&&steps.every(step=>step.type!=='bounded_loop'||Number.isInteger(step.maxRounds)&&step.maxRounds>0&&typeof step.stopWhen==='string'&&step.stopWhen.trim()&&Number.isInteger(step.noProgressRounds)&&step.noProgressRounds>0);
+  const limits=plan?.limits,authorized=node?.limit||{};
+  const limitsOK=Boolean(limits&&[['concurrency','maxConcurrency'],['calls','maxCalls'],['retries','maxRetries'],['time','timeLimit']].every(([key,maxKey])=>Number.isFinite(limits[key])&&Number.isInteger(limits[key])&&limits[key]>=(key==='retries'?0:1)&&limits[key]<=authorized[maxKey]));
+  const protections=plan?.protections;
+  const unchanged=Boolean(protections?.testsUnchanged===true&&protections?.seatsUnchanged===true&&protections?.permissionsUnchanged===true&&!plan?.tests&&!plan?.seats&&!plan?.permissions&&!plan?.specChanges&&!steps.some(step=>step.tests||step.seats||step.permissions||step.permissionEscalation||step.relaxTests));
+  const checks=[
+    {label:'字段、类型、枚举合法',ok:fields,reason:fields?'通过':'缺字段、字段类型错误或非法步骤类型'},
+    {label:'步骤 ID 唯一、引用存在、输入输出匹配',ok:references,reason:references?'通过':'重复 ID、引用不存在或输入输出类型不匹配'},
+    {label:'仅显式有上限循环，其他依赖无环',ok:bounded,reason:bounded?'通过':'依赖存在环或循环缺少终止条件、轮数、无进展上限'},
+    {label:'并发、调用、重试、时间填写且不超过授权上限',ok:limitsOK,reason:limitsOK?'通过':'缺少上限、数值非法或超过节点授权'},
+    {label:'未放宽测试、改变席位或提高权限',ok:unchanged,reason:unchanged?'通过':'计划改变了节点测试、席位或工具目录权限'}
+  ];return {ok:checks.every(check=>check.ok),checks};
+}
+function appendExecutionEvent(node,event,data={}) {
+  node.executionEvents ||= [];node.executionLog=node.executionEvents;node.executionEvents.push({sequence:node.executionEvents.length+1,time:coreTime(),event,nodeId:node.id,runId:`示例：${node.id}-try-${node.attempts?.length||1}`,planVersion:node.orchestration?.version||'未使用编排',...cloneData(data)});
+}
+function wakeMainAgent(nodeId,reason) {
+  const node=getNode(nodeId);if(!node||!V4_WAKE_REASONS.includes(reason))return {ok:false,reason:'主 agent 唤起原因不合法'};
+  const wake={time:coreTime(),reason,summaryOnly:true};node.mainAgentWakes ||= [];node.mainAgentWakes.push(wake);
+  node.log ||= [];node.log.push([wake.time,node.mainAgent||'leader',`主 agent 唤起（示例） · 原因：${reason}；只读取结构化结果和摘要`]);appendExecutionEvent(node,'主 agent 唤起',wake);return {ok:true,wake};
+}
+function applySimulatedPlan(node,plan) {
+  const previous=node.orchestration;
+  node.orchestration={template:plan.template,version:plan.version,plan:cloneData(plan),state:'simulating',notice:'示例 · 按钮驱动状态，不执行真实编排',steps:plan.steps.map(step=>{
+    const prior=previous?.steps.find(old=>old.id===step.id&&old.type===step.type&&JSON.stringify(old.deps)===JSON.stringify(step.deps));
+    return prior?cloneData(prior):{id:step.id,title:step.id,type:step.type,deps:[...step.deps],status:'unprocessed',reason:'示例计划已登记，等待模拟处理',input:'节点允许资料摘要',output:{summary:'尚未处理'},cost:0};
+  })};
+  if(previous?.frozen)freezeChecklist(node.orchestration,previous.items);
+  delete node.pendingPlan;delete node.blockedType;node.status='running';
+  syncCurrentAttempt(node);
+  appendExecutionEvent(node,'冻结计划',{template:plan.template,version:plan.version,planHash:`示例：plan-${node.id}-${plan.version}`,schemaHash:'示例：schema-v1',contextVersion:node.version});wakeMainAgent(node.id,'开工');
+  coreFinish('编排计划通过校验，已登记模拟执行');return {ok:true,simulated:true,validation:validatePlan(node.id,plan)};
+}
+function syncCurrentAttempt(node) {
+  const attempt=node.attempts?.at(-1);if(!attempt||attempt.result!=='running'||!node.orchestration)return;
+  attempt.orchestration=cloneData(node.orchestration);attempt.planVersion=node.orchestration.version;attempt.stepSummary=resultSummary(node.orchestration);
+  return attempt;
+}
+function executePlan(nodeId,plan) {
+  const validation=validatePlan(nodeId,plan);if(!validation.ok)return {ok:false,reason:'执行前校验不通过，退回主 agent 修改；未执行',validation};
+  const node=getNode(nodeId);
+  if(!coreAuto(node,'orchestration')){node.pendingPlan=cloneData(plan);node.orchestration=node.orchestration?cloneData(node.orchestration):{template:plan.template,version:plan.version,plan:cloneData(plan),steps:[],state:'awaiting_confirmation'};node.orchestration.state='awaiting_confirmation';node.status='blocked';node.blockedType='orchestration';recordDecision('orchestration',nodeId,'编排计划校验通过，等待你确认','leader');coreFinish('执行编排待你确认');return {ok:true,pending:true,validation};}
+  return applySimulatedPlan(node,plan);
+}
+function confirmOrchestration(nodeId,ok=true,actor='human') {
+  const node=getNode(nodeId);if(!node?.pendingPlan)return {ok:false,reason:'没有待确认编排'};
+  if(actor!=='human'&&!coreAuto(node,'orchestration'))return coreRefuse('执行编排已设为由你确认',nodeId,actor,'orchestration');
+  recordDecision('orchestration',nodeId,ok?'批准模拟执行编排':'拒绝执行编排',actor,ok?'原样采纳':'驳回');
+  if(!ok){delete node.pendingPlan;node.orchestration.state='rejected';node.status='running';delete node.blockedType;coreFinish('编排已拒绝，等待主 agent 修改');return {ok:true};}
+  const validation=validatePlan(nodeId,node.pendingPlan);if(!validation.ok)return {ok:false,validation,reason:'计划已不满足当前授权，未执行'};
+  return applySimulatedPlan(node,node.pendingPlan);
+}
+function replanNode(nodeId) {
+  const node=getNode(nodeId);if(!node)return {ok:false,reason:'节点不存在'};normalizeV4Node(node);
+  if(node.limit.usedReplans>=node.limit.maxReplans)return coreRefuse('重新规划次数已达上限，不能再规划',nodeId,'human','重新规划');
+  if(node.limit.usedAttempts>=node.limit.maxAttempts||Number.isFinite(node.limit.tokenBudget)&&node.limit.usedTokens>=node.limit.tokenBudget||node.cost+.5>node.limit.moneyBudget)return coreRefuse('节点尝试、token 或花费上限已到，不能再规划',nodeId,'human','重新规划');
+  if(['accepted','abandoned'].includes(node.status))return coreRefuse('此节点当前不能重新规划',nodeId);
+  node.limit.usedReplans++;node.limit.usedAttempts++;node.cost=v4Money(node.cost+.5);
+  const number=node.attempts.length+1,version=`示例 v${node.limit.usedReplans+1}`;
+  if(node.orchestration){node.orchestration=cloneData(node.orchestration);node.orchestration.version=version;node.orchestration.plan.version=version;node.orchestration.state='simulating';for(const entry of node.orchestration.steps)if(['fail','unprocessed'].includes(entry.status)){entry.status='unprocessed';entry.reason='重新规划：只重做失败与未处理步骤';if(entry.type==='gate'){entry.gateState='pending';entry.pending=true;}}}
+  const attempt=normalizeV4Attempt(node,{number,actor:node.mainAgent||'你',model:'示例 · 沿用主 agent 配置',method:'复用已完成的结果，只重做失败与未处理部分',result:'running',failure:'',tokens:null,duration:'进行中',cost:.5,planVersion:version,orchestration:node.orchestration?cloneData(node.orchestration):null});
+  node.attempts.push(attempt);node.status='running';delete node.blockedType;wakeMainAgent(nodeId,'步骤异常');appendExecutionEvent(node,'重新规划',{cost:.5,usedReplans:node.limit.usedReplans,version});recordDecision('重新规划',nodeId,`重新规划 ${node.limit.usedReplans}/${node.limit.maxReplans}，计入节点上限与花费（示例）`,'leader');const execution=node.orchestration?executePlan(nodeId,node.orchestration.plan):{ok:true};
+  syncCurrentAttempt(node);coreFinish(execution.pending?'重新规划待你确认；已完成结果保留':'已新增模拟尝试；冻结清单与已完成结果保留');return {ok:true,attempt,pending:Boolean(execution.pending)};
+}
+function setMemoryStatus(entry,status) { entry.status=status;entry.state=status;return entry; }
+function projectMemory(projectId) {const project=getProject(projectId);if(!project)return null;project.memory ||= {instructions:[],decisions:[],conventions:[],cautions:[]};return project.memory;}
+function normalizeV4Project(project) {project.budget ??= 200;project.budgetNote='示例 · 模拟预算，单位为元';project.memory ||= {instructions:[],decisions:[],conventions:[],cautions:[]};return project;}
+function mergeV4Instructions(node) {
+  const memory=getProject(node.projectId)?.memory;if(!memory)return node;
+  node.boundaries=(node.boundaries||[]).filter(boundary=>boundary.src!=='project_instruction');
+  for(const instruction of memory.instructions.filter(item=>item.mandatory!==false)){
+    node.boundaries.push({text:instruction.text,enf:'enforced',mech:'runtime 派单前合并项目指令并核对；原型为模拟',src:'project_instruction',source:'项目指令',instructionId:instruction.id,why:instruction.source,ok:true});
+    instruction.refs ||= [];if(!instruction.refs.includes(node.id))instruction.refs.push(node.id);
+  }
+  return node;
+}
+function syncProjectInstructions(projectId) {
+  const project=getProject(projectId),memory=projectMemory(projectId);if(!project)return {ok:false};
+  for(const id of project.nodeIds){const node=getNode(id);if(node)mergeV4Instructions(node);}
+  for(const instruction of memory.instructions)instruction.refs=[...project.nodeIds];return {ok:true};
+}
+function addProjectInstruction(projectId,text) {
+  const memory=projectMemory(projectId);if(!memory||!text?.trim())return {ok:false,reason:'项目指令不能为空'};
+  const instruction={id:coreId('instruction'),text:text.trim(),mandatory:true,source:'你添加的项目指令',refs:[]};memory.instructions.push(instruction);syncProjectInstructions(projectId);recordDecision('项目指令',getProject(projectId).nodeIds[0],'添加强制项目指令：'+instruction.text,'human','有修改',{projectId});coreFinish('项目指令已合并到本项目所有节点边界');return {ok:true,instruction,id:instruction.id};
+}
+function removeProjectInstruction(projectId,id) {
+  const memory=projectMemory(projectId);if(!memory||!memory.instructions.some(item=>item.id===id))return {ok:false};memory.instructions=memory.instructions.filter(item=>item.id!==id);syncProjectInstructions(projectId);recordDecision('项目指令',getProject(projectId).nodeIds[0],'删除项目指令及对应节点边界','human','有修改',{projectId});coreFinish('项目指令与对应边界已移除');return {ok:true};
+}
+function proposeDesignDecision(projectId,data) {
+  const memory=projectMemory(projectId);if(!memory||!data?.text?.trim())return {ok:false,reason:'设计决策不能为空'};
+  const decision=setMemoryStatus({id:coreId('design-decision'),title:data.title||'待确认的设计决策',text:data.text,reason:data.reason||'leader 提议，等待你确认',source:data.source||'leader 从节点产出提炼（示例）',refs:data.refs||[],replacedBy:null,replacementId:null},'proposed');memory.decisions.push(decision);recordDecision('designDecision',null,'leader 提议设计决策：'+decision.title,'leader','原样采纳',{projectId});coreFinish('设计决策尚未生效，已进入收件箱');return {ok:true,decision,id:decision.id};
+}
+function confirmDesignDecision(projectId,id,actor='human') {
+  const decision=projectMemory(projectId)?.decisions.find(item=>item.id===id);if(!decision||decision.status!=='proposed')return {ok:false};if(actor!=='human')return coreRefuse('项目记忆·设计决策始终由你确认',null,actor,'designDecision');setMemoryStatus(decision,'active');recordDecision('designDecision',null,'确认生效设计决策：'+decision.title,actor,'原样采纳',{projectId});coreFinish('设计决策已生效');return {ok:true,decision};
+}
+function activeDesignDecisions(projectId) {return projectMemory(projectId)?.decisions.filter(item=>item.status==='active')||[];}
+function deprecateDesignDecision(projectId,id,replacementId) {
+  const memory=projectMemory(projectId),entry=memory?.decisions.find(item=>item.id===id),replacement=memory?.decisions.find(item=>item.id===replacementId);if(!entry||!replacement||entry===replacement||replacement.status!=='active')return {ok:false,reason:'须指定一条有效的取代决策'};setMemoryStatus(entry,'deprecated');entry.replacedBy=replacementId;entry.replacementId=replacementId;recordDecision('designDecision',null,`废弃设计决策「${entry.title}」，由「${replacement.title}」取代；保留历史`,'human','有修改',{projectId});coreFinish('已废弃且保留原设计决策');return {ok:true,decision:entry};
+}
+function addCaution(projectId,data) {
+  const memory=projectMemory(projectId),text=typeof data==='string'?data:data?.text;if(!memory||!text?.trim())return {ok:false};const automatic=db.autonomy[getProject(projectId).type]?.caution==='auto';const caution=setMemoryStatus({id:coreId('caution'),text:text.trim(),source:data?.source||'leader 提炼（示例）',refs:data?.refs||[]},automatic?'active':'proposed');memory.cautions.push(caution);recordDecision('caution',null,(automatic?'leader 直接写入注意事项：':'leader 提议注意事项，等待你确认：')+caution.text,'leader','原样采纳',{projectId});coreFinish(automatic?'注意事项已写入，可以撤销':'注意事项待确认，已进入待批准分组');return {ok:true,caution,id:caution.id};
+}
+function confirmCaution(projectId,id,actor='human') {const caution=projectMemory(projectId)?.cautions.find(item=>item.id===id);if(!caution||caution.status!=='proposed')return {ok:false};if(actor!=='human'&&db.autonomy[getProject(projectId).type]?.caution!=='auto')return coreRefuse('注意事项已设为由你确认',null,actor,'caution');setMemoryStatus(caution,'active');recordDecision('caution',null,'确认注意事项：'+caution.text,actor,'原样采纳',{projectId});coreFinish('注意事项已生效，可以撤销');return {ok:true,caution};}
+function revokeCaution(projectId,id) {const caution=projectMemory(projectId)?.cautions.find(item=>item.id===id);if(!caution||caution.status!=='active')return {ok:false};setMemoryStatus(caution,'revoked');recordDecision('caution',null,'撤销注意事项：'+caution.text,'human','驳回',{projectId});coreFinish('注意事项已撤销，历史保留');return {ok:true,caution};}
+function submitDiscovery(nodeId,data) {
+  const node=getNode(nodeId);if(!node||!data?.description?.trim())return {ok:false,reason:'请填写发现的问题描述'};
+  const recommendation=cloneData(data.recommendation||data.suggestion||{action:'draft',reason:'leader 建议起草新节点（示例）',deps:[...node.deps]});
+  if(!['ignore','merge','draft'].includes(recommendation.action)||!recommendation.reason?.trim())return {ok:false,reason:'leader 分流建议须有动作与理由'};
+  const discovery={id:coreId('discovery'),nodeId,projectId:node.projectId,description:data.description,evidence:data.evidence||'示例 · 待附证据',location:data.location||'示例 · 位置未指定',materials:cloneData(data.materials||[]),blocking:Boolean(data.blocking),recommendation,suggestion:recommendation,status:'pending',state:'pending',example:data.example!==false,sourceNote:data.sourceNote||'示例 · 模拟发现，不是仓库真实检查记录'};db.discoveries.push(discovery);coreLog(node,node.mainAgent||'leader','提交发现（示例）：'+discovery.description);
+  if(coreAuto(node,'discovery'))return decideDiscovery(discovery.id,recommendation.action,'automatic');coreFinish('发现已进入收件箱，等待分流批准');return {ok:true,discovery,id:discovery.id};
+}
+function decideDiscovery(id,action='draft',actor='human') {
+  const discovery=db.discoveries.find(item=>item.id===id);if(!discovery||discovery.status!=='pending')return {ok:false,reason:'发现已处理或不存在'};
+  const node=getNode(discovery.nodeId),project=getProject(discovery.projectId),recommendation=discovery.recommendation;
+  if(actor!=='human'&&!coreAuto(node,'discovery'))return coreRefuse('发现转新节点由你决定',node.id,actor,'discovery');
+  if(!['ignore','merge','draft'].includes(action))return {ok:false,reason:'未知的发现分流动作'};
+  if(action==='ignore'&&!recommendation.reason?.trim())return {ok:false,reason:'忽略发现必须写明理由'};
+  let newNode;
+  if(action==='merge'){const target=getNode(recommendation.targetId);if(!target||target.projectId!==project.id)return {ok:false,reason:'请指定本项目中的已有节点'};target.sources=[...new Set([...target.sources,...discovery.materials])];target.mergedDiscoveries ||= [];target.mergedDiscoveries.push(discovery.id);discovery.targetId=target.id;}
+  if(action==='draft'){
+    const deps=[...new Set(recommendation.deps||node.deps)];if(deps.some(dep=>!project.nodeIds.includes(dep))||discovery.blocking&&deps.some(dep=>dep===node.id||downstreamOf(node.id).includes(dep)))return {ok:false,reason:'发现建议的依赖无效或会形成阻塞依赖环'};
+    newNode=draftNode(project.id,{title:recommendation.title||'示例 · 修复发现的新问题',need:`示例 · leader 根据发现起草：${discovery.description}`,deliverable:'示例 · 发现处理报告',sources:[...discovery.materials],deps,seats:{...node.seats,human:false,execute:node.seats.execute||'agent-frontend'},boundaries:[{text:'示例 · 只处理本发现描述的问题',enf:'advisory',ok:true,src:'agent_draft',why:'来源于发现 '+discovery.id}],tests:[{id:'discovery-proof',kind:'evidence',text:'示例 · 发现附带的问题与证据已逐项核对',v:'unchecked'}],discoverySource:discovery.id},actor==='human'?'leader':'automatic');
+    if(!newNode?.id)return {ok:false,reason:newNode?.reason||'无法起草发现节点'};normalizeV4Node(newNode);syncProjectInstructions(project.id);discovery.newNodeId=newNode.id;
+    if(discovery.blocking){node.status='blocked';node.blockedType='discovery';node.blockingDiscovery=id;node.deps=[...new Set([...node.deps,newNode.id])];project.edges.push({from:newNode.id,to:node.id});coreLog(node,actor,`阻塞型发现：暂停本节点并依赖新节点 ${newNode.title}`);}
+  }
+  discovery.status='resolved';discovery.state='resolved';discovery.action=action;discovery.resolvedBy=coreActor(actor);recordDecision('discovery',node.id,`${({ignore:'忽略并记录理由',merge:'并入已有节点',draft:'批准起草新节点'})[action]}（示例）：${discovery.description}；理由：${recommendation.reason}`,actor,'原样采纳',{discoveryId:id,newNodeId:newNode?.id});coreFinish('发现分流已处理');return {ok:true,discovery,nodeId:newNode?.id};
+}
+function resumeDiscoveryDependencies(projectId) {
+  for(const id of getProject(projectId)?.nodeIds||[]){const node=getNode(id);if(node?.blockedType==='discovery'&&!dependencyBlocker(node)){node.status='running';delete node.blockedType;delete node.blockingDiscovery;wakeMainAgent(id,'编排结束');coreLog(node,'leader','发现的新节点已验收，主 agent 从结构化摘要继续');}}
+}
+function resumeBlockedDiscoveries(projectId) {return resumeDiscoveryDependencies(projectId);}
+function decideGate(nodeId,stepId,ok,actor='human') {
+  const node=getNode(nodeId),step=node?.orchestration?.steps.find(item=>item.id===stepId);if(!step||step.type!=='gate'||step.gateState!=='pending')return {ok:false,reason:'没有待处理的人工关卡'};
+  if(actor!=='human')return coreRefuse('人工关卡批准对象涉及对外或不可逆动作，始终由你决定',nodeId,actor,'人工关卡');
+  if(step.approvalBinding&&(step.approvalBinding.object!==JSON.stringify(step.approvalObject)||step.approvalBinding.contentHash!==step.contentHash))return coreRefuse('批准对象或内容哈希已变化，必须重新登记人工关卡',nodeId,actor,'人工关卡');
+  step.status=ok?'pass':'fail';step.reason=ok?'你明确批准此内容哈希的对象':'你明确拒绝此内容哈希的对象';step.gateState=ok?'approved':'rejected';step.pending=false;step.output={approved:ok,approvalObject:step.approvalObject,contentHash:step.contentHash,actor:'你',note:'示例 · 模拟批准记录，未执行真实对外动作'};
+  node.orchestration.state=ok?'simulating':'failed';if(node.blockedType==='gate'){delete node.blockedType;node.status=ok?'running':'changes_requested';}
+  syncCurrentAttempt(node);
+  recordDecision('人工关卡',nodeId,`${ok?'批准':'拒绝'}人工关卡（示例）：${step.approvalObject}；内容哈希 ${step.contentHash}`,actor,ok?'原样采纳':'驳回',{stepId,contentHash:step.contentHash});appendExecutionEvent(node,'人工关卡决定',{stepId,result:step.status,contentHash:step.contentHash});wakeMainAgent(nodeId,'预设决策点');coreFinish('人工关卡决定已写入决策记录');return {ok:true,step};
+}
+function resolveSideEffect(id,action,actor='human') {
+  const effect=db.sideEffects.find(item=>item.id===id);if(!effect||effect.status!=='unknown')return {ok:false,reason:'没有待处理的未知副作用'};if(actor!=='human')return coreRefuse('副作用状态不明始终由你核对并处理',effect.nodeId,actor,'sideEffect');if(!['completed','retry'].includes(action))return {ok:false,reason:'未知处理方式'};
+  effect.status=action==='completed'?'completed':'retry_pending';effect.state=effect.status;effect.receipt=action==='completed'?'示例 · 人工核对现场后确认已完成':'示例 · 人工确认未完成，登记重新执行意图';effect.resolvedBy='你';effect.resolvedAt=coreTime();
+  const node=getNode(effect.nodeId);recordDecision('sideEffect',effect.nodeId,`${action==='completed'?'核对后标记已完成':'标记未完成并重新执行'}（示例）：${effect.target}；内容哈希 ${effect.contentHash}`,'human','有修改',{effectId:id,action});appendExecutionEvent(node,action==='completed'?'副作用回执人工核对完成':'登记副作用重新执行意图',{effectId:id,contentHash:effect.contentHash,action});coreLog(node,'human',effect.receipt);coreFinish('副作用处理已写入决策记录；真实动作不会执行');return {ok:true,effect};
+}
+
+const REAL_BROWSER_ITEMS = {
+  "first": [
+    {
+      "id": "b1-01",
+      "scenario": "S01",
+      "text": "1440×900 浅色视口",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 1,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/assertions.txt:1",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 1
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-02",
+      "scenario": "S01",
+      "text": "图例说明强制边界的机制和建议边界的 核对席位 核对",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 2,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/assertions.txt:2",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 2
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-03",
+      "scenario": "S01",
+      "text": "阻塞分组包含 交付产能 提问型和 市场调研 达到上限型",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 3,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/assertions.txt:3",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 3
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-04",
+      "scenario": "S01",
+      "text": "四个收件箱分组存在且无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 4,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/assertions.txt:4",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 4
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-05",
+      "scenario": "S02",
+      "text": "技术可行性信息带含交付物、资料来源、上限及两条进度条",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 5,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/assertions.txt:5",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 5
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-06",
+      "scenario": "S02",
+      "text": "t2 显示 ? 无法判定和两个仅供人工判定的按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 6,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/assertions.txt:6",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 6
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-07",
+      "scenario": "S02",
+      "text": "验收禁用并提示先人工判定；打回可用",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 7,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/assertions.txt:7",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 7
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-08",
+      "scenario": "S02",
+      "text": "桌面三栏同一行且无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 8,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/assertions.txt:8",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 8
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-09",
+      "scenario": "S03",
+      "text": "t2 证据展开，显示两条来源与独立代理复核方法",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 9,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S03 固定检查；evidence/002/assertions.txt:9",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 9
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-10",
+      "scenario": "S03",
+      "text": "展开 t2 的证据可见修正记录（修正）；未找到可见文本「修正：」",
+      "status": "fail",
+      "reason": "展开 t2 的证据可见修正记录（修正）；未找到可见文本「修正：」",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 10,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S03 固定检查；evidence/002/assertions.txt:10",
+      "output": {
+        "result": "FAIL",
+        "sourceLine": 10
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-11",
+      "scenario": "S03",
+      "text": "补充定位：具体修正记录位于 t3，不能替代 t2 的检查要求",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 11,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S03 固定检查；evidence/002/assertions.txt:11",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 11
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-12",
+      "scenario": "S04",
+      "text": "开发过程默认折叠",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 12,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/assertions.txt:12",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 12
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-13",
+      "scenario": "S04",
+      "text": "执行记录默认页签显示 #1 失败与 #2 成功",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 13,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/assertions.txt:13",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 13
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-14",
+      "scenario": "S04",
+      "text": "失败原因以错误色、背景和左边框醒目显示",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 14,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/assertions.txt:14",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 14
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-15",
+      "scenario": "S04",
+      "text": "切换时间线后显示日志、隐藏执行记录",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 15,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/assertions.txt:15",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 15
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-16",
+      "scenario": "S05",
+      "text": "判为通过后 t2 通过，验收按钮启用并记录人工判定",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 16,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S05 固定检查；evidence/002/assertions.txt:16",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 16
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-17",
+      "scenario": "S05",
+      "text": "接受验收 确认对话框 后出现已验收状态与保存为模板按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 17,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S05 固定检查；evidence/002/assertions.txt:17",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 17
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-18",
+      "scenario": "S06",
+      "text": "接受默认模板名后侧栏新增技术可行性模板，原按钮变为已保存",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 18,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S06 固定检查；evidence/002/assertions.txt:18",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 18
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-19",
+      "scenario": "S06",
+      "text": "模板详情只读且保留需求、边界强制标记、测试类型和三栏",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 19,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S06 固定检查；evidence/002/assertions.txt:19",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 19
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-20",
+      "scenario": "S07",
+      "text": "已达上限横幅包含部分完成报告、未完成项、估计和三个操作",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 20,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/assertions.txt:20",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 20
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-21",
+      "scenario": "S07",
+      "text": "token 进度达到 100%，使用错误色",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 21,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/assertions.txt:21",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 21
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-22",
+      "scenario": "S07",
+      "text": "追加预算后执行中，token 上限 +50%，进度恢复强调色",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 22,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/assertions.txt:22",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 22
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-23",
+      "scenario": "S08",
+      "text": "待批准节点 强制边界显示锁与权限规则/确定性测试机制",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 23,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/assertions.txt:23",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 23
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-24",
+      "scenario": "S08",
+      "text": "补充边界输入行旁有建议/强制下拉框，默认建议",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 24,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/assertions.txt:24",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 24
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-25",
+      "scenario": "S08",
+      "text": "待批准节点 桌面详情无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 25,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/assertions.txt:25",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 25
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-26",
+      "scenario": "S09",
+      "text": "模态框显示 需求、输入、规则、强制标记和复制/关闭按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 26,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/assertions.txt:26",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 26
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-27",
+      "scenario": "S09",
+      "text": "预览底部可阅读 规则段并保留模态框（全部内容放得下时无需滚动）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 27,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/assertions.txt:27",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 27
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-28",
+      "scenario": "S09",
+      "text": "Esc 关闭模态框并恢复触发按钮焦点",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 28,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/assertions.txt:28",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 28
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-29",
+      "scenario": "S10",
+      "text": "深色收件箱启用 dark 媒体查询及深色背景，保留边界说明和阻塞分组",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 29,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/assertions.txt:29",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 29
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-30",
+      "scenario": "S10",
+      "text": "深色 技术可行性 详情含无法判定、两个人工按钮和禁用验收，三栏无溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 30,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/assertions.txt:30",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 30
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-31",
+      "scenario": "S10",
+      "text": "深色人工判为通过按钮小号文字对比度达到 4.5:1；实测 2.16:1（rgb(255, 255, 255) / rgb(92, 196, 138)）",
+      "status": "fail",
+      "reason": "深色人工判为通过按钮小号文字对比度达到 4.5:1；实测 2.16:1（rgb(255, 255, 255) / rgb(92, 196, 138)）",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 31,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/assertions.txt:31",
+      "output": {
+        "result": "FAIL",
+        "sourceLine": 31
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-32",
+      "scenario": "S11",
+      "text": "375×812 收件箱无横向滚动条，侧栏与主内容为单列",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 32,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/assertions.txt:32",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 32
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-33",
+      "scenario": "S11",
+      "text": "补充可读性检查：窄屏收件箱十字以内短标题不超过两行；「竞品与市场规模调研」正文列仅 59.3px，短标题换为 3 行，影响提示占 221.7px",
+      "status": "fail",
+      "reason": "补充可读性检查：窄屏收件箱十字以内短标题不超过两行；「竞品与市场规模调研」正文列仅 59.3px，短标题换为 3 行，影响提示占 221.7px",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 33,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/assertions.txt:33",
+      "output": {
+        "result": "FAIL",
+        "sourceLine": 33
+      },
+      "cost": 0
+    },
+    {
+      "id": "b1-34",
+      "scenario": "S11",
+      "text": "375×812 技术可行性 无横向滚动条，需求/边界/测试三栏纵向排列",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/assertions.txt",
+      "sourceLine": 34,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/assertions.txt:34",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 34
+      },
+      "cost": 0
+    }
+  ],
+  "second": [
+    {
+      "id": "b2-01",
+      "scenario": "S01",
+      "text": "1440×900 浅色视口",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 1,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/recheck-1/assertions.txt:1",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 1
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-02",
+      "scenario": "S01",
+      "text": "图例说明强制边界的机制和建议边界的 核对席位 核对",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 2,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/recheck-1/assertions.txt:2",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 2
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-03",
+      "scenario": "S01",
+      "text": "阻塞分组包含 交付产能 提问型和 市场调研 达到上限型",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 3,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/recheck-1/assertions.txt:3",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 3
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-04",
+      "scenario": "S01",
+      "text": "四个收件箱分组存在且无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 4,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S01 固定检查；evidence/002/recheck-1/assertions.txt:4",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 4
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-05",
+      "scenario": "S02",
+      "text": "技术可行性信息带含交付物、资料来源、上限及两条进度条",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 5,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/recheck-1/assertions.txt:5",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 5
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-06",
+      "scenario": "S02",
+      "text": "t2 显示 ? 无法判定和两个仅供人工判定的按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 6,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/recheck-1/assertions.txt:6",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 6
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-07",
+      "scenario": "S02",
+      "text": "验收禁用并提示先人工判定；打回可用",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 7,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/recheck-1/assertions.txt:7",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 7
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-08",
+      "scenario": "S02",
+      "text": "桌面三栏同一行且无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 8,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S02 固定检查；evidence/002/recheck-1/assertions.txt:8",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 8
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-09",
+      "scenario": "S03",
+      "text": "t2 证据展开，显示两条来源与独立代理复核方法",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 9,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S03 固定检查；evidence/002/recheck-1/assertions.txt:9",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 9
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-10",
+      "scenario": "S03",
+      "text": "t3 挑错席位 检查链显示先不通过后通过、复核方法及通过后的修正记录",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 10,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S03 固定检查；evidence/002/recheck-1/assertions.txt:10",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 10
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-11",
+      "scenario": "S04",
+      "text": "开发过程默认折叠",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 11,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/recheck-1/assertions.txt:11",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 11
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-12",
+      "scenario": "S04",
+      "text": "执行记录默认页签显示 #1 失败与 #2 成功",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 12,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/recheck-1/assertions.txt:12",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 12
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-13",
+      "scenario": "S04",
+      "text": "失败原因以错误色、背景和左边框醒目显示",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 13,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/recheck-1/assertions.txt:13",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 13
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-14",
+      "scenario": "S04",
+      "text": "切换时间线后显示日志、隐藏执行记录",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 14,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S04 固定检查；evidence/002/recheck-1/assertions.txt:14",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 14
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-15",
+      "scenario": "S05",
+      "text": "判为通过后 t2 通过，验收按钮启用并记录人工判定",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 15,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S05 固定检查；evidence/002/recheck-1/assertions.txt:15",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 15
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-16",
+      "scenario": "S05",
+      "text": "接受验收 确认对话框 后出现已验收状态与保存为模板按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 16,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S05 固定检查；evidence/002/recheck-1/assertions.txt:16",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 16
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-17",
+      "scenario": "S06",
+      "text": "接受默认模板名后侧栏新增技术可行性模板，原按钮变为已保存",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 17,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S06 固定检查；evidence/002/recheck-1/assertions.txt:17",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 17
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-18",
+      "scenario": "S06",
+      "text": "模板详情只读且保留需求、边界强制标记、测试类型和三栏",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 18,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S06 固定检查；evidence/002/recheck-1/assertions.txt:18",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 18
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-19",
+      "scenario": "S07",
+      "text": "已达上限横幅包含部分完成报告、未完成项、估计和三个操作",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 19,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/recheck-1/assertions.txt:19",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 19
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-20",
+      "scenario": "S07",
+      "text": "token 进度达到 100%，使用错误色",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 20,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/recheck-1/assertions.txt:20",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 20
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-21",
+      "scenario": "S07",
+      "text": "追加预算后执行中，token 上限 +50%，进度恢复强调色",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 21,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S07 固定检查；evidence/002/recheck-1/assertions.txt:21",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 21
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-22",
+      "scenario": "S08",
+      "text": "待批准节点 强制边界显示锁与权限规则/确定性测试机制",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 22,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/recheck-1/assertions.txt:22",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 22
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-23",
+      "scenario": "S08",
+      "text": "补充边界输入行旁有建议/强制下拉框，默认建议",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 23,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/recheck-1/assertions.txt:23",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 23
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-24",
+      "scenario": "S08",
+      "text": "待批准节点 桌面详情无横向溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 24,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S08 固定检查；evidence/002/recheck-1/assertions.txt:24",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 24
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-25",
+      "scenario": "S09",
+      "text": "模态框显示 需求、输入、规则、强制标记和复制/关闭按钮",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 25,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/recheck-1/assertions.txt:25",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 25
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-26",
+      "scenario": "S09",
+      "text": "预览底部可阅读 规则段并保留模态框（全部内容放得下时无需滚动）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 26,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/recheck-1/assertions.txt:26",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 26
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-27",
+      "scenario": "S09",
+      "text": "Esc 关闭模态框并恢复触发按钮焦点",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 27,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S09 固定检查；evidence/002/recheck-1/assertions.txt:27",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 27
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-28",
+      "scenario": "S10",
+      "text": "深色收件箱启用 dark 媒体查询及深色背景，保留边界说明和阻塞分组",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 28,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:28",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 28
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-29",
+      "scenario": "S10",
+      "text": "深色 .count 对比度均 ≥ 4.5:1（实测 6.758225、6.758225）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 29,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:29",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 29
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-30",
+      "scenario": "S10",
+      "text": "深色 技术可行性 详情含无法判定、两个人工按钮和禁用验收，三栏无溢出",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 30,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:30",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 30
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-31",
+      "scenario": "S10",
+      "text": "深色 button.ok 对比度均 ≥ 4.5:1（实测 8.379728）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 31,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:31",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 31
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-32",
+      "scenario": "S10",
+      "text": "深色 button.primary 对比度均 ≥ 4.5:1（实测 6.786764）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 32,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:32",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 32
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-33",
+      "scenario": "S10",
+      "text": "浅色 .count 对比度均 ≥ 4.5:1（实测 5.438402、5.438402）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 33,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:33",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 33
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-34",
+      "scenario": "S10",
+      "text": "浅色 button.ok 对比度均 ≥ 4.5:1（实测 4.537390）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 34,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:34",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 34
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-35",
+      "scenario": "S10",
+      "text": "浅色 button.primary 对比度均 ≥ 4.5:1（实测 5.902306）",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 35,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S10 固定检查；evidence/002/recheck-1/assertions.txt:35",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 35
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-36",
+      "scenario": "S11",
+      "text": "375×812 收件箱无横向滚动条，侧栏与主内容为单列",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 36,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/recheck-1/assertions.txt:36",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 36
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-37",
+      "scenario": "S11",
+      "text": "补充可读性检查：窄屏收件箱十字以内短标题不超过两行",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 37,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/recheck-1/assertions.txt:37",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 37
+      },
+      "cost": 0
+    },
+    {
+      "id": "b2-38",
+      "scenario": "S11",
+      "text": "375×812 技术可行性 无横向滚动条，需求/边界/测试三栏纵向排列",
+      "status": "pass",
+      "reason": "历史记录：明确通过",
+      "sourceFile": "evidence/002/recheck-1/assertions.txt",
+      "sourceLine": 38,
+      "evidenceKind": "真实历史检查记录",
+      "input": "S11 固定检查；evidence/002/recheck-1/assertions.txt:38",
+      "output": {
+        "result": "PASS",
+        "sourceLine": 38
+      },
+      "cost": 0
+    }
+  ]
+};
+
+function initV4() {
+  if(db.v4Initialized)return;db.v4Initialized=true;
+  for(const autonomy of Object.values(db.autonomy))Object.assign(autonomy,{orchestration:'auto',discovery:'human',caution:'auto',designDecision:'human',sideEffect:'human'});
+  for(const node of Object.values(db.nodes)){
+    normalizeV4Node(node);
+    for(const attempt of node.attempts){attempt.cost=v4Money((node.projectId==='project-a'?1.2:2)+(attempt.number-1)*.4);attempt.stepSummary={pass:attempt.result==='success'?1:0,fail:attempt.result==='failed'?1:0,unverifiable:0,unprocessed:attempt.result==='limit'?1:0};}
+    node.cost=v4Money(node.attempts.reduce((sum,attempt)=>sum+attempt.cost,0));
+  }
+  for(const agent of [...db.agents,...db.agentTemplates]){
+    agent.mainModel=agent.model;agent.mainStrength=agent.strength;
+    agent.stepModel=agent.seats.includes('execute')?agent.model:null;
+    agent.stepStrength=agent.seats.includes('execute')?'high':null;
+  }
+  const patterns=[
+    ['single','结构','单步','一个代理调用','小改动','P0',['输入','输出 schema','固定测试','产物范围']],
+    ['sequence','结构','顺序','A → B → C','先分析再修改','P0',['顺序步骤','输入输出绑定','失败策略']],
+    ['parallel','结构','并行汇总','拆开 → 并行 → 汇总','多维度调研','P0',['分支全集','并发数','汇合策略','缺席项处理']],
+    ['batch','结构','批量清单','枚举 → 逐项处理 → 逐项验证','迁移 40 个调用点','P0',['枚举来源','冻结清单','稳定条目 ID','逐项验证']],
+    ['route','结构','分类分流','分类 → 按类别交给不同处理者','问题分诊','P1',['分类枚举','路由表','未知类别处理']],
+    ['generate-check','循环','生成-验证','做 → 测 → 改，直到通过','修 bug 到测试全绿','P0',['固定测试','轮数上限','终止条件','无进展判定']],
+    ['optimize','循环','指标优化','尝试 → 测量 → 保留更好、回滚更差','性能调优','P2',['指标方向','基线','环境','改善阈值','回退凭据']],
+    ['poll','循环','轮询等待','检查 → 等待 → 再检查','等 CI、等外部审批','P1',['探测目标','间隔','截止时间','累计次数']],
+    ['adversarial','质量','对抗验证','执行 ↔ 挑错，多轮','方案评审','P2',['主张清单','只读挑错','证据规则','轮数上限']],
+    ['perspectives','质量','多视角评审','多个评审者并行 → 去重合并','合同审查','P2',['评审视角','共同标准','必需检查','冲突处理']],
+    ['select','质量','生成后筛选','生成 N 份 → 按标准过滤 → 选一份','文案、方案草稿','P2',['候选数','硬门槛','评分标准','去重规则']],
+    ['tournament','质量','竞赛比较','多种思路分别实现 → 两两评判','技术选型','P2',['候选全集','赛程','评判标准','平分重判','轮数上限']],
+    ['gate','控制','人工关卡','中途暂停，等你决定','发布前确认','P0',['授权人','批准对象内容哈希','拒绝路径','等待上限']],
+    ['alignment','控制','对齐点','并行分支汇合并统一','并行分支的接口统一','P1',['必需分支','接口版本','缺席和冲突处理']],
+    ['schedule','控制','定时触发','按计划运行整个编排','日报、监控','后续',['日历或间隔','时区','起止日期','累计运行次数','重叠策略']]
+  ];
+  db.orchestrationTemplates=patterns.map(([id,category,name,structure,scenario,priority,params])=>({id,category,name,title:name,structure,scenario,priority,params,readonly:true,common:'完整清单、每项四态结果、异常逐项列出、核对证据、上限、恢复点'}));
+  for(const project of db.projects){
+    normalizeV4Project(project);project.budget=project.id==='project-a'?120:80;
+    const example=project.id==='project-a'?'客户资料与对外文案使用中文':'界面文字使用中文；保持单文件、零外部依赖';
+    project.memory={
+      instructions:[{id:project.id+'-instruction-1',text:'示例 · '+example,mandatory:true,source:'示例 · 你确认的项目指令',refs:[...project.nodeIds]}],
+      decisions:[
+        {id:project.id+'-decision-old',title:'示例 · 只记录最终总数',text:'示例 · 早期设计仅记录验收总数。',status:'deprecated',state:'deprecated',source:'示例 · 旧版设计讨论',refs:[project.nodeIds[0]],replacedBy:project.id+'-decision-current',replacementId:project.id+'-decision-current'},
+        {id:project.id+'-decision-current',title:'示例 · 验收异常逐项列出',text:'示例 · 保留冻结清单，失败、无法验证、未处理分别列出，避免遗漏。',status:'active',state:'active',source:'示例 · leader 提议后由你确认',refs:project.nodeIds.filter(id=>id==='a-market'||id==='b-browser'),replacedBy:null,replacementId:null},
+        {id:project.id+'-decision-pending',title:'示例 · 结构化摘要保留来源',text:'示例 · 后续摘要统一附来源路径与条目 ID；确认前不作为有效设计决策。',status:'proposed',state:'proposed',source:'示例 · leader 从交接记录提炼',refs:[project.nodeIds[0]],replacedBy:null,replacementId:null}
+      ],
+      conventions:[{id:project.id+'-convention-1',text:'示例 · 资料引用附文件路径和行号。',source:'示例 · 项目约定',refs:[...project.nodeIds]}],
+      cautions:[{id:project.id+'-caution-1',text:'示例 · 外部资料过期时不能把检索完成当作验证通过。',status:'active',state:'active',source:'示例 · leader 直接写入',refs:project.nodeIds.filter(id=>id==='a-market'||id==='b-browser')}]
+    };
+    syncProjectInstructions(project.id);
+  }
+  const market=getNode('a-market');
+  market.limit.maxReplans=2;market.limit.usedReplans=2;
+  const marketSteps=[
+    {id:'market-enumerate',title:'枚举检索来源',type:'agent',deps:[],status:'pass',reason:'示例 · 三个来源分支已固定',input:'2025 年行业报告与竞品资料索引',output:{sources:['行业报告','竞品官网','报价与统计'],frozenBranches:3},cost:.8},
+    {id:'market-industry',title:'行业报告检索',type:'agent',deps:['market-enumerate'],status:'pass',reason:'示例 · 允许资料已核对',input:'2025 年行业报告',output:{summary:'已有市场基线；保留报告出处'},cost:3.2},
+    {id:'market-competitors',title:'竞品官网检索',type:'agent',deps:['market-enumerate'],status:'pass',reason:'示例 · 三家竞品资料已保存',input:'三家竞品官网',output:{summary:'三家竞品对照与来源索引'},cost:4.1},
+    {id:'market-pricing',title:'最新统计与报价检索',type:'agent',deps:['market-enumerate'],status:'unverifiable',reason:'示例 · 已检索，但最新市场规模与报价缺少可交叉核对的证据',input:'最新统计与报价页面',output:{summary:'证据不足，无法验证；不计入通过'},cost:4.1},
+    {id:'market-join',title:'并行结果汇总',type:'parallel_join',deps:['market-industry','market-competitors','market-pricing'],status:'unprocessed',reason:'示例 · token 12000/12000 与重新规划 2/2 已达上限，汇总未开始',input:'三个分支的结构化结果',output:{summary:'尚未汇总；保留全部分支结果与异常'},cost:0}
+  ];
+  market.orchestration={template:'并行汇总',version:'示例 v3',plan:demoPlan(market,'并行汇总',marketSteps,'示例 v3'),steps:marketSteps,state:'limit',notice:'示例 · 编排数据与费用为模拟；保留原达到上限场景'};
+  market.cost=12.2;market.attempts[0].cost=12.2;market.attempts[0].orchestration=cloneData(market.orchestration);market.attempts[0].planVersion='示例 v3';market.attempts[0].stepSummary=resultSummary(market.orchestration);market.attempts[0].endReason='达到上限';market.attempts[0].continuation='续接原会话';
+  const browser=getNode('b-browser');
+  for(const [index,key] of ['first','second'].entries()){
+    const items=REAL_BROWSER_ITEMS[key],version=`示例 v${index+1}`,total=items.length,pass=items.filter(item=>item.status==='pass').length;
+    const steps=[
+      {id:`browser-${index+1}-enumerate`,title:'枚举并冻结检查清单',type:'agent',deps:[],status:'pass',reason:`真实来源：${total} 条历史断言已映射`,input:items[0].sourceFile,output:{itemCount:total,sourceFile:items[0].sourceFile,frozen:true},cost:.2},
+      {id:`browser-${index+1}-process`,title:'逐项处理检查',type:'foreach',deps:[`browser-${index+1}-enumerate`],status:'pass',reason:'真实历史记录：所有检查项均已处理；处理完成不表示验证通过',input:`冻结的 ${total} 条检查清单`,output:{processed:total,itemsHaveVerdict:true},cost:index?1.3:1.1},
+      {id:`browser-${index+1}-verify`,title:'逐项验证并汇总报告',type:'registered_test',deps:[`browser-${index+1}-process`],status:index?'pass':'fail',reason:`真实历史检查结果：${pass}/${total}${index?' 全部通过':'；3 项失败分别保留'}`,input:'历史断言记录逐项结果',output:{pass,total,fail:total-pass,evidenceFile:items[0].sourceFile},cost:index?.9:.7}
+    ];
+    const orchestration={template:'批量清单',version,plan:demoPlan(browser,'批量清单',steps,version),steps,state:index?'completed':'failed',notice:'检查项与结果是真实历史记录；步骤图、计划、快照与花费为示例，本任务未运行浏览器检查'};
+    freezeChecklist(orchestration,items);browser.attempts[index].orchestration=orchestration;browser.attempts[index].planVersion=version;browser.attempts[index].stepSummary=resultSummary(orchestration);browser.attempts[index].cost=index?2.4:2;browser.attempts[index].continuation='只重做失败与未处理项';browser.attempts[index].endReason=index?'完成':'验证失败';
+    browser.attempts[index].metadataNote='检查条目及四态结果来自真实历史文件；快照、编排计划版本、步骤与花费为示例；未记录的模型、token、会话 ID 不补造。';
+  }
+  browser.orchestration=browser.attempts[1].orchestration;browser.cost=4.4;
+  const cost=getNode('a-cost'),gateSteps=[
+    {id:'cost-prepare',title:'整理报价草稿',type:'agent',deps:[],status:'pass',reason:'示例 · 内部草稿完成，未对外发送',input:'资源台账与批准的毛利边界',output:{summary:'内部报价草稿 v1'},cost:cost.cost},
+    {id:'cost-approval',title:'报价对外发送前人工关卡',type:'gate',deps:['cost-prepare'],status:'unprocessed',reason:'示例 · 已到人工关卡，等待你批准指定内容',input:'内部报价草稿 v1',output:{summary:'尚未批准；不会实际发送'},cost:0,gateState:'pending',pending:true,approvalObject:'示例 · 客户 A 报价草稿 v1（仅模拟对外发送）',contentHash:'示意：sha256:8a4d21f0-example',external:true}
+  ];
+  gateSteps[1].approvalBinding={object:JSON.stringify(gateSteps[1].approvalObject),contentHash:gateSteps[1].contentHash};
+  cost.orchestration={template:'人工关卡',version:'示例 v1',plan:demoPlan(cost,'人工关卡',gateSteps),steps:gateSteps,state:'awaiting_gate',notice:'示例 · 人工关卡与内容哈希均为模拟，不执行对外发送'};
+  if(cost.attempts.length){const attempt=cost.attempts.at(-1);attempt.orchestration=cloneData(cost.orchestration);attempt.planVersion='示例 v1';attempt.stepSummary=resultSummary(cost.orchestration);}
+  db.discoveries=[
+    {id:'discovery-draft-example',nodeId:'b-implement',projectId:'project-b',description:'示例 · 实现中发现资料索引的失效链接，超出本节点界面改动范围',evidence:'示例日志：资料索引链接指向已移动文档',location:'示例资料目录/索引.md:12',materials:['示例资料目录/索引.md:12','示例日志/索引检查.txt：目标文档不存在'],blocking:false,recommendation:{action:'draft',reason:'示例 · 独立问题，应由专门节点处理',title:'示例 · 修复资料索引',deps:['b-spec']},status:'pending',state:'pending',example:true,sourceNote:'示例 · 模拟发现，不属于真实浏览器检查记录'},
+    {id:'discovery-ignore-example',nodeId:'a-market',projectId:'project-a',description:'示例 · 无关行业页面排版有问题',evidence:'示例 · 页面标题错位',location:'示例外部页面',materials:['示例截图说明：标题错位'],blocking:false,recommendation:{action:'ignore',reason:'示例 · 与本项目交付目标无关，无需处理'},status:'pending',state:'pending',example:true,sourceNote:'示例 · 模拟发现'},
+    {id:'discovery-merge-example',nodeId:'a-market',projectId:'project-a',description:'示例 · 报价资料中有需核对的历史折扣',evidence:'示例 · 两处折扣口径不同',location:'示例资料/报价补充.md:8',materials:['示例资料/报价补充.md:8'],blocking:false,recommendation:{action:'merge',reason:'示例 · 属于已有成本报价节点的范围',targetId:'a-cost'},status:'pending',state:'pending',example:true,sourceNote:'示例 · 模拟发现'}
+  ];
+  for(const discovery of db.discoveries)discovery.suggestion=discovery.recommendation;
+  db.sideEffects=[{id:'side-effect-merge-example',nodeId:'b-implement',title:'示例 · 合并回执未知',target:'示例 · prototype-demo 分支合并到 demo-main',contentHash:'示意：sha256:merge-7c02-example',expectedVersion:'示例：demo-main@v2',status:'unknown',state:'unknown',intent:'示例 · 执行前记录：将已批准的原型改动合并到 demo-main；目标版本 v2；批准记录为模拟记录',receipt:'示例 · 回执未知，恢复前必须人工核对现场；不会盲目重试',sourceNote:'示例 · 模拟副作用状态，不代表仓库发生真实合并'}];
+  for(const reason of V4_WAKE_REASONS)wakeMainAgent('a-market',reason);
+  for(const node of [market,browser,cost]){
+    appendExecutionEvent(node,'冻结计划与上下文（示例）',{template:node.orchestration.template,templateVersion:'示例模板 v1',planHash:`示意：plan-${node.id}`,schemaVersion:'示例 schema v1',schemaHash:'示意：schema-hash-v1',contextVersion:node.version,contextHash:`示意：context-${node.id}-v${node.version}`});
+    for(const step of node.orchestration.steps)appendExecutionEvent(node,'步骤结果（示例）',{stepId:step.id,identity:`示例：${node.id}/run-1/${step.id}/round-1/item-none/retry-0`,round:1,itemId:null,retryAttempt:0,exitCode:step.status==='unprocessed'?null:0,rawOutput:JSON.stringify(step.output),structuredResult:cloneData(step.output),artifactHash:`示意：artifact-${step.id}`,status:step.status,reason:step.reason,cost:step.cost});
+  }
 }
 
 // ---------- UI helpers ----------
@@ -3076,7 +4587,7 @@ const chip = (s, b) => `<span class="chip s-${s}">${s==='blocked' && b==='limit'
 const who = (a) => a==='human' || a==='你' ? '<span class="who-human">你</span>' : `<span class="who-agent">${esc(a==='leader' || a==='agent:leader' ? 'leader' : a==='自动' ? '自动' : getAgent(String(a).replace('agent:',''))?.name || a)}</span>`;
 function toast(msg) { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 function log(c, actor, text) { c.log ||= []; c.log.push([stamp(),actor,text]); }
-function go(page, id=null) { if(['node','contract'].includes(page)&&!getNode(id)){toast('来源节点已删除');return;}if(['project','settings'].includes(page)&&!getProject(id)){toast('项目不存在');return;}if(page==='template'&&!db.templates.some(t=>t.id===id)){toast('模板不存在');return;}view={page,id}; render(); $('#main').scrollTop=0; }
+function go(page, id=null) { if(['node','contract'].includes(page)&&!getNode(id)){toast('来源节点已删除');return;}if(['project','settings','memory'].includes(page)&&!getProject(id)){toast('项目不存在');return;}if(page==='template'&&!db.templates.some(t=>t.id===id)){toast('模板不存在');return;}view={page,id}; render(); $('#main').scrollTop=0; }
 const actorAt = (c, actor) => ({'执行代理':c.seats?.execute,'核对代理':c.seats?.verify,'挑错代理':c.seats?.challenge})[actor] || actor;
 const projectNodes = (p) => p.nodeIds.map(id=>getNode(id)).filter(Boolean);
 function renderSide() {
@@ -3085,18 +4596,19 @@ function renderSide() {
     <div class="section-label">项目列表</div><button class="nav-item nav-button ${view.page==='projects'?'active':''}" onclick="go('projects')">全部项目 · 新建</button>
     ${db.projects.map(p=>`<details class="side-project" open><summary>${esc(p.name)}</summary><button class="nav-item nav-button ${view.page==='project'&&view.id===p.id?'active':''}" onclick="go('project','${p.id}')">查看项目流程</button>${projectNodes(p).map(n=>`<button class="tree-node nav-button ${view.page==='node'&&view.id===n.id?'active':''}" onclick="go('node','${n.id}')"><span class="dot d-${n.status}"></span><span class="t">${esc(n.title)}</span></button>`).join('')}</details>`).join('')}
     <div class="section-label">知识</div>${[['experience','经验库'],['decisions','决策记录'],['agents','代理库']].map(([page,title])=>`<button class="nav-item nav-button ${view.page===page?'active':''}" onclick="go('${page}')">${title}</button>`).join('')}
-    <div class="section-label">模板</div><button class="nav-item nav-button ${view.page==='templates'?'active':''}" onclick="go('templates')">项目类型与模板</button>
+    ${db.projects.map(p=>`<button class="nav-item nav-button ${view.page==='memory'&&view.id===p.id?'active':''}" onclick="go('memory','${p.id}')">项目记忆 · ${esc(p.name)}</button>`).join('')}
+    <div class="section-label">模板</div><button class="nav-item nav-button ${view.page==='orchestrationTemplates'?'active':''}" onclick="go('orchestrationTemplates')">编排模板</button><button class="nav-item nav-button ${view.page==='templates'?'active':''}" onclick="go('templates')">项目类型与模板</button>
     ${db.templates.map(t=>`<button class="nav-item nav-button" onclick="go('template','${t.id}')">${esc(t.title)}</button>`).join('')}
     <div class="src side-note">你定义需求、边界和测试，完成验收。leader 起草、派单、回答提问；runtime 守住权限、依赖与上限。</div>`;
 }
-const INBOX_GROUPS = [['approval','待批准'],['questions','提问'],['limits','达到上限'],['requests','变更请求与退回请求'],['review','待验收'],['experience','待审核的经验库条目']];
+const INBOX_GROUPS = [['approval','待批准'],['questions','提问'],['limits','达到上限'],['requests','变更请求与退回请求'],['discoveries','发现'],['gates','人工关卡'],['review','待验收'],['designDecisions','待确认的设计决策'],['experience','待审核的经验库条目'],['sideEffects','副作用状态不明']];
 function renderInbox() {
   const box=inbox();
   $('#main').innerHTML=`<h1>收件箱</h1><div class="intro">这里只列需要你处理的事。每项打开对应节点，查看依据后决定。<div class="legend">${Object.keys(KIND).map(k=>`<span class="k">${KIND[k]} · ${KIND_HINT[k]}</span>`).join('')}<span class="k">🔒 强制 · 权限规则 / 确定性测试保证</span><span class="k">建议 · 核对席位核对</span></div></div>
-    ${INBOX_GROUPS.map(([key,title])=>`<section class="inbox-group" data-group="${key}"><h2>${title}<span class="hint">${box[key].length} 项</span></h2>${box[key].length?box[key].map(x=>{const n=getNode(x.nodeId);return `<button class="inbox-item inbox-button" onclick="go('node','${x.nodeId}')"><span class="dot d-${n.status}"></span><span class="grow"><span>${esc(x.title)}</span><span class="sub">${esc(x.summary)}</span></span><span class="impact">${esc(getProject(n.projectId).name)}</span>${chip(n.status,n.blockedType)}</button>`;}).join(''):'<div class="empty">没有待处理事项</div>'}</section>`).join('')}`;
+    ${INBOX_GROUPS.map(([key,title])=>`<section class="inbox-group" data-group="${key}"><h2><span class="inbox-label">${title}</span><span class="hint">${box[key].length} 项</span></h2>${box[key].length?box[key].map(x=>{const n=getNode(x.nodeId);return `<button class="inbox-item inbox-button" onclick="go('${key==='designDecisions'||x.kind==='caution'?'memory':'node'}','${key==='designDecisions'||x.kind==='caution'?n.projectId:x.nodeId}')"><span class="dot d-${n.status}"></span><span class="grow"><span>${esc(x.title)}</span><span class="sub">${esc(x.summary)}</span></span><span class="impact">${esc(getProject(n.projectId).name)}</span>${chip(n.status,n.blockedType)}</button>`;}).join(''):'<div class="empty">没有待处理事项</div>'}</section>`).join('')}`;
 }
 function renderProjects() {
-  $('#main').innerHTML=`<h1>项目列表</h1><div class="intro">项目包含一层项目流程；节点之间按依赖启动。</div><div class="below">${db.projects.map(p=>`<div class="card"><h2>${esc(p.name)}</h2><div class="meta">${esc(p.type)} · leader：${esc(getAgent(p.leader)?.name)}</div><p>工作现场：${esc(p.site)}</p><p>${projectNodes(p).filter(n=>n.status==='accepted').length} / ${p.nodeIds.length} 节点已验收</p><button class="primary" onclick="go('project','${p.id}')">打开项目</button></div>`).join('')}</div>
+  $('#main').innerHTML=`<h1>项目列表</h1><div class="intro">项目包含一层项目流程；节点之间按依赖启动。</div><div class="below">${db.projects.map(p=>`<div class="card"><h2>${esc(p.name)}</h2><div class="meta">${esc(p.type)} · leader：${esc(getAgent(p.leader)?.name)}</div><p>工作现场：${esc(p.site)}</p>${renderBudget(p)}<p>${projectNodes(p).filter(n=>n.status==='accepted').length} / ${p.nodeIds.length} 节点已验收</p><button class="primary" onclick="go('project','${p.id}')">打开项目</button></div>`).join('')}</div>
     <div class="card form-card"><h2>新建项目</h2><label>名称<input type="text" id="project-name"></label><label>类型<select id="project-type">${['产品开发','客户交付','调研','空白',...db.templates.map(t=>t.title)].map(t=>`<option>${esc(t)}</option>`).join('')}</select></label><label>目标<textarea id="project-goal"></textarea></label><label>工作现场<input type="text" id="project-site" placeholder="git 仓库或文档目录路径"></label><button class="primary" onclick="submitProject()">让 leader 起草项目流程</button></div>`;
 }
 function submitProject() { const p=createProject({name:$('#project-name').value,type:$('#project-type').value,goal:$('#project-goal').value,site:$('#project-site').value}); if(p?.id)go('project',p.id);else if(p?.reason)toast(p.reason); }
@@ -3107,8 +4619,8 @@ function flowStages(p) {
 }
 function renderProject(p) {
   const stages=flowStages(p);
-  $('#main').innerHTML=`<div class="head"><div><div class="crumb">项目 · ${esc(p.type)}</div><h1>${esc(p.name)}</h1><div class="meta">leader：${esc(getAgent(p.leader)?.name)} · 工作现场：${esc(p.site)}</div></div><div class="actions"><button onclick="go('settings','${p.id}')">项目设置</button></div></div>
-    <div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span>→${e.condition?' '+esc(e.condition)+' →':''}</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
+  $('#main').innerHTML=`<div class="head"><div><div class="crumb">项目 · ${esc(p.type)}</div><h1>${esc(p.name)}</h1><div class="meta">leader：${esc(getAgent(p.leader)?.name)} · 工作现场：${esc(p.site)}</div></div><div class="actions"><button onclick="go('memory','${p.id}')">项目记忆</button><button onclick="go('settings','${p.id}')">项目设置</button></div></div>
+    ${renderBudget(p)}<div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span>→${e.condition?' '+esc(e.condition)+' →':''}</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
     ${p.edges.some(e=>e.condition)?`<div class="card dependency-band"><b>条件分支</b><select id="branch-choice">${[...new Map(p.edges.filter(e=>e.condition).map(e=>[e.value||e.condition,e])).values()].map(e=>`<option value="${esc(e.value||e.condition)}" ${p.branchResult===(e.value||e.condition)?'selected':''}>${esc(e.condition)}</option>`).join('')}</select><button onclick="chooseBranch('${p.id}',document.querySelector('#branch-choice').value)">确认分支条件</button><span class="src">分支仍需等上游验收后开工</span></div>`:''}
     <details class="card flow-editor"><summary>编辑项目流程</summary><p class="src">可以增删节点、修改依赖与分支条件；执行中修改会提交变更请求。</p><label>节点<select id="flow-node">${projectNodes(p).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>操作<select id="flow-action"><option value="add">新增节点</option><option value="dependencies">修改依赖</option><option value="remove">删除节点</option></select></label><label>新节点名称<input type="text" id="flow-title"></label><label>前置节点 ID（逗号分隔）<input type="text" id="flow-deps" placeholder="${esc(p.nodeIds[0])}"></label><label>分支条件（可选）<input type="text" id="flow-condition" placeholder="若可行"></label><button class="primary" onclick="submitFlow('${p.id}')">提交项目流程变更</button></details>`;
 }
@@ -3141,18 +4653,19 @@ function renderNode(c) {
   let banner='';
   const refinementDiff=c.refinementDiff||c.approvalDiff||[];
   if(refinementDiff.length)banner+=`<div class="change"><h2>第二次确认 · 上游产出补全</h2><div>leader 根据已验收的上游产出补全细节，请确认差异与边界。</div><div class="diff">${refinementDiff.map(d=>typeof d==='string'?`<div>${esc(d)}</div>`:`<div class="del">− ${esc(d.before)}</div><div class="add">+ ${esc(d.after)}</div>`).join('')}</div></div>`;
-  if(c.status==='blocked'&&c.blockedType==='limit')banner+=`<div class="banner warn"><div class="grow"><b>已达上限 · 保存部分完成报告</b><strong>已完成</strong>${list(c.partial.done)}<strong>未完成</strong>${list(c.partial.remaining)}<div>继续完成预计还需：${esc(c.partial.estimate)}</div><div class="resolution"><button class="primary" onclick="extendBudget('${c.id}')">追加预算</button><button onclick="adjustContract('${c.id}')">调整节点项目</button><button class="bad" onclick="abandon('${c.id}')">终止</button></div></div></div>`;
+  if(c.status==='blocked'&&c.blockedType==='limit')banner+=`<div class="banner warn"><div class="grow"><b>已达上限 · 保存部分完成报告</b><strong>已完成</strong>${list((c.partial?.done||[]))}<strong>未完成</strong>${list((c.partial?.remaining||[]))}<div>继续完成预计还需：${esc(c.partial?.estimate||'重新规划或用量已达上限，需调整授权')}</div><div class="resolution"><button class="primary" onclick="extendBudget('${c.id}')">追加预算</button><button onclick="adjustContract('${c.id}')">调整节点项目</button><button class="bad" onclick="abandon('${c.id}')">终止</button></div></div></div>`;
   else if(c.status==='blocked'&&c.question)banner+=`<div class="banner warn"><div class="grow"><b>leader 无法回答，需要你回答</b>${esc(c.question)}<textarea id="answer" placeholder="补充所需信息"></textarea><button class="primary" onclick="answer('${c.id}')">回答并继续</button></div></div>`;
+  if(c.status==='blocked'&&c.blockedType==='discovery')banner+='<div class="banner warn"><b>阻塞型发现 · 本节点暂停，等待新增依赖节点验收</b></div>';
   if(c.status==='accepted')banner+=`<div class="banner ok"><div class="grow"><b>已验收</b>${esc(c.signNote||'')}<div class="resolution">${saved?`<button class="small" disabled>已保存为模板「${esc(saved.title)}」</button>`:`<button class="small" onclick="saveTemplate('${c.id}')">保存为模板</button>`}<button class="small" onclick="proposeExperience('${c.id}')">沉淀到经验库</button></div></div></div>`;
   if(c.status==='needs_revalidation')banner+='<div class="banner warn"><b>需重新验证 · 上游退回后原检查已作废</b></div>';
   if(c.archived)banner+='<div class="banner neutral">已从项目流程移除；历史记录保留供审计。</div>';
   if(c.status==='abandoned')banner+='<div class="banner neutral">已终止，保留部分报告、证据和交接记录。</div>';
   const timeline=c.log.slice().reverse().map(([t,a,x])=>`<div class="tl-item"><span class="time">${esc(t)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('');
-  $('#main').innerHTML=`<div class="head"><div><div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / ${esc(c.id)}</div><h1>${esc(c.title)}</h1><div class="meta">${chip(c.status,c.blockedType)}<span>节点项目 v${c.version}</span><span>执行：${c.seats.human?'你':esc(getAgent(c.seats.execute)?.name)}</span></div></div><div class="actions">${actions}<button onclick="openExecutionPrompt('${c.id}')">执行代理启动 prompt</button>${c.status!=='skipped'&&c.status!=='abandoned'?`<button onclick="editNodeForm('${c.id}')">编辑节点项目</button>`:''}${c.status==='in_review'&&blocker?`<div class="action-hint">${esc(blocker)}</div>`:''}</div></div>
+  $('#main').innerHTML=`<div class="head"><div><div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / ${esc(c.id)}</div><h1>${esc(c.title)}</h1><div class="meta">${chip(c.status,c.blockedType)}<span>节点项目 v${c.version}</span><span>${c.seats.human?'执行：你':'主 agent：'+esc(getAgent(c.seats.execute)?.name)}</span></div></div><div class="actions">${actions}<button onclick="openExecutionPrompt('${c.id}')">执行代理启动 prompt</button>${c.status!=='skipped'&&c.status!=='abandoned'?`<button onclick="editNodeForm('${c.id}')">编辑节点项目</button>`:''}${c.status==='in_review'&&blocker?`<div class="action-hint">${esc(blocker)}</div>`:''}</div></div>
     ${renderInfo(c)}${banner}${renderVersionDiff(c)}${renderRequests(c)}<div class="card dependency-band"><b>前置节点</b> ${(c.deps||[]).map(id=>`<button class="small" onclick="go('node','${id}')">${esc(getNode(id).title)} · ${STATUS[getNode(id).status]}</button>`).join(' ')||'无'}${p.edges.filter(e=>e.to===c.id&&e.condition).map(e=>`<span class="k">条件：${esc(e.condition)}</span>`).join('')}</div>
     <div class="cols"><div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div><div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}${(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden placeholder="保证机制（必填）">`:''}</div><div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div></div>
-    <div class="below">${renderSeats(c)}${renderContext(c)}${renderQuestions(c)}<div class="card handoff"><h2>验收报告</h2><div>${esc(c.result||'尚未提交结论')}</div><div class="legend">${Object.keys(VERDICT).map(v=>`<span class="k">${VERDICT[v]}：${c.tests.filter(t=>t.v===v).length}</span>`).join('')}</div><p class="src">核对与挑错使用只读权限和新上下文，leader 审阅后交给你验收。</p>${list(c.tests.filter(t=>t.v==='fail'||t.v==='unresolved').map(t=>t.id+' · '+t.text+' · '+VERDICT[t.v]))}</div>${renderHandoff(c)}
-    <div class="card handoff"><details class="process"><summary><h2>▸ 开发过程 <span class="hint">默认折叠 · ${c.attempts.length} 次执行 / ${c.log.length} 条日志</span></h2></summary><div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">执行记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button></div><div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div></details></div>
+    <div class="below">${renderOrchestration(c)}${renderDiscoveries(c)}${renderSideEffects(c)}${renderSeats(c)}${renderContext(c)}${renderQuestions(c)}<div class="card handoff"><h2>验收报告</h2><div>${esc(c.result||'尚未提交结论')}</div><div class="legend">${Object.keys(VERDICT).map(v=>`<span class="k">${VERDICT[v]}：${c.tests.filter(t=>t.v===v).length}</span>`).join('')}</div><p class="src">核对与挑错使用只读权限和新上下文，leader 审阅后交给你验收。</p>${list(c.tests.filter(t=>t.v==='fail'||t.v==='unresolved').map(t=>t.id+' · '+t.text+' · '+VERDICT[t.v]))}${renderResultGroups(c.orchestration)}${renderHistoricalReports(c)}</div>${renderHandoff(c)}
+    <div class="card handoff"><details class="process"><summary><h2>▸ 开发过程 <span class="hint">默认折叠 · ${c.attempts.length} 次尝试 / ${c.log.length} 条日志</span></h2></summary><div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">尝试记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button><button id="execution-tab" class="small" aria-pressed="false" onclick="setProcessTab('execution')">执行日志</button></div><div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div><div id="execution-panel" hidden>${renderExecutionLogs(c)}</div></details></div>
     <details class="card handoff"><summary>向 leader 提问 / 提出退回</summary><label>问题<textarea id="node-question"></textarea></label><button onclick="submitQuestion('${c.id}')">先交给 leader</button><label>退回到<select id="return-target">${projectNodes(p).filter(n=>n.id!==c.id).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>退回理由<textarea id="return-reason"></textarea></label><label>证据路径<input type="text" id="return-evidence"></label><button onclick="submitReturn('${c.id}')">提交退回请求</button></details>
     ${db.experience.filter(e=>e.nodeId===c.id&&e.status==='pending').map(e=>`<div class="card handoff"><h2>待审核的经验库条目</h2><p>${esc(e.title)} · ${esc(e.content)}</p><button class="ok" onclick="reviewExperience('${e.id}',true)">审核入库</button> <button class="bad" onclick="reviewExperience('${e.id}',false)">驳回</button></div>`).join('')}</div>`;
 }
@@ -3163,7 +4676,7 @@ let editingNode = null;
 function editNodeForm(id) {
   const c=getNode(id); editingNode=id;modalReturnFocus=document.activeElement;
   const agentsFor=(seat,current)=>db.agents.filter(a=>a.seats.includes(seat)).map(a=>`<option value="${a.id}" ${a.id===current?'selected':''}>${esc(a.name)}</option>`).join('');
-  $('#modal-root').innerHTML=`<div class="modal-backdrop"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">编辑节点项目 · v${c.version}<button id="close-editor" onclick="closeNodeEditor()">关闭</button></h2><div class="node-editor"><label>需求<textarea id="edit-need">${esc(c.need)}</textarea></label><h2>边界与机制</h2>${c.boundaries.map((b,i)=>`<div class="row"><input id="edit-bound-${i}" type="text" value="${esc(b.text)}"><label>保证类型<select id="edit-enf-${i}"><option value="advisory" ${b.enf==='advisory'?'selected':''}>建议</option><option value="enforced" ${b.enf==='enforced'?'selected':''}>强制</option></select></label><input id="edit-mech-${i}" type="text" value="${esc(b.mech||'')}" placeholder="强制边界必须填写机制"></div>`).join('')}<h2>测试</h2>${c.tests.map((t,i)=>`<div class="row"><input id="edit-test-${i}" type="text" value="${esc(t.text)}"><select id="edit-kind-${i}">${Object.entries(KIND).map(([k,v])=>`<option value="${k}" ${k===t.kind?'selected':''}>${v}</option>`).join('')}</select></div>`).join('')}<h2>席位安排</h2><label>执行席位<select id="edit-seat-execute" onchange="previewSeatDefaults(this.value)"><option value="" ${c.seats.human?'selected':''}>人工节点</option>${agentsFor('execute',c.seats.execute)}</select></label><div id="seat-defaults-preview"></div><label>核对席位<select id="edit-seat-verify">${agentsFor('verify',c.seats.verify)}</select></label><label>挑错席位（仅含对抗型测试时）<select id="edit-seat-challenge"><option value="">不安排</option>${agentsFor('challenge',c.seats.challenge)}</select></label></div><p class="src">保存后版本 +1，受影响的检查作废；待验收的节点回到执行中。</p><button class="primary" id="save-editor" onclick="saveNodeEditor()">保存项目变更</button></div></div>`;
+  $('#modal-root').innerHTML=`<div class="modal-backdrop"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">编辑节点项目 · v${c.version}<button id="close-editor" onclick="closeNodeEditor()">关闭</button></h2><div class="node-editor"><label>需求<textarea id="edit-need">${esc(c.need)}</textarea></label><h2>边界与机制</h2>${c.boundaries.map((b,i)=>`<div class="row">${b.src==='project_instruction'?'<div class="v4-note">🔒 来源：项目指令 · 请到项目记忆维护</div>':''}<input id="edit-bound-${i}" type="text" ${b.src==='project_instruction'?'readonly':''} value="${esc(b.text)}"><label>保证类型<select id="edit-enf-${i}" ${b.src==='project_instruction'?'disabled':''}><option value="advisory" ${b.enf==='advisory'?'selected':''}>建议</option><option value="enforced" ${b.enf==='enforced'?'selected':''}>强制</option></select></label><input id="edit-mech-${i}" ${b.src==='project_instruction'?'readonly':''} type="text" value="${esc(b.mech||'')}" placeholder="强制边界必须填写机制"></div>`).join('')}<h2>测试</h2>${c.tests.map((t,i)=>`<div class="row"><input id="edit-test-${i}" type="text" value="${esc(t.text)}"><select id="edit-kind-${i}">${Object.entries(KIND).map(([k,v])=>`<option value="${k}" ${k===t.kind?'selected':''}>${v}</option>`).join('')}</select></div>`).join('')}<h2>席位安排</h2><label>执行席位<select id="edit-seat-execute" onchange="previewSeatDefaults(this.value)"><option value="" ${c.seats.human?'selected':''}>人工节点</option>${agentsFor('execute',c.seats.execute)}</select></label><div id="seat-defaults-preview"></div><label>核对席位<select id="edit-seat-verify">${agentsFor('verify',c.seats.verify)}</select></label><label>挑错席位（仅含对抗型测试时）<select id="edit-seat-challenge"><option value="">不安排</option>${agentsFor('challenge',c.seats.challenge)}</select></label></div><p class="src">保存后版本 +1，受影响的检查作废；待验收的节点回到执行中。</p><button class="primary" id="save-editor" onclick="saveNodeEditor()">保存项目变更</button></div></div>`;
   $('#close-editor').focus?.();
 }
 function previewSeatDefaults(id) {
@@ -3185,21 +4698,21 @@ function saveNodeEditor() {
 function closeNodeEditor() { editingNode=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
 function toggleMechanism() { $('#newMech').hidden=$('#boundEnf').value!=='enforced'; }
 function renderAgents() {
-  $('#main').innerHTML=`<h1>代理库</h1><div class="intro">代理是一份专业配置；执行、核对、挑错是节点上的席位。坐核对或挑错席位时，runtime 强制只读权限和新上下文。</div><div class="below">${db.agents.map(a=>`<div class="card"><h2>${esc(a.name)}</h2><p>${esc(a.tasks)}</p><div class="meta">作为主 agent：${esc(a.model)} · ${esc(a.strength)}</div><p>可以担任：${a.seats.map(s=>({execute:'执行',verify:'核对',challenge:'挑错',leader:'协调'}[s]||s)).join(' / ')}</p><div class="src">一次验收通过：${a.stat?.firstPass||0} / ${a.stat?.total||0} · ${a.stat?.total?Math.round(a.stat.firstPass/a.stat.total*100)+'%':'暂无统计'}</div>${list(a.stat?.failures||[])}</div>`).join('')}</div>
-    <div class="card form-card"><h2>设计代理</h2><label>从模板开始<select id="agent-template" onchange="fillAgentTemplate(this.value)"><option value="">空白</option>${db.agentTemplates.map(a=>`<option value="${a.id}">${esc(a.name)} · ${esc(a.model)} / ${esc(a.strength)}</option>`).join('')}</select></label><label>名称<input type="text" id="agent-name"></label><label>擅长的任务<input type="text" id="agent-tasks"></label><label>专业指令<textarea id="agent-instructions"></textarea></label><div class="form-grid"><label>作为主 agent · 模型<input type="text" id="agent-model" value="gpt-6.1-sol"></label><label>强度<select id="agent-strength"><option>ultra</option><option>high</option><option>medium</option><option>low</option></select></label></div><label>技能与工具<input type="text" id="agent-tools" placeholder="逗号分隔"></label><label>权限上限<input type="text" id="agent-permissions" value="工作现场内读写；对外动作需人确认"></label><label>资料范围<input type="text" id="agent-sources" placeholder="逗号分隔"></label><label>默认边界<textarea id="agent-boundaries"></textarea></label><label>默认测试<textarea id="agent-tests"></textarea></label><fieldset><legend>可以担任的席位</legend>${[['execute','执行'],['verify','核对'],['challenge','挑错'],['leader','协调']].map(([k,t])=>`<label class="seat-option"><input id="agent-seat-${k}" type="checkbox" ${k==='execute'?'checked':''}> ${t}</label>`).join('')}</fieldset><button class="primary" onclick="submitAgent()">创建代理</button></div>
+  $('#main').innerHTML=`<h1>代理库</h1><div class="intro">代理是一份专业配置；执行、核对、挑错是节点上的席位。坐核对或挑错席位时，runtime 强制只读权限和新上下文。</div><div class="below">${db.agents.map(a=>`<div class="card"><h2>${esc(a.name)}</h2><p>${esc(a.tasks)}</p><div class="meta">作为主 agent：${esc(a.mainModel||a.model)} · ${esc(a.mainStrength||a.strength)}</div><div class="meta">作为编排步骤：${a.stepModel?esc(a.stepModel)+' · '+esc(a.stepStrength):'—'}</div><p>可以担任：${a.seats.map(s=>({execute:'执行',verify:'核对',challenge:'挑错',leader:'协调'}[s]||s)).join(' / ')}</p><div class="src">一次验收通过：${a.stat?.firstPass||0} / ${a.stat?.total||0} · ${a.stat?.total?Math.round(a.stat.firstPass/a.stat.total*100)+'%':'暂无统计'}</div>${list(a.stat?.failures||[])}</div>`).join('')}</div>
+    <div class="card form-card"><h2>设计代理</h2><label>从模板开始<select id="agent-template" onchange="fillAgentTemplate(this.value)"><option value="">空白</option>${db.agentTemplates.map(a=>`<option value="${a.id}">${esc(a.name)} · ${esc(a.model)} / ${esc(a.strength)}</option>`).join('')}</select></label><label>名称<input type="text" id="agent-name"></label><label>擅长的任务<input type="text" id="agent-tasks"></label><label>专业指令<textarea id="agent-instructions"></textarea></label><div class="form-grid"><label>作为主 agent · 模型<input type="text" id="agent-model" value="gpt-6.1-sol"></label><label>强度<select id="agent-strength"><option>ultra</option><option>high</option><option>medium</option><option>low</option></select></label></div><div class="form-grid"><label>作为编排步骤 · 模型<input type="text" id="agent-stepModel" value="gpt-6.1-sol" placeholder="空白表示不用于编排步骤"></label><label>作为编排步骤 · 强度<select id="agent-stepStrength"><option>high</option><option>ultra</option><option>medium</option><option>low</option></select></label></div><label>技能与工具<input type="text" id="agent-tools" placeholder="逗号分隔"></label><label>权限上限<input type="text" id="agent-permissions" value="工作现场内读写；对外动作需人确认"></label><label>资料范围<input type="text" id="agent-sources" placeholder="逗号分隔"></label><label>默认边界<textarea id="agent-boundaries"></textarea></label><label>默认测试<textarea id="agent-tests"></textarea></label><fieldset><legend>可以担任的席位</legend>${[['execute','执行'],['verify','核对'],['challenge','挑错'],['leader','协调']].map(([k,t])=>`<label class="seat-option"><input id="agent-seat-${k}" type="checkbox" ${k==='execute'?'checked':''}> ${t}</label>`).join('')}</fieldset><button class="primary" onclick="submitAgent()">创建代理</button></div>
     <div class="card form-card"><h2>待批准的代理提议</h2>${db.agentProposals.filter(x=>x.status==='pending').map(x=>`<div class="row"><b>${esc((x.agent||x.data||x).name)}</b><p>${esc(x.reason||'leader 发现缺少合适代理')}</p><button class="ok" onclick="approveAgent('${x.id}',true)">批准入库</button> <button class="bad" onclick="approveAgent('${x.id}',false)">驳回</button></div>`).join('')||'<div class="empty">暂无</div>'}</div><div class="card form-card"><h2>待批准的教训建议</h2>${db.lessonProposals.filter(x=>x.status==='pending').map(x=>`<div class="row"><b>${esc(getAgent(x.agentId)?.name)}</b><p>${esc(x.text||x.lesson||x.boundary?.text||x.boundary||x.reason)}</p><button class="ok" onclick="approveLesson('${x.id}',true)">写入代理默认边界</button> <button class="bad" onclick="approveLesson('${x.id}',false)">驳回</button></div>`).join('')||'<div class="empty">暂无</div>'}</div>`;
 }
-function fillAgentTemplate(id) { const a=db.agentTemplates.find(x=>x.id===id);if(!a)return;for(const k of ['name','tasks','instructions','model','strength','permissions'])$('#agent-'+k).value=a[k]||'';$('#agent-tools').value=(a.tools||[]).join(',');$('#agent-sources').value=(a.sources||[]).join(',');for(const k of ['execute','verify','challenge','leader'])$('#agent-seat-'+k).checked=a.seats.includes(k); }
-function submitAgent() { const data={};for(const k of ['name','tasks','instructions','model','strength','permissions'])data[k]=$('#agent-'+k).value.trim();for(const k of ['tools','sources'])data[k]=$('#agent-'+k).value.split(',').map(s=>s.trim()).filter(Boolean);data.seats=['execute','verify','challenge','leader'].filter(k=>$('#agent-seat-'+k).checked);data.defaultBoundaries=$('#agent-boundaries').value.split('\n').filter(Boolean).map(text=>({text,enf:'advisory',ok:false,src:'agent_default'}));data.defaultTests=$('#agent-tests').value.split('\n').filter(Boolean).map((text,i)=>({id:'default-'+i,text,kind:'evidence',v:'unchecked'}));const result=createAgent(data);if(result?.ok===false)toast(result.reason||'请补全代理配置'); }
+function fillAgentTemplate(id) { const a=db.agentTemplates.find(x=>x.id===id);if(!a)return;for(const k of ['name','tasks','instructions','model','strength','permissions'])$('#agent-'+k).value=a[k]||'';$('#agent-stepModel').value=a.stepModel||'';$('#agent-stepStrength').value=a.stepStrength||'high';$('#agent-tools').value=(a.tools||[]).join(',');$('#agent-sources').value=(a.sources||[]).join(',');for(const k of ['execute','verify','challenge','leader'])$('#agent-seat-'+k).checked=a.seats.includes(k); }
+function submitAgent() { const data={};for(const k of ['name','tasks','instructions','model','strength','permissions'])data[k]=$('#agent-'+k).value.trim();for(const k of ['tools','sources'])data[k]=$('#agent-'+k).value.split(',').map(s=>s.trim()).filter(Boolean);data.mainModel=data.model;data.mainStrength=data.strength;data.stepModel=$('#agent-stepModel').value.trim()||null;data.stepStrength=data.stepModel?$('#agent-stepStrength').value:null;data.seats=['execute','verify','challenge','leader'].filter(k=>$('#agent-seat-'+k).checked);data.defaultBoundaries=$('#agent-boundaries').value.split('\n').filter(Boolean).map(text=>({text,enf:'advisory',ok:false,src:'agent_default'}));data.defaultTests=$('#agent-tests').value.split('\n').filter(Boolean).map((text,i)=>({id:'default-'+i,text,kind:'evidence',v:'unchecked'}));const result=createAgent(data);if(result?.ok===false)toast(result.reason||'请补全代理配置'); }
 function renderExperience() {
   $('#main').innerHTML=`<h1>经验库</h1><div class="intro">事实、人工补充的知识、教训与风险可以跨项目复用。系统起草的条目由你审核入库。</div><div class="form-grid"><label>搜索<input type="text" id="experience-search" oninput="filterExperience()"></label><label>标签<select id="experience-tag" onchange="filterExperience()"><option value="">全部</option>${[...new Set(db.experience.flatMap(e=>e.tags||[]))].map(t=>`<option>${esc(t)}</option>`).join('')}</select></label></div><div id="experience-results">${experienceCards()}</div>`;
 }
 function experienceCards(search='',tag='') { return db.experience.filter(e=>(!search||(e.title+e.content).includes(search))&&(!tag||(e.tags||[]).includes(tag))).map(e=>`<div class="card form-card"><h2>${esc(e.title)} <span class="hint">${e.status==='pending'?'待审核':e.status==='rejected'?'已驳回':'已入库'}</span></h2><p>${esc(e.content)}</p><div class="meta">${esc((e.tags||[]).join(' · '))} · 有效期：${esc(e.validUntil||'复用前核对')}</div><div class="src">来源：${esc(e.source||(e.sources||[]).join('；')||'节点产出')} · 引用项目：${(e.projects||e.projectIds||[]).map(id=>esc(getProject(id)?.name||id)).join('、')||'暂无'}</div>${e.status==='pending'?`<div class="resolution"><button onclick="go('node','${e.nodeId}')">打开来源节点</button><button class="ok" onclick="reviewExperience('${e.id}',true)">审核入库</button><button class="bad" onclick="reviewExperience('${e.id}',false)">驳回</button></div>`:''}</div>`).join('')||'<div class="empty">没有匹配条目</div>'; }
 function filterExperience() { $('#experience-results').innerHTML=experienceCards($('#experience-search').value,$('#experience-tag').value); }
-const AUTONOMY_POINTS=[['approval','批准节点项目'],['change','审批变更请求'],['return','退回请求'],['limit','处理达到上限'],['unresolved','判定「无法判定」'],['acceptance','验收'],['context','上下文包确认']];
-function autonomyPanel(type) { const a=db.autonomy[type]||{};return `<div class="card form-card"><h2>自主度 · ${esc(type)}</h2>${AUTONOMY_POINTS.map(([k,t])=>`<label class="autonomy-row"><span>${t}</span><select aria-label="${esc(type)} ${t}" onchange="setAutonomy('${type}','${k}',this.value)"><option value="human" ${a[k]!=='auto'?'selected':''}>由我决定</option><option value="auto" ${a[k]==='auto'?'selected':''}>代理自动</option></select></label>`).join('')}<div class="autonomy-row">经验库入库 <span class="k">始终由我审核</span></div><div class="autonomy-row">不可逆或对外动作 <span class="k">始终由我决定</span></div><p class="src">默认人工决定；上下文包确认默认为自动。自动处理的决定可在决策列表回看。</p></div>`; }
+const AUTONOMY_POINTS=[['approval','批准节点项目'],['change','审批变更请求'],['return','退回请求'],['limit','处理达到上限'],['unresolved','判定「无法判定」'],['acceptance','验收'],['context','上下文包确认'],['orchestration','执行编排确认'],['discovery','发现转新节点'],['caution','项目记忆·注意事项']];
+function autonomyPanel(type) { const a=db.autonomy[type]||{};return `<div class="card form-card"><h2>自主度 · ${esc(type)}</h2>${AUTONOMY_POINTS.map(([k,t])=>`<label class="autonomy-row"><span>${t}</span><select aria-label="${esc(type)} ${t}" onchange="setAutonomy('${type}','${k}',this.value)"><option value="human" ${a[k]!=='auto'?'selected':''}>由我决定</option><option value="auto" ${a[k]==='auto'?'selected':''}>代理自动</option></select></label>`).join('')}<div class="autonomy-row">项目记忆·设计决策 <span class="k">始终由我确认</span></div><div class="autonomy-row">副作用状态不明 <span class="k">始终由我决定</span></div><div class="autonomy-row">经验库入库 <span class="k">始终由我审核</span></div><div class="autonomy-row">不可逆或对外动作 <span class="k">始终由我决定</span></div><p class="src">上下文包确认、执行编排确认、项目记忆·注意事项默认为自动；发现转新节点默认为人工。自动处理的决定可在决策列表回看。</p></div>`; }
 function renderDecisions() { const all=db.decisions,adopted=all.filter(d=>d.outcome!=='驳回').length,raw=all.filter(d=>d.outcome==='原样采纳').length;$('#main').innerHTML=`<h1>决策记录</h1><div class="intro">采纳率：${all.length?Math.round(adopted/all.length*100):0}%（${adopted}/${all.length}）；原样采纳：${raw}，有修改：${all.filter(d=>d.outcome==='有修改').length}，驳回：${all.filter(d=>d.outcome==='驳回').length}。</div><div class="card">${all.slice().reverse().map(d=>`<div class="row"><b>${esc(d.title||d.action||d.point)}</b> <span class="k">${esc(d.decisionMaker)}</span> <span class="k">${esc(d.outcome)}</span><div>${esc(d.reason||d.detail||d.summary||d.text)}</div><div class="src">${esc(d.time||d.at)} · ${esc(getProject(d.projectId)?.name||'代理库')}${d.nodeId?` · <a href="#" onclick="go('node','${d.nodeId}');return false">${esc(getNode(d.nodeId)?.title)}</a>`:''}</div></div>`).join('')||'<div class="empty">暂无</div>'}</div>${['产品开发','客户交付','调研','空白'].map(autonomyPanel).join('')}`; }
-function renderSettings(p) { $('#main').innerHTML=`<div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / 项目设置</div><h1>项目设置</h1><div class="card form-card"><h2>工作现场</h2><div>${p.type==='产品开发'?'git 仓库':'文档目录'}：${esc(p.site)}</div><h2>执行者配置</h2><label>执行端<select id="executor"><option selected>Codex CLI</option><option disabled>Claude Code · 即将支持</option><option disabled>Gemini CLI · 即将支持</option></select></label><p>leader：${esc(getAgent(p.leader)?.name)}</p><p class="src">纯前端模拟；runtime 执行端配置只在当前会话保存。</p><button onclick="go('decisions')">查看决策记录与自主度</button></div>${autonomyPanel(p.type)}`; }
+function renderSettings(p) { $('#main').innerHTML=`<div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / 项目设置</div><h1>项目设置</h1><div class="card form-card"><h2>工作现场</h2><div>${p.type==='产品开发'?'git 仓库':'文档目录'}：${esc(p.site)}</div><h2>执行者配置</h2><label>执行端<select id="executor"><option selected>Codex CLI</option><option disabled>Claude Code · 即将支持</option><option disabled>Gemini CLI · 即将支持</option></select></label><p>leader：${esc(getAgent(p.leader)?.name)}</p><p class="src">纯前端模拟；runtime 执行端配置只在当前会话保存。</p><button onclick="go('decisions')">查看决策记录与自主度</button></div>${renderBudget(p)}${autonomyPanel(p.type)}`; }
 function renderTemplates() { $('#main').innerHTML=`<h1>项目类型与模板</h1><div class="intro">内置项目类型：产品开发 / 客户交付 / 调研 / 空白。验收后保存的模板可以用于新建同类项目。</div>${db.templates.map(t=>`<div class="card form-card"><h2>${esc(t.title)}</h2><div class="meta">项目类型：${esc(t.projectType)} · 来源节点项目 v${t.sourceVersion}</div><button onclick="go('template','${t.id}')">查看模板</button></div>`).join('')||'<div class="empty">验收后可沉淀为模板</div>'}`; }
 function renderTemplate(t) { $('#main').innerHTML=`<div class="crumb">模板 · 只读 · ${esc(t.projectType)}</div><h1>${esc(t.title)}</h1><div class="intro">leader 下次起草同类项目时会以此为起点，你需要确认的内容会更少。</div><div class="cols"><div class="card"><div class="col-label">需求</div><div class="need">${esc(t.need)}</div></div><div class="card"><div class="col-label">边界</div>${renderBounds(t,true)}</div><div class="card"><div class="col-label">测试</div>${renderTests(t,true)}</div></div><div class="card form-card"><h2>项目流程节点</h2>${list(t.flow?.nodeTitles||t.nodeTitles||t.children||[])}</div>`; }
 function workerPrompt(id) {
@@ -3214,9 +4727,86 @@ function openExecutionPrompt(id) { modalContract=id;modalReturnFocus=document.ac
 function closeExecutionPrompt() { modalContract=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
 async function copyExecutionPrompt() { if(!modalContract)return;try{await navigator.clipboard.writeText(workerPrompt(modalContract));toast('已复制');}catch{toast('复制失败');} }
 if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(editingNode){if(event.key==='Escape'){event.preventDefault();closeNodeEditor();}return;}if(!modalContract)return;if(event.key==='Escape'){event.preventDefault();closeExecutionPrompt();}if(event.key==='Tab'){const first=$('#close-prompt'),last=$('#copy-prompt');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
-function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); }
+function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='memory')renderMemory(getProject(view.id));else if(view.page==='orchestrationTemplates')renderOrchestrationTemplates();else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); }
 
-window.helm = { db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
+// ---------- v4 模拟页面 ----------
+const FOUR_STATE_UI = {pass:'✓ 通过',fail:'✕ 失败',unverifiable:'? 无法验证',unprocessed:'— 未处理'};
+const money = value => Number.isFinite(value)?'¥'+value.toFixed(2):'未记录';
+function renderBudget(p) {
+  return `<div class="card budget-band"><b>项目预算：${money(p.budget)}</b><span>已用花费：${money(projectSpent(p.id))}</span><span class="v4-note">示例 · 按各节点模拟花费求和</span></div>`;
+}
+function resultChip(item) { return `<span class="result-chip result-${item.status}">${FOUR_STATE_UI[item.status]||'状态缺失'}</span>`; }
+function renderExecutionLogs(c) {
+  const events=c.executionLog||c.executionEvents||[];
+  return `<p class="v4-note">runtime 只追加日志（示例） · 冻结版本与哈希、稳定步骤身份、事件与回执；完整日志不默认发送给独立核对者。</p>${events.map(e=>`<details class="row"><summary>#${e.sequence} · ${esc(e.event)} · ${esc(e.time)}</summary><pre class="prompt-preview">${esc(JSON.stringify(e,null,2))}</pre></details>`).join('')||'<div class="empty">暂无执行日志</div>'}`;
+}
+function renderChecklist(o) {
+  if(!o?.items)return '';
+  return `<details class="frozen-checklist"><summary>冻结清单 · ${o.items.length} 项（冻结后条目数不变）</summary>${o.items.map(item=>`<div class="checklist-item" data-item-id="${esc(item.id)}">${resultChip(item)} <b>${esc(item.id)}</b> · ${esc(item.text||item.title)}${item.reason?`<div class="v4-note">原因：${esc(item.reason)}</div>`:''}${item.sourceFile?`<div class="v4-note">来源：<code>${esc(item.sourceFile)}:${item.sourceLine}</code></div>`:''}</div>`).join('')}</details>`;
+}
+function renderResultGroups(o) {
+  const items=o?.items||o?.steps||[];
+  return ['fail','unverifiable','unprocessed'].map(status=>{
+    const entries=items.filter(x=>x.status===status);
+    return `<section class="result-report" data-result-group="${status}"><h3>${FOUR_STATE_UI[status]} · ${entries.length} 项</h3>${entries.length?entries.map(x=>`<div class="checklist-item">${resultChip(x)} <b>${esc(x.id)}</b> · ${esc(x.text||x.title||x.name)}<div>原因：${esc(x.reason||'见结构化结果与检查证据')}</div>${x.sourceFile?`<div class="v4-note">证据：${esc(x.sourceFile)}:${x.sourceLine}</div>`:''}</div>`).join(''):'<div class="v4-note">无</div>'}</section>`;
+  }).join('');
+}
+function renderHistoricalReports(c) {
+  return c.attempts.filter(a=>a.orchestration&&a.orchestration!==c.orchestration&&a.orchestration.items?.some(i=>i.status!=='pass')).map(a=>`<details><summary>历史尝试 #${a.number} 验收报告 · ${esc(a.score||'示例')}</summary>${renderResultGroups(a.orchestration)}</details>`).join('');
+}
+function renderStepGraph(c,o) {
+  const steps=o.steps||[], rows=[],remaining=new Set(steps.map(s=>s.id)),done=new Set();
+  while(remaining.size) {
+    const row=steps.filter(s=>remaining.has(s.id)&&(s.deps||[]).every(id=>done.has(id)));
+    if(!row.length)break;
+    rows.push(row); row.forEach(s=>{remaining.delete(s.id);done.add(s.id);});
+  }
+  return `<div class="orchestration-grid">${rows.map((row,index)=>`${index?'<div class="v4-note">↓ 按依赖进入下一步</div>':''}<div class="orchestration-row" style="--step-columns:${Math.min(row.length,3)}">${row.map(step=>`<details class="orchestration-step" data-step-id="${esc(step.id)}"><summary><b>${esc(step.title||step.name||step.id)}</b><div>${resultChip(step)} · ${money(step.cost)}（示例）</div>${step.status!=='pass'?`<div class="v4-note">原因：${esc(step.reason||'等待处理')}</div>`:''}</summary><div class="step-body"><b>输入摘要</b><p>${esc(typeof step.input==='string'?step.input:JSON.stringify(step.input,null,2))}</p><b>结构化输出</b><pre>${esc(JSON.stringify(step.output,null,2))}</pre>${step.type==='gate'?`<div>批准对象：${esc(typeof step.approvalObject==='string'?step.approvalObject:JSON.stringify(step.approvalObject))}</div><div>内容哈希：<code>${esc(step.contentHash)}</code>（示意）</div>${step.gateState==='pending'?`<div class="resolution"><button class="ok" onclick="decideGate('${c.id}','${step.id}',true)">批准人工关卡</button><button class="bad" onclick="decideGate('${c.id}','${step.id}',false)">拒绝人工关卡</button></div>`:''}`:''}</div></details>`).join('')}</div>`).join('')}</div>`;
+}
+function renderPlanChecks(result) {
+  return result.checks.map(check=>`<div class="plan-check"><b>${check.ok?'✓ 通过':'✕ 不通过'}</b> · ${esc(check.label)}<div>${esc(check.reason||'符合节点授权')}</div></div>`).join('');
+}
+function renderOrchestration(c) {
+  const o=c.orchestration;
+  if(!o)return `<div class="card orchestration-card"><h2>执行编排</h2><p>本节点由主 agent 直接完成，未使用编排。</p></div>`;
+  const displayedPlan=c.pendingPlan||o.plan;
+  const validation=validatePlan(c.id,displayedPlan);
+  const replanning=c.limit.usedReplans>=c.limit.maxReplans||c.status==='blocked'&&c.blockedType==='limit';
+  return `<div class="card orchestration-card"><h2>执行编排 · ${esc(displayedPlan.template)}</h2>${c.pendingPlan?'<p class="v4-note">待确认计划尚未执行；步骤图保留已完成结果，计划版本与内容见下方 JSON。</p>':''}<div class="v4-note">示例 · 主 agent 选择方案；步骤模拟结果不替代节点独立核对与最终验收</div><div class="legend">${Object.entries(FOUR_STATE_UI).map(([status,label])=>`<span class="result-chip result-${status}">${label}</span>`).join('')}</div>${renderStepGraph(c,o)}${renderChecklist(o)}<details><summary>编排计划 JSON · ${esc(displayedPlan.version)}（示意，非最终接口）</summary><pre class="prompt-preview">${esc(JSON.stringify(displayedPlan,null,2))}</pre></details><details><summary>执行前校验 · 5 条 · ${validation.ok?'全部通过':'不通过，不执行'}</summary>${renderPlanChecks(validation)}</details>${c.planValidation?`<div><h3>最近一次校验</h3>${renderPlanChecks(c.planValidation)}</div>`:''}<div class="resolution"><button onclick="checkInvalidPlan('${c.id}')">模拟缺少上限的计划</button><button ${replanning?'disabled':''} onclick="replanNode('${c.id}')">重新规划（示例）</button>${o.state==='awaiting_confirmation'?`<button class="primary" onclick="confirmOrchestration('${c.id}')">确认本版编排</button>`:''}</div>${replanning?'<p class="v4-note">达到节点上限后不能再规划；需要先调整授权。</p>':''}</div>`;
+}
+function checkInvalidPlan(id) {
+  const plan=cloneData(getNode(id).orchestration.plan);delete plan.limits;
+  const result=executePlan(id,plan);getNode(id).planValidation=result.validation||validatePlan(id,plan);
+  coreFinish('计划校验不通过，未执行任何步骤');
+}
+function renderDiscoveries(c) {
+  const entries=db.discoveries.filter(d=>d.nodeId===c.id);
+  const labels={ignore:'忽略',merge:'并入已有节点',draft:'起草新节点'};
+  return `<div class="card"><h2>发现</h2>${entries.map(d=>`<div class="row"><b>${esc(d.description)}</b> <span class="k">示例 · ${{pending:'待分流',resolved:'已处理'}[d.status]||'待处理'}</span><p>位置：${esc(d.location)} · ${d.blocking?'阻塞本节点':'不阻塞本节点'}</p><b>证据</b>${list(Array.isArray(d.evidence)?d.evidence:[d.evidence])}<b>相关资料</b>${list(d.materials)}<p>leader 分流建议：${labels[d.recommendation?.action]||'起草新节点'} · ${esc(d.recommendation?.reason)}${d.recommendation?.targetId?' · '+esc(getNode(d.recommendation.targetId)?.title):''}</p><div class="v4-note">建议依赖：${esc((d.recommendation?.deps||[]).join('、')||'无')}</div>${d.status==='pending'?`<button class="primary" onclick="decideDiscovery('${d.id}','${d.recommendation?.action||'draft'}')">批准${labels[d.recommendation?.action]||'起草新节点'}</button>`:''}${d.newNodeId?`<button onclick="go('node','${d.newNodeId}')">查看新节点</button>`:''}</div>`).join('')||'<div class="empty">暂无发现</div>'}<details><summary>提交发现（示例）</summary><label>问题描述<input type="text" id="discovery-description"></label><label>证据与位置<input type="text" id="discovery-evidence"></label><label>相关资料（每行一条）<textarea id="discovery-materials"></textarea></label><label><input type="checkbox" id="discovery-blocking"> 阻塞本节点</label><button onclick="submitDiscoveryForm('${c.id}')">交给 leader 分流</button></details></div>`;
+}
+function submitDiscoveryForm(id) {
+  submitDiscovery(id,{description:$('#discovery-description').value,location:$('#discovery-evidence').value,evidence:[$('#discovery-evidence').value],materials:$('#discovery-materials').value.split('\n').filter(Boolean),blocking:$('#discovery-blocking').checked,recommendation:{action:'draft',reason:'示例：超出当前节点范围，建议独立核对与验收',deps:[]}});
+}
+function renderSideEffects(c) {
+  const entries=db.sideEffects.filter(e=>e.nodeId===c.id);
+  if(!entries.length)return '';
+  return `<div class="card"><h2>副作用状态不明</h2>${entries.map(e=>`<div class="row"><b>${esc(e.title)}</b><p>示例 · 目标：${esc(e.target)} · 状态：${{unknown:'状态不明',completed:'已完成',retry_pending:'未完成 · 已登记重新执行'}[e.status]||'待处理'}</p><p>意图：${esc(typeof e.intent==='string'?e.intent:JSON.stringify(e.intent))}</p><p>内容哈希：<code>${esc(e.contentHash)}</code>（示意） · 回执：${esc(e.receipt||'未知')}</p>${e.status==='unknown'?`<div class="resolution"><button class="ok" onclick="resolveSideEffect('${e.id}','completed')">核对后标记已完成</button><button onclick="resolveSideEffect('${e.id}','retry')">标记未完成并重新执行</button></div><p class="v4-note">先人工核对目标现场，再选择处理方式；此决策始终由你决定。</p>`:''}</div>`).join('')}</div>`;
+}
+function memoryRefs(item,p) {
+  return `<div class="v4-note">来源：${esc(item.source||'leader 提议 · 示例')} · 引用节点：${(item.refs||[]).map(id=>getNode(id)?`<a href="#" onclick="go('node','${id}');return false">${esc(getNode(id).title)}</a>`:esc(id)).join('、')||'暂无'}</div>`;
+}
+function renderMemory(p) {
+  const m=p.memory;
+  $('#main').innerHTML=`<div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / 知识</div><h1>项目记忆</h1><div class="intro">本项目持续使用的指令、设计决策、约定与注意事项。下面记忆内容为示例；来源与引用随条目显示。</div><div class="card"><h2>项目指令</h2>${m.instructions.map(i=>`<div class="memory-item"><b>🔒 强制 · ${esc(i.text)}</b>${memoryRefs(i,p)}<button class="bad small" onclick="removeProjectInstruction('${p.id}','${i.id}')">删除项目指令</button></div>`).join('')||'<div class="empty">暂无</div>'}<label>新增强制指令<input type="text" id="project-instruction"></label><button class="primary" onclick="addProjectInstruction('${p.id}',document.querySelector('#project-instruction').value)">添加，自动合并到所有节点边界</button></div><div class="card"><h2>设计决策</h2>${m.decisions.map(d=>`<div class="memory-item"><b>${esc(d.title||d.text)}</b> <span class="k">${({active:'有效',proposed:'待确认 · 尚未生效',deprecated:'已废弃',rejected:'已驳回'}[d.status]||d.status)}</span><p>${esc(d.text)}</p><p>理由：${esc(d.reason||'按项目目标与约束提炼')}</p><p>被否决的方案：${esc(d.rejectedAlternative||d.alternatives||'示例：暂不增加外部依赖')}</p>${d.status==='deprecated'?`<p>取代者：${esc(m.decisions.find(x=>x.id===d.replacedBy)?.title||d.replacedBy)}</p>`:''}${memoryRefs(d,p)}${d.status==='proposed'?`<button class="ok" onclick="confirmDesignDecision('${p.id}','${d.id}')">确认设计决策并生效</button>`:''}${d.status==='active'&&m.decisions.some(x=>x.status==='active'&&x.id!==d.id)?`<label>取代者<select id="replace-${d.id}">${m.decisions.filter(x=>x.status==='active'&&x.id!==d.id).map(x=>`<option value="${x.id}">${esc(x.title||x.text)}</option>`).join('')}</select></label><button onclick="deprecateDesignDecision('${p.id}','${d.id}',document.querySelector('#replace-${d.id}').value)">废弃并保留记录</button>`:''}</div>`).join('')}<button onclick="demoDesignProposal('${p.id}')">模拟 leader 提议设计决策</button></div><div class="card"><h2>约定</h2>${m.conventions.map(i=>`<div class="memory-item"><b>${esc(i.text||i.title)}</b>${memoryRefs(i,p)}</div>`).join('')||'<div class="empty">暂无</div>'}</div><div class="card"><h2>注意事项</h2>${m.cautions.map(i=>`<div class="memory-item"><b>${esc(i.text||i.title)}</b> <span class="k">${i.status==='revoked'?'已撤销':i.status==='proposed'?'待确认':'有效'}</span>${memoryRefs(i,p)}${i.status==='proposed'?`<button onclick="confirmCaution('${p.id}','${i.id}')">确认注意事项</button>`:i.status!=='revoked'?`<button class="bad small" onclick="revokeCaution('${p.id}','${i.id}')">撤销注意事项</button>`:''}</div>`).join('')}<button onclick="demoCaution('${p.id}')">模拟 leader 写入注意事项</button></div>`;
+}
+function demoDesignProposal(id) {proposeDesignDecision(id,{title:'统一产物引用格式（示例）',text:'产物引用同时附文件路径与版本，避免读取过期结论（示例）。',reason:'跨节点核对需要定位实际产物',source:'leader 提议 · 示例',refs:getProject(id).nodeIds.slice(0,2)});}
+function demoCaution(id) {addCaution(id,{text:'继续执行前核对上游产物版本（示例）',source:'leader 写入 · 示例',refs:getProject(id).nodeIds.slice(0,2)});}
+function renderOrchestrationTemplates() {
+  $('#main').innerHTML=`<h1>编排模板</h1><div class="intro">内置 15 个模式 · 只读。结构与参数为示意，非最终接口；原型不执行真实编排。</div>${db.orchestrationTemplates.map(t=>`<div class="card"><h2>${esc(t.name||t.title)} <span class="k">${esc(t.priority||t.demo)}</span></h2><p>${esc(t.structure)}</p><div class="v4-note">类型：${esc(t.category||'通用')} · 场景：${esc(t.scenario||t.useCase||'按节点需求选择')}</div><p>参数示意：${esc((t.params||[]).join('、'))}</p><p>共同要求：完整清单、逐项四态、异常列表、核对证据、上限与恢复点。</p></div>`).join('')}<div class="card"><h2>内置代理模板默认模型</h2>${db.agentTemplates.map(t=>`<div class="row"><b>${esc(t.name)}</b><p>作为主 agent：${esc(t.mainModel||t.model)} · ${esc(t.mainStrength||t.strength)}</p><p>作为编排步骤：${t.stepModel?esc(t.stepModel)+' · '+esc(t.stepStrength):'—'}</p></div>`).join('')}</div>`;
+}
+
+initV4();
+window.helm = { normalizeV4Node,normalizeV4Attempt,normalizeV4Project,mergeV4Instructions,validatePlan,executePlan,confirmOrchestration,freezeChecklist,updateChecklistItem,replanNode,wakeMainAgent,resultSummary,orchestrationExceptions,appendExecutionEvent,projectSpent,submitDiscovery,decideDiscovery,resumeBlockedDiscoveries,addProjectInstruction,removeProjectInstruction,syncProjectInstructions,proposeDesignDecision,confirmDesignDecision,deprecateDesignDecision,activeDesignDecisions,addCaution,confirmCaution,revokeCaution,decideGate,resolveSideEffect,renderOrchestration,renderResultGroups,renderMemory,renderOrchestrationTemplates,renderAttempts,setProcessTab,checkInvalidPlan, db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
 render();
 </script>
 </body>
