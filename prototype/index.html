@@ -13,6 +13,7 @@
   --bad: #c0392b; --bad-soft: #fbe6e3; --agent: #7a4fc4; --agent-soft: #efe8fa;
   --on-accent: #ffffff; --on-ok: #ffffff; --on-bad: #ffffff;
   --overlay: #00000066;
+  --flow-label: #605e57;
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -24,6 +25,7 @@
     --bad: #ef7d70; --bad-soft: #3d2220; --agent: #b598ea; --agent-soft: #2e2540;
     --on-accent: #161615; --on-ok: #161615; --on-bad: #161615;
     --overlay: #00000099;
+    --flow-label: #c0beb5;
   }
 }
 * { box-sizing: border-box; }
@@ -163,6 +165,45 @@ details.process > summary::-webkit-details-marker { display: none; }
 .prompt-preview { margin: 6px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; font: 12px/1.65 var(--mono); }
 [hidden] { display: none !important; }
 
+.app > *, .flow-stage > *, .form-grid > * { min-width: 0; }
+main, .card, .head, .modal { overflow-wrap: anywhere; }
+.nav-button { width: 100%; text-align: left; border-color: transparent; background: transparent; }
+.side-project { margin: 8px 0; }
+.side-project > summary { cursor: pointer; padding: 6px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.side-project .tree-node { padding-left: 22px; }
+.side-note { padding: 12px 10px; }
+.inbox-button { width: 100%; text-align: left; }
+.inbox-button .sub { display: block; }
+.s-pending_approval { background: var(--warn-soft); color: var(--warn); }
+.s-waiting, .s-skipped { background: var(--panel-2); color: var(--muted); }
+.s-needs_revalidation { background: var(--bad-soft); color: var(--bad); }
+.d-pending_approval { background: var(--warn); }
+.d-waiting, .d-skipped { background: var(--faint); }
+.d-needs_revalidation { background: var(--bad); }
+.flow { display: grid; gap: 12px; margin: 20px 0; }
+.flow-stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.flow-stage.parallel { grid-template-columns: repeat(var(--flow-columns, 4), minmax(0, 1fr)); }
+.flow-node { position: relative; padding: 15px 16px 15px 22px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; background: var(--panel); color: var(--text); min-width: 0; white-space: normal; }
+.flow-status { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 7px 0 0 7px; }
+.flow-edges { display: flex; justify-content: center; gap: 8px 20px; flex-wrap: wrap; color: var(--flow-label); background: var(--bg); font-size: 12px; }
+.branch-condition { color: var(--flow-label); background: var(--panel-2); border-radius: 5px; padding: 3px 8px; }
+.flow-editor { margin-top: 18px; }
+.flow-editor summary { cursor: pointer; }
+.form-card { margin-top: 18px; }
+.form-card label, .flow-editor label, details.handoff label, .form-grid label { display: block; margin: 10px 0; }
+.form-card label select, .flow-editor label select, details.handoff select { width: 100%; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-card fieldset { border: 1px solid var(--line); border-radius: 7px; margin: 14px 0; }
+.form-card .seat-option { display: inline-flex; gap: 4px; margin: 5px 12px 5px 0; }
+.seat-isolation { margin-left: 8px; }
+.dependency-band { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.version-diff { margin-bottom: 14px; }
+.autonomy-row { display: flex !important; justify-content: space-between; gap: 10px; align-items: center; padding: 6px 0; }
+.autonomy-row select { width: auto !important; flex: none; }
+.node-editor { overflow-y: auto; min-height: 0; }
+.node-editor label { display: block; margin: 10px 0; }
+.node-editor select { max-width: 100%; }
+
 @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .below { grid-template-columns: 1fr; } .info-band { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; height: auto; }
@@ -181,6 +222,10 @@ details.process > summary::-webkit-details-marker { display: none; }
   .inbox-item > .chip { flex: none; }
   .modal-backdrop { padding: 12px; }
   .tl-item { grid-template-columns: 46px 1fr; } .tl-item .who { grid-column: 2; }
+  .flow-stage.parallel, .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .flow-edges { justify-content: flex-start; flex-direction: column; }
+  .flow-node .chip { white-space: normal; }
+  .autonomy-row { flex-wrap: wrap; }
 }
 </style>
 </head>
@@ -193,379 +238,2761 @@ details.process > summary::-webkit-details-marker { display: none; }
 <div id="modal-root"></div>
 
 <script>
-// ---------- mock data: two chained cases ----------
-const STATUS = {
-  draft: '草稿·待批准', ready: '就绪', running: '代理执行中', blocked: '阻塞·等你回答',
-  verifying: '验证中', in_review: '待签收', changes_requested: '已打回', accepted: '已签收', abandoned: '已终止',
-};
-const KIND = { deterministic: '确定性', evidence: '证据型', adversarial: '对抗型', judgment: '判断型' };
-const KIND_HINT = {
-  deterministic: '自动执行', evidence: 'verifier 逐条核对来源', adversarial: 'redteam 挑错，须全部回应', judgment: '由你签字',
-};
-
+// 项目 → 项目流程 → 节点；所有演示状态仅保存在当前页面。
+const RETURN_LIMIT = 2;
 const db = {
-  c1: {
-    id: 'c1', parent: null, title: '客户 A · 智能排产需求能否承接', status: 'running', version: 2, owner: 'chief',
-    need: '客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。',
-    deliverable: 'Markdown 承接评估报告：evidence/c1/承接评估.md（含结论、依据、风险、条件及子契约证据索引）',
-    sources: ['公开行业数据与企业官网', 'experience/ 内部项目、基准与资源资料', '已批准的子契约结论与证据'],
-    limit: { deadline: '2026-10-10 18:00', maxAttempts: 3, tokenBudget: 30000, usedAttempts: 1, usedTokens: 6800 },
-    boundaries: [
-      { text: '只使用公开数据与内部资料', src: 'human', ok: true, enf: 'enforced', mech: 'worker 的资料工具仅开放公开网页检索与 experience/ 内部资料读取' },
-      { text: '不直接联系客户', src: 'human', ok: true, enf: 'enforced', mech: 'worker 未被授予邮件 / IM 类工具' },
-      { text: '3 个工作日内给出结论（截止 10/10）', src: 'human', ok: true, enf: 'advisory' },
-      { text: '不承诺超出当前交付产能的上线时间', src: 'agent_draft', ok: true, enf: 'advisory', why: '起草自经验库：P-2024-11 因过度承诺工期导致违约' },
-    ],
-    tests: [
-      { id: 't1', kind: 'deterministic', text: '结论包含：结论、依据、风险、条件 四部分', v: 'unchecked' },
-      { id: 't2', kind: 'evidence', text: '每条依据可追溯至市场数据或过往项目编号', v: 'unchecked' },
-      { id: 't3', kind: 'adversarial', text: '红队质疑全部得到回应', v: 'unchecked' },
-      { id: 't4', kind: 'judgment', text: '技术 / 产能 / 成本 三个子契约均已签收，结论可对外沟通', v: 'unchecked' },
-    ],
-    evidence: {},
-    handoff: {
-      updated: '10/07 09:18 · agent:chief',
-      baseline: '已有技术、交付产能、成本与报价三份子契约；承接结论尚未形成',
-      done: ['已批准需求与边界', '已派发技术、产能、成本子契约', '已补充竞品与市场规模调研子契约'],
-      decisions: ['先核对当前能力与产能，再汇总结论：避免在子契约未确认前承诺交付'],
-      open: ['交付产能缺少 Q4 排期', '成本子契约的毛利下限变更待批准', '技术对接先例仍需人工确认', '市场调研达到 token 上限'],
-      next: '处理子契约阻塞与待判定检查，待证据齐备后汇总承接结论',
-      outputs: ['evidence/c1/承接评估-提纲.md'],
-    },
-    attempts: [
-      { number: 1, actor: 'agent:chief', model: 'opus-5.5 · high', method: '拆解技术、产能、成本与市场调研，逐项汇总证据', result: 'running', failure: '', tokens: 6800, duration: '持续 2 小时' },
-    ],
-    log: [
-      ['10/07 09:12', 'human', '创建契约并批准'],
-      ['10/07 09:14', 'agent:chief', '拆解为 3 个子契约：技术可行性、交付产能、成本与报价'],
-      ['10/07 09:15', 'agent:chief', '等待子契约完成后汇总结论'],
-      ['10/07 09:18', 'agent:chief', '补充第 4 个子契约：竞品与市场规模调研'],
-    ],
-  },
-  c1a: {
-    id: 'c1a', parent: 'c1', title: '技术可行性', status: 'in_review', version: 1, owner: 'worker',
-    need: '评估现有平台能否支撑客户 A 的排产需求：约束求解规模、ERP 对接方式、数据前置条件。',
-    deliverable: 'Markdown 技术可行性报告：evidence/c1a/技术可行性.md（附基准、ERP 文档引用与风险回应）',
-    sources: ['experience/specs/engine-v3.md 调度引擎 v3 官方规格', 'experience/benchmarks/engine-v3-2025Q2.md', 'experience/projects/ 既有实施与复盘记录', 'SAP / 用友公开接口文档'],
-    limit: { deadline: '2026-10-08 18:00', maxAttempts: 3, tokenBudget: 18000, usedAttempts: 2, usedTokens: 8400 },
-    boundaries: [
-      { text: '以现有「调度引擎 v3」为基础，不评估自研新引擎', src: 'human', ok: true, enf: 'enforced', mech: 'worker 的引擎规格读取白名单仅包含 experience/specs/engine-v3.md' },
-      { text: '客户 ERP 型号未知时，按主流两种（SAP / 用友）分别评估', src: 'agent_draft', ok: true, enf: 'advisory' },
-    ],
-    tests: [
-      { id: 't1', kind: 'evidence', text: '求解规模结论有基准测试或过往项目数据支撑', v: 'pass' },
-      { id: 't2', kind: 'evidence', text: 'ERP 对接方式有接口文档或过往实施记录支撑', v: 'unresolved' },
-      { id: 't3', kind: 'adversarial', text: '红队质疑全部得到回应', v: 'pass' },
-      { id: 't4', kind: 'judgment', text: '技术负责人认可结论', v: 'unchecked' },
-    ],
-    result: '有条件可行：200 台设备 × 3000 工单/周 在引擎 v3 基准内（求解 < 4 分钟）。ERP 单向导入可行；双向实时同步无先例，建议首期不含。前提：客户提供 ≥ 6 个月历史工单数据。',
-    evidence: {
-      t1: [{ claim: '引擎 v3 在 250 台 × 4000 工单规模下求解 3.2 分钟', ref: 'experience/benchmarks/engine-v3-2025Q2.md#L40', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'pass', note: '数字与原文一致', method: '独立代理复核', correction: '' }] }],
-      t2: [
-        { claim: 'SAP 单向导入已在 P-2025-03 实施', ref: 'experience/projects/P-2025-03/交付报告.md', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'pass', note: '原文确认', method: '独立代理复核', correction: '' }] },
-        { claim: '无双向实时同步的交付记录', ref: 'experience/projects/ (全量检索 "双向同步")', by: 'agent:worker', checks: [{ checker: 'agent:verifier', result: 'unresolved', note: '检索为空只能证明经验库无记录，不能证明公司从未做过，需人确认', method: '独立代理复核', correction: '' }] },
+  "projects": [
+    {
+      "id": "project-a",
+      "name": "客户 A · 智能排产承接",
+      "type": "客户交付",
+      "site": "交付目录/客户A/",
+      "leader": "agent-pm-client",
+      "executor": "Codex CLI",
+      "goal": "评估智能排产需求能否承接",
+      "nodeIds": [
+        "a-clarify",
+        "a-tech",
+        "a-capacity",
+        "a-cost",
+        "a-market",
+        "a-summary",
+        "a-delivery",
+        "a-decline"
       ],
-      t3: [{ claim: '质疑：基准数据来自理想化排产，客户插单频繁会怎样？ → 回应：P-2024-07 插单率 18% 场景下求解仍 < 6 分钟，已写入风险', ref: 'experience/projects/P-2024-07/复盘.md', by: 'agent:worker', checks: [{ checker: 'agent:redteam', result: 'fail', note: '基准未覆盖插单', method: '独立代理复核', correction: '' }, { checker: 'agent:redteam', result: 'pass', note: '回应充分', method: '独立代理复核', correction: '补充 P-2024-07 插单率 18% 场景数据' }] }],
+      "edges": [
+        {
+          "from": "a-clarify",
+          "to": "a-tech"
+        },
+        {
+          "from": "a-clarify",
+          "to": "a-capacity"
+        },
+        {
+          "from": "a-clarify",
+          "to": "a-cost"
+        },
+        {
+          "from": "a-clarify",
+          "to": "a-market"
+        },
+        {
+          "from": "a-tech",
+          "to": "a-summary"
+        },
+        {
+          "from": "a-capacity",
+          "to": "a-summary"
+        },
+        {
+          "from": "a-cost",
+          "to": "a-summary"
+        },
+        {
+          "from": "a-market",
+          "to": "a-summary"
+        },
+        {
+          "from": "a-summary",
+          "to": "a-delivery",
+          "condition": "若可行",
+          "value": "feasible"
+        },
+        {
+          "from": "a-summary",
+          "to": "a-decline",
+          "condition": "若不可行",
+          "value": "infeasible"
+        }
+      ],
+      "branchResult": null
     },
-    handoff: {
-      updated: '10/07 10:38 · agent:worker',
-      baseline: '引擎 v3 官方规格支持 ≤ 200 台设备；已知无双向同步交付记录',
-      done: ['核对求解基准与 SAP 单向导入记录', '补充 P-2024-07 插单率 18% 场景', '提交技术结论与四条可追溯证据'],
-      decisions: ['首期采用 ERP 单向导入：已有 P-2025-03 实施依据', '双向同步仅作为风险建议：经验库空检索不足以证明公司从未实施'],
-      open: ['需人确认双向实时同步是否存在经验库外的交付记录', '官方 ≤ 200 台规格与 250 台基准的适用范围需要核对，当前结论限定为 200 台'],
-      next: '由人判定 t2，技术负责人确认结论后签收',
-      outputs: ['evidence/c1a/技术可行性.md', 'evidence/c1a/证据索引.md'],
+    {
+      "id": "project-b",
+      "name": "Helm 原型 v2 开发",
+      "type": "产品开发",
+      "site": "/Users/dikui/Project/Helm",
+      "leader": "agent-pm-dev",
+      "executor": "Codex CLI",
+      "goal": "以真实开发记录展示原型交付与返工",
+      "nodeIds": [
+        "b-spec",
+        "b-implement",
+        "b-browser",
+        "b-review"
+      ],
+      "edges": [
+        {
+          "from": "b-spec",
+          "to": "b-implement"
+        },
+        {
+          "from": "b-implement",
+          "to": "b-browser"
+        },
+        {
+          "from": "b-browser",
+          "to": "b-review"
+        }
+      ]
+    }
+  ],
+  "nodes": {
+    "a-tech": {
+      "id": "a-tech",
+      "title": "技术可行性",
+      "projectId": "project-a",
+      "deps": [
+        "a-clarify"
+      ],
+      "status": "in_review",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "评估现有平台能否支撑客户 A 的排产需求：约束求解规模、ERP 对接方式、数据前置条件。",
+      "deliverable": "Markdown 技术可行性报告：evidence/c1a/技术可行性.md（附基准、ERP 文档引用与风险回应）",
+      "sources": [
+        "experience/specs/engine-v3.md 调度引擎 v3 官方规格",
+        "experience/benchmarks/engine-v3-2025Q2.md",
+        "experience/projects/ 既有实施与复盘记录",
+        "SAP / 用友公开接口文档"
+      ],
+      "limit": {
+        "deadline": "2026-10-08 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 18000,
+        "usedAttempts": 2,
+        "usedTokens": 8400
+      },
+      "boundaries": [
+        {
+          "text": "以现有「调度引擎 v3」为基础，不评估自研新引擎",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 的引擎规格读取白名单仅包含 experience/specs/engine-v3.md"
+        },
+        {
+          "text": "客户 ERP 型号未知时，按主流两种（SAP / 用友）分别评估",
+          "src": "agent_draft",
+          "ok": true,
+          "enf": "advisory"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "求解规模结论有基准测试或过往项目数据支撑",
+          "v": "pass"
+        },
+        {
+          "id": "t2",
+          "kind": "evidence",
+          "text": "ERP 对接方式有接口文档或过往实施记录支撑",
+          "v": "unresolved"
+        },
+        {
+          "id": "t3",
+          "kind": "adversarial",
+          "text": "挑错席位质疑全部得到回应",
+          "v": "pass"
+        },
+        {
+          "id": "t4",
+          "kind": "judgment",
+          "text": "技术负责人认可结论",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {
+        "t1": [
+          {
+            "claim": "引擎 v3 在 250 台 × 4000 工单规模下求解 3.2 分钟",
+            "ref": "experience/benchmarks/engine-v3-2025Q2.md#L40",
+            "by": "agent-tech",
+            "checks": [
+              {
+                "checker": "agent-check",
+                "result": "pass",
+                "note": "数字与原文一致",
+                "method": "独立代理复核",
+                "correction": ""
+              }
+            ]
+          }
+        ],
+        "t2": [
+          {
+            "claim": "SAP 单向导入已在 P-2025-03 实施",
+            "ref": "experience/projects/P-2025-03/交付报告.md",
+            "by": "agent-tech",
+            "checks": [
+              {
+                "checker": "agent-check",
+                "result": "pass",
+                "note": "原文确认",
+                "method": "独立代理复核",
+                "correction": ""
+              }
+            ]
+          },
+          {
+            "claim": "无双向实时同步的交付记录",
+            "ref": "experience/projects/ (全量检索 \"双向同步\")",
+            "by": "agent-tech",
+            "checks": [
+              {
+                "checker": "agent-check",
+                "result": "unresolved",
+                "note": "检索为空只能证明经验库无记录，不能证明公司从未做过，需人确认",
+                "method": "独立代理复核",
+                "correction": ""
+              }
+            ]
+          }
+        ],
+        "t3": [
+          {
+            "claim": "质疑：基准数据来自理想化排产，客户插单频繁会怎样？ → 回应：P-2024-07 插单率 18% 场景下求解仍 < 6 分钟，已写入风险",
+            "ref": "experience/projects/P-2024-07/复盘.md",
+            "by": "agent-tech",
+            "checks": [
+              {
+                "checker": "agent-critic",
+                "result": "fail",
+                "note": "基准未覆盖插单",
+                "method": "独立代理复核",
+                "correction": ""
+              },
+              {
+                "checker": "agent-critic",
+                "result": "pass",
+                "note": "回应充分",
+                "method": "独立代理复核",
+                "correction": "补充 P-2024-07 插单率 18% 场景数据"
+              }
+            ]
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "agent-tech",
+          "model": "opus-5.5 · high",
+          "method": "仅按理想化排产基准评估求解规模，再检索 ERP 实施记录",
+          "result": "failed",
+          "failure": "风险审查员：基准未覆盖插单场景",
+          "tokens": 4800,
+          "duration": "49 分钟"
+        },
+        {
+          "number": 2,
+          "actor": "agent-tech",
+          "model": "opus-5.5 · high",
+          "method": "补充 P-2024-07 插单率 18% 场景，明确首期单向导入与数据前置条件",
+          "result": "success",
+          "failure": "",
+          "tokens": 3600,
+          "duration": "27 分钟"
+        }
+      ],
+      "log": [
+        [
+          "10/07 09:20",
+          "agent-tech",
+          "认领"
+        ],
+        [
+          "10/07 10:05",
+          "agent-tech",
+          "提交 4 条证据"
+        ],
+        [
+          "10/07 10:06",
+          "agent-tech",
+          "提交验证"
+        ],
+        [
+          "10/07 10:09",
+          "agent-critic",
+          "t3 不通过：基准未覆盖插单场景 → 退回执行"
+        ],
+        [
+          "10/07 10:31",
+          "agent-tech",
+          "补充 P-2024-07 插单数据，重新提交"
+        ],
+        [
+          "10/07 10:34",
+          "agent-check",
+          "t1、t2 通过"
+        ],
+        [
+          "10/07 10:36",
+          "agent-critic",
+          "t3 通过 → 进入待验收"
+        ],
+        [
+          "10/07 10:38",
+          "agent-check",
+          "补充复核：t2 无法判定，空检索不能证明公司从未做过双向同步，需人确认"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-tech",
+        "verify": "agent-check",
+        "challenge": "agent-critic",
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "result": "有条件可行：200 台设备 × 3000 工单/周 在引擎 v3 基准内（求解 < 4 分钟）。ERP 单向导入可行；双向实时同步无先例，建议首期不含。前提：客户提供 ≥ 6 个月历史工单数据。",
+      "handoff": {
+        "updated": "10/07 10:38 · 执行代理",
+        "baseline": "引擎 v3 官方规格支持 ≤ 200 台设备；已知无双向同步交付记录",
+        "done": [
+          "核对求解基准与 SAP 单向导入记录",
+          "补充 P-2024-07 插单率 18% 场景",
+          "提交技术结论与四条可追溯证据"
+        ],
+        "decisions": [
+          "首期采用 ERP 单向导入：已有 P-2025-03 实施依据",
+          "双向同步仅作为风险建议：经验库空检索不足以证明公司从未实施"
+        ],
+        "open": [
+          "需人确认双向实时同步是否存在经验库外的交付记录",
+          "官方 ≤ 200 台规格与 250 台基准的适用范围需要核对，当前结论限定为 200 台"
+        ],
+        "next": "由人判定 t2，技术负责人确认结论后验收",
+        "outputs": [
+          "evidence/c1a/技术可行性.md",
+          "evidence/c1a/证据索引.md"
+        ]
+      },
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "experience/specs/engine-v3.md 调度引擎 v3 官方规格；experience/benchmarks/engine-v3-2025Q2.md；experience/projects/ 既有实施与复盘记录；SAP / 用友公开接口文档",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "其他项目的开发过程",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "questions": [
+        {
+          "id": "question-history-1",
+          "text": "ERP 型号未知时按哪两种评估？",
+          "answer": "按已批准边界，分别评估 SAP / 用友。",
+          "answeredBy": "leader",
+          "state": "answered"
+        }
+      ]
     },
-    attempts: [
-      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '仅按理想化排产基准评估求解规模，再检索 ERP 实施记录', result: 'failed', failure: 'redteam：基准未覆盖插单场景', tokens: 4800, duration: '49 分钟' },
-      { number: 2, actor: 'agent:worker', model: 'opus-5.5 · high', method: '补充 P-2024-07 插单率 18% 场景，明确首期单向导入与数据前置条件', result: 'success', failure: '', tokens: 3600, duration: '27 分钟' },
-    ],
-    log: [
-      ['10/07 09:20', 'agent:worker', '认领'],
-      ['10/07 10:05', 'agent:worker', '提交 4 条证据'],
-      ['10/07 10:06', 'agent:worker', '提交验证'],
-      ['10/07 10:09', 'agent:redteam', 't3 不通过：基准未覆盖插单场景 → 退回执行'],
-      ['10/07 10:31', 'agent:worker', '补充 P-2024-07 插单数据，重新提交'],
-      ['10/07 10:34', 'agent:verifier', 't1、t2 通过'],
-      ['10/07 10:36', 'agent:redteam', 't3 通过 → 进入待签收'],
-      ['10/07 10:38', 'agent:verifier', '补充复核：t2 无法判定，空检索不能证明公司从未做过双向同步，需人确认'],
-    ],
-  },
-  c1b: {
-    id: 'c1b', parent: 'c1', title: '交付产能', status: 'blocked', blockedType: 'question', version: 1, owner: 'worker',
-    need: '评估 Q4–Q1 交付团队能否承接一个排产实施项目（预计 3 人 × 4 个月）。',
-    deliverable: 'Markdown 产能评估与 CSV 人员占用表：evidence/c1b/交付产能.md、evidence/c1b/人员占用.csv',
-    sources: ['experience/resources/2026-09-台账.xlsx', '人确认的 Q4 项目排期与人员占用'],
-    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 8000, usedAttempts: 1, usedTokens: 2400 },
-    boundaries: [{ text: '以现有人员为准，不假设新招聘', src: 'human', ok: true, enf: 'advisory' }],
-    tests: [
-      { id: 't1', kind: 'evidence', text: '产能结论基于排期表或资源台账', v: 'unchecked' },
-      { id: 't2', kind: 'judgment', text: '交付经理认可', v: 'unchecked' },
-    ],
-    question: '经验库中只有截至 9 月的资源台账，没有 Q4 排期。交付团队 Q4 是否已有确定项目？如有，请告诉我占用几人、到何时。',
-    evidence: {},
-    handoff: {
-      updated: '10/07 09:52 · agent:worker',
-      baseline: '现有资源台账截至 2026 年 9 月，尚无 Q4 已签约项目排期',
-      done: ['读取 9 月资源台账', '整理实施项目预计需要 3 人 × 4 个月的产能假设'],
-      decisions: ['缺少 Q4 排期时先提问：不将未知占用推定为可用产能'],
-      open: ['Q4 已确定项目占用人数与结束时间未知'],
-      next: '等待人补充 Q4 排期，再计算 Q4–Q1 可用产能',
-      outputs: ['evidence/c1b/人员占用-草稿.csv'],
+    "a-capacity": {
+      "id": "a-capacity",
+      "title": "交付产能",
+      "projectId": "project-a",
+      "deps": [
+        "a-clarify"
+      ],
+      "status": "blocked",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "评估 Q4–Q1 交付团队能否承接一个排产实施项目（预计 3 人 × 4 个月）。",
+      "deliverable": "Markdown 产能评估与 CSV 人员占用表：evidence/c1b/交付产能.md、evidence/c1b/人员占用.csv",
+      "sources": [
+        "experience/resources/2026-09-台账.xlsx",
+        "人确认的 Q4 项目排期与人员占用"
+      ],
+      "limit": {
+        "deadline": "2026-10-09 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 8000,
+        "usedAttempts": 1,
+        "usedTokens": 2400
+      },
+      "boundaries": [
+        {
+          "text": "以现有人员为准，不假设新招聘",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "产能结论基于排期表或资源台账",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "judgment",
+          "text": "交付经理认可",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "agent-capacity",
+          "model": "opus-5.5 · high",
+          "method": "核对资源台账并与 Q4 项目排期对照；缺失信息提交问题",
+          "result": "running",
+          "failure": "",
+          "tokens": 2400,
+          "duration": "31 分钟（等待回答）"
+        }
+      ],
+      "log": [
+        [
+          "10/07 09:21",
+          "agent-capacity",
+          "认领"
+        ],
+        [
+          "10/07 09:50",
+          "agent-capacity",
+          "读取 experience/resources/2026-09-台账.xlsx"
+        ],
+        [
+          "10/07 09:52",
+          "agent-capacity",
+          "阻塞：缺少 Q4 排期信息"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-capacity",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "blockedType": "question",
+      "question": "经验库中只有截至 9 月的资源台账，没有 Q4 排期。交付团队 Q4 是否已有确定项目？如有，请告诉我占用几人、到何时。",
+      "handoff": {
+        "updated": "10/07 09:52 · 执行代理",
+        "baseline": "现有资源台账截至 2026 年 9 月，尚无 Q4 已签约项目排期",
+        "done": [
+          "读取 9 月资源台账",
+          "整理实施项目预计需要 3 人 × 4 个月的产能假设"
+        ],
+        "decisions": [
+          "缺少 Q4 排期时先提问：不将未知占用推定为可用产能"
+        ],
+        "open": [
+          "Q4 已确定项目占用人数与结束时间未知"
+        ],
+        "next": "等待人补充 Q4 排期，再计算 Q4–Q1 可用产能",
+        "outputs": [
+          "evidence/c1b/人员占用-草稿.csv"
+        ]
+      },
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "experience/resources/2026-09-台账.xlsx；人确认的 Q4 项目排期与人员占用",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "其他项目的开发过程",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "questions": [
+        {
+          "id": "question-pending-1",
+          "text": "经验库中只有截至 9 月的资源台账，没有 Q4 排期。交付团队 Q4 是否已有确定项目？如有，请告诉我占用几人、到何时。",
+          "answer": null,
+          "answeredBy": null,
+          "state": "pending",
+          "leaderTried": true
+        }
+      ]
     },
-    attempts: [
-      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '核对资源台账并与 Q4 项目排期对照；缺失信息提交问题', result: 'running', failure: '', tokens: 2400, duration: '31 分钟（等待回答）' },
-    ],
-    log: [
-      ['10/07 09:21', 'agent:worker', '认领'],
-      ['10/07 09:50', 'agent:worker', '读取 experience/resources/2026-09-台账.xlsx'],
-      ['10/07 09:52', 'agent:worker', '阻塞：缺少 Q4 排期信息'],
-    ],
-  },
-  c1c: {
-    id: 'c1c', parent: 'c1', title: '成本与报价', status: 'running', version: 1, owner: 'worker',
-    need: '估算实施成本，给出报价区间。',
-    deliverable: 'Markdown 报价说明与 CSV 成本明细：evidence/c1c/成本与报价.md、evidence/c1c/成本明细.csv',
-    sources: ['experience/projects/P-2024-07/ 报价、工时与采购记录', 'experience/projects/P-2025-01/ 报价、工时与采购记录', '内部人力成本与采购价目表'],
-    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 15000, usedAttempts: 1, usedTokens: 12300 },
-    boundaries: [{ text: '报价区间参考近 2 年同类项目', src: 'human', ok: true, enf: 'advisory' }],
-    tests: [
-      { id: 't1', kind: 'evidence', text: '成本每一项有工时或采购依据', v: 'unchecked' },
-      { id: 't2', kind: 'judgment', text: '财务认可报价区间', v: 'unchecked' },
-    ],
-    change: {
-      by: 'agent:worker', reason: '经验库 P-2024-07、P-2025-01 两个排产项目毛利分别为 22%、19%，均被财务事后否决续签。建议把毛利下限写入边界，避免报价时遗漏。',
-      add: ['毛利率不低于 35%'], remove: [],
+    "a-cost": {
+      "id": "a-cost",
+      "title": "成本报价",
+      "projectId": "project-a",
+      "deps": [
+        "a-clarify"
+      ],
+      "status": "running",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "估算实施成本，给出报价区间。",
+      "deliverable": "Markdown 报价说明与 CSV 成本明细：evidence/c1c/成本与报价.md、evidence/c1c/成本明细.csv",
+      "sources": [
+        "experience/projects/P-2024-07/ 报价、工时与采购记录",
+        "experience/projects/P-2025-01/ 报价、工时与采购记录",
+        "内部人力成本与采购价目表"
+      ],
+      "limit": {
+        "deadline": "2026-10-09 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 15000,
+        "usedAttempts": 1,
+        "usedTokens": 12300
+      },
+      "boundaries": [
+        {
+          "text": "报价区间参考近 2 年同类项目",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "成本每一项有工时或采购依据",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "judgment",
+          "text": "财务认可报价区间",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "agent-finance",
+          "model": "opus-5.5 · high",
+          "method": "参考近两年同类项目，逐项汇总工时、采购与毛利区间",
+          "result": "running",
+          "failure": "",
+          "tokens": 12300,
+          "duration": "53 分钟"
+        }
+      ],
+      "log": [
+        [
+          "10/07 09:22",
+          "agent-finance",
+          "认领"
+        ],
+        [
+          "10/07 10:12",
+          "agent-finance",
+          "检索到 2 个同类项目报价"
+        ],
+        [
+          "10/07 10:15",
+          "agent-finance",
+          "提出节点变更：新增边界「毛利率不低于 35%」"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-finance",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "change": {
+        "by": "执行代理",
+        "reason": "经验库 P-2024-07、P-2025-01 两个排产项目毛利分别为 22%、19%，均被财务事后否决续签。建议把毛利下限写入边界，避免报价时遗漏。",
+        "add": [
+          "毛利率不低于 35%"
+        ],
+        "remove": []
+      },
+      "handoff": {
+        "updated": "10/07 10:15 · 执行代理",
+        "baseline": "已有 P-2024-07、P-2025-01 两个同类项目，历史毛利分别为 22%、19%",
+        "done": [
+          "检索两份同类项目报价",
+          "对照工时与采购项目",
+          "提出毛利下限 35% 的边界变更请求"
+        ],
+        "decisions": [
+          "先请求人批准毛利下限：避免将建议直接当成既定节点"
+        ],
+        "open": [
+          "毛利下限变更待批准",
+          "部分采购依据尚需核对"
+        ],
+        "next": "按批准后的节点补齐成本证据并形成报价区间",
+        "outputs": [
+          "evidence/c1c/成本明细-草稿.csv"
+        ]
+      },
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "experience/projects/P-2024-07/ 报价、工时与采购记录；experience/projects/P-2025-01/ 报价、工时与采购记录；内部人力成本与采购价目表",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "其他项目的开发过程",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      }
     },
-    evidence: {},
-    handoff: {
-      updated: '10/07 10:15 · agent:worker',
-      baseline: '已有 P-2024-07、P-2025-01 两个同类项目，历史毛利分别为 22%、19%',
-      done: ['检索两份同类项目报价', '对照工时与采购项目', '提出毛利下限 35% 的边界变更请求'],
-      decisions: ['先请求人批准毛利下限：避免将建议直接当成既定契约'],
-      open: ['毛利下限变更待批准', '部分采购依据尚需核对'],
-      next: '按批准后的契约补齐成本证据并形成报价区间',
-      outputs: ['evidence/c1c/成本明细-草稿.csv'],
+    "a-market": {
+      "id": "a-market",
+      "title": "市场调研",
+      "projectId": "project-a",
+      "deps": [
+        "a-clarify"
+      ],
+      "status": "blocked",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "调研离散制造智能排产的主要竞品与市场规模，区分已确认数据、估算口径及资料时效，给承接判断提供市场依据。",
+      "deliverable": "Markdown 市场调研报告与 CSV 竞品对照表：evidence/c1d/市场调研.md、evidence/c1d/竞品对照.csv",
+      "sources": [
+        "experience/market/2025-智能排产行业报告.md（可能过期）",
+        "竞品官网公开产品资料",
+        "公开行业协会统计与研究报告"
+      ],
+      "limit": {
+        "deadline": "2026-10-09 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 12000,
+        "usedAttempts": 1,
+        "usedTokens": 12000
+      },
+      "boundaries": [
+        {
+          "text": "只引用公开资料与内部已有报告，不采购付费报告",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 未被授予采购或支付工具，资料来源限定为公开页面与已有内部报告"
+        },
+        {
+          "text": "市场规模必须注明年份、地区与统计口径；过期资料标明风险",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "主要竞品的能力、定位与公开报价都有可追溯来源",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "evidence",
+          "text": "市场规模注明年份、地区、统计口径及资料时效",
+          "v": "unchecked"
+        },
+        {
+          "id": "t3",
+          "kind": "judgment",
+          "text": "你确认市场依据足以用于承接判断",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "agent-market",
+          "model": "opus-5.5 · high",
+          "method": "从 2025 年行业报告建立基线，检索竞品官网并交叉核对最新统计",
+          "result": "limit",
+          "failure": "token 已用 12000 / 12000，最新市场规模与报价核对未完成",
+          "tokens": 12000,
+          "duration": "1 小时 40 分钟"
+        }
+      ],
+      "log": [
+        [
+          "10/07 09:18",
+          "leader",
+          "起草并派发第 4 个节点"
+        ],
+        [
+          "10/07 09:30",
+          "agent-market",
+          "认领并记录 2025 年行业报告基线"
+        ],
+        [
+          "10/07 10:40",
+          "agent-market",
+          "保存 3 家竞品对照与来源索引"
+        ],
+        [
+          "10/07 11:10",
+          "agent-market",
+          "已达上限：token 12000 / 12000，保存部分完成报告后停止"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-market",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "blockedType": "limit",
+      "partial": {
+        "done": [
+          "整理 3 家竞品的公开能力与定位",
+          "核对已有 2025 年行业报告的统计范围",
+          "建立竞品对照表与来源索引"
+        ],
+        "remaining": [
+          "核对 2026 年最新市场规模与公开报价",
+          "交叉验证地区口径差异",
+          "完成市场风险结论与验证证据"
+        ],
+        "estimate": "预计还需约 6000 token、1 次尝试、45 分钟；可先缩小为已有资料的带时效说明摘要"
+      },
+      "handoff": {
+        "updated": "10/07 11:10 · 执行代理",
+        "baseline": "已有 2025 年行业报告 1 份（可能过期）",
+        "done": [
+          "整理 3 家竞品的公开能力与定位",
+          "核对 2025 年报告统计范围",
+          "保存部分完成报告及竞品对照草稿"
+        ],
+        "decisions": [
+          "不把 2025 年数据直接称为当前市场规模：需补充时效核对",
+          "token 达到上限即停止，交由人决定追加预算、调整范围或终止"
+        ],
+        "open": [
+          "2026 年最新市场规模尚未交叉验证",
+          "部分竞品缺少公开报价",
+          "token 预算已全部用完"
+        ],
+        "next": "等人决定预算或节点范围，再从未完成项目继续",
+        "outputs": [
+          "evidence/c1d/市场调研-部分完成.md",
+          "evidence/c1d/竞品对照.csv",
+          "evidence/c1d/来源索引.md"
+        ]
+      },
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "experience/market/2025-智能排产行业报告.md（可能过期）；竞品官网公开产品资料；公开行业协会统计与研究报告",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "其他项目的开发过程",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      }
     },
-    attempts: [
-      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '参考近两年同类项目，逐项汇总工时、采购与毛利区间', result: 'running', failure: '', tokens: 12300, duration: '53 分钟' },
-    ],
-    log: [
-      ['10/07 09:22', 'agent:worker', '认领'],
-      ['10/07 10:12', 'agent:worker', '检索到 2 个同类项目报价'],
-      ['10/07 10:15', 'agent:worker', '提出契约变更：新增边界「毛利率不低于 35%」'],
-    ],
-  },
-  c1d: {
-    id: 'c1d', parent: 'c1', title: '竞品与市场规模调研', status: 'blocked', blockedType: 'limit', version: 1, owner: 'worker',
-    need: '调研离散制造智能排产的主要竞品与市场规模，区分已确认数据、估算口径及资料时效，给承接判断提供市场依据。',
-    deliverable: 'Markdown 市场调研报告与 CSV 竞品对照表：evidence/c1d/市场调研.md、evidence/c1d/竞品对照.csv',
-    sources: ['experience/market/2025-智能排产行业报告.md（可能过期）', '竞品官网公开产品资料', '公开行业协会统计与研究报告'],
-    limit: { deadline: '2026-10-09 18:00', maxAttempts: 3, tokenBudget: 12000, usedAttempts: 1, usedTokens: 12000 },
-    boundaries: [
-      { text: '只引用公开资料与内部已有报告，不采购付费报告', src: 'human', ok: true, enf: 'enforced', mech: 'worker 未被授予采购或支付工具，资料来源限定为公开页面与已有内部报告' },
-      { text: '市场规模必须注明年份、地区与统计口径；过期资料标明风险', src: 'human', ok: true, enf: 'advisory' },
-    ],
-    tests: [
-      { id: 't1', kind: 'evidence', text: '主要竞品的能力、定位与公开报价都有可追溯来源', v: 'unchecked' },
-      { id: 't2', kind: 'evidence', text: '市场规模注明年份、地区、统计口径及资料时效', v: 'unchecked' },
-      { id: 't3', kind: 'judgment', text: '你确认市场依据足以用于承接判断', v: 'unchecked' },
-    ],
-    partial: {
-      done: ['整理 3 家竞品的公开能力与定位', '核对已有 2025 年行业报告的统计范围', '建立竞品对照表与来源索引'],
-      remaining: ['核对 2026 年最新市场规模与公开报价', '交叉验证地区口径差异', '完成市场风险结论与验证证据'],
-      estimate: '预计还需约 6000 token、1 次尝试、45 分钟；可先缩小为已有资料的带时效说明摘要',
+    "a-clarify": {
+      "id": "a-clarify",
+      "title": "需求澄清",
+      "projectId": "project-a",
+      "deps": [],
+      "status": "accepted",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。",
+      "deliverable": "Markdown 需求澄清：交付目录/客户A/需求澄清.md",
+      "sources": [
+        "客户 A 已提供需求材料",
+        "内部历史项目资料"
+      ],
+      "limit": {
+        "deadline": "2026-10-07 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 10000,
+        "usedAttempts": 1,
+        "usedTokens": 3000
+      },
+      "boundaries": [
+        {
+          "text": "只使用公开数据与内部资料",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 的资料工具仅开放公开网页检索与 experience/ 内部资料读取"
+        },
+        {
+          "text": "不直接联系客户",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 未被授予邮件 / IM 类工具"
+        },
+        {
+          "text": "3 个工作日内给出结论（截止 10/10）",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        },
+        {
+          "text": "不承诺超出当前交付产能的上线时间",
+          "src": "agent_draft",
+          "ok": true,
+          "enf": "advisory",
+          "why": "起草自经验库：P-2024-11 因过度承诺工期导致违约"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "订单、设备、人员及 ERP 同步目标已写明",
+          "v": "pass"
+        },
+        {
+          "id": "t2",
+          "kind": "judgment",
+          "text": "你确认承接判断的目标与范围",
+          "v": "pass"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "客户交付项目经理",
+          "model": "gpt-6.1-sol · ultra",
+          "method": "整理客户目标与当前业务边界",
+          "result": "success",
+          "failure": "",
+          "tokens": 3000,
+          "duration": "30 分钟"
+        }
+      ],
+      "log": [
+        [
+          "10/07 09:12",
+          "human",
+          "批准并验收需求澄清节点"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-pm-client",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "result": "离散制造；年产值约 8 亿；周排产；ERP 同步；先做承接判断，不直接承诺上线。",
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "客户 A 已提供需求材料；内部历史项目资料",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清基线",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "其他项目的开发过程",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "handoff": {
+        "updated": "10/07 09:18 · leader",
+        "baseline": "客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。",
+        "done": [
+          "本节点已验收"
+        ],
+        "decisions": [
+          "只按批准范围工作"
+        ],
+        "open": [],
+        "next": "为下游提供已验收产出",
+        "outputs": [
+          "Markdown 需求澄清：交付目录/客户A/需求澄清.md"
+        ]
+      }
     },
-    evidence: {},
-    handoff: {
-      updated: '10/07 11:10 · agent:worker',
-      baseline: '已有 2025 年行业报告 1 份（可能过期）',
-      done: ['整理 3 家竞品的公开能力与定位', '核对 2025 年报告统计范围', '保存部分完成报告及竞品对照草稿'],
-      decisions: ['不把 2025 年数据直接称为当前市场规模：需补充时效核对', 'token 达到上限即停止，交由人决定追加预算、调整范围或终止'],
-      open: ['2026 年最新市场规模尚未交叉验证', '部分竞品缺少公开报价', 'token 预算已全部用完'],
-      next: '等人决定预算或契约范围，再从未完成项目继续',
-      outputs: ['evidence/c1d/市场调研-部分完成.md', 'evidence/c1d/竞品对照.csv', 'evidence/c1d/来源索引.md'],
+    "a-summary": {
+      "id": "a-summary",
+      "title": "汇总结论",
+      "projectId": "project-a",
+      "deps": [
+        "a-tech",
+        "a-capacity",
+        "a-cost",
+        "a-market"
+      ],
+      "status": "ready",
+      "version": 1,
+      "approved": true,
+      "started": false,
+      "need": "客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。",
+      "deliverable": "Markdown 承接评估报告：evidence/c1/承接评估.md（含结论、依据、风险、条件及节点证据索引）",
+      "sources": [
+        "公开行业数据与企业官网",
+        "experience/ 内部项目、基准与资源资料",
+        "已批准的节点结论与证据"
+      ],
+      "limit": {
+        "deadline": "2026-10-10 18:00",
+        "maxAttempts": 3,
+        "tokenBudget": 30000,
+        "usedAttempts": 0,
+        "usedTokens": 0
+      },
+      "boundaries": [
+        {
+          "text": "只使用公开数据与内部资料",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 的资料工具仅开放公开网页检索与 experience/ 内部资料读取"
+        },
+        {
+          "text": "不直接联系客户",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "执行代理 未被授予邮件 / IM 类工具"
+        },
+        {
+          "text": "3 个工作日内给出结论（截止 10/10）",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        },
+        {
+          "text": "不承诺超出当前交付产能的上线时间",
+          "src": "agent_draft",
+          "ok": true,
+          "enf": "advisory",
+          "why": "起草自经验库：P-2024-11 因过度承诺工期导致违约"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "deterministic",
+          "text": "结论包含：结论、依据、风险、条件 四部分",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "evidence",
+          "text": "每条依据可追溯至市场数据或过往项目编号",
+          "v": "unchecked"
+        },
+        {
+          "id": "t3",
+          "kind": "adversarial",
+          "text": "挑错席位质疑全部得到回应",
+          "v": "unchecked"
+        },
+        {
+          "id": "t4",
+          "kind": "judgment",
+          "text": "技术 / 产能 / 成本 四个节点均已验收，结论可对外沟通",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [],
+      "log": [
+        [
+          "10/07 09:14",
+          "human",
+          "批准汇总节点主体，等待四个前置节点验收"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-pm-client",
+        "verify": "agent-check",
+        "challenge": "agent-critic",
+        "human": false
+      },
+      "refinement": {
+        "changed": true,
+        "applied": false,
+        "summary": "依据上游实际产出补充承接条件",
+        "changes": [
+          {
+            "field": "need",
+            "before": "客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。",
+            "after": "客户 A（离散制造，年产值约 8 亿）提出智能排产需求：根据订单、设备、人员自动生成周排产计划，并与其现有 ERP 同步。\n\n判断我们能否承接，给出结论：可行 / 有条件可行 / 不可行。\n\n补全：首期只做 ERP 单向导入；客户须提供至少 6 个月历史工单；根据已确认的 Q4 排期注明资源条件。"
+          }
+        ]
+      }
     },
-    attempts: [
-      { number: 1, actor: 'agent:worker', model: 'opus-5.5 · high', method: '从 2025 年行业报告建立基线，检索竞品官网并交叉核对最新统计', result: 'limit', failure: 'token 已用 12000 / 12000，最新市场规模与报价核对未完成', tokens: 12000, duration: '1 小时 40 分钟' },
-    ],
-    log: [
-      ['10/07 09:18', 'agent:chief', '起草并派发第 4 个子契约'],
-      ['10/07 09:30', 'agent:worker', '认领并记录 2025 年行业报告基线'],
-      ['10/07 10:40', 'agent:worker', '保存 3 家竞品对照与来源索引'],
-      ['10/07 11:10', 'agent:worker', '已达上限：token 12000 / 12000，保存部分完成报告后停止'],
-    ],
+    "a-delivery": {
+      "id": "a-delivery",
+      "title": "起草交付项目",
+      "projectId": "project-a",
+      "deps": [
+        "a-summary"
+      ],
+      "status": "draft",
+      "version": 1,
+      "approved": false,
+      "started": false,
+      "need": "在现有产品中新增「排产看板」：展示周排产计划（设备 × 时间甘特图），支持手动拖拽调整，并从 ERP 单向导入工单。",
+      "deliverable": "代码补丁与 Markdown 交付说明：evidence/c2/排产看板.patch、evidence/c2/交付说明.md；验证证据：evidence/c2/测试证据/",
+      "sources": [
+        "现有产品仓库与 CONTRIBUTING.md",
+        "调度引擎 v3 接口文档",
+        "c1 / c1a 已验收结论与边界",
+        "现有图表库官方文档"
+      ],
+      "limit": {
+        "deadline": "2026-10-18 18:00",
+        "maxAttempts": 6,
+        "tokenBudget": 90000,
+        "usedAttempts": 0,
+        "usedTokens": 0
+      },
+      "boundaries": [
+        {
+          "text": "首期不含 ERP 双向同步",
+          "src": "agent_draft",
+          "ok": false,
+          "enf": "advisory",
+          "why": "继承自 c1a 结论：双向同步无交付先例"
+        },
+        {
+          "text": "复用调度引擎 v3，不修改 engine/ 目录",
+          "src": "agent_draft",
+          "ok": false,
+          "enf": "enforced",
+          "mech": "Codex CLI 路径写入白名单排除 engine/ + 确定性测试 t2",
+          "why": "继承自 c1a 边界"
+        },
+        {
+          "text": "不新增第三方依赖（甘特图用现有图表库）",
+          "src": "agent_draft",
+          "ok": false,
+          "enf": "enforced",
+          "mech": "确定性测试 t2",
+          "why": "起草自仓库约定 CONTRIBUTING.md"
+        },
+        {
+          "text": "页面首屏加载 < 2s（200 台设备）",
+          "src": "agent_draft",
+          "ok": false,
+          "enf": "advisory",
+          "why": "起草自产品性能基线"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "deterministic",
+          "text": "单元测试与 CI 全部通过",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "deterministic",
+          "text": "diff 未触及 engine/ 目录，package.json 无新增依赖",
+          "v": "unchecked"
+        },
+        {
+          "id": "t3",
+          "kind": "evidence",
+          "text": "200 台设备场景首屏 < 2s，附性能测试截图",
+          "v": "unchecked"
+        },
+        {
+          "id": "t4",
+          "kind": "adversarial",
+          "text": "挑错席位针对拖拽冲突、空数据、超大数据给出用例并全部通过",
+          "v": "unchecked"
+        },
+        {
+          "id": "t5",
+          "kind": "judgment",
+          "text": "你在预览环境中验收交互",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [],
+      "log": [],
+      "seats": {
+        "execute": "agent-pm-client",
+        "verify": "agent-check",
+        "challenge": "agent-critic",
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "trigger": "条件分支：若可行，根据汇总结论起草交付项目。",
+      "branchCondition": "feasible"
+    },
+    "a-decline": {
+      "id": "a-decline",
+      "title": "婉拒说明",
+      "projectId": "project-a",
+      "deps": [
+        "a-summary"
+      ],
+      "status": "ready",
+      "version": 1,
+      "approved": true,
+      "started": false,
+      "need": "若评估不可行，形成说明原因和证据的婉拒说明草稿；由你决定是否对外发送。",
+      "deliverable": "Markdown 婉拒说明草稿：交付目录/客户A/婉拒说明.md",
+      "sources": [
+        "已验收的承接结论和依据"
+      ],
+      "limit": {
+        "deadline": "待确认",
+        "maxAttempts": 3,
+        "tokenBudget": 12000,
+        "usedAttempts": 0,
+        "usedTokens": 0
+      },
+      "boundaries": [
+        {
+          "text": "只形成草稿，不对外发送",
+          "enf": "enforced",
+          "mech": "未授予邮件与 IM 工具",
+          "src": "human",
+          "ok": true
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "每项原因引用已验收的评估证据",
+          "v": "unchecked"
+        },
+        {
+          "id": "t2",
+          "kind": "judgment",
+          "text": "你确认说明的语气和结论",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [],
+      "log": [],
+      "seats": {
+        "execute": "agent-pm-client",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "branchCondition": "infeasible"
+    },
+    "b-spec": {
+      "id": "b-spec",
+      "title": "功能规格",
+      "projectId": "project-b",
+      "deps": [],
+      "status": "accepted",
+      "version": 1,
+      "approved": true,
+      "started": true,
+      "need": "在 Helm 单文件原型中实现强制/建议边界、交付物/资料来源/上限、达到上限、交接记录、执行记录、无法判定与人工判定、验收后保存模板、执行代理启动 prompt。",
+      "deliverable": "任务说明：tasks/001-prototype-v2.md",
+      "sources": [
+        "tasks/001-prototype-v2.md",
+        "evidence/001/report.md",
+        "tasks/001-rework-1.md",
+        "tasks/002-prototype-v2-browser-check.md",
+        "tasks/002-recheck-1.md"
+      ],
+      "limit": {
+        "deadline": "未记录",
+        "maxAttempts": 3,
+        "tokenBudget": null,
+        "usedAttempts": 1,
+        "usedTokens": null
+      },
+      "boundaries": [
+        {
+          "text": "只改原型、任务证据与报告；零外部依赖，无构建步骤",
+          "enf": "enforced",
+          "mech": "修改范围检查与静态依赖检查",
+          "src": "human",
+          "ok": true
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "evidence",
+          "text": "任务 001 的 8 项改进与验收条件完整",
+          "v": "pass"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "研发项目经理",
+          "model": "未记录",
+          "method": "读取任务 001 功能规格与验收条件",
+          "result": "success",
+          "failure": "",
+          "tokens": null,
+          "duration": "未记录",
+          "sessionId": "未记录",
+          "sourceFiles": [
+            "tasks/001-prototype-v2.md"
+          ]
+        }
+      ],
+      "log": [],
+      "seats": {
+        "execute": "agent-pm-dev",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "sourceFiles": [
+        "tasks/001-prototype-v2.md"
+      ],
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "tasks/001-prototype-v2.md；evidence/001/report.md；tasks/001-rework-1.md；tasks/002-prototype-v2-browser-check.md；tasks/002-recheck-1.md",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "需求澄清基线",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "客户报价与商务谈判资料",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "handoff": {
+        "updated": "未记录",
+        "baseline": "以引用的任务说明和证据文件为基线；真实会话、模型、token 与耗时未记录",
+        "done": [
+          "本节点已验收"
+        ],
+        "decisions": [
+          "初检真实缺陷走退回，测试说明错误走项目变更"
+        ],
+        "open": [],
+        "next": "为下游提供已验收产出",
+        "outputs": [
+          "任务说明：tasks/001-prototype-v2.md"
+        ]
+      }
+    },
+    "b-implement": {
+      "id": "b-implement",
+      "title": "实现（Codex）",
+      "projectId": "project-b",
+      "deps": [
+        "b-spec"
+      ],
+      "status": "accepted",
+      "version": 2,
+      "approved": true,
+      "started": true,
+      "need": "按任务 001 实现原型 v2，再修复浏览器初检暴露的窄屏挤压与深色实色按钮文字对比度不足。",
+      "deliverable": "prototype/index.html；实现报告 evidence/001/report.md",
+      "sources": [
+        "tasks/001-prototype-v2.md",
+        "evidence/001/report.md",
+        "tasks/001-rework-1.md",
+        "tasks/002-prototype-v2-browser-check.md",
+        "tasks/002-recheck-1.md"
+      ],
+      "limit": {
+        "deadline": "未记录",
+        "maxAttempts": 3,
+        "tokenBudget": null,
+        "usedAttempts": 2,
+        "usedTokens": null
+      },
+      "boundaries": [
+        {
+          "text": "单文件、内联 CSS 与 JS、零外部依赖",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "确定性检查：不得引入 CDN、依赖或构建步骤"
+        },
+        {
+          "text": "沿用现有视觉风格与变量",
+          "src": "human",
+          "ok": true,
+          "enf": "advisory"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "deterministic",
+          "text": "任务 001 的 T1–T7 全部通过",
+          "v": "pass"
+        },
+        {
+          "id": "t2",
+          "kind": "evidence",
+          "text": "深浅两模式六种实色组合对比度均 ≥ 4.5:1",
+          "v": "pass"
+        }
+      ],
+      "evidence": {},
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "前端工程师 · Codex CLI",
+          "model": "未记录",
+          "method": "实现任务 001 的 8 项改进，并执行 Node 断言与脚本语法检查",
+          "result": "failed",
+          "failure": "浏览器初检发现窄屏正文挤压、深色实心按钮文字对比度不足",
+          "tokens": null,
+          "duration": "未记录",
+          "sessionId": "未记录",
+          "sourceFiles": [
+            "tasks/001-report.md",
+            "evidence/001/report.md",
+            "tasks/002-report.md"
+          ]
+        },
+        {
+          "number": 2,
+          "actor": "前端工程师 · Codex CLI",
+          "model": "未记录",
+          "method": "窄屏正文占满整行；新增实色按钮前景变量；经批准将浅色 --ok 从 #1f8a4c 调整为 #1f874c",
+          "result": "success",
+          "failure": "",
+          "tokens": null,
+          "duration": "未记录",
+          "sessionId": "未记录",
+          "sourceFiles": [
+            "tasks/001-rework-1.md",
+            "tasks/001-rework-1-report.md",
+            "evidence/001/report.md"
+          ]
+        }
+      ],
+      "log": [
+        [
+          "未记录",
+          "human",
+          "批准任务 001 的节点项目"
+        ],
+        [
+          "未记录",
+          "浏览器检查员",
+          "退回到实现：窄屏挤压、对比度不足"
+        ],
+        [
+          "未记录",
+          "human",
+          "批准颜色变更：--ok #1f8a4c → #1f874c"
+        ],
+        [
+          "未记录",
+          "前端工程师",
+          "完成第 2 次实现尝试"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-frontend",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "returnCount": 1,
+      "changeHistory": [
+        {
+          "id": "historical-color",
+          "kind": "change",
+          "status": "approved",
+          "reason": "浅色 --ok 原颜色的白字对比度为 4.376811:1，批准调整为 #1f874c 后为 4.537390:1。",
+          "before": "#1f8a4c",
+          "after": "#1f874c",
+          "sourceFiles": [
+            "evidence/001/report.md",
+            "tasks/001-rework-1-report.md"
+          ]
+        }
+      ],
+      "sourceFiles": [
+        "tasks/001-prototype-v2.md",
+        "tasks/001-report.md",
+        "tasks/001-rework-1.md",
+        "evidence/001/report.md"
+      ],
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "tasks/001-prototype-v2.md；evidence/001/report.md；tasks/001-rework-1.md；tasks/002-prototype-v2-browser-check.md；tasks/002-recheck-1.md",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "功能规格",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "客户报价与商务谈判资料",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "handoff": {
+        "updated": "未记录",
+        "baseline": "以引用的任务说明和证据文件为基线；真实会话、模型、token 与耗时未记录",
+        "done": [
+          "本节点已验收"
+        ],
+        "decisions": [
+          "初检真实缺陷走退回，测试说明错误走项目变更",
+          "退回理由：窄屏收件箱正文被挤压、深色实色按钮文字对比度不足；已由第 2 次实现修复。"
+        ],
+        "open": [],
+        "next": "为下游提供已验收产出",
+        "outputs": [
+          "prototype/index.html；实现报告 evidence/001/report.md"
+        ],
+        "returns": [
+          {
+            "from": "b-browser",
+            "reason": "窄屏挤压、对比度不足",
+            "evidence": [
+              "evidence/002/assertions.txt",
+              "tasks/001-rework-1.md"
+            ]
+          }
+        ]
+      }
+    },
+    "b-browser": {
+      "id": "b-browser",
+      "title": "浏览器检查",
+      "projectId": "project-b",
+      "deps": [
+        "b-implement"
+      ],
+      "status": "in_review",
+      "version": 2,
+      "approved": true,
+      "started": true,
+      "need": "按 S01–S11 检查原型，保存场景截图、逐条断言和控制台结果；初检缺陷退回实现，纠正写错的 S03 检查要求后复检。",
+      "deliverable": "evidence/002/assertions.txt；evidence/002/recheck-1/assertions.txt；对应场景截图与报告",
+      "sources": [
+        "tasks/001-prototype-v2.md",
+        "evidence/001/report.md",
+        "tasks/001-rework-1.md",
+        "tasks/002-prototype-v2-browser-check.md",
+        "tasks/002-recheck-1.md"
+      ],
+      "limit": {
+        "deadline": "未记录",
+        "maxAttempts": 3,
+        "tokenBudget": null,
+        "usedAttempts": 2,
+        "usedTokens": null
+      },
+      "boundaries": [
+        {
+          "text": "浏览器检查不修改原型代码，不覆盖初检证据",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "只读原型；复检证据保存到独立 evidence/002/recheck-1/ 目录"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "deterministic",
+          "text": "复检 38 条断言全部通过",
+          "v": "pass"
+        },
+        {
+          "id": "t2",
+          "kind": "evidence",
+          "text": "S01–S11 的检查结论都有对应截图与报告",
+          "v": "pass"
+        },
+        {
+          "id": "t3",
+          "kind": "judgment",
+          "text": "你确认可以进入最终审核",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {
+        "t1": [
+          {
+            "claim": "初检 31/34；复检 38/38；初检的真实实现缺陷是 S10、S11，S03 为测试规格错误",
+            "ref": "evidence/002/assertions.txt；evidence/002/recheck-1/assertions.txt",
+            "by": "浏览器检查员",
+            "checks": [
+              {
+                "checker": "通用核对员",
+                "result": "pass",
+                "method": "独立代理复核",
+                "note": "与两份逐条断言记录一致",
+                "correction": "S03 改查 t3 的修正链，t2 仅核验 method"
+              }
+            ]
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "number": 1,
+          "actor": "浏览器检查员",
+          "model": "未记录",
+          "method": "浏览器初检 S01–S11，按原任务要求核验",
+          "result": "failed",
+          "failure": "31/34：S10 深色按钮文字对比度 2.16:1；S11 正文列 59.3px、标题 3 行；S03 检查要求本身写错",
+          "tokens": null,
+          "duration": "未记录",
+          "sessionId": "未记录",
+          "passed": 31,
+          "total": 34,
+          "score": "31/34",
+          "sourceFiles": [
+            "evidence/002/assertions.txt",
+            "evidence/002/final-verification.txt",
+            "tasks/002-report.md"
+          ]
+        },
+        {
+          "number": 2,
+          "actor": "浏览器检查员",
+          "model": "未记录",
+          "method": "纠正 S03：t2 只检查 method，t3 检查修正链；深浅模式六组对比度与窄屏原阈值复检",
+          "result": "success",
+          "failure": "",
+          "tokens": null,
+          "duration": "未记录",
+          "sessionId": "未记录",
+          "passed": 38,
+          "total": 38,
+          "score": "38/38",
+          "sourceFiles": [
+            "tasks/002-recheck-1.md",
+            "evidence/002/recheck-1/assertions.txt",
+            "evidence/002/recheck-1/report.md"
+          ]
+        }
+      ],
+      "log": [
+        [
+          "未记录",
+          "浏览器检查员",
+          "初检 31/34，向实现节点提出退回"
+        ],
+        [
+          "未记录",
+          "human",
+          "批准 S03 测试规格变更，不走退回"
+        ],
+        [
+          "未记录",
+          "浏览器检查员",
+          "复检 38/38，进入待验收"
+        ]
+      ],
+      "seats": {
+        "execute": "agent-browser",
+        "verify": "agent-check",
+        "challenge": null,
+        "human": false
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      },
+      "result": "复检 S01–S11 全部通过，38/38；无新发现问题。控制台仅一次 favicon 404。",
+      "changeHistory": [
+        {
+          "id": "historical-s03",
+          "kind": "change",
+          "status": "approved",
+          "reason": "测试本身写错：S03 原断言把 correction 错指向 t2；通过项目变更修正为 t2 检查 method、t3 检查修正链，不走退回。",
+          "sourceFiles": [
+            "tasks/002-recheck-1.md",
+            "evidence/002/recheck-1/report.md"
+          ]
+        }
+      ],
+      "sourceFiles": [
+        "tasks/002-prototype-v2-browser-check.md",
+        "tasks/002-report.md",
+        "tasks/002-recheck-1.md",
+        "evidence/002/assertions.txt",
+        "evidence/002/recheck-1/assertions.txt"
+      ],
+      "context": {
+        "sent": [
+          {
+            "info": "本节点需求、边界、测试、交付物与上限",
+            "reason": "执行本节点所需"
+          },
+          {
+            "info": "tasks/001-prototype-v2.md；evidence/001/report.md；tasks/001-rework-1.md；tasks/002-prototype-v2-browser-check.md；tasks/002-recheck-1.md",
+            "reason": "提供可追溯资料"
+          },
+          {
+            "info": "实现（Codex）",
+            "reason": "相关上游产出"
+          }
+        ],
+        "omitted": [
+          {
+            "info": "核对与挑错席位的检查思路和完整对话",
+            "reason": "保持复核独立"
+          },
+          {
+            "info": "客户报价与商务谈判资料",
+            "reason": "与本节点无关"
+          }
+        ],
+        "confirmed": true
+      },
+      "handoff": {
+        "updated": "未记录",
+        "baseline": "以引用的任务说明和证据文件为基线；真实会话、模型、token 与耗时未记录",
+        "done": [
+          "已读取资料并整理节点产出"
+        ],
+        "decisions": [
+          "初检真实缺陷走退回，测试说明错误走项目变更"
+        ],
+        "open": [
+          "等待你验收"
+        ],
+        "next": "核对引用证据后继续处理",
+        "outputs": [
+          "evidence/002/assertions.txt；evidence/002/recheck-1/assertions.txt；对应场景截图与报告"
+        ]
+      }
+    },
+    "b-review": {
+      "id": "b-review",
+      "title": "你审核",
+      "projectId": "project-b",
+      "deps": [
+        "b-browser"
+      ],
+      "status": "draft",
+      "version": 1,
+      "approved": false,
+      "started": false,
+      "need": "查看真实开发与复检证据，审核原型的需求、边界与测试是否符合目标。",
+      "deliverable": "你填写的最终审核意见（本原型演示，不冒充仓库中的真实审核记录）",
+      "sources": [
+        "tasks/001-prototype-v2.md",
+        "evidence/001/report.md",
+        "tasks/001-rework-1.md",
+        "tasks/002-prototype-v2-browser-check.md",
+        "tasks/002-recheck-1.md"
+      ],
+      "limit": {
+        "deadline": "未记录",
+        "maxAttempts": 3,
+        "tokenBudget": null,
+        "usedAttempts": 0,
+        "usedTokens": null
+      },
+      "boundaries": [
+        {
+          "text": "是否最终验收由你决定",
+          "src": "human",
+          "ok": true,
+          "enf": "enforced",
+          "mech": "验收操作拒绝 leader 身份"
+        }
+      ],
+      "tests": [
+        {
+          "id": "t1",
+          "kind": "judgment",
+          "text": "你审核交互与产品模型",
+          "v": "unchecked"
+        }
+      ],
+      "evidence": {},
+      "attempts": [],
+      "log": [],
+      "seats": {
+        "execute": null,
+        "verify": "agent-check",
+        "challenge": null,
+        "human": true
+      },
+      "refinement": {
+        "changed": false,
+        "applied": false,
+        "changes": []
+      }
+    }
   },
-  c2: {
-    id: 'c2', parent: null, title: '交付功能：排产看板 v1', status: 'draft', version: 1, owner: 'chief',
-    trigger: '由 chief 起草：若「客户 A · 智能排产」签收为有条件可行，则启动此契约。边界中的条件继承自 c1a 的结论。',
-    need: '在现有产品中新增「排产看板」：展示周排产计划（设备 × 时间甘特图），支持手动拖拽调整，并从 ERP 单向导入工单。',
-    deliverable: '代码补丁与 Markdown 交付说明：evidence/c2/排产看板.patch、evidence/c2/交付说明.md；验证证据：evidence/c2/测试证据/',
-    sources: ['现有产品仓库与 CONTRIBUTING.md', '调度引擎 v3 接口文档', 'c1 / c1a 已签收结论与边界', '现有图表库官方文档'],
-    limit: { deadline: '2026-10-18 18:00', maxAttempts: 6, tokenBudget: 90000, usedAttempts: 0, usedTokens: 0 },
-    boundaries: [
-      { text: '首期不含 ERP 双向同步', src: 'agent_draft', ok: false, enf: 'advisory', why: '继承自 c1a 结论：双向同步无交付先例' },
-      { text: '复用调度引擎 v3，不修改 engine/ 目录', src: 'agent_draft', ok: false, enf: 'enforced', mech: 'Claude Code 权限规则 deny Edit(engine/**) + 确定性测试 t2', why: '继承自 c1a 边界' },
-      { text: '不新增第三方依赖（甘特图用现有图表库）', src: 'agent_draft', ok: false, enf: 'enforced', mech: '确定性测试 t2', why: '起草自仓库约定 CONTRIBUTING.md' },
-      { text: '页面首屏加载 < 2s（200 台设备）', src: 'agent_draft', ok: false, enf: 'advisory', why: '起草自产品性能基线' },
-    ],
-    tests: [
-      { id: 't1', kind: 'deterministic', text: '单元测试与 CI 全部通过', v: 'unchecked' },
-      { id: 't2', kind: 'deterministic', text: 'diff 未触及 engine/ 目录，package.json 无新增依赖', v: 'unchecked' },
-      { id: 't3', kind: 'evidence', text: '200 台设备场景首屏 < 2s，附性能测试截图', v: 'unchecked' },
-      { id: 't4', kind: 'adversarial', text: '红队针对拖拽冲突、空数据、超大数据给出用例并全部通过', v: 'unchecked' },
-      { id: 't5', kind: 'judgment', text: '你在预览环境中验收交互', v: 'unchecked' },
-    ],
-    evidence: {}, attempts: [],
-    log: [['10/07 10:40', 'agent:chief', '起草契约（待 c1 签收后启动）']],
+  "agents": [
+    {
+      "id": "agent-pm-client",
+      "name": "客户交付项目经理",
+      "tasks": "承接评估、派单与交付协调",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "leader",
+        "execute"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-pm-dev",
+      "name": "研发项目经理",
+      "tasks": "需求澄清、研发派单与交付协调",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "leader",
+        "execute"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-tech",
+      "name": "技术评估员",
+      "tasks": "平台能力与 ERP 接口评估",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-capacity",
+      "name": "交付规划员",
+      "tasks": "排期与人员占用测算",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-finance",
+      "name": "财务测算员",
+      "tasks": "成本、报价与毛利测算",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-market",
+      "name": "市场调研员",
+      "tasks": "公开市场资料检索与交叉核对",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-frontend",
+      "name": "前端工程师",
+      "tasks": "单文件交互原型与布局修复",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-browser",
+      "name": "浏览器检查员",
+      "tasks": "独立场景检查与证据整理",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute",
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-check",
+      "name": "通用核对员",
+      "tasks": "独立证据复核",
+      "model": "gpt-6-astra",
+      "strength": "high",
+      "seats": [
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "只读",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    },
+    {
+      "id": "agent-critic",
+      "name": "风险审查员",
+      "tasks": "对抗用例与风险挑错",
+      "model": "gpt-6-sol",
+      "strength": "high",
+      "seats": [
+        "challenge"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "只读",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": [],
+      "stat": {
+        "firstPass": 0,
+        "total": 0,
+        "failures": []
+      }
+    }
+  ],
+  "agentTemplates": [
+    {
+      "id": "agent-template-execute",
+      "name": "通用执行",
+      "tasks": "通用执行",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "execute"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": []
+    },
+    {
+      "id": "agent-template-verify",
+      "name": "通用核对",
+      "tasks": "通用核对",
+      "model": "gpt-6-astra",
+      "strength": "high",
+      "seats": [
+        "verify"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "只读",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": []
+    },
+    {
+      "id": "agent-template-challenge",
+      "name": "通用挑错",
+      "tasks": "通用挑错",
+      "model": "gpt-6-sol",
+      "strength": "high",
+      "seats": [
+        "challenge"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "只读",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": []
+    },
+    {
+      "id": "agent-template-leader",
+      "name": "通用项目经理",
+      "tasks": "通用项目经理",
+      "model": "gpt-6.1-sol",
+      "strength": "ultra",
+      "seats": [
+        "leader"
+      ],
+      "instructions": "遵守节点批准的需求、边界与测试",
+      "tools": [
+        "允许的资料读取"
+      ],
+      "permissions": "按节点授权",
+      "sources": [
+        "相关经验库"
+      ],
+      "defaultBoundaries": [],
+      "defaultTests": []
+    }
+  ],
+  "agentProposals": [
+    {
+      "id": "agent-proposal-1",
+      "nodeId": "a-tech",
+      "status": "pending",
+      "data": {
+        "name": "ERP 对接专家",
+        "tasks": "SAP / 用友实施记录和接口风险评估",
+        "model": "gpt-6.1-sol",
+        "strength": "ultra",
+        "seats": [
+          "execute",
+          "verify"
+        ],
+        "instructions": "引用接口文档与实施证据",
+        "tools": [
+          "资料检索"
+        ],
+        "permissions": "按节点授权",
+        "sources": [
+          "ERP 相关经验库"
+        ],
+        "defaultBoundaries": [],
+        "defaultTests": []
+      },
+      "reason": "现有代理缺少 ERP 专项经验"
+    }
+  ],
+  "lessonProposals": [
+    {
+      "id": "lesson-proposal-1",
+      "nodeId": "a-tech",
+      "agentId": "agent-tech",
+      "status": "pending",
+      "title": "基准评估覆盖插单场景",
+      "boundary": "评估求解规模时同时覆盖非理想化插单场景",
+      "reason": "技术节点第 1 次尝试漏掉插单场景"
+    }
+  ],
+  "experience": [
+    {
+      "id": "exp-engine",
+      "title": "调度引擎 v3 的规模与基准",
+      "content": "官方规格 ≤ 200 台；250 台 × 4000 工单基准为 3.2 分钟。适用范围需分别核对。",
+      "sources": [
+        "experience/specs/engine-v3.md",
+        "experience/benchmarks/engine-v3-2025Q2.md#L40"
+      ],
+      "projectIds": [
+        "project-a"
+      ],
+      "tags": [
+        "技术",
+        "基准"
+      ],
+      "status": "approved",
+      "sourceNote": "沿用原型 v2 的模拟资料引用"
+    },
+    {
+      "id": "exp-order",
+      "title": "P-2024-07 插单场景",
+      "content": "插单率 18% 场景下求解仍 < 6 分钟；技术评估须覆盖非理想化排产。",
+      "sources": [
+        "experience/projects/P-2024-07/复盘.md"
+      ],
+      "projectIds": [
+        "project-a"
+      ],
+      "tags": [
+        "教训",
+        "技术"
+      ],
+      "status": "approved"
+    },
+    {
+      "id": "exp-margin",
+      "title": "历史毛利与报价风险",
+      "content": "P-2024-07、P-2025-01 历史毛利分别为 22%、19%；财务否决续签。毛利下限应先请求批准。",
+      "sources": [
+        "experience/projects/P-2024-07/",
+        "experience/projects/P-2025-01/"
+      ],
+      "projectIds": [
+        "project-a"
+      ],
+      "tags": [
+        "财务",
+        "教训"
+      ],
+      "status": "approved"
+    },
+    {
+      "id": "exp-delay",
+      "title": "P-2024-11 工期过度承诺",
+      "content": "过度承诺工期导致违约；承诺时间前先核对产能。",
+      "sources": [
+        "experience/projects/P-2024-11/复盘.md"
+      ],
+      "projectIds": [
+        "project-a"
+      ],
+      "tags": [
+        "交付",
+        "风险"
+      ],
+      "status": "approved"
+    },
+    {
+      "id": "exp-pending-browser",
+      "nodeId": "b-browser",
+      "title": "浏览器断言需对准测试对象",
+      "content": "S03 的修正记录实际在 t3；测试要求错误通过项目变更修正，避免错误退回实现。",
+      "sources": [
+        "tasks/002-recheck-1.md"
+      ],
+      "projectIds": [
+        "project-b"
+      ],
+      "tags": [
+        "检查",
+        "教训"
+      ],
+      "status": "pending"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "decision-history-question",
+      "projectId": "project-a",
+      "nodeId": "a-tech",
+      "type": "提问",
+      "title": "ERP 型号评估口径",
+      "text": "按已批准边界分别评估 SAP / 用友；leader 已回答，不进入收件箱。",
+      "decisionMaker": "leader",
+      "outcome": "原样采纳",
+      "time": "10/07 09:25"
+    },
+    {
+      "id": "decision-history-return",
+      "projectId": "project-b",
+      "nodeId": "b-implement",
+      "type": "退回请求",
+      "title": "浏览器检查 → 实现",
+      "text": "批准退回：窄屏挤压、对比度不足；S03 单独修正测试规格。",
+      "decisionMaker": "你",
+      "outcome": "原样采纳",
+      "time": "未记录",
+      "sourceFiles": [
+        "tasks/001-rework-1.md",
+        "evidence/002/assertions.txt"
+      ]
+    },
+    {
+      "id": "decision-history-color",
+      "projectId": "project-b",
+      "nodeId": "b-implement",
+      "type": "审批变更请求",
+      "title": "批准 --ok 颜色变更",
+      "text": "--ok #1f8a4c → #1f874c，浅色白字对比度 4.376811:1 → 4.537390:1。",
+      "decisionMaker": "你",
+      "outcome": "原样采纳",
+      "time": "未记录",
+      "sourceFiles": [
+        "evidence/001/report.md"
+      ]
+    },
+    {
+      "id": "decision-history-s03",
+      "projectId": "project-b",
+      "nodeId": "b-browser",
+      "type": "审批变更请求",
+      "title": "测试写错走项目变更",
+      "text": "S03 错把 correction 检查写在 t2，改为检查 t3 修正链；不是实现缺陷，不走退回。",
+      "decisionMaker": "你",
+      "outcome": "有修改",
+      "time": "未记录",
+      "sourceFiles": [
+        "tasks/002-recheck-1.md",
+        "evidence/002/recheck-1/report.md"
+      ]
+    }
+  ],
+  "templates": [],
+  "autonomy": {
+    "产品开发": {
+      "approval": "human",
+      "change": "human",
+      "return": "human",
+      "limit": "human",
+      "unresolved": "human",
+      "acceptance": "human",
+      "context": "auto",
+      "experience": "human",
+      "external": "human",
+      "limitExtra": 6000
+    },
+    "客户交付": {
+      "approval": "human",
+      "change": "human",
+      "return": "human",
+      "limit": "human",
+      "unresolved": "human",
+      "acceptance": "human",
+      "context": "auto",
+      "experience": "human",
+      "external": "human",
+      "limitExtra": 6000
+    },
+    "调研": {
+      "approval": "human",
+      "change": "human",
+      "return": "human",
+      "limit": "human",
+      "unresolved": "human",
+      "acceptance": "human",
+      "context": "auto",
+      "experience": "human",
+      "external": "human",
+      "limitExtra": 6000
+    },
+    "空白": {
+      "approval": "human",
+      "change": "human",
+      "return": "human",
+      "limit": "human",
+      "unresolved": "human",
+      "acceptance": "human",
+      "context": "auto",
+      "experience": "human",
+      "external": "human",
+      "limitExtra": 6000
+    }
   },
-  c2a: {
-    id: 'c2a', parent: 'c2', title: 'PRD 与方案设计', status: 'draft', version: 1, owner: 'chief',
-    need: '输出 PRD 和技术方案。',
-    deliverable: 'Markdown PRD 与技术方案：evidence/c2a/PRD.md、evidence/c2a/技术方案.md',
-    sources: ['c2 已批准的需求、边界与测试', '现有产品交互与代码结构', '调度引擎 v3 与现有图表库接口文档'],
-    limit: { deadline: '2026-10-12 18:00', maxAttempts: 3, tokenBudget: 15000, usedAttempts: 0, usedTokens: 0 },
-    boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你确认方案', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
-  },
-  c2b: {
-    id: 'c2b', parent: 'c2', title: '实现', status: 'draft', version: 1, owner: 'chief',
-    need: '按方案实现前端看板与导入接口。',
-    deliverable: '前端看板与导入接口代码补丁，以及 Markdown 实现说明：evidence/c2b/实现.patch、evidence/c2b/实现说明.md',
-    sources: ['c2a 已签收 PRD 与技术方案', '现有产品仓库及测试', '调度引擎 v3 与现有图表库官方接口文档'],
-    limit: { deadline: '2026-10-16 18:00', maxAttempts: 5, tokenBudget: 50000, usedAttempts: 0, usedTokens: 0 },
-    boundaries: [], tests: [{ id: 't1', kind: 'deterministic', text: 'CI 通过', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
-  },
-  c2c: {
-    id: 'c2c', parent: 'c2', title: '验收与发布', status: 'draft', version: 1, owner: 'chief',
-    need: '预览环境验收并发布。',
-    deliverable: 'Markdown 验收与发布记录：evidence/c2c/验收记录.md、evidence/c2c/发布记录.md（附预览环境地址）',
-    sources: ['c2 已批准验收标准', 'c2b 已签收实现与 CI 结果', '产品预览环境与既有发布流程'],
-    limit: { deadline: '2026-10-18 18:00', maxAttempts: 3, tokenBudget: 18000, usedAttempts: 0, usedTokens: 0 },
-    boundaries: [], tests: [{ id: 't1', kind: 'judgment', text: '你验收', v: 'unchecked' }], evidence: {}, attempts: [], log: [],
-  },
+  "returns": [
+    {
+      "id": "return-history-1",
+      "fromId": "b-browser",
+      "targetId": "b-implement",
+      "reason": "窄屏挤压、对比度不足",
+      "evidence": [
+        "evidence/002/assertions.txt",
+        "tasks/001-rework-1.md"
+      ],
+      "status": "approved",
+      "state": "approved",
+      "decisionMaker": "你",
+      "historical": true,
+      "sourceFiles": [
+        "tasks/001-rework-1.md",
+        "tasks/002-report.md"
+      ]
+    }
+  ],
+  "returnLimit": 2,
+  "serial": 100
 };
 
-let view = { page: 'inbox', id: null };
-const templates = [];
-let modalContract = null;
-let modalReturnFocus = null;
-
-// ---------- helpers ----------
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const kids = (id) => Object.values(db).filter((c) => c.parent === id);
-const chip = (s, blockedType) => `<span class="chip s-${s}">${s === 'blocked' && blockedType === 'limit' ? '阻塞·已达上限' : STATUS[s]}</span>`;
-const who = (a) => a === 'human'
-  ? '<span class="who-human">你</span>'
-  : `<span class="who-agent">${esc(a.replace('agent:', ''))}</span>`;
-const stamp = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
-function go(page, id = null) { view = { page, id }; render(); $('main').scrollTop = 0; }
-function log(c, actor, text) { c.log.push([stamp(), actor, text]); }
-const VERDICT = { pass: '✓ 通过', fail: '✗ 不通过', unresolved: '? 无法判定', unchecked: '— 未检查' };
-const ATTEMPT_RESULT = { success: '成功', failed: '失败', running: '进行中', limit: '达到上限' };
-const list = (items) => items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="empty">暂无</div>';
-const unresolvedTests = (c) => c.tests.filter((t) => t.v === 'unresolved');
-function signoffBlocker(c) {
-  if (unresolvedTests(c).length) return '仍有无法判定的测试，请先人工判定后签收';
-  if (c.tests.some((t) => t.kind !== 'judgment' && t.v !== 'pass')) return '仍有未通过的测试，请打回后补充验证';
+// ---------- 数据、规则与决策 ----------
+const cloneData = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+const AUTONOMY_LABELS = { approval:'批准节点项目',change:'审批变更请求',return:'退回请求',limit:'处理达到上限',unresolved:'判定「无法判定」',acceptance:'验收',context:'上下文包确认',experience:'经验库入库',external:'不可逆或对外动作' };
+const getNode = (id) => db.nodes[id];
+const getProject = (id) => db.projects.find((p) => p.id === id);
+const getAgent = (id) => db.agents.find((a) => a.id === id);
+const coreTime = () => typeof stamp === 'function' ? stamp() : new Date().toISOString();
+const coreId = (prefix) => `${prefix}-${++db.serial}`;
+const coreActor = (actor) => actor === 'automatic' || actor === 'auto' ? '自动' : ['leader','agent:leader'].includes(actor) ? 'leader' : '你';
+function coreFinish(message) { if (message && typeof toast === 'function') toast(message); if (typeof render === 'function') render(); }
+function coreLog(node,actor,text) { if (!node) return; node.log ||= []; node.log.push([coreTime(),coreActor(actor),text]); }
+function recordDecision(type,nodeId,text,actor='human',outcome='原样采纳',extra={}) {
+  const node=getNode(nodeId);
+  const decision={id:coreId('decision'),nodeId:nodeId||null,projectId:node?.projectId||extra.projectId||null,type:AUTONOMY_LABELS[type]||type,title:extra.title||text,text,decisionMaker:coreActor(actor),outcome,time:coreTime(),...extra};
+  db.decisions.push(decision); return decision;
+}
+function coreRefuse(reason,nodeId=null,actor='human',type='规则检查') { recordDecision(type,nodeId,reason,actor,'驳回');coreFinish(reason);return {ok:false,reason}; }
+function coreAuto(node,key) { const p=getProject(node.projectId); return db.autonomy[p.type]?.[key] === 'auto'; }
+function ensureStarted(node) {
+  node.attempts ||= []; node.handoff ||= {updated:`${coreTime()} · leader`,baseline:'读取允许的资料并核对基线',done:[],decisions:[],open:[],next:'按批准的需求执行，先核对引用文件',outputs:[]};
+  node.context ||= {sent:[{info:'本节点需求、边界、测试、交付物、上限与席位安排',reason:'执行本节点所需'},{info:node.deps.map(d=>getNode(d)?.result||getNode(d)?.deliverable||d).join('；')||'节点资料来源',reason:'相关上游的已验收产出'},{info:node.sources.join('；'),reason:'提供允许读取的资料'}],omitted:[{info:'独立核对与挑错的检查思路、完整对话',reason:'保持复核独立'},{info:node.projectId==='project-b'?'客户报价、商务谈判与无关项目资料':'其他项目的开发过程',reason:'与本节点无关'}],confirmed:coreAuto(node,'context')};
+}
+function updateHandoff(node,next,actor='human') {ensureStarted(node);node.handoff.updated=`${coreTime()} · ${coreActor(actor)}`;node.handoff.next=next;}
+function dependencyBlocker(node) { const pending=node.deps.filter(id=>getNode(id)?.status!=='accepted');if(pending.length)return `前置节点尚未全部验收：${pending.map(id=>getNode(id)?.title||id).join('、')}`;return ''; }
+function branchBlocker(node) { if(!node.branchCondition)return '';const p=getProject(node.projectId);return p.branchResult!==node.branchCondition?'尚未选中此条件分支':''; }
+function signoffBlocker(node) {if(node.tests.some(t=>t.v==='unresolved'))return '仍有无法判定的测试，请先判定后验收';if(node.tests.some(t=>t.kind!=='judgment'&&t.v!=='pass'))return '仍有未通过的测试，请打回后补充验证';return '';}
+const unresolvedTests = (node) => node.tests.filter(t=>t.v==='unresolved');
+function inbox() {
+  const result={approval:[],questions:[],limits:[],requests:[],review:[],experience:[]};
+  const push=(key,id,nodeId,title,summary,kind)=>result[key].push({id,nodeId,title,summary,kind,type:kind});
+  for(const n of Object.values(db.nodes)) {
+    if(n.archived)continue;
+    if(['draft','needs_revalidation'].includes(n.status)&&!n.approved)push('approval',n.id,n.id,n.title,n.approvalStage==='refinement'?'上游产出补全后有变化，需再次确认':'确认需求、边界、测试与席位安排','node');
+    if(n.context&&!n.context.confirmed&&n.approved&&n.status==='ready'&&!dependencyBlocker(n)&&!branchBlocker(n))push('approval',`context-${n.id}`,n.id,n.title,'派单前上下文包待你确认','context');
+    for(const q of n.questions||[])if(q.state==='pending')push('questions',q.id,n.id,n.title,q.text,'question');
+    if(n.status==='blocked'&&n.blockedType==='limit')push('limits',n.id,n.id,n.title,n.partial?.estimate||'已达到节点上限','limit');
+    if(n.change)push('requests',n.change.id||`change-${n.id}`,n.id,n.title,n.change.reason,'change');
+    if(n.status==='in_review')push('review',n.id,n.id,n.title,n.result||`${unresolvedTests(n).length} 项无法判定测试`,'acceptance');
+  }
+  for(const r of db.returns)if(['pending','escalated'].includes(r.status))push('requests',r.id,r.fromId,`${getNode(r.fromId)?.title} → ${getNode(r.targetId)?.title}`,r.status==='escalated'?`升级给你处理：${r.reason}`:r.reason,r.status==='escalated'?'escalation':'return');
+  for(const p of db.agentProposals)if(p.status==='pending')push('approval',p.id,p.nodeId,`代理提议：${p.data.name}`,p.reason||p.data.tasks,'agent');
+  for(const p of db.lessonProposals)if(p.status==='pending')push('approval',p.id,p.nodeId,p.title,p.reason,'lesson');
+  for(const e of db.experience)if(e.status==='pending')push('experience',e.id,e.nodeId,e.title,e.content,'experience');
+  for(const p of db.projects)if(p.flowChange)push('requests',p.flowChange.id,p.flowChange.nodeId||p.nodeIds[0],`${p.name} · 项目流程变更`,p.flowChange.reason,'flow');
+  return result;
+}
+const inboxCount = () => Object.values(inbox()).reduce((n,items)=>n+items.length,0);
+function startNode(id) {
+  const n=getNode(id);if(!n)return {ok:false,reason:'节点不存在'};
+  if(!n.approved)return coreRefuse('节点项目尚未批准',id);
+  const reason=dependencyBlocker(n)||branchBlocker(n);if(reason)return coreRefuse(reason,id);
+  if(['accepted','abandoned'].includes(n.status))return {ok:false,reason:'此节点当前不能启动'};
+  if(n.started&&!['ready','changes_requested','needs_revalidation'].includes(n.status))return {ok:true,alreadyStarted:true};
+  ensureStarted(n);
+  if(!n.context.confirmed){n.status='ready';coreFinish('请先确认上下文包再派单');return {ok:false,reason:'上下文包待确认'};}
+  recordDecision('context',id,n.context.confirmed?'确认节点派单上下文包':'上下文包待确认',coreAuto(n,'context')?'automatic':'human');
+  n.started=true;n.status='running';delete n.blockedType;n.limit.usedAttempts=(n.limit.usedAttempts||0)+1;
+  n.attempts.push({number:n.attempts.length+1,actor:n.seats.human?'你':getAgent(n.seats.execute)?.name||'执行代理',model:n.seats.human?'人工':`${getAgent(n.seats.execute)?.model||'未记录'} · ${getAgent(n.seats.execute)?.strength||'未记录'}`,method:'核对上下文包和交接记录，记录基线后按批准的节点项目执行',result:'running',failure:'',tokens:null,duration:'进行中',sessionId:null});
+  coreLog(n,'leader',n.seats.human?'人工节点就绪，等待你执行':'组装上下文包，通过 Codex CLI 启动执行代理');
+  updateHandoff(n,n.seats.human?'由你执行本人工节点':'核对引用文件并继续执行','leader');
+  coreFinish('节点已开工');return {ok:true};
+}
+function applyRefinement(n) {
+  const r=n.refinement;if(!r||r.applied)return false;
+  r.applied=true;if(!r.changed)return false;
+  n.approvalDiff=(r.changes||[]).map(change=>({...change,before:change.before??n[change.field],after:change.after??change.value}));
+  for(const diff of n.approvalDiff)if(diff.after!==undefined)n[diff.field]=cloneData(diff.after);
+  if(n.approvalDiff.length)n.version++;
+  n.refinementDiff=n.approvalDiff;delete n.context;n.approvalStage='refinement';n.approved=false;n.status='draft';
+  recordDecision('节点补全',n.id,r.summary||'leader 根据上游已验收产出补全节点细节','leader','有修改',{diff:n.approvalDiff});
+  return true;
+}
+function completeReadyNodes(projectId) {
+  const p=getProject(projectId);if(!p)return {ok:false};
+  for(const id of p.nodeIds){const n=getNode(id);if(!n||!n.approved||n.started&&!['ready','needs_revalidation'].includes(n.status)||['accepted','abandoned'].includes(n.status)||dependencyBlocker(n)||branchBlocker(n))continue;
+    const changed=applyRefinement(n);
+    if(changed){if(coreAuto(n,'approval'))approve(id,'automatic');continue;}
+    startNode(id);
+  }
+  coreFinish();return {ok:true};
+}
+function approve(id,actor='human') {
+  const n=getNode(id);if(!n)return {ok:false};
+  if(!['human','leader','automatic','auto'].includes(actor))return coreRefuse('此身份不能批准节点项目',id,actor,'approval');
+  if(actor==='leader'&&!coreAuto(n,'approval'))return coreRefuse('批准节点项目尚未授权代理自动',id,actor,'approval');
+  if(['automatic','auto'].includes(actor)&&!coreAuto(n,'approval'))return coreRefuse('当前项目类型未启用自动批准',id,actor,'approval');
+  if(!['draft','needs_revalidation'].includes(n.status)||n.approved)return {ok:false,reason:'节点不在待批准状态'};
+  if(actor==='human'&&n.boundaries.some(b=>!b.ok))return coreRefuse('还有边界未确认：请逐条勾选或删除',id,actor,'approval');
+  if(n.boundaries.some(b=>b.enf==='enforced'&&!b.mech?.trim()))return coreRefuse('强制边界必须填写保证机制',id,actor,'approval');
+  if(!validSeats(n.seats,n.tests))return coreRefuse('席位安排不合法；执行席位只允许一个代理，对抗型测试必须安排挑错席位',id,actor,'approval');
+  n.boundaries.forEach(b=>b.ok=true);n.approved=true;n.status='ready';
+  recordDecision('approval',id,n.approvalStage==='refinement'?'批准节点就绪前补全的差异':'批准节点项目主体与席位安排',actor,'原样采纳',{diff:n.approvalDiff||[]});
+  coreLog(n,actor,'批准节点项目');completeReadyNodes(n.projectId);coreFinish('已批准节点项目');return {ok:true};
+}
+function validSeats(seats,tests) {
+  if(!seats||Array.isArray(seats.execute))return false;
+  if(seats.human){if(seats.execute!==null)return false;}else if(typeof seats.execute!=='string'||!getAgent(seats.execute)?.seats.includes('execute'))return false;
+  if(!getAgent(seats.verify)?.seats.includes('verify'))return false;
+  if(tests.some(t=>t.kind==='adversarial')&&!getAgent(seats.challenge)?.seats.includes('challenge'))return false;
+  if(!tests.some(t=>t.kind==='adversarial')&&seats.challenge)return false;
+  return true;
+}
+function confirmContext(id,actor='human') { const n=getNode(id);if(!n?.context)return {ok:false};if(actor!=='human'&&!coreAuto(n,'context'))return coreRefuse('上下文包需由你确认',id,actor,'context');n.context.confirmed=true;recordDecision('context',id,'确认发送与不发送的信息及原因',actor);return startNode(id); }
+function toggleBound(id,index) {const n=getNode(id);if(!n||!['draft','needs_revalidation'].includes(n.status)||n.approved||!n.boundaries[index])return;n.boundaries[index].ok=!n.boundaries[index].ok;coreFinish();}
+function addBound(id,data) {const n=getNode(id);if(!n||!['draft','needs_revalidation'].includes(n.status)||n.approved)return {ok:false};const b=data||{text:typeof $==='function'?$('#newBound')?.value:'',enf:typeof $==='function'?$('#boundEnf')?.value:'advisory',mech:typeof $==='function'?$('#newMech')?.value:''};if(!b.text?.trim())return {ok:false};if(b.enf==='enforced'&&!b.mech?.trim())return coreRefuse('请填写强制边界的保证机制',id);n.boundaries.push({text:b.text.trim(),enf:b.enf==='enforced'?'enforced':'advisory',mech:b.mech||'',src:'human',ok:true});recordDecision('编辑边界',id,'补充节点边界：'+b.text,'human','有修改');coreFinish();return {ok:true};}
+function normalizeNode(projectId,data) {
+  const p=getProject(projectId);const agent=getAgent(data.seats?.execute||'agent-frontend');
+  const n={id:data.id||coreId('node'),projectId,title:data.title||'新节点',deps:data.deps||data.dependencies||[],status:'draft',version:1,approved:false,started:false,need:data.need||'请补充需求',deliverable:data.deliverable||'Markdown 节点报告：交付目录/新节点.md',sources:data.sources||[],limit:{deadline:'待确认',maxAttempts:3,tokenBudget:12000,usedAttempts:0,usedTokens:0},boundaries:[],tests:[{id:'t1',kind:'judgment',text:'你确认节点产出满足需求',v:'unchecked'}],evidence:{},attempts:[],log:[],seats:{execute:agent?.id||'agent-frontend',verify:'agent-check',challenge:null,human:false},refinement:{changed:false,applied:false,changes:[]},...cloneData(data),projectId};
+  n.deps=[...new Set(n.deps)];const defaults=getAgent(n.seats.execute);n.boundaries=[...n.boundaries,...(defaults?.defaultBoundaries||[]).map(b=>({...cloneData(b),src:'agent_default',why:'执行代理默认边界：'+defaults.name,ok:false}))];n.tests=[...n.tests,...(defaults?.defaultTests||[]).map((t,i)=>({...cloneData(t),id:'agent-default-'+(t.id||i),src:'agent_default',sourceName:defaults.name,v:'unchecked'}))];n.boundaries=n.boundaries.map(b=>({enf:'advisory',ok:false,src:'agent_draft',...b}));n.tests=n.tests.map(t=>({v:'unchecked',...t}));if(n.approved)n.status='ready';if(n.tests.some(t=>t.kind==='adversarial')&&!n.seats.challenge)n.seats.challenge='agent-critic';return n;
+}
+function draftNode(projectId,data={},actor='leader') {
+  const p=getProject(projectId);if(!p)return {ok:false,reason:'项目不存在'};
+  const n=normalizeNode(projectId,data);if(db.nodes[n.id])return {ok:false,reason:'节点 ID 已存在'};
+  if(n.deps.some(id=>getNode(id)?.projectId!==projectId))return coreRefuse('依赖必须属于当前项目',null,actor);
+  if(!validSeats(n.seats,n.tests))return coreRefuse('请检查执行、核对与挑错席位安排',null,actor);
+  db.nodes[n.id]=n;p.nodeIds.push(n.id);for(const from of n.deps)p.edges.push({from,to:n.id,...(n.branchCondition?{condition:n.branchCondition==='feasible'?'若可行':'若不可行',value:n.branchCondition}:{})});
+  coreLog(n,actor,'起草节点项目');recordDecision('起草节点',n.id,'起草节点项目：'+n.title,actor);
+  if(coreAuto(n,'approval')&&!n.approved)approve(n.id,'automatic');else if(n.approved)completeReadyNodes(projectId);
+  coreFinish('节点草稿已加入项目流程');return n;
+}
+function askQuestion(id,text,leaderAnswer) {
+  const n=getNode(id);if(!n||!text?.trim())return {ok:false};
+  if(leaderAnswer===undefined&&/ERP|SAP|用友/.test(text)&&/型号|两种|哪.*评估/.test(text)){leaderAnswer='按已批准的边界，分别评估 SAP / 用友。';}
+  const q={id:coreId('question'),text:text.trim(),answer:leaderAnswer?.trim()||null,answeredBy:leaderAnswer?.trim()?'leader':null,state:leaderAnswer?.trim()?'answered':'pending',leaderTried:true};n.questions||=[];n.questions.push(q);
+  if(q.answer){recordDecision('提问',id,`提问：${q.text}\nleader 回答：${q.answer}`,'leader');coreLog(n,'leader','回答提问：'+q.answer);}else{n.status='blocked';n.blockedType='question';n.question=q.text;recordDecision('提问',id,'leader 无法回答，转给你处理：'+q.text,'leader');coreLog(n,'leader','无法回答，进入收件箱提问分组');}
+  coreFinish(q.answer?'leader 已回答并记录决策':'提问已转给你');return q;
+}
+function answer(id,text) {
+  const n=getNode(id);if(!n||n.status!=='blocked'||n.blockedType!=='question')return {ok:false};
+  const v=(text??(typeof $==='function'?$('#answer')?.value:''))?.trim();if(!v)return coreRefuse('请先输入回答',id);
+  for(const q of n.questions||[])if(q.state==='pending'){q.state='answered';q.answer=v;q.answeredBy='你';}
+  n.status='running';delete n.question;delete n.blockedType;recordDecision('提问',id,'你回答：'+v,'human');coreLog(n,'human','回答：'+v);ensureStarted(n);n.handoff.decisions.push('你补充信息：'+v);updateHandoff(n,'核对你的回答并继续执行');coreFinish('已回答，执行代理继续执行');return {ok:true};
+}
+function invalidateChecks(n) { for(const t of n.tests){t.previousVerdict=t.v;t.v='unchecked';for(const check of t.checks||[])check.superseded=true;}for(const entries of Object.values(n.evidence||{}))for(const e of entries)for(const check of e.checks||[])check.superseded=true;n.needsRevalidation=true; }
+function downstreamOf(id) {const p=getProject(getNode(id)?.projectId);const found=new Set();const queue=[id];while(queue.length){const current=queue.shift();for(const edge of p?.edges||[])if(edge.from===current&&!found.has(edge.to)){found.add(edge.to);queue.push(edge.to);}}found.delete(id);return [...found];}
+function requestReturn(fromId,targetId,reason,evidence) {
+  const from=getNode(fromId),target=getNode(targetId);if(!from||!target||!reason?.trim()||!evidence||(Array.isArray(evidence)&&!evidence.length))return coreRefuse('退回请求必须包含节点、理由和证据',fromId,'leader','return');
+  if(!downstreamOf(targetId).includes(fromId))return coreRefuse('只能退回当前节点依赖的上游节点',fromId,'leader','return');
+  const r={id:coreId('return'),fromId,targetId,reason:reason.trim(),evidence:cloneData(evidence),status:(target.returnCount||0)>=(db.returnLimit??RETURN_LIMIT)?'escalated':'pending',state:(target.returnCount||0)>=(db.returnLimit??RETURN_LIMIT)?'escalated':'pending',time:coreTime()};db.returns.push(r);
+  coreLog(from,'leader',r.status==='escalated'?'超过退回次数，升级给你处理':'提出退回到「'+target.title+'」：'+reason);
+  recordDecision('return',fromId,r.status==='escalated'?'退回已达上限，升级给你处理：'+reason:'提出退回请求：'+reason,'leader','原样采纳',{requestId:r.id});
+  if(r.status==='pending'&&coreAuto(target,'return'))decideReturn(r.id,true,'leader');coreFinish(r.status==='escalated'?'退回已达上限，升级给你处理':'退回请求已记录');return r;
+}
+function decideReturn(requestId,ok,actor='human') {
+  const r=db.returns.find(x=>x.id===requestId);if(!r)return {ok:false};const target=getNode(r.targetId);
+  if(r.status==='escalated')return coreRefuse('第 3 次退回请求升级给你处理，不执行退回',r.fromId,actor,'return');
+  if(r.status!=='pending')return {ok:false,reason:'此请求已处理'};
+  if(actor!=='human'&&!coreAuto(target,'return'))return coreRefuse('退回请求默认由你批准',r.fromId,actor,'return');
+  if(ok&&(target.returnCount||0)>=(db.returnLimit??RETURN_LIMIT)){r.status=r.state='escalated';return coreRefuse('退回次数已达上限，升级给你处理',r.fromId,actor,'return');}
+  r.status=r.state=ok?'approved':'rejected';r.decisionMaker=coreActor(actor);recordDecision('return',r.fromId,(ok?'批准':'驳回')+'退回到「'+target.title+'」：'+r.reason,actor,ok?'原样采纳':'驳回',{requestId:r.id});
+  if(ok){target.returnCount=(target.returnCount||0)+1;target.status='changes_requested';delete target.blockedType;invalidateChecks(target);ensureStarted(target);target.handoff.returns||=[];target.handoff.returns.push({from:r.fromId,reason:r.reason,evidence:r.evidence});target.handoff.open.push('退回理由：'+r.reason);target.handoff.decisions.push('批准退回：'+r.reason);updateHandoff(target,'根据退回理由修正产出，再提交验证',actor);coreLog(target,actor,'重新打开节点，退回理由：'+r.reason);r.affected=downstreamOf(target.id);for(const id of r.affected){const n=getNode(id);invalidateChecks(n);n.status='needs_revalidation';coreLog(n,actor,'上游「'+target.title+'」被退回，需重新验证');}}
+  coreFinish(ok?'已退回；受影响的下游节点需重新验证':'退回请求已驳回');return {ok:true};
+}
+function editNode(id,patch,actor='human') {
+  const n=getNode(id);if(!n)return {ok:false};if(['leader','agent:leader'].includes(actor))return coreRefuse('leader 不能修改节点项目，只能提出变更请求',id,actor,'change');
+  if(actor!=='human'&&(!['automatic','auto'].includes(actor)||!coreAuto(n,'change')))return coreRefuse('节点项目变更未授权自动处理',id,actor,'change');
+  const allowed=['title','need','deliverable','sources','limit','boundaries','tests','seats'];const changes=Object.fromEntries(Object.entries(patch||{}).filter(([key])=>allowed.includes(key)));
+  if(!Object.keys(changes).length)return {ok:false,reason:'没有可编辑的字段'};
+  if(changes.seats&&changes.seats.execute!==n.seats.execute){
+    const selected=getAgent(changes.seats.execute);
+    changes.boundaries=[...(changes.boundaries||n.boundaries).filter(b=>b.src!=='agent_default'),...(selected?.defaultBoundaries||[]).map(b=>({...cloneData(b),src:'agent_default',why:'执行代理默认边界：'+selected.name,ok:actor==='human'}))];
+    changes.tests=[...(changes.tests||n.tests).filter(t=>t.src!=='agent_default'),...(selected?.defaultTests||[]).map((t,i)=>({...cloneData(t),id:'agent-default-'+(t.id||i),src:'agent_default',sourceName:selected.name,v:'unchecked'}))];
+  }
+  const nextBounds=changes.boundaries||n.boundaries;if(nextBounds.some(b=>b.enf==='enforced'&&!b.mech?.trim()))return coreRefuse('强制边界必须填写保证机制',id,actor,'change');
+  if(!validSeats(changes.seats||n.seats,changes.tests||n.tests))return coreRefuse('席位安排与测试不匹配',id,actor,'change');
+  const diffs=Object.entries(changes).filter(([k,v])=>JSON.stringify(n[k])!==JSON.stringify(v)).map(([field,after])=>({field,before:cloneData(n[field]),after:cloneData(after)}));if(!diffs.length)return {ok:true,unchanged:true};
+  n.versions||=[];n.versions.push({version:n.version,diff:diffs,time:coreTime()});Object.assign(n,cloneData(changes));n.lastDiff=diffs;delete n.context;if(n.started)ensureStarted(n);
+  if(n.approved){
+    n.version++;invalidateChecks(n);if(['verifying','in_review','accepted'].includes(n.status))n.status='running';
+    for(const downstreamId of downstreamOf(n.id)){
+      const downstream=getNode(downstreamId);invalidateChecks(downstream);downstream.status='needs_revalidation';
+      delete downstream.context;if(downstream.started)ensureStarted(downstream);
+      coreLog(downstream,actor,'上游「'+n.title+'」的节点项目变更，原检查作废，需重新验证');
+    }
+  }
+  recordDecision('change',id,'修改节点项目'+(n.approved?`至 v${n.version}`:''),actor,'有修改',{diff:diffs});coreLog(n,actor,'节点项目已修改；受影响检查结果作废');coreFinish(`节点项目已更新至 v${n.version}`);return {ok:true};
+}
+function proposeChange(id,data,actor='leader') {const n=getNode(id);if(!n)return {ok:false};n.change={id:coreId('change'),by:actor,add:[],remove:[],...cloneData(data)};recordDecision('提交变更请求',id,n.change.reason||'提交节点项目变更',actor);if(coreAuto(n,'change'))return decide(id,true,'automatic');coreFinish('变更请求待你批准');return n.change;}
+function decide(id,ok,actor='human') {
+  const n=getNode(id);const ch=n?.change;if(!ch)return {ok:false};
+  if(actor!=='human'&&(!['automatic','auto'].includes(actor)||!coreAuto(n,'change')))return coreRefuse('变更请求默认由你审批',id,actor,'change');
+  if(ok&&actor!=='human'&&((ch.remove||[]).length||ch.patch?.tests||ch.weakensTests))return coreRefuse('可能放宽测试的变更必须由你审批',id,actor,'change');
+  if(ok){const patch={...(ch.patch||{}),boundaries:[...n.boundaries.filter(b=>!(ch.remove||[]).includes(b.text)),...(ch.add||[]).map(b=>typeof b==='string'?{text:b,enf:'advisory',src:'agent_draft',ok:true,why:'经批准的变更请求'}:{ok:true,src:'agent_draft',...b})]};const edited=editNode(id,patch,actor==='leader'?'automatic':actor);if(!edited.ok)return edited;}
+  n.changeHistory||=[];n.changeHistory.push({...cloneData(ch),status:ok?'approved':'rejected',decisionMaker:coreActor(actor)});delete n.change;recordDecision('change',id,(ok?'批准':'驳回')+'变更请求',actor,ok?'原样采纳':'驳回');coreLog(n,actor,(ok?'批准':'驳回')+'变更请求');coreFinish(ok?`节点项目升至 v${n.version}`:'变更请求已驳回');return {ok:true};
+}
+function resolveTest(id,testId,pass,actor='human') {
+  const n=getNode(id),t=n?.tests.find(t=>t.id===testId);if(!n||n.status!=='in_review'||!t||t.v!=='unresolved'||typeof pass!=='boolean')return {ok:false};
+  if(['leader','agent:leader'].includes(actor)||actor!=='human'&&(!['automatic','auto'].includes(actor)||!coreAuto(n,'unresolved')))return coreRefuse('无法判定需由你判定或授权新的独立上下文',id,actor,'unresolved');
+  const check={checker:actor==='human'?'human':'独立核对代理',result:pass?'pass':'fail',note:actor==='human'?'你人工判定':'授权另一代理使用新的独立上下文判定',method:actor==='human'?'人工判定':'独立代理复核 · 新上下文',correction:''};const pending=(n.evidence[t.id]||[]).filter(e=>e.checks.at(-1)?.result==='unresolved');
+  if(pending.length)pending.forEach(e=>e.checks.push({...check}));else{t.checks||=[];t.checks.push(check);}t.v=check.result;recordDecision('unresolved',id,`${t.id} 判为${pass?'通过':'不通过'}`,actor);coreLog(n,actor,`${t.id} 判为${pass?'通过':'不通过'}`);
+  if(coreAuto(n,'acceptance')&&!signoffBlocker(n)&&n.tests.every(t=>t.v==='pass'))signoff(id,true,'automatic');coreFinish('已记录测试判定');return {ok:true};
+}
+function signoff(id,ok,actor='human') {
+  const n=getNode(id);if(!n)return {ok:false};if(['leader','agent:leader'].includes(actor))return coreRefuse('leader 不能验收节点',id,actor,'acceptance');
+  if(actor!=='human'&&(!['automatic','auto'].includes(actor)||!coreAuto(n,'acceptance')))return coreRefuse('验收未授权自动处理',id,actor,'acceptance');
+  if(n.status!=='in_review')return {ok:false,reason:'节点不在待验收状态'};
+  const dependencyReason=dependencyBlocker(n)||branchBlocker(n);if(dependencyReason)return coreRefuse(dependencyReason,id,actor,'acceptance');
+  const blocker=signoffBlocker(n);if(ok&&blocker)return coreRefuse(blocker,id,actor,'acceptance');
+  if(actor!=='human'&&n.tests.some(t=>t.v!=='pass'))return coreRefuse('自动验收要求所有测试通过，包括判断型测试',id,actor,'acceptance');
+  const note=actor==='human'&&typeof prompt==='function'?prompt(ok?'验收备注（可选）':'打回原因（必填）',''):(ok?'全部测试通过，自动验收':'自动打回');if(note===null||!ok&&!note.trim())return {ok:false,reason:'已取消'};
+  n.signNote=note;n.tests.filter(t=>t.kind==='judgment').forEach(t=>{t.v=ok?'pass':'fail';t.checks||=[];t.checks.push({checker:'human',result:t.v,note:note||'人工验收确认',method:'人工判定',correction:''});});n.status=ok?'accepted':'changes_requested';n.needsRevalidation=false;recordDecision('acceptance',id,ok?'验收节点':'打回：'+note,actor,ok?'原样采纳':'驳回');coreLog(n,actor,ok?'已验收':'打回：'+note);
+  const agent=getAgent(n.seats.execute);if(agent){agent.stat||={firstPass:0,total:0,failures:[]};agent.stat.total++;if(ok&&n.attempts.filter(a=>a.result==='failed').length===0&&(n.returnCount||0)===0)agent.stat.firstPass++;if(!ok)agent.stat.failures.push(note);}
+  if(ok){const p=getProject(n.projectId);if(p.edges.some(edge=>edge.from===n.id&&edge.condition)){p.branchResult=n.result?.includes('不可行')&&!n.result?.includes('有条件可行')?'infeasible':'feasible';}completeReadyNodes(n.projectId);}
+  coreFinish(ok?'已验收':'已打回');return {ok:true};
+}
+function isLimitBlocked(n) {return n?.status==='blocked'&&n.blockedType==='limit';}
+function extendBudget(id,actor='human') {
+  const n=getNode(id);if(!isLimitBlocked(n))return {ok:false};if(actor!=='human'&&!coreAuto(n,'limit'))return coreRefuse('达到上限的处理由你决定',id,actor,'limit');const before=n.limit.tokenBudget,extra=before*.5;
+  if(actor!=='human'&&extra>(db.autonomy[getProject(n.projectId).type]?.limitExtra||0))return coreRefuse('追加额度超过自动授权范围，请你决定',id,actor,'limit');
+  n.limit.tokenBudget=before*1.5;n.status='running';delete n.blockedType;recordDecision('limit',id,`追加 token 预算：${before} → ${n.limit.tokenBudget}`,actor);coreLog(n,actor,'追加 50% token 预算');ensureStarted(n);n.handoff.decisions.push('追加 token 预算至 '+n.limit.tokenBudget);n.handoff.open=n.handoff.open.filter(x=>x!=='token 预算已全部用完');updateHandoff(n,'在追加预算内继续未完成工作',actor);coreFinish('已追加 50% token 预算');return {ok:true};
+}
+function adjustContract(id,text,actor='human') {const n=getNode(id);if(!isLimitBlocked(n))return {ok:false};if(actor!=='human')return coreRefuse('调整节点项目必须由你决定',id,actor,'limit');const v=text??(typeof prompt==='function'?prompt('追加需求调整（例如缩小范围，保留当前部分结果）',''):null);if(v===null||!v?.trim())return {ok:false};const result=editNode(id,{need:n.need+'\n\n节点调整：'+v.trim()},actor);if(!result.ok)return result;n.status='running';delete n.blockedType;recordDecision('limit',id,'达到上限后调整节点范围：'+v.trim(),actor,'有修改');updateHandoff(n,'按调整后的需求核对已有结果与剩余工作',actor);coreFinish('范围已调整，执行代理继续执行');return {ok:true};}
+function abandon(id,actor='human') {const n=getNode(id);if(!isLimitBlocked(n))return {ok:false};if(actor!=='human')return coreRefuse('终止节点由你决定',id,actor,'limit');n.status='abandoned';delete n.blockedType;recordDecision('limit',id,'终止节点并保留部分完成结果',actor,'驳回');coreLog(n,actor,'终止节点');updateHandoff(n,'保留产出与未解决问题供后续参考');coreFinish('节点已终止');return {ok:true};}
+function saveTemplate(id,title) {const n=getNode(id);if(n?.status!=='accepted')return {ok:false};if(db.templates.some(t=>t.sourceId===id)){coreFinish('此节点已保存为模板');return {ok:false,reason:'已保存'};}const name=title??(typeof prompt==='function'?prompt('模板名称',n.title):n.title);if(name===null||!name.trim())return {ok:false};const p=getProject(n.projectId),t={id:coreId('template'),sourceId:id,sourceVersion:n.version,projectType:p.type,title:name.trim(),need:n.need,boundaries:cloneData(n.boundaries),tests:n.tests.map(({id,kind,text})=>({id,kind,text})),children:[],flow:{nodeTitles:p.nodeIds.map(id=>getNode(id).title),edges:cloneData(p.edges)},nodesSnapshot:p.nodeIds.map(id=>{const source=getNode(id);return cloneData({id:source.id,title:source.title,need:source.need,deliverable:source.deliverable,sources:source.sources,limit:{...source.limit,usedAttempts:0,usedTokens:source.limit.tokenBudget===null?null:0},boundaries:source.boundaries,tests:source.tests.map(({id,kind,text})=>({id,kind,text,v:'unchecked'})),seats:source.seats,deps:source.deps,branchCondition:source.branchCondition||null});})};db.templates.push(t);recordDecision('保存模板',id,'保存为模板：'+t.title,'human');coreLog(n,'human','保存为模板：'+t.title);coreFinish('模板已保存');return t;}
+function setAutonomy(type,key,value) {
+  key=Object.entries(AUTONOMY_LABELS).find(([k,v])=>k===key||v===key)?.[0]||key;if(!db.autonomy[type]||!(key in AUTONOMY_LABELS))return {ok:false,reason:'未知决策点'};
+  const mode=['auto','代理自动','自动',true].includes(value)?'auto':'human';if(['experience','external'].includes(key)&&mode==='auto')return coreRefuse('经验库入库与不可逆或对外动作始终由你决定');db.autonomy[type][key]=mode;recordDecision('自主度设置',null,`${type} · ${AUTONOMY_LABELS[key]}：${mode==='auto'?'代理自动':'由我决定'}`,'human');
+  for(const n of Object.values(db.nodes).filter(n=>getProject(n.projectId)?.type===type)) {
+    if(key==='approval'&&mode==='auto'&&n.status==='draft')approve(n.id,'automatic');
+    if(key==='change'&&mode==='auto'&&n.change)decide(n.id,true,'automatic');
+    if(key==='return'&&mode==='auto')for(const r of db.returns.filter(r=>r.targetId===n.id&&r.status==='pending'))decideReturn(r.id,true,'leader');
+    if(key==='limit'&&mode==='auto'&&isLimitBlocked(n))extendBudget(n.id,'automatic');
+    if(key==='context'&&mode==='auto'&&n.context&&!n.context.confirmed){n.context.confirmed=true;recordDecision('context',n.id,'自动确认上下文包','automatic');if(n.approved&&n.status==='ready'&&!dependencyBlocker(n)&&!branchBlocker(n))startNode(n.id);}
+    if(key==='unresolved'&&mode==='auto'&&n.status==='in_review')recheckUnresolved(n.id);
+    if(key==='acceptance'&&mode==='auto'&&n.status==='in_review'&&n.tests.every(t=>t.v==='pass'))signoff(n.id,true,'automatic');
+  }
+  coreFinish('自主度已按项目类型保存');return {ok:true};
+}
+function normalizeAgent(data) { const seats=data.seats||['execute'];return {id:coreId('agent'),name:data.name?.trim()||'',tasks:data.tasks||data.specialty||'',model:data.model||'gpt-6.1-sol',strength:data.strength||data.effort||'ultra',instructions:data.instructions||'',tools:data.tools||[],permissions:data.permissions||'按节点授权',sources:data.sources||[],defaultBoundaries:data.defaultBoundaries||[],defaultTests:data.defaultTests||[],seats:seats.filter(s=>['leader','execute','verify','challenge'].includes(s)),stat:{firstPass:0,total:0,failures:[]}}; }
+function createAgent(data,actor='human') {if(actor!=='human')return coreRefuse('leader 只能提议新代理，由你批准后入库',null,actor);const a=normalizeAgent(data);if(!a.name||!a.tasks?.trim()||!a.seats.length)return {ok:false,reason:'请填写名称、擅长任务与可以担任的席位'};db.agents.push(a);recordDecision('创建代理',null,'直接创建代理：'+a.name,actor);coreFinish('代理已加入代理库');return a;}
+function proposeAgent(data) {const p={id:coreId('agent-proposal'),nodeId:data.nodeId||'a-tech',status:'pending',data:cloneData(data),reason:data.reason||'leader 建议补充专业代理'};db.agentProposals.push(p);recordDecision('代理提议',p.nodeId,'提议创建代理：'+data.name,'leader');coreFinish('代理提议等待你批准');return p;}
+function approveAgent(id,ok=true,actor='human') {if(actor!=='human')return coreRefuse('代理提议必须由你批准',null,actor);const p=db.agentProposals.find(p=>p.id===id);if(p?.status!=='pending')return {ok:false};if(ok){const agent=createAgent(p.data);if(agent.ok===false)return agent;p.agentId=agent.id;}p.status=ok?'approved':'rejected';recordDecision('代理提议',p.nodeId,(ok?'批准':'驳回')+'代理提议：'+p.data.name,actor,ok?'原样采纳':'驳回');coreFinish('代理提议已处理');return {ok:true};}
+function approveLesson(id,ok=true,actor='human') {if(actor!=='human')return coreRefuse('教训建议必须由你批准',null,actor);const p=db.lessonProposals.find(p=>p.id===id);if(p?.status!=='pending')return {ok:false};const a=getAgent(p.agentId);if(ok&&a){a.defaultBoundaries.push({text:p.boundary||p.title,enf:'advisory',src:'已批准教训建议',why:p.reason});}p.status=ok?'approved':'rejected';recordDecision('教训建议',p.nodeId,(ok?'批准':'驳回')+'教训建议：'+p.title,actor,ok?'原样采纳':'驳回');coreFinish('教训建议已处理');return {ok:true};}
+function reviewExperience(id,ok=true,actor='human') {const e=db.experience.find(e=>e.id===id);if(!e||e.status!=='pending')return {ok:false};if(actor!=='human')return coreRefuse('经验库入库始终由你审核',e.nodeId,actor,'experience');e.status=ok?'approved':'rejected';recordDecision('experience',e.nodeId,(ok?'批准':'驳回')+'经验库条目：'+e.title,actor,ok?'原样采纳':'驳回');coreFinish('经验库条目已审核');return {ok:true};}
+function proposeExperience(id) {
+  const n=getNode(id);if(n?.status!=='accepted')return {ok:false,reason:'验收后才能沉淀到经验库'};
+  if(db.experience.some(e=>e.nodeId===id&&e.status==='pending'))return {ok:false,reason:'已有待审核条目'};
+  const e={id:coreId('experience'),nodeId:id,title:n.title+' · 产出与教训',content:n.result||n.signNote||n.need,sources:[n.deliverable],projectIds:[n.projectId],tags:['节点产出'],status:'pending'};db.experience.push(e);recordDecision('经验库提议',id,'起草经验库条目，始终由你审核入库','leader');coreFinish('经验库条目已起草，等待你审核');return e;
+}
+function createProject(data,actor='human') {
+  if(actor!=='human')return coreRefuse('新建项目由你决定',null,actor);
+  const saved=db.templates.find(t=>t.title===data.type||t.id===data.type);
+  if(!data.name?.trim()||!saved&&!['产品开发','客户交付','调研','空白'].includes(data.type))return coreRefuse('请填写项目名称并选择类型');
+  if(saved)data={...data,type:saved.projectType};
+  const p={id:coreId('project'),name:data.name.trim(),type:data.type,goal:data.goal||'请补充总目标',site:data.site||'待绑定工作现场',leader:data.leader||(['产品开发','空白'].includes(data.type)?'agent-pm-dev':'agent-pm-client'),executor:'Codex CLI',nodeIds:[],edges:[],branchResult:null};db.projects.push(p);
+  if(saved){const ids=new Map(saved.nodesSnapshot.map(n=>[n.id,coreId('node')]));for(const spec of saved.nodesSnapshot){const n=normalizeNode(p.id,{...cloneData(spec),id:ids.get(spec.id),deps:spec.deps.map(id=>ids.get(id)),boundaries:spec.boundaries.map(b=>({...b,ok:false,src:'agent_draft',why:'从已验收模板继承，需重新确认'}))});db.nodes[n.id]=n;p.nodeIds.push(n.id);}p.edges=saved.flow.edges.map(edge=>({...cloneData(edge),from:ids.get(edge.from),to:ids.get(edge.to)}));p.templateId=saved.id;recordDecision('创建项目',p.nodeIds[0],'从已验收模板起草项目：'+saved.title,actor);for(const id of p.nodeIds)if(coreAuto(getNode(id),'approval'))approve(id,'automatic');coreFinish('项目已从模板起草，节点主体待批准');return p;}
+  const specs=data.type==='产品开发'?[['功能规格','agent-pm-dev'],['实现（Codex）','agent-frontend'],['浏览器检查','agent-browser'],['你审核',null]]:data.type==='客户交付'?[['需求澄清','agent-pm-client'],['技术可行性','agent-tech'],['交付产能','agent-capacity'],['成本报价','agent-finance'],['市场调研','agent-market'],['汇总结论','agent-pm-client'],['起草交付项目','agent-pm-client'],['婉拒说明','agent-pm-client']]:data.type==='调研'?[['调研问题','agent-pm-client'],['收集资料','agent-market'],['形成结论','agent-market']]:[['开始节点','agent-frontend']];
+  const ids=specs.map(()=>coreId('node'));
+  specs.forEach(([title,execute],index)=>{
+    const deps=data.type==='客户交付'?index===0?[]:index<5?[ids[0]]:index===5?ids.slice(1,5):[ids[5]]:index?[ids[index-1]]:[];
+    const branchCondition=data.type==='客户交付'&&index>5?(index===6?'feasible':'infeasible'):null;
+    const n=normalizeNode(p.id,{id:ids[index],title,need:`围绕「${p.goal}」完成${title}。`,deps,seats:{execute,verify:'agent-check',challenge:null,human:execute===null},boundaries:[{text:'只处理本节点范围内的工作，禁止未经批准的对外动作',src:'agent_draft',ok:false,enf:'enforced',mech:'按节点授权限定工具与目录'}],...(branchCondition?{branchCondition}:{})});db.nodes[n.id]=n;p.nodeIds.push(n.id);for(const from of deps)p.edges.push({from,to:n.id,...(branchCondition?{condition:branchCondition==='feasible'?'若可行':'若不可行',value:branchCondition}:{})});
+  });
+  recordDecision('创建项目',p.nodeIds[0],'按类型起草项目流程与节点主体：'+p.name,actor);for(const id of p.nodeIds)if(coreAuto(getNode(id),'approval'))approve(id,'automatic');coreFinish('项目已创建；节点主体待批准');return p;
+}
+function validateFlowChange(projectId,change) {
+  const p=getProject(projectId);if(!p)return '项目不存在';
+  if(!['add','remove','dependencies'].includes(change.action))return '未知项目流程操作';
+  if(change.action!=='add'&&!p.nodeIds.includes(change.nodeId))return '请选择本项目中的节点';
+  if(change.action==='remove'&&downstreamOf(change.nodeId).length)return '该节点仍被下游依赖，请先修改下游依赖';
+  if((change.deps||[]).some(id=>!p.nodeIds.includes(id)))return '依赖必须属于当前项目';
+  if(change.action==='dependencies'&&(change.deps||[]).some(id=>id===change.nodeId||downstreamOf(change.nodeId).includes(id)))return '依赖会形成循环';
+  if(change.action==='add'&&!change.title?.trim())return '请填写节点名称';
   return '';
 }
-function ensureStarted(c) {
-  c.attempts ||= [];
-  c.handoff ||= {
-    updated: `${stamp()} · agent:chief`, baseline: '刚批准，worker 首步需读取允许资料、记录并验证基线',
-    done: ['需求、边界和测试已由人确认'], decisions: ['按批准的契约执行，尚未开始验证'],
-    open: ['基线和资料路径待 worker 实际核对'], next: '核对资料来源与文件，记录基线后开始执行', outputs: [],
-  };
+function flowBranchValue(condition) {return !condition?null:condition.includes('不可行')?'infeasible':condition.includes('可行')?'feasible':condition;}
+function applyFlowChange(projectId,change,actor='human') {
+  const p=getProject(projectId),error=validateFlowChange(projectId,change);if(error)return coreRefuse(error,change.nodeId,actor,'项目流程变更');
+  if(change.action==='add') { const n=normalizeNode(projectId,{title:change.title,deps:change.deps||[],need:change.need||'请补充节点需求',branchCondition:flowBranchValue(change.condition)});db.nodes[n.id]=n;p.nodeIds.push(n.id);for(const from of n.deps)p.edges.push({from,to:n.id,...(change.condition?{condition:change.condition,value:flowBranchValue(change.condition)}:{})}); }
+  if(change.action==='remove') {
+    p.nodeIds=p.nodeIds.filter(id=>id!==change.nodeId);p.edges=p.edges.filter(e=>e.from!==change.nodeId&&e.to!==change.nodeId);
+    const removed=getNode(change.nodeId);removed.archived=true;removed.status='abandoned';delete removed.change;
+    coreLog(removed,actor,'已从项目流程移除，保留历史决策、证据与来源节点详情');
+  }
+  if(change.action==='dependencies') { const n=getNode(change.nodeId),before=n.deps;n.deps=[...new Set(change.deps||[])];n.branchCondition=flowBranchValue(change.condition);p.edges=p.edges.filter(e=>e.to!==n.id);for(const from of n.deps)p.edges.push({from,to:n.id,...(change.condition?{condition:change.condition,value:flowBranchValue(change.condition)}:{})});if(n.approved){n.version++;n.lastDiff=[{field:'deps',before,after:n.deps}];invalidateChecks(n);n.status='needs_revalidation';for(const id of downstreamOf(n.id)){const d=getNode(id);invalidateChecks(d);d.status='needs_revalidation';}} }
+  recordDecision('项目流程变更',change.nodeId||p.nodeIds[0],'编辑项目流程：'+change.action,actor,'有修改');coreFinish('项目流程已更新');return {ok:true};
 }
-function updateHandoff(c, next) {
-  ensureStarted(c); c.handoff.updated = `${stamp()} · human`; c.handoff.next = next;
+function editFlow(projectId,change,actor='human') {
+  const p=getProject(projectId),error=validateFlowChange(projectId,change);if(error)return coreRefuse(error,change.nodeId,actor,'项目流程变更');
+  if(actor==='leader'||p.nodeIds.some(id=>getNode(id).started)){p.flowChange={id:coreId('flow-change'),nodeId:change.nodeId||p.nodeIds[0],reason:'执行中修改项目流程：'+change.action,change:cloneData(change),status:'pending'};recordDecision('提交变更请求',p.flowChange.nodeId,p.flowChange.reason,actor);coreFinish('项目流程变更请求等待你审批');return p.flowChange;}
+  return applyFlowChange(projectId,change,actor);
 }
-
-function inbox() {
-  const all = Object.values(db);
-  return {
-    drafts: all.filter((c) => c.status === 'draft' && !c.parent),
-    changes: all.filter((c) => c.change),
-    blocked: all.filter((c) => c.status === 'blocked'),
-    review: all.filter((c) => c.status === 'in_review'),
-  };
+function decideFlow(projectId,ok,actor='human') {const p=getProject(projectId);if(!p?.flowChange)return {ok:false};if(actor!=='human')return coreRefuse('项目流程变更由你审批',p.flowChange.nodeId,actor,'change');if(ok){const result=applyFlowChange(projectId,p.flowChange.change,actor);if(!result.ok)return result;}recordDecision('change',p.flowChange.nodeId,(ok?'批准':'驳回')+'项目流程变更',actor,ok?'原样采纳':'驳回');delete p.flowChange;coreFinish('项目流程变更请求已处理');return {ok:true};}
+function submitForReview(id,result) {
+  const n=getNode(id);if(!n||!n.started||!['running','verifying','changes_requested','needs_revalidation'].includes(n.status))return {ok:false,reason:'节点需先开工才能提交验收报告'};
+  const blocker=dependencyBlocker(n)||branchBlocker(n);if(blocker)return coreRefuse(blocker,id,'leader','提交验收报告');
+  if(n.blockedType)return coreRefuse('请先处理节点阻塞',id,'leader','提交验收报告');
+  for(const t of n.tests.filter(t=>t.kind!=='judgment'&&t.v==='unchecked')) {
+    const checker=t.kind==='deterministic'?'runtime':t.kind==='adversarial'?n.seats.challenge:n.seats.verify;
+    const check={checker,result:'pass',method:t.kind==='deterministic'?'模拟执行确定性检查':'独立代理复核 · 只读 · 新上下文',note:'原型演示：按批准的测试提交检查记录，不代表在当前会话真实执行',correction:''};
+    t.v='pass';t.checks||=[];t.checks.push(check);n.evidence[t.id]||=[];n.evidence[t.id].push({claim:'原型演示产出满足本条测试，实际项目需提交对应证据',ref:n.deliverable,by:n.seats.human?'human':n.seats.execute,checks:[{...check}]});
+  }
+  n.result=result?.trim()||'原型模拟执行已完成；验收报告见下方测试与证据。';n.status='in_review';n.needsRevalidation=false;const attempt=n.attempts.at(-1);if(attempt?.result==='running')attempt.result='success';ensureStarted(n);n.handoff.done.push('提交节点产出与验收报告（原型演示）');updateHandoff(n,'等待你判定无法判定项与最终验收','leader');coreLog(n,'leader','审阅验收报告，提交给你验收');recordDecision('提交验收报告',id,'leader 审阅模拟验收报告并提交给你','leader');
+  if(coreAuto(n,'acceptance')&&n.tests.every(t=>t.v==='pass'))signoff(id,true,'automatic');coreFinish('已提交验收报告；等待你验收');return {ok:true};
 }
-const inboxCount = () => { const b = inbox(); return b.drafts.length + b.changes.length + b.blocked.length + b.review.length; };
-
-// ---------- sidebar ----------
-function renderSide() {
-  const node = (c, depth) => `
-    <div class="tree-node ${view.page === 'contract' && view.id === c.id ? 'active' : ''}" style="padding-left:${8 + depth * 16}px" onclick="go('contract','${c.id}')">
-      <span class="dot d-${c.status}"></span><span class="t">${esc(c.title)}</span>
-      ${c.change ? '<span class="count" title="变更请求">1</span>' : ''}
-    </div>` + kids(c.id).map((k) => node(k, depth + 1)).join('');
-  const roots = Object.values(db).filter((c) => !c.parent);
-  const n = inboxCount();
-  $('#side').innerHTML = `
-    <div class="brand">⎈ Helm <small>契约驱动的 ADE · 原型</small></div>
-    <div class="nav-item ${view.page === 'inbox' ? 'active' : ''}" onclick="go('inbox')">
-      <span>收件箱</span>${n ? `<span class="count">${n}</span>` : ''}
-    </div>
-    <div class="section-label">契约树</div>
-    ${roots.map((r) => node(r, 0)).join('')}
-    <div class="section-label">模板</div>
-    ${templates.length ? templates.map((t) => `<div class="nav-item ${view.page === 'template' && view.id === t.id ? 'active' : ''}" onclick="go('template','${t.id}')">${esc(t.title)}</div>`).join('') : '<div class="empty" style="padding-left:10px">签收后可沉淀为模板</div>'}
-    <div class="section-label">角色</div>
-    <div style="padding:0 10px;font-size:12px;color:var(--muted);line-height:1.9">
-      <div>${who('human')} 定义需求 / 边界 / 测试，签收</div>
-      <div>${who('agent:chief')} 拆解、派单、汇总</div>
-      <div>${who('agent:worker')} 执行（开发）</div>
-      <div>${who('agent:verifier')} 核对证据</div>
-      <div>${who('agent:redteam')} 挑错</div>
-    </div>`;
+function recheckUnresolved(id) {
+  const n=getNode(id);if(!n||!coreAuto(n,'unresolved'))return {ok:false};
+  const tests=unresolvedTests(n);if(!tests.length)return {ok:true};
+  for(const t of tests){const check={checker:n.seats.verify,result:'unresolved',method:'独立代理复核 · 只读 · 新上下文',note:'新上下文仍缺少可证明的证据，保留无法判定，不自动放宽标准',correction:''};t.checks||=[];t.checks.push(check);recordDecision('unresolved',id,`使用新上下文重新判定 ${t.id}：证据仍不足，保留无法判定并交给你`,'automatic');coreLog(n,'automatic','另一新上下文复核未能取得足够证据');}
+  coreFinish('独立上下文复核仍无法判定，需要你补充证据或判定');return {ok:true};
 }
+function chooseBranch(projectId,value,actor='human') {const p=getProject(projectId);if(!p)return {ok:false};if(actor!=='human')return coreRefuse('条件分支由你选择',p.nodeIds[0],actor);if(!p.edges.some(e=>e.condition&&e.value===value))return {ok:false,reason:'不存在这个条件分支'};p.branchResult=value;recordDecision('选择条件分支',p.nodeIds[0],'选择分支：'+value,actor);completeReadyNodes(projectId);return {ok:true};}
 
-// ---------- inbox ----------
-function renderInbox() {
-  const b = inbox();
-  const item = (c, sub, extra = '') => `
-    <div class="inbox-item" onclick="go('contract','${c.id}')">
-      <span class="dot d-${c.status}"></span>
-      <div class="grow"><div>${esc(c.title)}</div><div class="sub">${sub}</div></div>
-      ${extra}${chip(c.status, c.blockedType)}
-    </div>`;
-  const group = (title, hint, items) => `
-    <div class="inbox-group"><h2>${title} <span class="hint">${hint}</span></h2>
-    ${items.length ? items.join('') : '<div class="empty">没有待处理事项</div>'}</div>`;
-  const blocks = (c) => { const p = c.parent ? db[c.parent] : null; return p ? `<span class="impact">阻塞上层「${esc(p.title)}」</span>` : ''; };
-
-  $('#main').innerHTML = `
-    <h1>收件箱</h1>
-    <div class="intro">
-      你只需要处理这里的事：<b>批准契约</b>（需求、边界、测试是否写对）、<b>回答阻塞</b>、<b>审批变更请求</b>、<b>签收结果</b>。
-      开发过程由代理完成，默认折叠，需要时可以展开查看。
-      <div class="legend">${Object.keys(KIND).map((k) => `<span class="k">${KIND[k]}测试 · ${KIND_HINT[k]}</span>`).join('')}<span class="k">🔒 强制边界 · 权限规则 / 确定性测试保证</span><span class="k">建议边界 · verifier 核对</span></div>
-    </div>
-    ${group('阻塞 · 等你处理', '回答提问，或决定达到上限后的处理方式', b.blocked.map((c) => item(c, c.blockedType === 'limit' ? '达到上限型 · 已达 token 上限，部分完成报告待处理' : `提问型 · ${esc(c.question)}`, blocks(c))))}
-    ${group('变更请求', '代理不能自己改契约，只能提议', b.changes.map((c) => item(c, `${who(c.change.by)} 提议：${c.change.add.map((x) => '+ ' + esc(x)).join('；')}`, blocks(c))))}
-    ${group('待签收', '核对结果；无法判定的测试需先由你判定', b.review.map((c) => item(c, `${unresolvedTests(c).length ? '<span class="v-unresolved">? 还有无法判定的测试 · </span>' : ''}${esc(c.result || '')}`, blocks(c))))}
-    ${group('待批准契约', '代理起草的契约，确认后才会开工', b.drafts.map((c) => item(c, `${kids(c.id).length} 个子契约 · ${c.boundaries.filter((x) => !x.ok).length} 条边界待确认`)))}
-  `;
-}
-
-// ---------- contract detail ----------
 function renderBounds(c, readonly = false) {
   return c.boundaries.map((b, i) => `
     <div class="row ${!readonly && !b.ok ? 'unconfirmed' : ''}">
       <div class="row-top">
-        ${!readonly && c.status === 'draft' ? `<input type="checkbox" aria-label="确认边界 ${i + 1}" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
+        ${!readonly && (['draft', 'pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation') ? `<input type="checkbox" aria-label="确认边界 ${i + 1}" ${b.ok ? 'checked' : ''} onchange="toggleBound('${c.id}',${i})">` : ''}
         <div class="grow">${b.enf === 'enforced' ? '<span class="chip s-ready">🔒 强制</span> ' : ''}${esc(b.text)}
-          <div class="src">${b.src === 'human' ? '你写的' : `${who('agent:chief')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}
-            · ${b.enf === 'enforced' ? `机制：${esc(b.mech)}` : '建议 · verifier 核对'}${!readonly && !b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}
+          <div class="src">${b.src === 'human' ? '你写的' : b.src === 'agent_default' ? '执行代理默认边界' : `${who('leader')} 起草${b.why ? ' · ' + esc(b.why) : ''}`}
+            · ${b.enf === 'enforced' ? `机制：${esc(b.mech)}` : '建议 · 核对席位 核对'}${!readonly && !b.ok ? ' · <b style="color:var(--warn)">待确认</b>' : ''}
           </div>
         </div>
       </div>
     </div>`).join('') || '<div class="empty">尚无边界</div>';
 }
-function renderChecks(checks) {
-  return checks.map((check) => `<div class="check">${who(check.checker)} <span class="verdict v-${check.result}">${VERDICT[check.result]}</span> · ${esc(check.method)}（${esc(check.note)}）${check.correction ? `<div>修正：${esc(check.correction)}</div>` : ''}</div>`).join('');
+function renderChecks(checks, c) {
+  return checks.map((check) => `<div class="check">${who(c ? actorAt(c, check.checker) : check.checker)} <span class="verdict v-${check.result}">${VERDICT[check.result]}</span>${check.superseded?'<span class="k">历史检查 · 已作废</span>':''} · ${esc(check.method)}（${esc(check.note)}）${check.correction ? `<div>修正：${esc(check.correction)}</div>` : ''}</div>`).join('');
 }
 function renderTests(c, readonly = false) {
   return c.tests.map((t) => {
@@ -573,22 +3000,23 @@ function renderTests(c, readonly = false) {
     return `
       <div class="row">
         <div class="row-top">
-          <div class="grow">${esc(t.text)}<div class="src"><span class="k">${KIND[t.kind]}</span> ${KIND_HINT[t.kind]}</div></div>
+          <div class="grow">${esc(t.text)}<div class="src"><span class="k">${KIND[t.kind]}</span> ${KIND_HINT[t.kind]}${t.src==='agent_default'?' · 执行代理默认测试：'+esc(t.sourceName||'所选代理'):''}</div></div>
           ${readonly ? '' : `<span class="verdict v-${t.v}">${VERDICT[t.v]}</span>`}
         </div>
         ${!readonly && c.status === 'in_review' && t.v === 'unresolved' ? `<div class="resolution"><button class="ok small" onclick="resolveTest('${c.id}','${t.id}',true)">判为通过</button><button class="bad small" onclick="resolveTest('${c.id}','${t.id}',false)">判为不通过</button><span class="src">仅由你人工判定</span></div>` : ''}
-        ${readonly ? '' : renderChecks(t.checks || [])}
+        ${readonly ? '' : renderChecks(t.checks || [], c)}
         ${!readonly && ev.length ? `<details class="ev"><summary>${ev.length} 条证据</summary>${ev.map((e) => `
           <div class="ev-item">${esc(e.claim)}<div><code>${esc(e.ref)}</code></div>
-            <div class="by">提交：${who(e.by)}${renderChecks(e.checks)}</div>
+            <div class="by">提交：${who(actorAt(c, e.by))}${renderChecks(e.checks || [], c)}</div>
           </div>`).join('')}</details>` : ''}
       </div>`;
   }).join('');
 }
 function renderUsage(label, used, max) {
+  if (!Number.isFinite(used) || !Number.isFinite(max)) return `<div class="limit-row">${label}：未记录</div>`;
   const ratio = max > 0 ? used / max : 1;
   const level = ratio >= 1 ? 'exhausted' : ratio > .8 ? 'warning' : '';
-  return `<div class="limit-row ${level}"><div>${label}：${used.toLocaleString('zh-CN')} / ${max.toLocaleString('zh-CN')}${ratio >= 1 ? ' · 已达上限' : ratio > .8 ? ' · 接近上限' : ''}</div><div class="progress" role="progressbar" aria-label="${label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, Math.max(0, ratio * 100))}"><span style="width:${Math.min(100, Math.max(0, ratio * 100))}%"></span></div></div>`;
+  return `<div class="limit-row ${level}"><div>${label}：${formatNumber(used)} / ${formatNumber(max)}${ratio >= 1 ? ' · 已达上限' : ratio > .8 ? ' · 接近上限' : ''}</div><div class="progress" role="progressbar" aria-label="${label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, Math.max(0, ratio * 100))}"><span style="width:${Math.min(100, Math.max(0, ratio * 100))}%"></span></div></div>`;
 }
 function renderInfo(c) {
   const l = c.limit;
@@ -614,9 +3042,9 @@ function renderHandoff(c) {
 }
 function renderAttempts(c) {
   return (c.attempts || []).map((a) => `<div class="attempt ${a.result === 'failed' ? 'failed' : a.result === 'limit' ? 'limited' : ''}">
-    <div class="row-top"><b class="grow">#${a.number} · ${who(a.actor)}</b><span class="verdict ${a.result === 'failed' ? 'v-fail' : a.result === 'success' ? 'v-pass' : a.result === 'limit' ? 'v-unresolved' : 'who-agent'}">${ATTEMPT_RESULT[a.result]}</span></div>
-    <div class="src">模型与 effort：${esc(a.model)} · ${a.tokens.toLocaleString('zh-CN')} token · 耗时 ${esc(a.duration)}</div>
-    <div>方法：${esc(a.method)}</div>
+    <div class="row-top"><b class="grow">#${a.number} · ${who(actorAt(c, a.actor))}</b><span class="verdict ${a.result === 'failed' ? 'v-fail' : a.result === 'success' ? 'v-pass' : a.result === 'limit' ? 'v-unresolved' : 'who-agent'}">${ATTEMPT_RESULT[a.result]}</span></div>
+    <div class="src">模型与强度：${esc(a.model || '未记录')} · ${formatNumber(a.tokens)} token · 耗时 ${esc(a.duration || '未记录')}</div>
+    <div>方法：${esc(a.method)}</div><div class="src">会话 ID：${esc(a.sessionId || '未记录')}${a.score ? ' · 检查：' + esc(a.score) : ''}</div>
     ${a.failure ? `<div class="reason">${a.result === 'failed' ? '失败原因' : '停止原因'}：${esc(a.failure)}</div>` : ''}
     ${a.result === 'failed' ? '<div class="reason"><b>后续尝试不得重复此方法，除非有新理由</b></div>' : ''}
   </div>`).join('') || '<div class="empty">尚无执行记录，认领后记录基线和首次尝试</div>';
@@ -629,260 +3057,165 @@ function setProcessTab(tab) {
   $('#attempts-tab').setAttribute?.('aria-pressed', String(attempts));
   $('#timeline-tab').setAttribute?.('aria-pressed', String(!attempts));
 }
-function renderContract(c) {
-  const parent = c.parent ? db[c.parent] : null;
-  const k = kids(c.id);
-  const human = c.status === 'draft' || c.status === 'in_review' || c.status === 'blocked';
-  const blocker = signoffBlocker(c);
-  const saved = templates.find((t) => t.sourceId === c.id);
-  const actions = {
-    draft: `<button class="primary" onclick="approve('${c.id}')">批准契约，开工</button>`,
-    in_review: `<button class="bad" onclick="signoff('${c.id}', false)">打回</button><button class="ok" ${blocker ? 'disabled' : ''} onclick="signoff('${c.id}', true)">签收</button>`,
-  }[c.status] || '';
 
-  let banner = '';
-  if (c.trigger) banner += `<div class="banner agent"><div class="grow"><b>由代理起草</b>${esc(c.trigger)}</div></div>`;
-  if (c.status === 'blocked' && c.blockedType === 'limit') banner += `
-    <div class="banner warn"><div class="grow"><b>已达上限 · token 预算已用完</b>
-      <div>部分完成报告</div><div><strong>已完成</strong>${list(c.partial.done)}</div>
-      <div><strong>未完成</strong>${list(c.partial.remaining)}</div><div>继续完成预计还需：${esc(c.partial.estimate)}</div>
-      <div class="resolution"><button class="primary" onclick="extendBudget('${c.id}')">追加预算</button><button onclick="adjustContract('${c.id}')">调整契约</button><button class="bad" onclick="abandon('${c.id}')">终止</button></div>
-    </div></div>`;
-  else if (c.status === 'blocked') banner += `
-    <div class="banner warn"><div class="grow"><b>${who('agent:' + c.owner)} 需要你回答</b>${esc(c.question)}
-      <textarea id="answer" style="margin-top:8px" placeholder="例：Q4 已有 P-2026-09 占用 2 人至 12 月底"></textarea>
-      <div style="margin-top:8px"><button class="primary" onclick="answer('${c.id}')">回答并继续</button></div></div></div>`;
-  if (c.status === 'running') banner += `<div class="banner agent"><div class="grow"><b>${who('agent:' + c.owner)} 正在执行</b>${k.length ? `等待 ${k.filter((x) => x.status !== 'accepted' && x.status !== 'abandoned').length} 个子契约完成后汇总` : '你暂时不需要做什么'}</div></div>`;
-  if (c.status === 'in_review' && c.result) banner += `<div class="banner ok"><div class="grow"><b>产出结论</b>${esc(c.result)}</div></div>`;
-  if (c.status === 'accepted') banner += `<div class="banner ok"><div class="grow"><b>已签收</b>${esc(c.signNote || '')}<div style="margin-top:8px">${saved ? `<button class="small" disabled>已保存为模板「${esc(saved.title)}」</button>` : `<button class="small" onclick="saveTemplate('${c.id}')">保存为模板</button>`}</div></div></div>`;
-  if (c.status === 'changes_requested') banner += `<div class="banner warn"><div class="grow"><b>已打回</b>${esc(c.signNote || '')}，代理将重新认领</div></div>`;
-  if (c.status === 'abandoned') banner += '<div class="banner neutral"><div class="grow"><b>已终止</b>保留部分完成报告、证据与交接记录，供后续参考。</div></div>';
-
-  const change = c.change ? `
-    <div class="change">
-      <h2>变更请求 <span class="hint">${who(c.change.by)} 提议 · 批准后契约版本 v${c.version} → v${c.version + 1}</span></h2>
-      <div>${esc(c.change.reason)}</div>
-      <div class="diff">${c.change.add.map((x) => `<div class="add">+ 边界：${esc(x)} <span class="k">建议 · verifier 核对</span></div>`).join('')}${c.change.remove.map((x) => `<div class="del">− 边界：${esc(x)}</div>`).join('')}</div>
-      <button class="ok small" onclick="decide('${c.id}', true)">批准</button>
-      <button class="bad small" onclick="decide('${c.id}', false)">驳回</button>
-    </div>` : '';
-  const timeline = c.log.slice().reverse().map(([t, a, x]) => `
-    <div class="tl-item"><span class="time" title="${esc(t)}">${esc(t.slice(6))}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('') || '<div class="empty">暂无</div>';
-
-  $('#main').innerHTML = `
-    <div class="head">
-      <div>
-        <div class="crumb">${parent ? `<a onclick="go('contract','${parent.id}')">${esc(parent.title)}</a> / ` : ''}${c.id}</div>
-        <h1>${esc(c.title)}</h1>
-        <div class="meta">${chip(c.status, c.blockedType)}<span>契约 v${c.version}</span><span>负责：${who('agent:' + c.owner)}</span>${human ? '<span style="color:var(--warn)">● 需要你处理</span>' : ''}</div>
-      </div>
-      <div class="actions">${actions}<button onclick="openWorkerPrompt('${c.id}')">worker 启动 prompt</button>${c.status === 'in_review' && blocker ? `<div class="action-hint">${esc(blocker)}</div>` : ''}</div>
-    </div>
-    ${renderInfo(c)}${banner}${change}
-    <div class="cols">
-      <div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div>
-      <div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}
-        ${c.status === 'draft' ? `<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden style="margin-top:6px" placeholder="保证机制（权限规则或确定性测试，必填）">` : ''}
-      </div>
-      <div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div>
-    </div>
-    <div class="below">
-      ${renderHandoff(c)}
-      <div class="card">
-        <details class="process">
-          <summary><h2 style="margin:0">▸ 开发过程 <span class="hint">代理的工作，默认折叠 · ${(c.attempts || []).length} 次尝试 / ${c.log.length} 条日志</span></h2></summary>
-          <div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">执行记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button></div>
-          <div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div>
-        </details>
-      </div>
-      <div class="card"><h2>子契约 <span class="hint">${k.length ? `${k.filter((x) => x.status === 'accepted').length}/${k.length} 已签收` : '无'}</span></h2>
-        ${k.map((x) => `<div class="kid" onclick="go('contract','${x.id}')"><span class="dot d-${x.status}"></span><span class="t">${esc(x.title)}</span>${chip(x.status, x.blockedType)}</div>`).join('') || '<div class="empty">这是叶子契约，由 worker 直接执行</div>'}
-      </div>
-    </div>`;
+// ---------- UI helpers ----------
+let view = { page: 'inbox', id: null };
+let modalContract = null, modalReturnFocus = null;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const formatNumber = (n) => Number.isFinite(n) ? n.toLocaleString('zh-CN') : '未记录';
+const stamp = () => { const d = new Date(); return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+const STATUS = {draft:'草稿·待批准',pending_approval:'待批准·补全有变化',waiting:'等待前置验收',ready:'已批准·等待开工',running:'代理执行中',blocked:'阻塞·等你回答',verifying:'验证中',in_review:'待验收',changes_requested:'已打回',needs_revalidation:'需重新验证',accepted:'已验收',abandoned:'已终止',skipped:'分支未选中'};
+const KIND = {deterministic:'确定性',evidence:'证据型',adversarial:'对抗型',judgment:'判断型'};
+const KIND_HINT = {deterministic:'自动执行',evidence:'核对席位 · 独立核对来源',adversarial:'挑错席位 · 须全部回应',judgment:'由你判定'};
+const VERDICT = {pass:'✓ 通过',fail:'✗ 不通过',unresolved:'? 无法判定',unchecked:'— 未检查'};
+const ATTEMPT_RESULT = {success:'成功',failed:'失败',running:'进行中',limit:'达到上限'};
+const list = (items = []) => items.length ? `<ul>${items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="empty">暂无</div>';
+const chip = (s, b) => `<span class="chip s-${s}">${s==='blocked' && b==='limit' ? '阻塞·已达上限' : STATUS[s] || s}</span>`;
+const who = (a) => a==='human' || a==='你' ? '<span class="who-human">你</span>' : `<span class="who-agent">${esc(a==='leader' || a==='agent:leader' ? 'leader' : a==='自动' ? '自动' : getAgent(String(a).replace('agent:',''))?.name || a)}</span>`;
+function toast(msg) { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
+function log(c, actor, text) { c.log ||= []; c.log.push([stamp(),actor,text]); }
+function go(page, id=null) { if(['node','contract'].includes(page)&&!getNode(id)){toast('来源节点已删除');return;}if(['project','settings'].includes(page)&&!getProject(id)){toast('项目不存在');return;}if(page==='template'&&!db.templates.some(t=>t.id===id)){toast('模板不存在');return;}view={page,id}; render(); $('#main').scrollTop=0; }
+const actorAt = (c, actor) => ({'执行代理':c.seats?.execute,'核对代理':c.seats?.verify,'挑错代理':c.seats?.challenge})[actor] || actor;
+const projectNodes = (p) => p.nodeIds.map(id=>getNode(id)).filter(Boolean);
+function renderSide() {
+  $('#side').innerHTML = `<div class="brand">⎈ Helm <small>项目驱动的 ADE · 原型</small></div>
+    <button class="nav-item nav-button ${view.page==='inbox'?'active':''}" onclick="go('inbox')"><span>收件箱</span>${inboxCount()?`<span class="count">${inboxCount()}</span>`:''}</button>
+    <div class="section-label">项目列表</div><button class="nav-item nav-button ${view.page==='projects'?'active':''}" onclick="go('projects')">全部项目 · 新建</button>
+    ${db.projects.map(p=>`<details class="side-project" open><summary>${esc(p.name)}</summary><button class="nav-item nav-button ${view.page==='project'&&view.id===p.id?'active':''}" onclick="go('project','${p.id}')">查看项目流程</button>${projectNodes(p).map(n=>`<button class="tree-node nav-button ${view.page==='node'&&view.id===n.id?'active':''}" onclick="go('node','${n.id}')"><span class="dot d-${n.status}"></span><span class="t">${esc(n.title)}</span></button>`).join('')}</details>`).join('')}
+    <div class="section-label">知识</div>${[['experience','经验库'],['decisions','决策记录'],['agents','代理库']].map(([page,title])=>`<button class="nav-item nav-button ${view.page===page?'active':''}" onclick="go('${page}')">${title}</button>`).join('')}
+    <div class="section-label">模板</div><button class="nav-item nav-button ${view.page==='templates'?'active':''}" onclick="go('templates')">项目类型与模板</button>
+    ${db.templates.map(t=>`<button class="nav-item nav-button" onclick="go('template','${t.id}')">${esc(t.title)}</button>`).join('')}
+    <div class="src side-note">你定义需求、边界和测试，完成验收。leader 起草、派单、回答提问；runtime 守住权限、依赖与上限。</div>`;
 }
-function renderTemplate(t) {
-  $('#main').innerHTML = `<div class="head"><div><div class="crumb">模板 · 只读</div><h1>${esc(t.title)}</h1><div class="meta">来源：${esc(db[t.sourceId].title)} · 契约 v${t.sourceVersion}</div></div></div>
-    <div class="intro">chief 下次起草同类契约时会以此为起点，你需要确认的内容会更少</div>
-    <div class="cols">
-      <div class="card"><div class="col-label">需求 · 说明</div><div class="need">${esc(t.need)}</div></div>
-      <div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(t, true)}</div>
-      <div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(t, true)}</div>
-    </div><div class="below"><div class="card"><h2>子契约标题</h2>${list(t.children)}</div></div>`;
+const INBOX_GROUPS = [['approval','待批准'],['questions','提问'],['limits','达到上限'],['requests','变更请求与退回请求'],['review','待验收'],['experience','待审核的经验库条目']];
+function renderInbox() {
+  const box=inbox();
+  $('#main').innerHTML=`<h1>收件箱</h1><div class="intro">这里只列需要你处理的事。每项打开对应节点，查看依据后决定。<div class="legend">${Object.keys(KIND).map(k=>`<span class="k">${KIND[k]} · ${KIND_HINT[k]}</span>`).join('')}<span class="k">🔒 强制 · 权限规则 / 确定性测试保证</span><span class="k">建议 · 核对席位核对</span></div></div>
+    ${INBOX_GROUPS.map(([key,title])=>`<section class="inbox-group" data-group="${key}"><h2>${title}<span class="hint">${box[key].length} 项</span></h2>${box[key].length?box[key].map(x=>{const n=getNode(x.nodeId);return `<button class="inbox-item inbox-button" onclick="go('node','${x.nodeId}')"><span class="dot d-${n.status}"></span><span class="grow"><span>${esc(x.title)}</span><span class="sub">${esc(x.summary)}</span></span><span class="impact">${esc(getProject(n.projectId).name)}</span>${chip(n.status,n.blockedType)}</button>`;}).join(''):'<div class="empty">没有待处理事项</div>'}</section>`).join('')}`;
 }
-
-// ---------- human actions (simulated) ----------
-function approve(id) {
-  const c = db[id];
-  if (c.status !== 'draft') return;
-  if (c.boundaries.some((b) => !b.ok)) { toast('还有边界未确认：请勾选或删除'); return; }
-  const descendants = (x) => [x, ...kids(x.id).flatMap(descendants)];
-  const tree = descendants(c);
-  tree.forEach((x) => { x.status = 'ready'; x.boundaries.forEach((b) => (b.ok = true)); ensureStarted(x); log(x, 'human', '批准契约'); });
-  log(c, 'agent:chief', '开始派单');
-  c.status = 'running';
-  toast(`已批准 ${tree.length} 个契约，chief 开始派单`); render();
+function renderProjects() {
+  $('#main').innerHTML=`<h1>项目列表</h1><div class="intro">项目包含一层项目流程；节点之间按依赖启动。</div><div class="below">${db.projects.map(p=>`<div class="card"><h2>${esc(p.name)}</h2><div class="meta">${esc(p.type)} · leader：${esc(getAgent(p.leader)?.name)}</div><p>工作现场：${esc(p.site)}</p><p>${projectNodes(p).filter(n=>n.status==='accepted').length} / ${p.nodeIds.length} 节点已验收</p><button class="primary" onclick="go('project','${p.id}')">打开项目</button></div>`).join('')}</div>
+    <div class="card form-card"><h2>新建项目</h2><label>名称<input type="text" id="project-name"></label><label>类型<select id="project-type">${['产品开发','客户交付','调研','空白',...db.templates.map(t=>t.title)].map(t=>`<option>${esc(t)}</option>`).join('')}</select></label><label>目标<textarea id="project-goal"></textarea></label><label>工作现场<input type="text" id="project-site" placeholder="git 仓库或文档目录路径"></label><button class="primary" onclick="submitProject()">让 leader 起草项目流程</button></div>`;
 }
-function toggleBound(id, i) {
-  const c = db[id]; if (c.status !== 'draft') return;
-  c.boundaries[i].ok = !c.boundaries[i].ok; render();
+function submitProject() { const p=createProject({name:$('#project-name').value,type:$('#project-type').value,goal:$('#project-goal').value,site:$('#project-site').value}); if(p?.id)go('project',p.id);else if(p?.reason)toast(p.reason); }
+function flowStages(p) {
+  const levels=new Map(), remaining=new Set(p.nodeIds), stages=[];
+  while(remaining.size) { const row=[...remaining].filter(id=>(getNode(id).deps||[]).every(dep=>levels.has(dep))); if(!row.length)break; row.forEach(id=>{levels.set(id,stages.length);remaining.delete(id);}); stages.push(row); }
+  return stages;
 }
-function toggleMechanism() { $('#newMech').hidden = $('#boundEnf').value !== 'enforced'; }
-function addBound(id) {
-  const c = db[id]; if (c.status !== 'draft') return;
-  const v = $('#newBound').value.trim(); if (!v) return;
-  const enf = $('#boundEnf').value === 'enforced' ? 'enforced' : 'advisory';
-  const mech = enf === 'enforced' ? $('#newMech').value.trim() : '';
-  if (enf === 'enforced' && !mech) { toast('请填写强制边界的保证机制'); return; }
-  c.boundaries.push({ text: v, src: 'human', ok: true, enf, ...(mech ? { mech } : {}) });
-  log(c, 'human', `添加${enf === 'enforced' ? '强制' : '建议'}边界：${v}`); render();
+function renderProject(p) {
+  const stages=flowStages(p);
+  $('#main').innerHTML=`<div class="head"><div><div class="crumb">项目 · ${esc(p.type)}</div><h1>${esc(p.name)}</h1><div class="meta">leader：${esc(getAgent(p.leader)?.name)} · 工作现场：${esc(p.site)}</div></div><div class="actions"><button onclick="go('settings','${p.id}')">项目设置</button></div></div>
+    <div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span aria-hidden="true">─ ${e.condition?esc(e.condition)+' ':''}→</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
+    ${p.edges.some(e=>e.condition)?`<div class="card dependency-band"><b>条件分支</b><select id="branch-choice">${[...new Map(p.edges.filter(e=>e.condition).map(e=>[e.value||e.condition,e])).values()].map(e=>`<option value="${esc(e.value||e.condition)}" ${p.branchResult===(e.value||e.condition)?'selected':''}>${esc(e.condition)}</option>`).join('')}</select><button onclick="chooseBranch('${p.id}',document.querySelector('#branch-choice').value)">确认分支条件</button><span class="src">分支仍需等上游验收后开工</span></div>`:''}
+    <details class="card flow-editor"><summary>编辑项目流程</summary><p class="src">可以增删节点、修改依赖与分支条件；执行中修改会提交变更请求。</p><label>节点<select id="flow-node">${projectNodes(p).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>操作<select id="flow-action"><option value="add">新增节点</option><option value="dependencies">修改依赖</option><option value="remove">删除节点</option></select></label><label>新节点名称<input type="text" id="flow-title"></label><label>前置节点 ID（逗号分隔）<input type="text" id="flow-deps" placeholder="${esc(p.nodeIds[0])}"></label><label>分支条件（可选）<input type="text" id="flow-condition" placeholder="若可行"></label><button class="primary" onclick="submitFlow('${p.id}')">提交项目流程变更</button></details>`;
 }
-function answer(id) {
-  const c = db[id]; if (c.status !== 'blocked' || c.blockedType === 'limit') return;
-  const v = $('#answer').value.trim();
-  if (!v) { toast('请先输入回答'); return; }
-  c.status = 'running'; delete c.question; log(c, 'human', `回答：${v}`); log(c, 'agent:worker', '继续执行');
-  c.handoff.decisions.push(`人补充排期：${v}`);
-  updateHandoff(c, '核对人补充的排期并继续计算可用产能');
-  toast('已回答，worker 继续执行'); render();
+function submitFlow(id) { editFlow(id,{action:$('#flow-action').value,nodeId:$('#flow-node').value,title:$('#flow-title').value,deps:$('#flow-deps').value.split(',').map(s=>s.trim()).filter(Boolean),condition:$('#flow-condition').value}); }
+function renderSeats(c) { return `<div class="card"><h2>席位安排</h2>${[['execute','执行'],['verify','核对'],['challenge','挑错']].map(([k,title])=>c.seats[k] || k==='execute'&&c.seats.human ? `<div class="row"><b>${title}席位</b> · ${k==='execute'&&c.seats.human?'人工节点':esc(getAgent(c.seats[k])?.name)}${k!=='execute'?'<span class="k seat-isolation">只读 · 新上下文</span>':''}</div>`:'').join('')}</div>`; }
+function renderQuestions(c) { const questions=c.questions||[];return questions.length?`<div class="card"><h2>提问与回答</h2>${questions.map(q=>`<div class="row"><b>${esc(q.text)}</b><p>${q.answer?`${who(q.answeredBy)} 回答：${esc(q.answer)}`:'leader 无法回答，已转给你。'}</p><div class="src">${q.answer?'已写入决策记录，不作为提问待办':'待你补充信息'}</div></div>`).join('')}</div>`:''; }
+function renderContext(c) { const x=c.context; return `<div class="card"><h2>上下文包 <span class="hint">leader 组装 · ${x?(x.confirmed?'已确认':'派单前待确认'):'就绪时生成'}</span></h2>${x?`<b>发送的信息与原因</b>${list(x.sent.map(v=>v.info+' · '+v.reason))}<b>不发送的信息与原因</b>${list(x.omitted.map(v=>v.info+' · '+v.reason))}${!x.confirmed?`<button class="primary" onclick="confirmContext('${c.id}')">确认上下文包并开工</button>`:''}`:'<div class="empty">上游产出齐备后组装。</div>'}</div>`; }
+function renderVersionDiff(c) {
+  const history=c.versions||c.versionHistory||c.changeHistory||[];
+  const show=v=>esc(typeof v==='object'?JSON.stringify(v):v??'未记录');
+  return history.length?`<details class="card version-diff"><summary>节点项目版本差异 · 当前 v${c.version}</summary>${history.map(h=>`<div class="row"><b>${esc(h.reason||h.title||(h.version?'v'+h.version+' → v'+(h.version+1):'项目变更'))}</b><div class="diff">${(Array.isArray(h.diff)?h.diff:[h]).map(d=>`<div>${esc(({need:'需求',boundaries:'边界',tests:'测试',seats:'席位',sources:'资料来源',deliverable:'交付物',title:'名称',limit:'上限'})[d.field]||d.field||'内容')}</div><div class="del">− ${show(d.before)}</div><div class="add">+ ${show(d.after)}</div>`).join('')}</div></div>`).join('')}</details>`:'';
 }
-function isLimitBlocked(c) { return c.status === 'blocked' && c.blockedType === 'limit'; }
-function extendBudget(id) {
-  const c = db[id]; if (!isLimitBlocked(c)) return;
-  const before = c.limit.tokenBudget; c.limit.tokenBudget = before * 1.5; c.status = 'running';
-  log(c, 'human', `追加预算：token 上限 ${before} → ${c.limit.tokenBudget}（+50%）`);
-  updateHandoff(c, '核对部分报告与引用文件，在追加预算内继续未完成工作');
-  c.handoff.open = c.handoff.open.filter((x) => x !== 'token 预算已全部用完');
-  c.handoff.decisions.push(`人追加 token 预算至 ${c.limit.tokenBudget}，保留已用 ${c.limit.usedTokens} 的记录`);
-  toast('已追加 50% token 预算，worker 继续执行'); render();
+function renderRequests(c) {
+  const p=getProject(c.projectId), fc=p.flowChange;
+  const flowChange=fc&&(fc.nodeId||p.nodeIds[0])===c.id?`<div class="change"><h2>项目流程变更请求</h2><p>${esc(fc.reason)}</p><div class="diff">${esc(JSON.stringify(fc.change))}</div><button class="ok" onclick="decideFlow('${p.id}',true)">批准流程变更</button> <button class="bad" onclick="decideFlow('${p.id}',false)">驳回</button></div>`:'';
+  const ch=c.change;
+  const change=ch?`<div class="change"><h2>变更请求 <span class="hint">批准后版本 v${c.version} → v${c.version+1}</span></h2><div>${esc(ch.reason)}</div><div class="diff">${(ch.add||[]).map(x=>`<div class="add">+ 边界：${esc(x)} · 建议</div>`).join('')}${(ch.remove||[]).map(x=>`<div class="del">− ${esc(x)}</div>`).join('')}${ch.patch?`<div>修改：${esc(JSON.stringify(ch.patch))}</div>`:''}</div><button class="ok small" onclick="decide('${c.id}',true)">批准</button> <button class="bad small" onclick="decide('${c.id}',false)">驳回</button></div>`:'';
+  const returns=db.returns.filter(r=>r.fromId===c.id||r.targetId===c.id);
+  const proposals=db.agentProposals.filter(x=>x.nodeId===c.id&&x.status==='pending').map(x=>`<div class="change"><h2>待批准的代理提议</h2><b>${esc((x.agent||x.data||x).name)}</b><p>${esc(x.reason||'leader 提议补充专业代理')}</p><button class="ok" onclick="approveAgent('${x.id}',true)">批准入库</button> <button class="bad" onclick="approveAgent('${x.id}',false)">驳回</button></div>`).join('');
+  const lessons=db.lessonProposals.filter(x=>x.nodeId===c.id&&x.status==='pending').map(x=>`<div class="change"><h2>待批准的教训建议</h2><b>${esc(getAgent(x.agentId)?.name)}</b><p>${esc(x.text||x.boundary?.text||x.boundary||x.reason)}</p><button class="ok" onclick="approveLesson('${x.id}',true)">批准写入默认边界</button> <button class="bad" onclick="approveLesson('${x.id}',false)">驳回</button></div>`).join('');
+  return change+flowChange+proposals+lessons+returns.map(r=>`<div class="change"><h2>${r.status==='escalated'?'升级给你处理':'退回请求'} <span class="hint">${esc(({pending:'待批准',approved:'已批准',rejected:'已驳回',escalated:'升级给你处理'})[r.status]||r.status)}</span></h2><div>${esc(getNode(r.fromId).title)} → ${esc(getNode(r.targetId).title)}</div><p>理由：${esc(r.reason)}</p><div>证据：${list(Array.isArray(r.evidence)?r.evidence:[r.evidence])}</div>${r.status==='pending'?`<button class="ok small" onclick="decideReturn('${r.id}',true)">批准退回</button> <button class="bad small" onclick="decideReturn('${r.id}',false)">驳回</button>`:r.status==='escalated'?'<div class="src">已达到退回次数上限；保留当前结果，由你调整范围或终止。</div>':''}</div>`).join('');
 }
-function adjustContract(id) {
-  const c = db[id]; if (!isLimitBlocked(c)) return;
-  const text = prompt('追加需求调整（例如缩小范围，保留当前部分结果）', '');
-  if (text === null || !text.trim()) return;
-  c.need += `\n\n契约调整：${text.trim()}`; c.version++; c.status = 'running';
-  log(c, 'human', `调整契约至 v${c.version}：${text.trim()}`);
-  updateHandoff(c, '按调整后的需求核对已有结果与剩余工作；达到测试或上限即停止');
-  toast(`契约升至 v${c.version}，worker 继续执行`); render();
+function renderNode(c) {
+  const p=getProject(c.projectId), blocker=signoffBlocker(c), saved=db.templates.find(t=>t.sourceId===c.id);
+  let actions=(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<button class="primary" onclick="approve('${c.id}')">批准节点项目${c.approved?'补全':''}</button>`:c.status==='in_review'?`<button class="bad" onclick="signoff('${c.id}',false)">打回</button><button class="ok" ${blocker?'disabled':''} onclick="signoff('${c.id}',true)">验收</button>`:'';
+  const waiting=dependencyBlocker(c)||branchBlocker(c);
+  if(c.approved&&['ready','changes_requested','needs_revalidation'].includes(c.status))actions+=`<button class="primary" ${waiting?'disabled':''} onclick="startNode('${c.id}')">启动节点</button>${waiting?`<div class="action-hint">${esc(waiting)}</div>`:''}`;
+  if(unresolvedTests(c).length&&db.autonomy[p.type]?.unresolved==='auto')actions+=`<button onclick="recheckUnresolved('${c.id}')">用新上下文重新判定</button>`;
+  if(['running','verifying'].includes(c.status))actions+=`<button class="primary" onclick="submitNodeReport('${c.id}')">${c.seats.human?'人工完成，提交验收':'提交验收报告'}</button>`;
+  let banner='';
+  const refinementDiff=c.refinementDiff||c.approvalDiff||[];
+  if(refinementDiff.length)banner+=`<div class="change"><h2>第二次确认 · 上游产出补全</h2><div>leader 根据已验收的上游产出补全细节，请确认差异与边界。</div><div class="diff">${refinementDiff.map(d=>typeof d==='string'?`<div>${esc(d)}</div>`:`<div class="del">− ${esc(d.before)}</div><div class="add">+ ${esc(d.after)}</div>`).join('')}</div></div>`;
+  if(c.status==='blocked'&&c.blockedType==='limit')banner+=`<div class="banner warn"><div class="grow"><b>已达上限 · 保存部分完成报告</b><strong>已完成</strong>${list(c.partial.done)}<strong>未完成</strong>${list(c.partial.remaining)}<div>继续完成预计还需：${esc(c.partial.estimate)}</div><div class="resolution"><button class="primary" onclick="extendBudget('${c.id}')">追加预算</button><button onclick="adjustContract('${c.id}')">调整节点项目</button><button class="bad" onclick="abandon('${c.id}')">终止</button></div></div></div>`;
+  else if(c.status==='blocked'&&c.question)banner+=`<div class="banner warn"><div class="grow"><b>leader 无法回答，需要你回答</b>${esc(c.question)}<textarea id="answer" placeholder="补充所需信息"></textarea><button class="primary" onclick="answer('${c.id}')">回答并继续</button></div></div>`;
+  if(c.status==='accepted')banner+=`<div class="banner ok"><div class="grow"><b>已验收</b>${esc(c.signNote||'')}<div class="resolution">${saved?`<button class="small" disabled>已保存为模板「${esc(saved.title)}」</button>`:`<button class="small" onclick="saveTemplate('${c.id}')">保存为模板</button>`}<button class="small" onclick="proposeExperience('${c.id}')">沉淀到经验库</button></div></div></div>`;
+  if(c.status==='needs_revalidation')banner+='<div class="banner warn"><b>需重新验证 · 上游退回后原检查已作废</b></div>';
+  if(c.archived)banner+='<div class="banner neutral">已从项目流程移除；历史记录保留供审计。</div>';
+  if(c.status==='abandoned')banner+='<div class="banner neutral">已终止，保留部分报告、证据和交接记录。</div>';
+  const timeline=c.log.slice().reverse().map(([t,a,x])=>`<div class="tl-item"><span class="time">${esc(t)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('');
+  $('#main').innerHTML=`<div class="head"><div><div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / ${esc(c.id)}</div><h1>${esc(c.title)}</h1><div class="meta">${chip(c.status,c.blockedType)}<span>节点项目 v${c.version}</span><span>执行：${c.seats.human?'你':esc(getAgent(c.seats.execute)?.name)}</span></div></div><div class="actions">${actions}<button onclick="openExecutionPrompt('${c.id}')">执行代理启动 prompt</button>${c.status!=='skipped'&&c.status!=='abandoned'?`<button onclick="editNodeForm('${c.id}')">编辑节点项目</button>`:''}${c.status==='in_review'&&blocker?`<div class="action-hint">${esc(blocker)}</div>`:''}</div></div>
+    ${renderInfo(c)}${banner}${renderVersionDiff(c)}${renderRequests(c)}<div class="card dependency-band"><b>前置节点</b> ${(c.deps||[]).map(id=>`<button class="small" onclick="go('node','${id}')">${esc(getNode(id).title)} · ${STATUS[getNode(id).status]}</button>`).join(' ')||'无'}${p.edges.filter(e=>e.to===c.id&&e.condition).map(e=>`<span class="k">条件：${esc(e.condition)}</span>`).join('')}</div>
+    <div class="cols"><div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div><div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}${(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden placeholder="保证机制（必填）">`:''}</div><div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div></div>
+    <div class="below">${renderSeats(c)}${renderContext(c)}${renderQuestions(c)}<div class="card handoff"><h2>验收报告</h2><div>${esc(c.result||'尚未提交结论')}</div><div class="legend">${Object.keys(VERDICT).map(v=>`<span class="k">${VERDICT[v]}：${c.tests.filter(t=>t.v===v).length}</span>`).join('')}</div><p class="src">核对与挑错使用只读权限和新上下文，leader 审阅后交给你验收。</p>${list(c.tests.filter(t=>t.v==='fail'||t.v==='unresolved').map(t=>t.id+' · '+t.text+' · '+VERDICT[t.v]))}</div>${renderHandoff(c)}
+    <div class="card handoff"><details class="process"><summary><h2>▸ 开发过程 <span class="hint">默认折叠 · ${c.attempts.length} 次执行 / ${c.log.length} 条日志</span></h2></summary><div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">执行记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button></div><div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div></details></div>
+    <details class="card handoff"><summary>向 leader 提问 / 提出退回</summary><label>问题<textarea id="node-question"></textarea></label><button onclick="submitQuestion('${c.id}')">先交给 leader</button><label>退回到<select id="return-target">${projectNodes(p).filter(n=>n.id!==c.id).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>退回理由<textarea id="return-reason"></textarea></label><label>证据路径<input type="text" id="return-evidence"></label><button onclick="submitReturn('${c.id}')">提交退回请求</button></details>
+    ${db.experience.filter(e=>e.nodeId===c.id&&e.status==='pending').map(e=>`<div class="card handoff"><h2>待审核的经验库条目</h2><p>${esc(e.title)} · ${esc(e.content)}</p><button class="ok" onclick="reviewExperience('${e.id}',true)">审核入库</button> <button class="bad" onclick="reviewExperience('${e.id}',false)">驳回</button></div>`).join('')}</div>`;
 }
-function abandon(id) {
-  const c = db[id]; if (!isLimitBlocked(c)) return;
-  c.status = 'abandoned'; log(c, 'human', '终止契约：达到上限后保留部分完成结果');
-  updateHandoff(c, '已终止，保留产出与未解决问题供后续参考');
-  toast('契约已终止'); render();
+function submitNodeReport(id) { const c=getNode(id);const result=prompt('产出结论（原型模拟提交；仓库历史记录保留）',c.result||'已完成当前节点需求，附允许资料与检查结果。');if(result!==null&&result.trim())submitForReview(id,result.trim()); }
+function submitQuestion(id) { const text=$('#node-question').value.trim(); if(text)askQuestion(id,text); }
+function submitReturn(id) { requestReturn(id,$('#return-target').value,$('#return-reason').value,$('#return-evidence').value); }
+let editingNode = null;
+function editNodeForm(id) {
+  const c=getNode(id); editingNode=id;modalReturnFocus=document.activeElement;
+  const agentsFor=(seat,current)=>db.agents.filter(a=>a.seats.includes(seat)).map(a=>`<option value="${a.id}" ${a.id===current?'selected':''}>${esc(a.name)}</option>`).join('');
+  $('#modal-root').innerHTML=`<div class="modal-backdrop"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">编辑节点项目 · v${c.version}<button id="close-editor" onclick="closeNodeEditor()">关闭</button></h2><div class="node-editor"><label>需求<textarea id="edit-need">${esc(c.need)}</textarea></label><h2>边界与机制</h2>${c.boundaries.map((b,i)=>`<div class="row"><input id="edit-bound-${i}" type="text" value="${esc(b.text)}"><label>保证类型<select id="edit-enf-${i}"><option value="advisory" ${b.enf==='advisory'?'selected':''}>建议</option><option value="enforced" ${b.enf==='enforced'?'selected':''}>强制</option></select></label><input id="edit-mech-${i}" type="text" value="${esc(b.mech||'')}" placeholder="强制边界必须填写机制"></div>`).join('')}<h2>测试</h2>${c.tests.map((t,i)=>`<div class="row"><input id="edit-test-${i}" type="text" value="${esc(t.text)}"><select id="edit-kind-${i}">${Object.entries(KIND).map(([k,v])=>`<option value="${k}" ${k===t.kind?'selected':''}>${v}</option>`).join('')}</select></div>`).join('')}<h2>席位安排</h2><label>执行席位<select id="edit-seat-execute" onchange="previewSeatDefaults(this.value)"><option value="" ${c.seats.human?'selected':''}>人工节点</option>${agentsFor('execute',c.seats.execute)}</select></label><div id="seat-defaults-preview"></div><label>核对席位<select id="edit-seat-verify">${agentsFor('verify',c.seats.verify)}</select></label><label>挑错席位（仅含对抗型测试时）<select id="edit-seat-challenge"><option value="">不安排</option>${agentsFor('challenge',c.seats.challenge)}</select></label></div><p class="src">保存后版本 +1，受影响的检查作废；待验收的节点回到执行中。</p><button class="primary" id="save-editor" onclick="saveNodeEditor()">保存项目变更</button></div></div>`;
+  $('#close-editor').focus?.();
 }
-function decide(id, ok) {
-  const c = db[id]; const ch = c.change; if (!ch) return;
-  if (ok) {
-    ch.add.forEach((t) => c.boundaries.push({ text: t, src: 'agent_draft', ok: true, enf: 'advisory', why: '经你批准的变更请求' }));
-    c.version++;
-  }
-  log(c, 'human', `${ok ? '批准' : '驳回'}变更请求`); delete c.change;
-  toast(ok ? `边界已更新，契约升至 v${c.version}` : '已驳回，代理按原契约继续'); render();
+function previewSeatDefaults(id) {
+  const agent=getAgent(id);$('#seat-defaults-preview').innerHTML=agent?`<div class="intro">执行代理默认内容将随节点项目一并保存。<b>默认边界</b>${list((agent.defaultBoundaries||[]).map(b=>b.text))}<b>默认测试</b>${list((agent.defaultTests||[]).map(t=>t.text))}</div>`:'';
 }
-function resolveTest(id, testId, pass, actor = 'human') {
-  const c = db[id]; const t = c.tests.find((x) => x.id === testId);
-  if (actor !== 'human') { toast('无法判定的测试只能由人判定'); return; }
-  if (c.status !== 'in_review' || !t || t.v !== 'unresolved' || typeof pass !== 'boolean') return;
-  const check = { checker: 'human', result: pass ? 'pass' : 'fail', note: `由你将「${t.text}」判为${pass ? '通过' : '不通过'}`, method: '人工判定', correction: '' };
-  const ev = c.evidence[t.id] || [];
-  const pending = ev.filter((e) => e.checks[e.checks.length - 1]?.result === 'unresolved');
-  if (pending.length) pending.forEach((e) => e.checks.push({ ...check }));
-  else if (ev.length) ev[0].checks.push(check);
-  else { t.checks ||= []; t.checks.push(check); }
-  t.v = check.result; log(c, 'human', `${t.id} 人工判为${pass ? '通过' : '不通过'}`);
-  toast(pass ? '已记录人工判定：通过' : '已记录人工判定：不通过，可打回补充'); render();
+function saveNodeEditor() {
+  const c=getNode(editingNode), need=$('#edit-need').value.trim();if(!need){toast('请填写需求');return;}
+  const boundaries=c.boundaries.map((b,i)=>({...b,text:$('#edit-bound-'+i).value.trim(),enf:$('#edit-enf-'+i).value,mech:$('#edit-mech-'+i).value.trim(),ok:true}));
+  if(boundaries.some(b=>!b.text||b.enf==='enforced'&&!b.mech)){toast('请填写边界文字及强制边界机制');return;}
+  const tests=c.tests.map((t,i)=>({...t,text:$('#edit-test-'+i).value.trim(),kind:$('#edit-kind-'+i).value}));
+  if(tests.some(t=>!t.text)){toast('请填写测试');return;}
+  const execute=$('#edit-seat-execute').value,verify=$('#edit-seat-verify').value;
+  const hasAdversarial=tests.some(t=>t.kind==='adversarial')||(execute!==c.seats.execute&&getAgent(execute)?.defaultTests.some(t=>t.kind==='adversarial'));
+  const challenge=hasAdversarial?$('#edit-seat-challenge').value:null;
+  if(hasAdversarial&&!challenge){toast('对抗型测试需要安排挑错席位');return;}
+  const patch={need,boundaries,tests,seats:{execute:execute||null,verify,challenge,human:!execute}};
+  closeNodeEditor();editNode(c.id,patch);
 }
-function signoff(id, ok) {
-  const c = db[id]; if (c.status !== 'in_review') return;
-  const blocker = signoffBlocker(c);
-  if (ok && blocker) { toast(blocker); return; }
-  const note = prompt(ok ? '签收备注（可选）' : '打回原因（必填）', '');
-  if (note === null || (!ok && !note.trim())) return;
-  c.signNote = note;
-  c.tests.filter((t) => t.kind === 'judgment').forEach((t) => {
-    t.v = ok ? 'pass' : 'fail'; t.checks ||= [];
-    t.checks.push({ checker: 'human', result: t.v, note: note || '人工签收确认', method: '人工判定', correction: '' });
-  });
-  c.status = ok ? 'accepted' : 'changes_requested';
-  log(c, 'human', ok ? '签收' : `打回：${note}`);
-  if (ok && c.parent) log(db[c.parent], 'agent:chief', `子契约「${c.title}」已签收`);
-  toast(ok ? '已签收' : '已打回'); render();
+function closeNodeEditor() { editingNode=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
+function toggleMechanism() { $('#newMech').hidden=$('#boundEnf').value!=='enforced'; }
+function renderAgents() {
+  $('#main').innerHTML=`<h1>代理库</h1><div class="intro">代理是一份专业配置；执行、核对、挑错是节点上的席位。坐核对或挑错席位时，runtime 强制只读权限和新上下文。</div><div class="below">${db.agents.map(a=>`<div class="card"><h2>${esc(a.name)}</h2><p>${esc(a.tasks)}</p><div class="meta">作为主 agent：${esc(a.model)} · ${esc(a.strength)}</div><p>可以担任：${a.seats.map(s=>({execute:'执行',verify:'核对',challenge:'挑错',leader:'协调'}[s]||s)).join(' / ')}</p><div class="src">一次验收通过：${a.stat?.firstPass||0} / ${a.stat?.total||0} · ${a.stat?.total?Math.round(a.stat.firstPass/a.stat.total*100)+'%':'暂无统计'}</div>${list(a.stat?.failures||[])}</div>`).join('')}</div>
+    <div class="card form-card"><h2>设计代理</h2><label>从模板开始<select id="agent-template" onchange="fillAgentTemplate(this.value)"><option value="">空白</option>${db.agentTemplates.map(a=>`<option value="${a.id}">${esc(a.name)} · ${esc(a.model)} / ${esc(a.strength)}</option>`).join('')}</select></label><label>名称<input type="text" id="agent-name"></label><label>擅长的任务<input type="text" id="agent-tasks"></label><label>专业指令<textarea id="agent-instructions"></textarea></label><div class="form-grid"><label>作为主 agent · 模型<input type="text" id="agent-model" value="gpt-6.1-sol"></label><label>强度<select id="agent-strength"><option>ultra</option><option>high</option><option>medium</option><option>low</option></select></label></div><label>技能与工具<input type="text" id="agent-tools" placeholder="逗号分隔"></label><label>权限上限<input type="text" id="agent-permissions" value="工作现场内读写；对外动作需人确认"></label><label>资料范围<input type="text" id="agent-sources" placeholder="逗号分隔"></label><label>默认边界<textarea id="agent-boundaries"></textarea></label><label>默认测试<textarea id="agent-tests"></textarea></label><fieldset><legend>可以担任的席位</legend>${[['execute','执行'],['verify','核对'],['challenge','挑错'],['leader','协调']].map(([k,t])=>`<label class="seat-option"><input id="agent-seat-${k}" type="checkbox" ${k==='execute'?'checked':''}> ${t}</label>`).join('')}</fieldset><button class="primary" onclick="submitAgent()">创建代理</button></div>
+    <div class="card form-card"><h2>待批准的代理提议</h2>${db.agentProposals.filter(x=>x.status==='pending').map(x=>`<div class="row"><b>${esc((x.agent||x.data||x).name)}</b><p>${esc(x.reason||'leader 发现缺少合适代理')}</p><button class="ok" onclick="approveAgent('${x.id}',true)">批准入库</button> <button class="bad" onclick="approveAgent('${x.id}',false)">驳回</button></div>`).join('')||'<div class="empty">暂无</div>'}</div><div class="card form-card"><h2>待批准的教训建议</h2>${db.lessonProposals.filter(x=>x.status==='pending').map(x=>`<div class="row"><b>${esc(getAgent(x.agentId)?.name)}</b><p>${esc(x.text||x.lesson||x.boundary?.text||x.boundary||x.reason)}</p><button class="ok" onclick="approveLesson('${x.id}',true)">写入代理默认边界</button> <button class="bad" onclick="approveLesson('${x.id}',false)">驳回</button></div>`).join('')||'<div class="empty">暂无</div>'}</div>`;
 }
-function saveTemplate(id) {
-  const c = db[id]; if (c.status !== 'accepted') return;
-  if (templates.some((t) => t.sourceId === id)) { toast('此契约已保存为模板'); return; }
-  const title = prompt('模板名称', c.title);
-  if (title === null) return;
-  if (!title.trim()) { toast('请输入模板名称'); return; }
-  templates.push({
-    id: `tpl${templates.length + 1}`, sourceId: id, sourceVersion: c.version, title: title.trim(), need: c.need,
-    boundaries: c.boundaries.map((b) => ({ ...b })),
-    tests: c.tests.map(({ id, kind, text }) => ({ id, kind, text })), children: kids(id).map((x) => x.title),
-  });
-  log(c, 'human', `保存为模板「${title.trim()}」`); toast('模板已保存到侧栏'); render();
+function fillAgentTemplate(id) { const a=db.agentTemplates.find(x=>x.id===id);if(!a)return;for(const k of ['name','tasks','instructions','model','strength','permissions'])$('#agent-'+k).value=a[k]||'';$('#agent-tools').value=(a.tools||[]).join(',');$('#agent-sources').value=(a.sources||[]).join(',');for(const k of ['execute','verify','challenge','leader'])$('#agent-seat-'+k).checked=a.seats.includes(k); }
+function submitAgent() { const data={};for(const k of ['name','tasks','instructions','model','strength','permissions'])data[k]=$('#agent-'+k).value.trim();for(const k of ['tools','sources'])data[k]=$('#agent-'+k).value.split(',').map(s=>s.trim()).filter(Boolean);data.seats=['execute','verify','challenge','leader'].filter(k=>$('#agent-seat-'+k).checked);data.defaultBoundaries=$('#agent-boundaries').value.split('\n').filter(Boolean).map(text=>({text,enf:'advisory',ok:false,src:'agent_default'}));data.defaultTests=$('#agent-tests').value.split('\n').filter(Boolean).map((text,i)=>({id:'default-'+i,text,kind:'evidence',v:'unchecked'}));const result=createAgent(data);if(result?.ok===false)toast(result.reason||'请补全代理配置'); }
+function renderExperience() {
+  $('#main').innerHTML=`<h1>经验库</h1><div class="intro">事实、人工补充的知识、教训与风险可以跨项目复用。系统起草的条目由你审核入库。</div><div class="form-grid"><label>搜索<input type="text" id="experience-search" oninput="filterExperience()"></label><label>标签<select id="experience-tag" onchange="filterExperience()"><option value="">全部</option>${[...new Set(db.experience.flatMap(e=>e.tags||[]))].map(t=>`<option>${esc(t)}</option>`).join('')}</select></label></div><div id="experience-results">${experienceCards()}</div>`;
 }
-
-// ---------- worker startup prompt ----------
+function experienceCards(search='',tag='') { return db.experience.filter(e=>(!search||(e.title+e.content).includes(search))&&(!tag||(e.tags||[]).includes(tag))).map(e=>`<div class="card form-card"><h2>${esc(e.title)} <span class="hint">${e.status==='pending'?'待审核':e.status==='rejected'?'已驳回':'已入库'}</span></h2><p>${esc(e.content)}</p><div class="meta">${esc((e.tags||[]).join(' · '))} · 有效期：${esc(e.validUntil||'复用前核对')}</div><div class="src">来源：${esc(e.source||(e.sources||[]).join('；')||'节点产出')} · 引用项目：${(e.projects||e.projectIds||[]).map(id=>esc(getProject(id)?.name||id)).join('、')||'暂无'}</div>${e.status==='pending'?`<div class="resolution"><button onclick="go('node','${e.nodeId}')">打开来源节点</button><button class="ok" onclick="reviewExperience('${e.id}',true)">审核入库</button><button class="bad" onclick="reviewExperience('${e.id}',false)">驳回</button></div>`:''}</div>`).join('')||'<div class="empty">没有匹配条目</div>'; }
+function filterExperience() { $('#experience-results').innerHTML=experienceCards($('#experience-search').value,$('#experience-tag').value); }
+const AUTONOMY_POINTS=[['approval','批准节点项目'],['change','审批变更请求'],['return','退回请求'],['limit','处理达到上限'],['unresolved','判定「无法判定」'],['acceptance','验收'],['context','上下文包确认']];
+function autonomyPanel(type) { const a=db.autonomy[type]||{};return `<div class="card form-card"><h2>自主度 · ${esc(type)}</h2>${AUTONOMY_POINTS.map(([k,t])=>`<label class="autonomy-row"><span>${t}</span><select aria-label="${esc(type)} ${t}" onchange="setAutonomy('${type}','${k}',this.value)"><option value="human" ${a[k]!=='auto'?'selected':''}>由我决定</option><option value="auto" ${a[k]==='auto'?'selected':''}>代理自动</option></select></label>`).join('')}<div class="autonomy-row">经验库入库 <span class="k">始终由我审核</span></div><div class="autonomy-row">不可逆或对外动作 <span class="k">始终由我决定</span></div><p class="src">默认人工决定；上下文包确认默认为自动。自动处理的决定可在决策列表回看。</p></div>`; }
+function renderDecisions() { const all=db.decisions,adopted=all.filter(d=>d.outcome!=='驳回').length,raw=all.filter(d=>d.outcome==='原样采纳').length;$('#main').innerHTML=`<h1>决策记录</h1><div class="intro">采纳率：${all.length?Math.round(adopted/all.length*100):0}%（${adopted}/${all.length}）；原样采纳：${raw}，有修改：${all.filter(d=>d.outcome==='有修改').length}，驳回：${all.filter(d=>d.outcome==='驳回').length}。</div><div class="card">${all.slice().reverse().map(d=>`<div class="row"><b>${esc(d.title||d.action||d.point)}</b> <span class="k">${esc(d.decisionMaker)}</span> <span class="k">${esc(d.outcome)}</span><div>${esc(d.reason||d.detail||d.summary||d.text)}</div><div class="src">${esc(d.time||d.at)} · ${esc(getProject(d.projectId)?.name||'代理库')}${d.nodeId?` · <a href="#" onclick="go('node','${d.nodeId}');return false">${esc(getNode(d.nodeId)?.title)}</a>`:''}</div></div>`).join('')||'<div class="empty">暂无</div>'}</div>${['产品开发','客户交付','调研','空白'].map(autonomyPanel).join('')}`; }
+function renderSettings(p) { $('#main').innerHTML=`<div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / 项目设置</div><h1>项目设置</h1><div class="card form-card"><h2>工作现场</h2><div>${p.type==='产品开发'?'git 仓库':'文档目录'}：${esc(p.site)}</div><h2>执行者配置</h2><label>执行端<select id="executor"><option selected>Codex CLI</option disabled>Claude Code · 即将支持</option><option disabled>Gemini CLI · 即将支持</option></select></label><p>leader：${esc(getAgent(p.leader)?.name)}</p><p class="src">纯前端模拟；runtime 执行端配置只在当前会话保存。</p><button onclick="go('decisions')">查看决策记录与自主度</button></div>${autonomyPanel(p.type)}`; }
+function renderTemplates() { $('#main').innerHTML=`<h1>项目类型与模板</h1><div class="intro">内置项目类型：产品开发 / 客户交付 / 调研 / 空白。验收后保存的模板可以用于新建同类项目。</div>${db.templates.map(t=>`<div class="card form-card"><h2>${esc(t.title)}</h2><div class="meta">项目类型：${esc(t.projectType)} · 来源节点项目 v${t.sourceVersion}</div><button onclick="go('template','${t.id}')">查看模板</button></div>`).join('')||'<div class="empty">验收后可沉淀为模板</div>'}`; }
+function renderTemplate(t) { $('#main').innerHTML=`<div class="crumb">模板 · 只读 · ${esc(t.projectType)}</div><h1>${esc(t.title)}</h1><div class="intro">leader 下次起草同类项目时会以此为起点，你需要确认的内容会更少。</div><div class="cols"><div class="card"><div class="col-label">需求</div><div class="need">${esc(t.need)}</div></div><div class="card"><div class="col-label">边界</div>${renderBounds(t,true)}</div><div class="card"><div class="col-label">测试</div>${renderTests(t,true)}</div></div><div class="card form-card"><h2>项目流程节点</h2>${list(t.flow?.nodeTitles||t.nodeTitles||t.children||[])}</div>`; }
 function workerPrompt(id) {
-  const c = db[id]; const l = c.limit; const h = c.handoff;
-  const checks = c.tests.map((t) => `${t.id} [${KIND[t.kind]}] ${t.text}`).join('\n');
-  const scope = c.boundaries.map((b) => `${b.enf === 'enforced' ? '[强制]' : '[建议]'} ${b.text}${b.enf === 'enforced' ? `（机制：${b.mech}）` : '（verifier 核对）'}`).join('\n') || '无额外边界';
-  const failed = (c.attempts || []).filter((a) => a.result === 'failed').map((a) => `#${a.number} ${a.actor} · ${a.model}；方法：${a.method}；失败原因：${a.failure}；${a.tokens} token，耗时 ${a.duration}`).join('\n') || '暂无失败尝试';
-  const handoff = h ? `更新：${h.updated}\n基线：${h.baseline}\n已完成：${h.done.join('；') || '暂无'}\n决策及依据：${h.decisions.join('；') || '暂无'}\n未解决：${h.open.join('；') || '暂无'}\n下一步：${h.next}\n产出路径：${h.outputs.join('；') || '暂无'}` : '尚未开工，无交接记录；第一步记录基线';
-  return `<goal>完成 ${c.need}。在 ${c.deliverable} 留下可用结果、验证证据和交接记录。达到全部测试或上限即停止。</goal>
-<inputs>
-Task: ${c.need}
-Output: ${c.deliverable}
-Checks: ${checks}
-Sources: ${c.sources.join('；')}
-Scope: ${scope}
-Limit: 截止 ${l.deadline} / 尝试次数 ${l.usedAttempts}/${l.maxAttempts} / token ${l.usedTokens}/${l.tokenBudget}
-Handoff:
-${handoff}
-</inputs>
-<rules>
-- 先读 handoff，再核对其引用的文件，不要直接相信记录的状态
-- 第一步记录基线
-- 不得放宽测试来换取通过；契约问题只能通过 propose_change 提出
-- 不得重复已失败的方法，除非有新理由（失败记录摘要：
-${failed}）
-- 每完成一个阶段调用 save_handoff
-- 证据通过 submit_evidence 提交；验证由 verifier 完成，你不自评
-</rules>`;
+  const c=getNode(id),l=c.limit,h=c.handoff;
+  const checks=c.tests.map(t=>`${t.id} [${KIND[t.kind]}] ${t.text}`).join('\n');
+  const scope=c.boundaries.map(b=>`${b.enf==='enforced'?'[强制]':'[建议]'} ${b.text}${b.enf==='enforced'?`（机制：${b.mech}）`:'（核对席位核对）'}`).join('\n')||'无额外边界';
+  const failed=c.attempts.filter(a=>a.result==='failed').map(a=>`#${a.number} ${getAgent(String(a.actor).replace('agent:',''))?.name||a.actor} · ${a.model||'未记录'}；方法：${a.method}；失败原因：${a.failure}；${formatNumber(a.tokens)} token，耗时 ${a.duration||'未记录'}`).join('\n')||'暂无失败尝试';
+  const handoff=h?`更新：${h.updated}\n基线：${h.baseline}\n已完成：${h.done.join('；')}\n决策及依据：${h.decisions.join('；')}\n未解决：${h.open.join('；')}\n下一步：${h.next}\n产出路径：${h.outputs.join('；')}`:'尚未开工，无交接记录；第一步记录基线';
+  return `<goal>完成 ${c.need}。在 ${c.deliverable} 留下可用结果、验证证据和交接记录。达到全部测试或上限即停止。</goal>\n<inputs>\nTask: ${c.need}\nOutput: ${c.deliverable}\nChecks: ${checks}\nSources: ${c.sources.join('；')}\nScope: ${scope}\nLimit: 截止 ${l.deadline} / 尝试次数 ${l.usedAttempts}/${l.maxAttempts} / token ${formatNumber(l.usedTokens)}/${formatNumber(l.tokenBudget)}\nHandoff:\n${handoff}\n</inputs>\n<rules>\n- 先读 handoff，再核对其引用的文件，不要直接相信记录的状态\n- 第一步记录基线\n- 不得放宽测试来换取通过；节点项目问题只能通过 propose_change 提出\n- 不得重复已失败的方法，除非有新理由（失败记录摘要：\n${failed}）\n- 每完成一个阶段调用 save_handoff\n- 证据通过 submit_evidence 提交；验证由核对席位完成，你不自评\n</rules>`;
 }
-function openWorkerPrompt(id) {
-  modalContract = id; modalReturnFocus = document.activeElement;
-  $('#modal-root').innerHTML = `<div class="modal-backdrop" onclick="if(event.target === this) closeWorkerPrompt()"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
-    <h2 id="prompt-title">worker 启动 prompt · ${esc(db[id].title)}<button id="close-prompt" class="small" onclick="closeWorkerPrompt()">关闭</button></h2>
-    <pre class="prompt-preview">${esc(workerPrompt(id))}</pre><div class="actions"><button id="copy-prompt" class="primary" onclick="copyWorkerPrompt()">复制</button></div>
-  </div></div>`;
-  $('#close-prompt').focus?.();
-}
-function closeWorkerPrompt() {
-  modalContract = null; $('#modal-root').innerHTML = ''; modalReturnFocus?.focus?.(); modalReturnFocus = null;
-}
-async function copyWorkerPrompt() {
-  if (!modalContract) return;
-  try { await navigator.clipboard.writeText(workerPrompt(modalContract)); toast('已复制'); }
-  catch { toast('复制失败'); }
-}
-if (typeof document.addEventListener === 'function') document.addEventListener('keydown', (event) => {
-  if (!modalContract) return;
-  if (event.key === 'Escape') { event.preventDefault(); closeWorkerPrompt(); }
-  if (event.key === 'Tab') {
-    const first = $('#close-prompt'); const last = $('#copy-prompt');
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-  }
-});
+function openExecutionPrompt(id) { modalContract=id;modalReturnFocus=document.activeElement;$('#modal-root').innerHTML=`<div class="modal-backdrop" onclick="if(event.target===this)closeExecutionPrompt()"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="prompt-title"><h2 id="prompt-title">执行代理启动 prompt · ${esc(getNode(id).title)}<button id="close-prompt" class="small" onclick="closeExecutionPrompt()">关闭</button></h2><pre class="prompt-preview">${esc(workerPrompt(id))}</pre><div class="actions"><button id="copy-prompt" class="primary" onclick="copyExecutionPrompt()">复制</button></div></div></div>`;$('#close-prompt').focus?.(); }
+function closeExecutionPrompt() { modalContract=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
+async function copyExecutionPrompt() { if(!modalContract)return;try{await navigator.clipboard.writeText(workerPrompt(modalContract));toast('已复制');}catch{toast('复制失败');} }
+if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(editingNode){if(event.key==='Escape'){event.preventDefault();closeNodeEditor();}return;}if(!modalContract)return;if(event.key==='Escape'){event.preventDefault();closeExecutionPrompt();}if(event.key==='Tab'){const first=$('#close-prompt'),last=$('#copy-prompt');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
+function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); }
 
-function render() {
-  renderSide();
-  if (view.page === 'inbox') renderInbox();
-  else if (view.page === 'template') renderTemplate(templates.find((t) => t.id === view.id));
-  else renderContract(db[view.id]);
-}
-window.helm = { db, templates, inbox, approve, toggleBound, decide, signoff, extendBudget, adjustContract, abandon, resolveTest, saveTemplate, workerPrompt, go, addBound, answer, openWorkerPrompt, closeWorkerPrompt, copyWorkerPrompt };
+window.helm = { db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
 render();
 </script>
 </body>
