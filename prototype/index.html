@@ -63,9 +63,9 @@ select { font: inherit; border: 1px solid var(--line); border-radius: 7px; paddi
 textarea, input[type=text] { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--panel); color: var(--text); }
 textarea { resize: vertical; min-height: 60px; }
 
-.app { display: grid; grid-template-columns: 290px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: 290px minmax(0, 1fr); height: 100vh; }
 aside { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 14px 10px; }
-main { overflow-y: auto; padding: 22px 28px 60px; }
+main { overflow-y: auto; overflow-x: hidden; min-width: 0; max-width: 100%; padding: 22px 28px 60px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; padding: 2px 8px 14px; }
 .brand small { font-weight: 400; color: var(--faint); font-size: 12px; }
 .nav-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
@@ -202,7 +202,8 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
 .d-waiting, .d-skipped { background: var(--faint); }
 .d-needs_revalidation { background: var(--bad); }
 .flow-diagram { margin: 20px 0; min-width: 0; }
-.flow-canvas { max-width: 100%; overflow-x: auto; background: var(--graph-bg); padding: 2px; }
+.flow-canvas { width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; background: var(--graph-bg); padding: 2px; }
+.flow-scroll-hint { color: var(--graph-label); background: var(--graph-label-bg); padding: 6px 10px; margin: 6px 0; font-size: 12px; border-radius: 5px; }
 .flow-svg { display: block; background: var(--graph-bg); max-width: none; }
 .flow-node { background: var(--graph-node-bg); color: var(--graph-text); cursor: pointer; outline: none; }
 .flow-node .src { color: var(--muted); }
@@ -4908,9 +4909,10 @@ function flowViewport(canvas) {
   const main=$('#main'),viewport=window.innerWidth||1024;
   const vertical=typeof matchMedia==='function'?matchMedia('(max-width: 760px)').matches:viewport<=760;
   let width=canvas?.clientWidth;
-  if(!width&&main?.clientWidth) {
+  if(main?.clientWidth) {
     const style=typeof getComputedStyle==='function'?getComputedStyle(main):null;
-    width=main.clientWidth-(parseFloat(style?.paddingLeft)|| (vertical?16:28))-(parseFloat(style?.paddingRight)|| (vertical?16:28));
+    const content=main.clientWidth-(parseFloat(style?.paddingLeft)|| (vertical?16:28))-(parseFloat(style?.paddingRight)|| (vertical?16:28));
+    width=width?Math.min(width,content):content;
   }
   return {vertical,width:Math.max(120,(width|| (vertical?viewport-32:viewport-346))-4)};
 }
@@ -4918,19 +4920,29 @@ function flowViewport(canvas) {
 function layoutFlow(p,options={}) {
   const width=Math.max(120,Number(options.width)||960),vertical=options.vertical??width<=760;
   const graph=options.focusId?flowNeighborhood(p,options.focusId):p,stages=flowStages(graph);
-  const included=new Set(stages.flat()),nodeWidth=vertical?Math.min(270,width-80):210;
+  const included=new Set(stages.flat()),levelOf=new Map(stages.flatMap((ids,level)=>ids.map(id=>[id,level])));
+  let nodeWidth=vertical?Math.min(270,width-80):210;
   const edges=graph.edges.filter(e=>included.has(e.from)&&included.has(e.to)).map(e=>{
     const marks=flowEdgeMarks(p,e),text=[e.condition,marks.returned?'退回':'',marks.discovery?'发现':''].filter(Boolean).join(' · ');
     const lines=flowTextLines(text,vertical?nodeWidth-24:168,12);
     return {...e,...marks,label:text?{text,lines,width:Math.max(...lines.map(line=>flowTextWidth(line,12)))+16,height:lines.length*16+10}:null};
   });
+  const gaps=stages.slice(0,-1).map((ids,level)=>{
+    const channel=edges.filter(e=>levelOf.get(e.from)===level||levelOf.get(e.to)===level+1);
+    return Math.max(56,...channel.map(e=>(e.label?.width||0)+24),channel.length*6+32);
+  });
+  // 常规项目先适配内容宽度；172px 是保留固定字号及全文换行的最小桌面方块宽度。
+  if(!vertical&&stages.length)nodeWidth=Math.max(172,Math.min(210,(width-32-gaps.reduce((sum,gap)=>sum+gap,0))/stages.length));
   const nodes=stages.flatMap((ids,level)=>ids.map(id=>{
     const n=getNode(id),discovery=Boolean(n.discoverySource||db.discoveries.some(d=>d.newNodeId===id));
     const titleLines=flowTextLines(n.title,nodeWidth-32,14),statusLabel=flowStatusLabel(n),statusLines=flowTextLines(statusLabel,nodeWidth-48,12);
     const agent=n.seats.human?'执行：你（人工节点）':'执行：'+(getAgent(n.seats.execute)?.name||'未安排');
     const agentLines=flowTextLines(agent,nodeWidth-32,12),statusY=20+titleLines.length*19;
     const statusHeight=statusLines.length*16+10,agentY=statusY+statusHeight+22;
-    return {id,level,width:nodeWidth,height:agentY+(agentLines.length-1)*16+(discovery?36:20),titleLines,statusLabel,statusLines,statusY,statusHeight,agent,agentLines,agentY,discovery};
+    const inCount=edges.filter(e=>e.to===id).length,outCount=edges.filter(e=>e.from===id).length;
+    const inSide=vertical&&(inCount-1)*12>nodeWidth-32,outSide=vertical&&(outCount-1)*12>nodeWidth-32;
+    const portHeight=!vertical||inSide||outSide?(Math.max(inCount,outCount)-1)*16+32:0;
+    return {id,level,width:nodeWidth,height:Math.max(agentY+(agentLines.length-1)*16+(discovery?36:20),portHeight),inPortSide:inSide?'left':vertical?'top':'left',outPortSide:outSide?'right':vertical?'bottom':'right',titleLines,statusLabel,statusLines,statusY,statusHeight,agent,agentLines,agentY,discovery};
   }));
   const byId=new Map(nodes.map(n=>[n.id,n])),labelsBefore=id=>edges.filter(e=>e.to===id&&e.label);
   const labelSpace=id=>labelsBefore(id).reduce((sum,e)=>sum+e.label.height+8,0);
@@ -4950,23 +4962,27 @@ function layoutFlow(p,options={}) {
     stages.forEach((ids,level)=>{
       let y=top+(maxHeight-heights[level])/2;
       for(const id of ids){const n=byId.get(id);n.x=x;n.y=y;y+=n.height+44;}
-      const channel=edges.filter(e=>byId.get(e.from).level===level||byId.get(e.to).level===level+1);
-      const gap=Math.max(104,...channel.map(e=>(e.label?.width||0)+32),channel.length*8+40);
-      x+=nodeWidth+(level<stages.length-1?gap:0);
+      x+=nodeWidth+(gaps[level]||0);
     });
-    graphWidth=Math.max(width,x+16);graphHeight=top+maxHeight+28;
-    const shift=(graphWidth-x-16)/2;nodes.forEach(n=>n.x+=shift);
+    graphWidth=x+16;graphHeight=top+maxHeight+28;
   }
   let skipY=20;
   edges.forEach(e=>{
     const source=byId.get(e.from),target=byId.get(e.to),skip=target.level>source.level+1;
     const outgoing=edges.filter(edge=>edge.from===e.from),incoming=edges.filter(edge=>edge.to===e.to);
-    const port=(items,span)=>(items.indexOf(e)-(items.length-1)/2)*Math.min(10,(span-32)/(items.length+1));
+    const port=(items,span)=>(items.indexOf(e)-(items.length-1)/2)*Math.min(16,(span-32)/Math.max(1,items.length-1));
     if(vertical) {
       const peers=edges.filter(edge=>(byId.get(edge.to).level>byId.get(edge.from).level+1)===skip);
       const offset=12+24*(peers.indexOf(e)+1)/(peers.length+1),lane=skip?source.x-offset:source.x+nodeWidth+offset;
       const sx=source.x+nodeWidth/2+port(outgoing,source.width),tx=target.x+nodeWidth/2+port(incoming,target.width),sy=source.y+source.height,ty=target.y;
       e.points=[[sx,sy],[sx,sy+10],[lane,sy+10],[lane,ty-10],[tx,ty-10],[tx,ty]];
+      // 窄屏遇到过多端口时改用方块侧边，扩展高度而不突破视口宽度。
+      if(source.outPortSide==='right'||target.inPortSide==='left') {
+        const right=source.x+nodeWidth+offset,left=source.x-offset;
+        const start=source.outPortSide==='right'?[[source.x+nodeWidth,source.y+source.height/2+port(outgoing,source.height)],[right,source.y+source.height/2+port(outgoing,source.height)]]:[[sx,sy],[sx,sy+10],[right,sy+10]];
+        const end=target.inPortSide==='left'?[[left,ty-10],[left,ty+target.height/2+port(incoming,target.height)],[target.x,ty+target.height/2+port(incoming,target.height)]]:[[tx,ty-10],[tx,ty]];
+        e.points=[...start,[right,ty-10],...end];
+      }
       if(e.label) {
         const labels=labelsBefore(e.to),after=labels.slice(labels.indexOf(e)+1).reduce((sum,edge)=>sum+edge.label.height+8,0);
         e.label.x=skip?target.x:target.x+nodeWidth-e.label.width;e.label.y=target.y-16-after-e.label.height;
@@ -4996,27 +5012,28 @@ function layoutFlow(p,options={}) {
   }
   graphHeight=Math.max(graphHeight,...labels.map(label=>label.y+label.height+16));
   edges.forEach(e=>{e.path=e.points.map(([x,y],i)=>`${i?'L':'M'} ${x} ${y}`).join(' ');});
-  return {nodes,edges,width:graphWidth,height:graphHeight,vertical,stages};
+  return {nodes,edges,width:graphWidth,height:graphHeight,availableWidth:width,scrollable:!vertical&&graphWidth>width+.5,vertical,stages};
 }
 function flowSVGText(lines,x,y,className,lineHeight=16) {
   return `<text class="${className}" x="${x}" y="${y}">${lines.map((line,i)=>`<tspan x="${x}" dy="${i?lineHeight:0}">${esc(line)}</tspan>`).join('')}</text>`;
 }
 function renderFlowSVG(p,options={}) {
   const layout=layoutFlow(p,options),key='flow-'+p.id+'-'+(options.focusId||'project');
-  const markers=['normal','returned','discovery','active'].map(kind=>`<marker id="${esc(key+'-'+kind)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="flow-arrow-${kind}" d="M 0 0 L 10 5 L 0 10 Z"/></marker>`).join('');
+  const markers=['normal','returned','discovery','active'].map(kind=>`<marker id="${esc(key+'-'+kind)}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path class="flow-arrow-${kind}" d="M 0 0 L 10 5 L 0 10 Z"/></marker>`).join('');
   const edges=layout.edges.map(e=>`<g class="flow-edge${e.returned?' returned':''}${e.discovery?' discovery':''}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" aria-hidden="true"><path class="flow-edge-path" d="${e.path}" marker-end="url(#${esc(key+'-'+(e.returned?'returned':e.discovery?'discovery':'normal'))})"/>${e.label?`<rect class="flow-label-bg" x="${e.label.x}" y="${e.label.y}" width="${e.label.width}" height="${e.label.height}" rx="4"/>${flowSVGText(e.label.lines,e.label.x+8,e.label.y+17,'flow-edge-label')}`:''}</g>`).join('');
   const nodes=layout.nodes.map(n=>{
     const state=getNode(n.id).status,open=`go('node',${JSON.stringify(n.id)})`,highlight=JSON.stringify(n.id);
     const label=[getNode(n.id).title,n.statusLabel,n.agent,n.discovery?'由发现生成':'',`第 ${n.level+1} 层`].filter(Boolean).join('，');
     return `<g class="flow-node${n.discovery?' discovery':''}${n.id===options.focusId?' current':''}" data-node-id="${esc(n.id)}" data-state="${state}" data-level="${n.level}" transform="translate(${n.x} ${n.y})" role="link" tabindex="0" aria-label="${esc(label)}" onclick="${esc(open)}" onkeydown="${esc(`openFlowNode(event,${highlight})`)}" onmouseenter="${esc(`highlightFlowNode(this,${highlight},'hover')`)}" onmouseleave="highlightFlowNode(this,null,'hover')" onfocus="${esc(`highlightFlowNode(this,${highlight},'focus')`)}" onblur="highlightFlowNode(this,null,'focus')"><rect class="flow-node-box" width="${n.width}" height="${n.height}" rx="6"/>${flowSVGText(n.titleLines,16,26,'flow-title',19)}<g class="flow-state s-${state}"><rect class="flow-state-bg" x="14" y="${n.statusY}" width="${Math.min(n.width-28,Math.max(...n.statusLines.map(line=>flowTextWidth(line,12)))+20)}" height="${n.statusHeight}" rx="5"/>${flowSVGText(n.statusLines,24,n.statusY+17,'flow-state-text')}</g>${flowSVGText(n.agentLines,16,n.agentY,'flow-agent')}${n.discovery?flowSVGText(['发现'],16,n.height-14,'flow-discovery-tag'):''}</g>`;
   }).join('');
-  return `<svg class="flow-svg" data-direction="${layout.vertical?'vertical':'horizontal'}" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-labelledby="${esc(key+'-title')}" style="--graph-arrow-active:url(#${esc(key+'-active')})"><title id="${esc(key+'-title')}">${esc(options.focusId?'本节点与直接上下游关系':'项目流程：'+p.name)}；${layout.vertical?'从上到下':'从左到右'}，Tab 聚焦节点，Enter 打开详情</title><defs>${markers}</defs>${edges}${nodes}</svg>`;
+  return `<svg class="flow-svg" data-direction="${layout.vertical?'vertical':'horizontal'}" data-scrollable="${layout.scrollable}" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-labelledby="${esc(key+'-title')}" style="--graph-arrow-active:url(#${esc(key+'-active')})"><title id="${esc(key+'-title')}">${esc(options.focusId?'本节点与直接上下游关系':'项目流程：'+p.name)}；${layout.vertical?'从上到下':'从左到右'}，Tab 聚焦节点，Enter 打开详情</title><defs>${markers}</defs>${edges}${nodes}</svg>`;
 }
 function renderFlowGraph(p,options={}) {
   const settings={...flowViewport(),...options},graph=settings.focusId?flowNeighborhood(p,settings.focusId):p;
+  const scrolling=layoutFlow(p,settings).scrollable;
   const states=[...new Set(graph.nodeIds.map(id=>getNode(id)?.status).filter(Boolean))];
   const descriptions=graph.edges.map(e=>{const marks=flowEdgeMarks(p,e);return `<li data-from="${esc(e.from)}" data-to="${esc(e.to)}">${esc(getNode(e.from)?.title)} → ${esc(getNode(e.to)?.title)}${e.condition?'；条件：'+esc(e.condition):''}${marks.returned?'；退回过的依赖':''}${marks.discovery?'；由发现生成的依赖':''}</li>`;}).join('');
-  return `<section class="flow-diagram${settings.focusId?' flow-local':''}" data-project-id="${esc(p.id)}" data-focus-id="${esc(settings.focusId||'')}" aria-label="${settings.focusId?'本节点上下游小图':'项目流程图'}">${settings.focusId?'<h2>直接上下游</h2>':''}<div class="flow-canvas">${renderFlowSVG(p,settings)}</div><div class="flow-legend" aria-label="流程图图例">${states.map(state=>`<span class="flow-legend-status">${chip(state)}</span>`).join('')}<span><svg aria-hidden="true" viewBox="0 0 32 12"><path class="flow-legend-return" d="M 0 6 L 32 6"/></svg>退回</span><span><svg aria-hidden="true" viewBox="0 0 32 12"><rect class="flow-legend-discovery" x="1" y="1" width="30" height="10"/></svg>发现 · 虚线边框 / 点线</span><span>条件分支 · 连线旁的条件文字</span></div><ul class="flow-dependency-list visually-hidden" aria-label="${settings.focusId?'直接上下游依赖列表':'完整项目依赖列表'}">${descriptions||'<li>无依赖</li>'}</ul></section>`;
+  return `<section class="flow-diagram${settings.focusId?' flow-local':''}" data-project-id="${esc(p.id)}" data-focus-id="${esc(settings.focusId||'')}" aria-label="${settings.focusId?'本节点上下游小图':'项目流程图'}">${settings.focusId?'<h2>直接上下游</h2>':''}<div class="flow-canvas" role="region" aria-label="${scrolling?'流程图，可左右滚动查看全部节点':'流程图'}"${scrolling?' tabindex="0"':''}>${renderFlowSVG(p,settings)}</div><p class="flow-scroll-hint"${scrolling?'':' hidden'}>↔ 图较宽，可左右滚动查看全部节点；也可聚焦图区域后使用方向键。</p><div class="flow-legend" aria-label="流程图图例">${states.map(state=>`<span class="flow-legend-status">${chip(state)}</span>`).join('')}<span><svg aria-hidden="true" viewBox="0 0 32 12"><path class="flow-legend-return" d="M 0 6 L 32 6"/></svg>退回</span><span><svg aria-hidden="true" viewBox="0 0 32 12"><rect class="flow-legend-discovery" x="1" y="1" width="30" height="10"/></svg>发现 · 虚线边框 / 点线</span><span>条件分支 · 连线旁的条件文字</span></div><ul class="flow-dependency-list visually-hidden" aria-label="${settings.focusId?'直接上下游依赖列表':'完整项目依赖列表'}">${descriptions||'<li>无依赖</li>'}</ul></section>`;
 }
 function openFlowNode(event,id) { if(event.key==='Enter'){event.preventDefault();go('node',id);} }
 function highlightFlowNode(element,id,kind='hover') {
@@ -5037,7 +5054,12 @@ function refreshFlowLayout() {
     if(!p||!canvas)continue;
     const focused=document.activeElement?.closest?.('.flow-node');
     const focusedId=focused?.closest('.flow-diagram')===diagram?focused.dataset.nodeId:null;
-    canvas.innerHTML=renderFlowSVG(p,{...flowViewport(canvas),focusId:diagram.dataset.focusId||undefined});
+    const settings={...flowViewport(canvas),focusId:diagram.dataset.focusId||undefined},scrolling=layoutFlow(p,settings).scrollable;
+    canvas.innerHTML=renderFlowSVG(p,settings);
+    const hint=diagram.querySelector('.flow-scroll-hint');
+    if(scrolling){hint?.removeAttribute('hidden');canvas.setAttribute('tabindex','0');}
+    else {hint?.setAttribute('hidden','');canvas.removeAttribute('tabindex');}
+    canvas.setAttribute('aria-label',scrolling?'流程图，可左右滚动查看全部节点':'流程图');
     diagram._flowFocus=null;diagram._flowHover=null;
     if(focusedId)[...canvas.querySelectorAll('.flow-node')].find(node=>node.dataset.nodeId===focusedId)?.focus();
   }
@@ -5332,7 +5354,9 @@ function init009MergeDemo() {
   db.projects.push(project);normalizeV4Project(project);
   const definitions=[['c-interface','示例 · 共享接口','accepted',1,'10/11 09:10'],['c-search','示例 · 搜索交互','accepted',2,'10/11 09:20'],['c-empty','示例 · 空结果提示','accepted',3,'10/11 09:30'],['c-settings','示例 · 偏好设置','running',null,null]];
   for(const [id,title,status,order,time] of definitions){
-    const node=normalizeNode(project.id,{id,title,need:'示例 · 在独立工作目录完成'+title.replace(/^示例 · /,'')+'，产出差异并独立核对。',deliverable:'示例 · 搜索面板差异：示例/src/search.diff',sources:['示例/docs/搜索面板.md'],deps:[],boundaries:[{text:'示例 · 只修改搜索面板相关内容',enf:'advisory',src:'human',ok:true}],tests:[{id:'c-proof',kind:'evidence',text:'示例 · 差异与已批准需求逐项核对',v:status==='accepted'?'pass':'unchecked'}],seats:{execute:'agent-frontend',verify:'agent-check',challenge:null,human:false},attempts:[{number:1,actor:'agent-frontend',model:'示例 · 未调用真实模型',method:'示例 · 在独立工作目录模拟执行与核对',result:status==='accepted'?'success':'running',failure:'',tokens:null,duration:'示例',sessionId:'示例 · c-session-'+id,cost:status==='accepted'?.5:.2}],cost:status==='accepted'?.5:.2,example:true});
+    const deps=id==='c-interface'?[]:['c-interface'];
+    const node=normalizeNode(project.id,{id,title,need:'示例 · 在独立工作目录完成'+title.replace(/^示例 · /,'')+'，产出差异并独立核对。',deliverable:'示例 · 搜索面板差异：示例/src/search.diff',sources:['示例/docs/搜索面板.md'],deps,boundaries:[{text:'示例 · 只修改搜索面板相关内容',enf:'advisory',src:'human',ok:true}],tests:[{id:'c-proof',kind:'evidence',text:'示例 · 差异与已批准需求逐项核对',v:status==='accepted'?'pass':'unchecked'}],seats:{execute:'agent-frontend',verify:'agent-check',challenge:null,human:false},attempts:[{number:1,actor:'agent-frontend',model:'示例 · 未调用真实模型',method:'示例 · 在独立工作目录模拟执行与核对',result:status==='accepted'?'success':'running',failure:'',tokens:null,duration:'示例',sessionId:'示例 · c-session-'+id,cost:status==='accepted'?.5:.2}],cost:status==='accepted'?.5:.2,example:true});
+    for(const from of deps)project.edges.push({from,to:id});
     node.status=status;node.approved=true;node.started=true;
     node.boundaries.forEach(boundary=>boundary.ok=true);if(status==='accepted')node.tests.forEach(test=>test.v='pass');
     node.result=status==='accepted'?'示例 · 节点已通过核对并由你验收':'示例 · 偏好设置正在执行';node.signNote=status==='accepted'?'示例 · 人工验收确认':'';
@@ -5340,6 +5364,10 @@ function init009MergeDemo() {
     node.handoff.done=status==='accepted'?['示例 · 完成差异、核对与人工验收']:['示例 · 已完成偏好设置基础草稿'];node.handoff.outputs=[node.deliverable];
     if(order){node.merge={example:true,sourceNote:'示例 · 当前页面模拟合并，未操作真实仓库',acceptedAt:time,acceptedOrder:order,status:order===1?'merged':'pending',baseVersion:1,needsRebase:order>1,leaderAttempts:[],history:[],demoConflict:order===2};node.log.push([time,'human','示例 · 人工验收']);if(order===1){node.merge.mergedAt='10/11 09:12';node.merge.mergedVersion=2;node.merge.history=[{time:'10/11 09:12',event:'示例 · 合并完成',baseVersion:1,mergedVersion:2,actor:'leader'}];}}
   }
+  const integration=normalizeNode(project.id,{id:'c-integration',title:'示例 · 搜索面板联调',need:'示例 · 汇合搜索交互、空结果提示与偏好设置，核对搜索面板整体行为。',deliverable:'示例 · 搜索面板联调报告',sources:['示例/docs/搜索面板.md'],deps:['c-search','c-empty','c-settings'],seats:{execute:'agent-frontend',verify:'agent-check',challenge:null,human:false},boundaries:[{text:'示例 · 只联调已验收的三个上游结果',enf:'advisory',src:'human',ok:true}],tests:[{id:'c-integration-proof',kind:'evidence',text:'示例 · 三个上游结果在完整面板中协同工作',v:'unchecked'}],example:true});
+  integration.status='waiting';integration.approved=true;integration.cost=0;
+  db.nodes[integration.id]=integration;project.nodeIds.push(integration.id);
+  for(const from of integration.deps)project.edges.push({from,to:integration.id});
   project.memory.instructions[0].refs=[...project.nodeIds];syncProjectInstructions(project.id);
   failExampleLeaderMerge(getNode('c-search'),'10/11 09:21');
   const blocking={id:'discovery-blocking-example',nodeId:'c-settings',projectId:project.id,description:'示例 · 偏好设置读取旧版配置格式，缺少迁移规则，继续执行会丢失用户偏好',evidence:'示例 · 配置样本格式 v1 与读取接口 v2 不一致',location:'示例/src/preferences.js:18',materials:['示例/docs/偏好迁移.md:8','示例/data/preferences-v1.json'],blocking:true,recommendation:{action:'draft',reason:'示例 · 迁移规则超出偏好设置节点范围，先独立处理再恢复原节点',title:'示例 · 补齐偏好配置迁移',deps:[]},status:'pending',state:'pending',example:true,sourceNote:'示例 · 预置阻塞型发现，不属于真实开发或浏览器检查记录'};
