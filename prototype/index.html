@@ -18,6 +18,9 @@
   --result-fail: #8b2357; --result-fail-bg: #fae6f0;
   --result-unverifiable: #55429b; --result-unverifiable-bg: #efebfa;
   --result-unprocessed: #55565f; --result-unprocessed-bg: #ececf0;
+  --preview-text: #1d1d1b; --preview-bg: #ffffff; --preview-muted: #6b6a64; --preview-code-bg: #f0efea;
+  --preview-highlight: #2346a6; --preview-highlight-bg: #e6ecfb;
+  --preview-add: #165c33; --preview-add-bg: #e3f3ea; --preview-delete: #9b2c21; --preview-delete-bg: #fbe6e3;
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -34,6 +37,9 @@
     --result-fail: #ffa0ca; --result-fail-bg: #412337;
     --result-unverifiable: #c1b1ff; --result-unverifiable-bg: #302842;
     --result-unprocessed: #c1c2ce; --result-unprocessed-bg: #2b2c33;
+    --preview-text: #ecebe6; --preview-bg: #1f1f1d; --preview-muted: #a3a197; --preview-code-bg: #282825;
+    --preview-highlight: #a6bcff; --preview-highlight-bg: #232c45;
+    --preview-add: #7edba6; --preview-add-bg: #1d3326; --preview-delete: #ff9b90; --preview-delete-bg: #3d2220;
   }
 }
 * { box-sizing: border-box; }
@@ -255,6 +261,45 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
 .checklist-item { padding: 7px 0; border-bottom: 1px solid var(--line); }
 .budget-band { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
 @media (max-width: 760px) { .orchestration-row { grid-template-columns: 1fr; } }
+
+/* 产出物抽屉：正文换行，窄屏保持表格和 diff 在视口内。 */
+.artifact-backdrop { position: fixed; inset: 0; z-index: 40; display: flex; justify-content: flex-end; background: var(--overlay); }
+.artifact-drawer { width: min(720px, 100%); max-width: 100%; height: 100%; display: flex; flex-direction: column; padding: 20px; border-left: 1px solid var(--line); color: var(--preview-text); background: var(--preview-bg); overflow: hidden; }
+.artifact-header { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.artifact-header h2 { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.artifact-header button { flex: none; }
+.artifact-content { overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; flex: 1; overflow-wrap: anywhere; padding: 6px 0 20px; }
+.preview-meta { color: var(--preview-muted); background: var(--preview-bg); font-size: 12px; overflow-wrap: anywhere; margin: 8px 0; }
+.preview-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.preview-trigger { color: var(--preview-highlight); background: var(--preview-highlight-bg); font-size: 12px; padding: 3px 7px; text-align: left; white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+.preview-code { color: var(--preview-text); background: var(--preview-code-bg); font: 12px/1.7 var(--mono); border-radius: 6px; margin: 12px 0; padding: 8px; max-width: 100%; white-space: normal; }
+.preview-line { scroll-margin-block: 24px; }
+.preview-markdown-marker { display: block; min-height: 8px; }
+.preview-code .preview-line { display: grid; grid-template-columns: 4ch minmax(0, 1fr); gap: 8px; padding: 2px 4px; }
+.preview-line-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.preview-line-number { color: var(--preview-muted); background: var(--preview-code-bg); font-variant-numeric: tabular-nums; user-select: none; white-space: nowrap; font-size: 11px; }
+.preview-diff .preview-line { grid-template-columns: 10ch 2ch minmax(0, 1fr); }
+.preview-diff-add { color: var(--preview-add); background: var(--preview-add-bg); }
+.preview-diff-add .preview-line-number { color: var(--preview-add); background: var(--preview-add-bg); }
+.preview-diff-delete { color: var(--preview-delete); background: var(--preview-delete-bg); }
+.preview-diff-delete .preview-line-number { color: var(--preview-delete); background: var(--preview-delete-bg); }
+.preview-highlight { color: var(--preview-highlight); background: var(--preview-highlight-bg); outline: 2px solid var(--preview-highlight); outline-offset: -2px; }
+.preview-highlight .preview-line-number { color: var(--preview-highlight); background: var(--preview-highlight-bg); }
+.preview-csv { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 12px 0; }
+.preview-csv th { color: var(--preview-text); background: var(--preview-code-bg); text-align: left; padding: 8px; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.preview-csv td { color: var(--preview-text); background: var(--preview-bg); padding: 8px; border: 1px solid var(--line); overflow-wrap: anywhere; white-space: pre-wrap; }
+.preview-csv .preview-highlight th, .preview-csv .preview-highlight td { color: var(--preview-highlight); background: var(--preview-highlight-bg); }
+@media (max-width: 760px) { .artifact-drawer { width: 100%; border-left: none; padding: 14px; } .preview-csv th, .preview-csv td { padding: 5px; } }
+
+.merge-queue, .publication-mode { margin: 16px 0; }
+.merge-item { border-top: 1px solid var(--line); padding: 12px 0; overflow-wrap: anywhere; }
+.merge-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.merge-status, .merge-label { display: inline-flex; border-radius: 5px; padding: 2px 7px; font-size: 12px; white-space: normal; }
+.merge-label { color: var(--text); background: var(--panel-2); }
+.merge-merged { color: var(--ok); background: var(--ok-soft); }
+.merge-pending { color: var(--warn); background: var(--warn-soft); }
+.merge-conflict { color: var(--bad); background: var(--bad-soft); }
+.merge-conflict-card, .blocking-discovery-demo { margin-bottom: 14px; }
 </style>
 </head>
 <body>
@@ -264,6 +309,7 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
 </div>
 <div class="toast" id="toast"></div>
 <div id="modal-root"></div>
+<div id="artifact-root"></div>
 
 <script>
 // 项目 → 项目流程 → 节点；所有演示状态仅保存在当前页面。
@@ -2732,7 +2778,7 @@ function branchBlocker(node) { if(!node.branchCondition)return '';const p=getPro
 function signoffBlocker(node) {if(node.tests.some(t=>t.v==='unresolved'))return '仍有无法判定的测试，请先判定后验收';if(node.tests.some(t=>t.kind!=='judgment'&&t.v!=='pass'))return '仍有未通过的测试，请打回后补充验证';return '';}
 const unresolvedTests = (node) => node.tests.filter(t=>t.v==='unresolved');
 function inbox() {
-  const result={approval:[],questions:[],limits:[],requests:[],discoveries:[],gates:[],review:[],designDecisions:[],experience:[],sideEffects:[]};
+  const result={approval:[],questions:[],limits:[],requests:[],discoveries:[],gates:[],review:[],designDecisions:[],experience:[],sideEffects:[],mergeConflicts:[]};
   const push=(key,id,nodeId,title,summary,kind)=>result[key].push({id,nodeId,title,summary,kind,type:kind});
   for(const n of Object.values(db.nodes)) {
     if(n.archived)continue;
@@ -2758,6 +2804,7 @@ function inbox() {
     for(const c of p.memory.cautions)if(c.status==='proposed')push('approval',c.id,c.refs?.[0]||p.nodeIds[0],c.text,'项目记忆·注意事项待你确认','caution');
   }
   for(const effect of db.sideEffects)if(effect.status==='unknown')push('sideEffects',effect.id,effect.nodeId,effect.title,'回执未知 · 核对目标现场后由你处理（示例）','sideEffect');
+  for(const c of db.mergeConflicts||[])if(c.status==='pending'&&c.leaderAttempts.some(attempt=>attempt.result==='failed'))push('mergeConflicts',c.id,c.nodeId,c.title,'示例 · leader 尝试解决失败，等待你选择继续合并或退回节点','mergeConflict');
   return result;
 }
 const inboxCount = () => Object.values(inbox()).reduce((n,items)=>n+items.length,0);
@@ -2917,7 +2964,7 @@ function signoff(id,ok,actor='human') {
   const note=actor==='human'&&typeof prompt==='function'?prompt(ok?'验收备注（可选）':'打回原因（必填）',''):(ok?'全部测试通过，自动验收':'自动打回');if(note===null||!ok&&!note.trim())return {ok:false,reason:'已取消'};
   n.signNote=note;n.tests.filter(t=>t.kind==='judgment').forEach(t=>{t.v=ok?'pass':'fail';t.checks||=[];t.checks.push({checker:'human',result:t.v,note:note||'人工验收确认',method:'人工判定',correction:''});});n.status=ok?'accepted':'changes_requested';n.needsRevalidation=false;recordDecision('acceptance',id,ok?'验收节点':'打回：'+note,actor,ok?'原样采纳':'驳回');coreLog(n,actor,ok?'已验收':'打回：'+note);
   const agent=getAgent(n.seats.execute);if(agent){agent.stat||={firstPass:0,total:0,failures:[]};agent.stat.total++;if(ok&&n.attempts.filter(a=>a.result==='failed').length===0&&(n.returnCount||0)===0)agent.stat.firstPass++;if(!ok)agent.stat.failures.push(note);}
-  if(ok){resumeBlockedDiscoveries(n.projectId);const p=getProject(n.projectId);if(p.edges.some(edge=>edge.from===n.id&&edge.condition)){p.branchResult=n.result?.includes('不可行')&&!n.result?.includes('有条件可行')?'infeasible':'feasible';}completeReadyNodes(n.projectId);}
+  if(ok){registerMergeAcceptance(n);resumeBlockedDiscoveries(n.projectId);const p=getProject(n.projectId);if(p.edges.some(edge=>edge.from===n.id&&edge.condition)){p.branchResult=n.result?.includes('不可行')&&!n.result?.includes('有条件可行')?'infeasible':'feasible';}completeReadyNodes(n.projectId);}
   coreFinish(ok?'已验收':'已打回');return {ok:true};
 }
 function isLimitBlocked(n) {return n?.status==='blocked'&&n.blockedType==='limit';}
@@ -2962,7 +3009,7 @@ function createProject(data,actor='human') {
   const saved=db.templates.find(t=>t.title===data.type||t.id===data.type);
   if(!data.name?.trim()||!saved&&!['产品开发','客户交付','调研','空白'].includes(data.type))return coreRefuse('请填写项目名称并选择类型');
   if(saved)data={...data,type:saved.projectType};
-  const p={id:coreId('project'),name:data.name.trim(),type:data.type,goal:data.goal||'请补充总目标',site:data.site||'待绑定工作现场',leader:data.leader||(['产品开发','空白'].includes(data.type)?'agent-pm-dev':'agent-pm-client'),executor:'Codex CLI',nodeIds:[],edges:[],branchResult:null};normalizeV4Project(p);db.projects.push(p);
+  const p={id:coreId('project'),name:data.name.trim(),type:data.type,goal:data.goal||'请补充总目标',site:data.site||'待绑定工作现场',leader:data.leader||(['产品开发','空白'].includes(data.type)?'agent-pm-dev':'agent-pm-client'),executor:'Codex CLI',nodeIds:[],edges:[],branchResult:null,...(data.type==='产品开发'?{exampleMerge:true,mergeBaselineVersion:1,mergeSerial:0}:{})};normalizeV4Project(p);db.projects.push(p);
   if(saved){const ids=new Map(saved.nodesSnapshot.map(n=>[n.id,coreId('node')]));for(const spec of saved.nodesSnapshot){const n=normalizeNode(p.id,{...cloneData(spec),id:ids.get(spec.id),deps:spec.deps.map(id=>ids.get(id)),boundaries:spec.boundaries.map(b=>({...b,ok:false,src:'agent_draft',why:'从已验收模板继承，需重新确认'}))});db.nodes[n.id]=n;p.nodeIds.push(n.id);}p.edges=saved.flow.edges.map(edge=>({...cloneData(edge),from:ids.get(edge.from),to:ids.get(edge.to)}));p.templateId=saved.id;recordDecision('创建项目',p.nodeIds[0],'从已验收模板起草项目：'+saved.title,actor);for(const id of p.nodeIds)if(coreAuto(getNode(id),'approval'))approve(id,'automatic');coreFinish('项目已从模板起草，节点主体待批准');return p;}
   const specs=data.type==='产品开发'?[['功能规格','agent-pm-dev'],['实现（Codex）','agent-frontend'],['浏览器检查','agent-browser'],['你审核',null]]:data.type==='客户交付'?[['需求澄清','agent-pm-client'],['技术可行性','agent-tech'],['交付产能','agent-capacity'],['成本报价','agent-finance'],['市场调研','agent-market'],['汇总结论','agent-pm-client'],['起草交付项目','agent-pm-client'],['婉拒说明','agent-pm-client']]:data.type==='调研'?[['调研问题','agent-pm-client'],['收集资料','agent-market'],['形成结论','agent-market']]:[['开始节点','agent-frontend']];
   const ids=specs.map(()=>coreId('node'));
@@ -3049,7 +3096,7 @@ function renderTests(c, readonly = false) {
         ${!readonly && c.status === 'in_review' && t.v === 'unresolved' ? `<div class="resolution"><button class="ok small" onclick="resolveTest('${c.id}','${t.id}',true)">判为通过</button><button class="bad small" onclick="resolveTest('${c.id}','${t.id}',false)">判为不通过</button><span class="src">仅由你人工判定</span></div>` : ''}
         ${readonly ? '' : renderChecks(t.checks || [], c)}
         ${!readonly && ev.length ? `<details class="ev"><summary>${ev.length} 条证据</summary>${ev.map((e) => `
-          <div class="ev-item">${esc(e.claim)}<div><code>${esc(e.ref)}</code></div>
+          <div class="ev-item">${esc(e.claim)}<div>${previewReference(e.ref,'evidence')}</div>
             <div class="by">提交：${who(actorAt(c, e.by))}${renderChecks(e.checks || [], c)}</div>
           </div>`).join('')}</details>` : ''}
       </div>`;
@@ -3064,8 +3111,8 @@ function renderUsage(label, used, max) {
 function renderInfo(c) {
   const l = c.limit;
   return `<div class="card info-band">
-    <div><div class="col-label">交付物 · 形式与路径</div><div>${esc(c.deliverable)}</div></div>
-    <div><div class="col-label">资料来源 · 允许使用</div>${list(c.sources)}</div>
+    <div><div class="col-label">交付物 · 形式与路径</div><div>${previewReference(c.deliverable,'deliverable')}</div></div>
+    <div><div class="col-label">资料来源 · 允许使用</div>${previewList(c.sources,'evidence')}</div>
     <div><div class="col-label">上限 · 达到即停止</div><div class="meta">截止：${esc(l.deadline)}</div>${renderUsage('尝试次数', l.usedAttempts, l.maxAttempts)}${renderUsage('重新规划次数', l.usedReplans, l.maxReplans)}${renderUsage('token', l.usedTokens, l.tokenBudget)}<div class="limit-row">本节点花费：${money(c.cost)}（示例）</div></div>
   </div>`;
 }
@@ -3080,7 +3127,7 @@ function renderHandoff(c) {
       <div><b>决策及依据</b>${list(h.decisions)}</div>
       <div><b>未解决问题</b>${list(h.open)}</div>
       <div><b>下一步动作</b><div>${esc(h.next)}</div></div>
-      <div><b>产出路径</b>${list(h.outputs)}</div>
+      <div><b>产出路径</b>${previewList(h.outputs,'handoff')}</div>
     </div></div>`;
 }
 function renderAttempts(c) {
@@ -4571,6 +4618,152 @@ function initV4() {
   }
 }
 
+const artifactPreviews = {
+  "evidence/002/assertions.txt": {
+    "type": "text",
+    "label": "浏览器检查 · 第一次尝试",
+    "real": true,
+    "evidence": true,
+    "content": "PASS S01 1440×900 浅色视口\nPASS S01 图例说明强制边界的机制和建议边界的 verifier 核对\nPASS S01 阻塞分组包含 c1b 提问型和 c1d 达到上限型\nPASS S01 四个收件箱分组存在且无横向溢出\nPASS S02 技术可行性信息带含交付物、资料来源、上限及两条进度条\nPASS S02 t2 显示 ? 无法判定和两个仅供人工判定的按钮\nPASS S02 签收禁用并提示先人工判定；打回可用\nPASS S02 桌面三栏同一行且无横向溢出\nPASS S03 t2 证据展开，显示两条来源与独立代理复核方法\nFAIL S03 展开 t2 的证据可见修正记录（correction）；未找到可见文本「修正：」\nPASS S03 补充定位：具体修正记录位于 t3，不能替代 t2 的检查要求\nPASS S04 开发过程默认折叠\nPASS S04 执行记录默认页签显示 #1 失败与 #2 成功\nPASS S04 失败原因以错误色、背景和左边框醒目显示\nPASS S04 切换时间线后显示日志、隐藏执行记录\nPASS S05 判为通过后 t2 通过，签收按钮启用并记录人工判定\nPASS S05 接受签收 prompt 后出现已签收状态与保存为模板按钮\nPASS S06 接受默认模板名后侧栏新增技术可行性模板，原按钮变为已保存\nPASS S06 模板详情只读且保留需求、边界强制标记、测试类型和三栏\nPASS S07 已达上限横幅包含部分完成报告、未完成项、估计和三个操作\nPASS S07 token 进度达到 100%，使用错误色\nPASS S07 追加预算后执行中，token 上限 +50%，进度恢复强调色\nPASS S08 c2 强制边界显示锁与权限规则/确定性测试机制\nPASS S08 补充边界输入行旁有建议/强制下拉框，默认建议\nPASS S08 c2 桌面详情无横向溢出\nPASS S09 模态框显示 goal、inputs、rules、强制标记和复制/关闭按钮\nPASS S09 预览底部可阅读 rules 段并保留模态框（全部内容放得下时无需滚动）\nPASS S09 Esc 关闭模态框并恢复触发按钮焦点\nPASS S10 深色收件箱启用 dark 媒体查询及深色背景，保留边界说明和阻塞分组\nPASS S10 深色 c1a 详情含无法判定、两个人工按钮和禁用签收，三栏无溢出\nFAIL S10 深色人工判为通过按钮小号文字对比度达到 4.5:1；实测 2.16:1（rgb(255, 255, 255) / rgb(92, 196, 138)）\nPASS S11 375×812 收件箱无横向滚动条，侧栏与主内容为单列\nFAIL S11 补充可读性检查：窄屏收件箱十字以内短标题不超过两行；「竞品与市场规模调研」正文列仅 59.3px，短标题换为 3 行，影响提示占 221.7px\nPASS S11 375×812 c1a 无横向滚动条，需求/边界/测试三栏纵向排列\n"
+  },
+  "evidence/002/recheck-1/assertions.txt": {
+    "type": "text",
+    "label": "浏览器检查 · 第二次尝试",
+    "real": true,
+    "evidence": true,
+    "content": "PASS S01 1440×900 浅色视口\nPASS S01 图例说明强制边界的机制和建议边界的 verifier 核对\nPASS S01 阻塞分组包含 c1b 提问型和 c1d 达到上限型\nPASS S01 四个收件箱分组存在且无横向溢出\nPASS S02 技术可行性信息带含交付物、资料来源、上限及两条进度条\nPASS S02 t2 显示 ? 无法判定和两个仅供人工判定的按钮\nPASS S02 签收禁用并提示先人工判定；打回可用\nPASS S02 桌面三栏同一行且无横向溢出\nPASS S03 t2 证据展开，显示两条来源与独立代理复核方法\nPASS S03 t3 redteam 检查链显示先不通过后通过、复核方法及通过后的修正记录\nPASS S04 开发过程默认折叠\nPASS S04 执行记录默认页签显示 #1 失败与 #2 成功\nPASS S04 失败原因以错误色、背景和左边框醒目显示\nPASS S04 切换时间线后显示日志、隐藏执行记录\nPASS S05 判为通过后 t2 通过，签收按钮启用并记录人工判定\nPASS S05 接受签收 prompt 后出现已签收状态与保存为模板按钮\nPASS S06 接受默认模板名后侧栏新增技术可行性模板，原按钮变为已保存\nPASS S06 模板详情只读且保留需求、边界强制标记、测试类型和三栏\nPASS S07 已达上限横幅包含部分完成报告、未完成项、估计和三个操作\nPASS S07 token 进度达到 100%，使用错误色\nPASS S07 追加预算后执行中，token 上限 +50%，进度恢复强调色\nPASS S08 c2 强制边界显示锁与权限规则/确定性测试机制\nPASS S08 补充边界输入行旁有建议/强制下拉框，默认建议\nPASS S08 c2 桌面详情无横向溢出\nPASS S09 模态框显示 goal、inputs、rules、强制标记和复制/关闭按钮\nPASS S09 预览底部可阅读 rules 段并保留模态框（全部内容放得下时无需滚动）\nPASS S09 Esc 关闭模态框并恢复触发按钮焦点\nPASS S10 深色收件箱启用 dark 媒体查询及深色背景，保留边界说明和阻塞分组\nPASS S10 深色 .count 对比度均 ≥ 4.5:1（实测 6.758225、6.758225）\nPASS S10 深色 c1a 详情含无法判定、两个人工按钮和禁用签收，三栏无溢出\nPASS S10 深色 button.ok 对比度均 ≥ 4.5:1（实测 8.379728）\nPASS S10 深色 button.primary 对比度均 ≥ 4.5:1（实测 6.786764）\nPASS S10 浅色 .count 对比度均 ≥ 4.5:1（实测 5.438402、5.438402）\nPASS S10 浅色 button.ok 对比度均 ≥ 4.5:1（实测 4.537390）\nPASS S10 浅色 button.primary 对比度均 ≥ 4.5:1（实测 5.902306）\nPASS S11 375×812 收件箱无横向滚动条，侧栏与主内容为单列\nPASS S11 补充可读性检查：窄屏收件箱十字以内短标题不超过两行\nPASS S11 375×812 c1a 无横向滚动条，需求/边界/测试三栏纵向排列\n"
+  },
+  "prototype/index.html": {
+    "type": "diff",
+    "label": "--ok 颜色变更",
+    "real": true,
+    "commit": "eeac9ad2a364203f1f888b168a4c75777fa9bdeb",
+    "content": "diff --git a/prototype/index.html b/prototype/index.html\nindex 68de948..d15f82f 100644\n--- a/prototype/index.html\n+++ b/prototype/index.html\n@@ -9,8 +9,9 @@\n   --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f0efea; --line: #e2e0d8;\n   --text: #1d1d1b; --muted: #6b6a64; --faint: #9a988f;\n   --accent: #2f5bd3; --accent-soft: #e6ecfb;\n-  --ok: #1f8a4c; --ok-soft: #e3f3ea; --warn: #b26a00; --warn-soft: #fbf0dc;\n+  --ok: #1f874c; --ok-soft: #e3f3ea; --warn: #b26a00; --warn-soft: #fbf0dc;\n   --bad: #c0392b; --bad-soft: #fbe6e3; --agent: #7a4fc4; --agent-soft: #efe8fa;\n+  --on-accent: #ffffff; --on-ok: #ffffff; --on-bad: #ffffff;\n   --overlay: #00000066;\n   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;\n }\n"
+  },
+  "evidence/c1a/技术可行性.md": {
+    "type": "markdown",
+    "label": "技术可行性报告（示例）",
+    "real": false,
+    "content": "# 技术可行性报告（示例）\n\n本报告为模拟资料，结论仍需按节点测试独立核对。\n\n## 评估范围\n\n- 现有调度引擎 v3，规模限于 200 台设备。\n- ERP 首期采用单向导入；双向同步需补充资料。\n\n## 示例核对记录\n\n```text\n设备上限：200 台\n插单场景：补充历史记录后复核\n结论：有条件可行，待确认 ERP 资料\n```\n\n1. 收集接口文档。\n2. 核对风险回应。\n"
+  },
+  "evidence/c1a/证据索引.md": {
+    "type": "markdown",
+    "label": "技术证据索引（示例）",
+    "real": false,
+    "content": "# 证据索引（示例）\n\n- 引擎规模：引用模拟基准摘要。\n- ERP 接口：等待资料核对。\n\n```text\n来源类型：示例\n核对要求：来源与结论逐项对应\n```\n"
+  },
+  "evidence/c1b/人员占用.csv": {
+    "type": "csv",
+    "label": "人员占用表（示例）",
+    "real": false,
+    "content": "成员,角色,本月占用率,可用人月\n张宁,实施顾问,75%,0.25\n李明,接口开发,50%,0.50\n王悦,测试,25%,0.75\n"
+  },
+  "evidence/c1b/人员占用-草稿.csv": {
+    "type": "csv",
+    "label": "人员占用草稿（示例）",
+    "real": false,
+    "content": "成员,角色,本月占用率,可用人月\n张宁,实施顾问,75%,0.25\n李明,接口开发,50%,0.50\n王悦,测试,25%,0.75\n"
+  },
+  "evidence/c1b/交付产能.md": {
+    "type": "markdown",
+    "label": "交付产能评估（示例）",
+    "real": false,
+    "content": "# 交付产能评估（示例）\n\n本资料为模拟内容，未知排期仍等待提问答复。\n\n- 基线：三位成员的当前占用。\n- 后续：核对 Q4 排期后再判断产能。\n\n```text\n当前示例可用人月：1.50\nQ4 可用产能：未知\n```\n"
+  }
+};
+// ---------- 产出物预览：静态嵌入，所有正文均先转义 ----------
+const artifactPreview = {path:null,line:null,returnFocus:null};
+function artifactReference(reference) {
+  const value=String(reference||'');
+  const known=Object.keys(artifactPreviews).sort((a,b)=>b.length-a.length).find(path=>value.includes(path));
+  const suffix=known?value.slice(value.indexOf(known)+known.length):value;
+  const match=suffix.match(known?/^(?::|#L)(\d+)/:/(?:[:]|#L)(\d+)$/);
+  return {path:known||value.replace(/(?::|#L)\d+$/,''),line:match?Number(match[1]):null};
+}
+function previewReference(reference,kind='evidence',label=null) {
+  const value=String(reference||'');
+  const paths=Object.keys(artifactPreviews).filter(path=>value.includes(path));
+  const refs=paths.length?paths.map(path=>{const tail=value.slice(value.indexOf(path)+path.length).match(/^(?::|#L)\d+/);return path+(tail?.[0]||'');}):[value];
+  return `${esc(label??value)}<span class="preview-links">${refs.map(ref=>`<button type="button" class="preview-trigger" data-preview-kind="${esc(kind)}" data-preview-reference="${esc(ref)}" onclick="openArtifactPreview(${esc(JSON.stringify(ref))},this)">预览 · ${esc(ref)}</button>`).join('')}</span>`;
+}
+function previewList(items,kind) {return items?.length?`<ul>${items.map(item=>`<li>${previewReference(item,kind)}</li>`).join('')}</ul>`:'<div class="empty">暂无</div>';}
+function previewLineAttributes(number,selected,extra='') {const highlighted=Number.isInteger(number)&&number===selected;return `class="preview-line${highlighted?' preview-highlight':''}${extra?' '+extra:''}"${Number.isInteger(number)?' data-source-line="'+number+'"':''}${highlighted?' aria-current="location"':''}`;}
+function previewTextLine(text,number,selected) {return `<span ${previewLineAttributes(number,selected)}><span class="preview-line-number" aria-label="第 ${number} 行">${number}</span><span class="preview-line-text">${esc(text)}</span></span>`;}
+function renderTextPreview(content,selected=null) {return `<div class="preview-code">${content.split('\n').map((line,index)=>previewTextLine(line,index+1,selected)).join('')}</div>`;}
+function renderMarkdown(content,selected=null) {
+  const lines=content.split(/\r?\n/);let out='',paragraph=[],listType=null,inCode=false,code=[];
+  const flushParagraph=()=>{if(paragraph.length){out+=`<p>${paragraph.join('<br>')}</p>`;paragraph=[];}};
+  const closeList=()=>{if(listType){out+=`</${listType}>`;listType=null;}};
+  const flushCode=()=>{out+=`<pre class="preview-code"><code>${code.join('')}</code></pre>`;code=[];};
+  const marker=(line,number)=>`<span ${previewLineAttributes(number,selected,'preview-markdown-marker')} aria-label="第 ${number} 行${line?' · 代码块围栏':' · 空白行'}">${number===selected?esc(line||'（空白行）'):''}</span>`;
+  lines.forEach((line,index)=>{
+    const number=index+1;
+    if(/^\s*```/.test(line)){flushParagraph();closeList();if(inCode){flushCode();inCode=false;out+=marker(line,number);}else {out+=marker(line,number);inCode=true;}return;}
+    if(inCode){code.push(previewTextLine(line,number,selected));return;}
+    if(!line.trim()){flushParagraph();closeList();out+=marker(line,number);return;}
+    const heading=line.match(/^(#{1,6})\s+(.+)$/);
+    if(heading){flushParagraph();closeList();out+=`<h${heading[1].length} ${previewLineAttributes(number,selected)}>${esc(heading[2])}</h${heading[1].length}>`;return;}
+    const item=line.match(/^\s*(?:([-*+])|\d+[.)])\s+(.+)$/);
+    if(item){flushParagraph();const type=item[1]?'ul':'ol';if(listType!==type){closeList();listType=type;out+=`<${type}>`;}out+=`<li ${previewLineAttributes(number,selected)}>${esc(item[2])}</li>`;return;}
+    closeList();paragraph.push(`<span ${previewLineAttributes(number,selected)}>${esc(line)}</span>`);
+  });
+  flushParagraph();closeList();if(inCode)flushCode();return `<div class="preview-markdown">${out}</div>`;
+}
+function csvRecords(content) {
+  const rows=[];let row=[],field='',quoted=false,line=1,start=1;
+  for(let i=0;i<content.length;i++){
+    const ch=content[i];
+    if(ch==='"'){if(quoted&&content[i+1]==='"'){field+='"';i++;}else if(quoted||field==='')quoted=!quoted;else field+=ch;}
+    else if(ch===','&&!quoted){row.push(field);field='';}
+    else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&content[i+1]==='\n')i++;row.push(field);rows.push({cells:row,line:start});row=[];field='';line++;start=line;}
+    else {field+=ch;if(ch==='\n')line++;}
+  }
+  if(field!==''||row.length||quoted){row.push(field);rows.push({cells:row,line:start});}
+  return rows;
+}
+function parseCSV(content) {return csvRecords(content).map(row=>row.cells);}
+function renderCSV(content,selected=null) {
+  const rows=csvRecords(content);if(!rows.length)return '<p>空表格</p>';
+  const cells=(row,tag)=>`<tr ${previewLineAttributes(row.line,selected)}>${row.cells.map(value=>`<${tag}${tag==='th'?' scope="col"':''}>${esc(value)}</${tag}>`).join('')}</tr>`;
+  return `<table class="preview-csv"><caption>CSV 资料 · ${rows.length-1} 条数据，${rows[0].cells.length} 列</caption><thead>${cells(rows[0],'th')}</thead><tbody>${rows.slice(1).map(row=>cells(row,'td')).join('')}</tbody></table>`;
+}
+function renderDiff(content,selected=null) {
+  let oldLine=null,newLine=null;
+  const rows=content.split('\n').map((line,index)=>{
+    const hunk=line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    let oldNumber='—',newNumber='—',symbol='',kind='',text=line;
+    if(hunk){oldLine=Number(hunk[1]);newLine=Number(hunk[2]);}
+    else if(oldLine!==null&&!/^(?:---|\+\+\+|\\)/.test(line)){
+      if(line.startsWith('+')){symbol='+';kind='preview-diff-add';newNumber=newLine++;text=line.slice(1);}
+      else if(line.startsWith('-')){symbol='-';kind='preview-diff-delete';oldNumber=oldLine++;text=line.slice(1);}
+      else if(line.startsWith(' ')){oldNumber=oldLine++;newNumber=newLine++;text=line.slice(1);}
+    }
+    const sourceNumber=Number.isInteger(newNumber)?newNumber:null;
+    return `<span ${previewLineAttributes(sourceNumber,selected,kind)} data-diff-line="${index+1}" data-old-line="${oldNumber}" data-new-line="${newNumber}"><span class="preview-line-number" aria-label="原行 / 新行">${oldNumber} / ${newNumber}</span><span class="preview-diff-symbol" aria-label="${symbol==='+'?'新增':symbol==='-'?'删除':'上下文'}">${symbol||' '}</span><span class="preview-line-text">${esc(text)}</span></span>`;
+  }).join('');
+  return `<p class="preview-meta">行号：原行 / 新行 · + 新增 · - 删除</p><div class="preview-code preview-diff">${rows}</div>`;
+}
+function renderArtifactPreview(reference) {
+  const {path,line}=artifactReference(reference),artifact=artifactPreviews[path];
+  const title=artifact?.label||'引用路径';
+  const body=artifact?(artifact.type==='markdown'?renderMarkdown(artifact.content,line):artifact.type==='csv'?renderCSV(artifact.content,line):artifact.type==='diff'?renderDiff(artifact.content,line):renderTextPreview(artifact.content,line)):'<p>此路径未嵌入内容。原型仅预置部分产出物，请选择已嵌入的报告、CSV、断言文件或颜色变更。</p>';
+  return `<div class="artifact-backdrop" onclick="if(event.target===this)closeArtifactPreview()"><section class="artifact-drawer" role="dialog" aria-modal="true" aria-labelledby="artifact-title"><header class="artifact-header"><h2 id="artifact-title">产出物预览 · ${esc(title)}</h2><button id="artifact-close" onclick="closeArtifactPreview()">关闭</button></header><p class="preview-meta">${esc(path)}${line?' · 引用第 '+line+' 行':''}</p><p class="preview-meta">${artifact?.real?'真实历史内容'+(artifact.evidence?' · 原文保留当时术语':' · diff 片段'):artifact?'示例 · 模拟资料':'未嵌入'}${artifact?.commit?' · 提交 '+esc(artifact.commit):''}</p><div class="artifact-content" tabindex="0" aria-label="产出物正文"${artifact?.evidence?' data-real-evidence="true"':''}>${body}</div></section></div>`;
+}
+function openArtifactPreview(reference,trigger=document.activeElement) {
+  if(!artifactPreview.path)artifactPreview.returnFocus=trigger;
+  const {path,line}=artifactReference(reference);artifactPreview.path=path;artifactPreview.line=line;
+  $('#artifact-root').innerHTML=renderArtifactPreview(reference);
+  $('.app')?.setAttribute('inert','');
+  $('#artifact-close').focus?.();
+  if(line)$('#artifact-root [data-source-line="'+line+'"]')?.scrollIntoView?.({block:'center'});
+  return {ok:true,path,line};
+}
+function closeArtifactPreview() {
+  const trigger=artifactPreview.returnFocus;
+  $('#artifact-root').innerHTML='';$('.app')?.removeAttribute('inert');
+  artifactPreview.path=null;artifactPreview.line=null;artifactPreview.returnFocus=null;trigger?.focus?.();return {ok:true};
+}
+
 // ---------- UI helpers ----------
 let view = { page: 'inbox', id: null };
 let modalContract = null, modalReturnFocus = null;
@@ -4584,7 +4777,7 @@ const KIND_HINT = {deterministic:'自动执行',evidence:'核对席位 · 独立
 const VERDICT = {pass:'✓ 通过',fail:'✗ 不通过',unresolved:'? 无法判定',unchecked:'— 未检查'};
 const ATTEMPT_RESULT = {success:'成功',failed:'失败',running:'进行中',limit:'达到上限'};
 const list = (items = []) => items.length ? `<ul>${items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="empty">暂无</div>';
-const chip = (s, b) => `<span class="chip s-${s}">${s==='blocked' && b==='limit' ? '阻塞·已达上限' : STATUS[s] || s}</span>`;
+const chip = (s, b) => `<span class="chip s-${s}">${s==='blocked' && b==='limit' ? '阻塞·已达上限' : s==='blocked' && b==='discovery' ? '暂停·等待发现处理' : STATUS[s] || s}</span>`;
 const who = (a) => a==='human' || a==='你' ? '<span class="who-human">你</span>' : `<span class="who-agent">${esc(a==='leader' || a==='agent:leader' ? 'leader' : a==='自动' ? '自动' : getAgent(String(a).replace('agent:',''))?.name || a)}</span>`;
 function toast(msg) { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 function log(c, actor, text) { c.log ||= []; c.log.push([stamp(),actor,text]); }
@@ -4602,11 +4795,11 @@ function renderSide() {
     ${db.templates.map(t=>`<button class="nav-item nav-button" onclick="go('template','${t.id}')">${esc(t.title)}</button>`).join('')}
     <div class="src side-note">你定义需求、边界和测试，完成验收。leader 起草、派单、回答提问；runtime 守住权限、依赖与上限。</div>`;
 }
-const INBOX_GROUPS = [['approval','待批准'],['questions','提问'],['limits','达到上限'],['requests','变更请求与退回请求'],['discoveries','发现'],['gates','人工关卡'],['review','待验收'],['designDecisions','待确认的设计决策'],['experience','待审核的经验库条目'],['sideEffects','副作用状态不明']];
+const INBOX_GROUPS = [['approval','待批准'],['questions','提问'],['limits','达到上限'],['requests','变更请求与退回请求'],['discoveries','发现'],['gates','人工关卡'],['review','待验收'],['designDecisions','待确认的设计决策'],['experience','待审核的经验库条目'],['sideEffects','副作用状态不明'],['mergeConflicts','合并冲突']];
 function renderInbox() {
   const box=inbox();
   $('#main').innerHTML=`<h1>收件箱</h1><div class="intro">这里只列需要你处理的事。每项打开对应节点，查看依据后决定。<div class="legend">${Object.keys(KIND).map(k=>`<span class="k">${KIND[k]} · ${KIND_HINT[k]}</span>`).join('')}<span class="k">🔒 强制 · 权限规则 / 确定性测试保证</span><span class="k">建议 · 核对席位核对</span></div></div>
-    ${INBOX_GROUPS.map(([key,title])=>`<section class="inbox-group" data-group="${key}"><h2><span class="inbox-label">${title}</span><span class="hint">${box[key].length} 项</span></h2>${box[key].length?box[key].map(x=>{const n=getNode(x.nodeId);return `<button class="inbox-item inbox-button" onclick="go('${key==='designDecisions'||x.kind==='caution'?'memory':'node'}','${key==='designDecisions'||x.kind==='caution'?n.projectId:x.nodeId}')"><span class="dot d-${n.status}"></span><span class="grow"><span>${esc(x.title)}</span><span class="sub">${esc(x.summary)}</span></span><span class="impact">${esc(getProject(n.projectId).name)}</span>${chip(n.status,n.blockedType)}</button>`;}).join(''):'<div class="empty">没有待处理事项</div>'}</section>`).join('')}`;
+    ${INBOX_GROUPS.map(([key,title])=>`<section class="inbox-group" data-group="${key}"><h2><span class="inbox-label${key==='mergeConflicts'?' merge-label':''}">${title}</span><span class="hint">${box[key].length} 项</span></h2>${box[key].length?box[key].map(x=>{const n=getNode(x.nodeId);return `<button class="inbox-item inbox-button" onclick="go('${key==='designDecisions'||x.kind==='caution'?'memory':'node'}','${key==='designDecisions'||x.kind==='caution'?n.projectId:x.nodeId}')"><span class="dot d-${n.status}"></span><span class="grow"><span>${esc(x.title)}</span><span class="sub">${esc(x.summary)}</span></span><span class="impact">${esc(getProject(n.projectId).name)}</span>${chip(n.status,n.blockedType)}</button>`;}).join(''):'<div class="empty">没有待处理事项</div>'}</section>`).join('')}`;
 }
 function renderProjects() {
   $('#main').innerHTML=`<h1>项目列表</h1><div class="intro">项目包含一层项目流程；节点之间按依赖启动。</div><div class="below">${db.projects.map(p=>`<div class="card"><h2>${esc(p.name)}</h2><div class="meta">${esc(p.type)} · leader：${esc(getAgent(p.leader)?.name)}</div><p>工作现场：${esc(p.site)}</p>${renderBudget(p)}<p>${projectNodes(p).filter(n=>n.status==='accepted').length} / ${p.nodeIds.length} 节点已验收</p><button class="primary" onclick="go('project','${p.id}')">打开项目</button></div>`).join('')}</div>
@@ -4621,7 +4814,7 @@ function flowStages(p) {
 function renderProject(p) {
   const stages=flowStages(p);
   $('#main').innerHTML=`<div class="head"><div><div class="crumb">项目 · ${esc(p.type)}</div><h1>${esc(p.name)}</h1><div class="meta">leader：${esc(getAgent(p.leader)?.name)} · 工作现场：${esc(p.site)}</div></div><div class="actions"><button onclick="go('memory','${p.id}')">项目记忆</button><button onclick="go('settings','${p.id}')">项目设置</button></div></div>
-    ${renderBudget(p)}<div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span>→${e.condition?' '+esc(e.condition)+' →':''}</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
+    ${renderBudget(p)}${renderMergeQueue(p)}<div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span>→${e.condition?' '+esc(e.condition)+' →':''}</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
     ${p.edges.some(e=>e.condition)?`<div class="card dependency-band"><b>条件分支</b><select id="branch-choice">${[...new Map(p.edges.filter(e=>e.condition).map(e=>[e.value||e.condition,e])).values()].map(e=>`<option value="${esc(e.value||e.condition)}" ${p.branchResult===(e.value||e.condition)?'selected':''}>${esc(e.condition)}</option>`).join('')}</select><button onclick="chooseBranch('${p.id}',document.querySelector('#branch-choice').value)">确认分支条件</button><span class="src">分支仍需等上游验收后开工</span></div>`:''}
     <details class="card flow-editor"><summary>编辑项目流程</summary><p class="src">可以增删节点、修改依赖与分支条件；执行中修改会提交变更请求。</p><label>节点<select id="flow-node">${projectNodes(p).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>操作<select id="flow-action"><option value="add">新增节点</option><option value="dependencies">修改依赖</option><option value="remove">删除节点</option></select></label><label>新节点名称<input type="text" id="flow-title"></label><label>前置节点 ID（逗号分隔）<input type="text" id="flow-deps" placeholder="${esc(p.nodeIds[0])}"></label><label>分支条件（可选）<input type="text" id="flow-condition" placeholder="若可行"></label><button class="primary" onclick="submitFlow('${p.id}')">提交项目流程变更</button></details>`;
 }
@@ -4663,7 +4856,7 @@ function renderNode(c) {
   if(c.status==='abandoned')banner+='<div class="banner neutral">已终止，保留部分报告、证据和交接记录。</div>';
   const timeline=c.log.slice().reverse().map(([t,a,x])=>`<div class="tl-item"><span class="time">${esc(t)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('');
   $('#main').innerHTML=`<div class="head"><div><div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / ${esc(c.id)}</div><h1>${esc(c.title)}</h1><div class="meta">${chip(c.status,c.blockedType)}<span>节点项目 v${c.version}</span><span>${c.seats.human?'执行：你':'主 agent：'+esc(getAgent(c.seats.execute)?.name)}</span></div></div><div class="actions">${actions}<button onclick="openExecutionPrompt('${c.id}')">执行代理启动 prompt</button>${c.status!=='skipped'&&c.status!=='abandoned'?`<button onclick="editNodeForm('${c.id}')">编辑节点项目</button>`:''}${c.status==='in_review'&&blocker?`<div class="action-hint">${esc(blocker)}</div>`:''}</div></div>
-    ${renderInfo(c)}${banner}${renderVersionDiff(c)}${renderRequests(c)}<div class="card dependency-band"><b>前置节点</b> ${(c.deps||[]).map(id=>`<button class="small" onclick="go('node','${id}')">${esc(getNode(id).title)} · ${STATUS[getNode(id).status]}</button>`).join(' ')||'无'}${p.edges.filter(e=>e.to===c.id&&e.condition).map(e=>`<span class="k">条件：${esc(e.condition)}</span>`).join('')}</div>
+    ${renderInfo(c)}${banner}${renderVersionDiff(c)}${renderRequests(c)}${renderMergeConflict(c)}${renderBlockingDiscoveryDemo(c)}<div class="card dependency-band"><b>前置节点</b> ${(c.deps||[]).map(id=>`<button class="small" onclick="go('node','${id}')">${esc(getNode(id).title)} · ${STATUS[getNode(id).status]}</button>`).join(' ')||'无'}${p.edges.filter(e=>e.to===c.id&&e.condition).map(e=>`<span class="k">条件：${esc(e.condition)}</span>`).join('')}</div>
     <div class="cols"><div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div><div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}${(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden placeholder="保证机制（必填）">`:''}</div><div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div></div>
     <div class="below">${renderOrchestration(c)}${renderDiscoveries(c)}${renderSideEffects(c)}${renderSeats(c)}${renderContext(c)}${renderQuestions(c)}<div class="card handoff"><h2>验收报告</h2><div>${esc(c.result||'尚未提交结论')}</div><div class="legend">${Object.keys(VERDICT).map(v=>`<span class="k">${VERDICT[v]}：${c.tests.filter(t=>t.v===v).length}</span>`).join('')}</div><p class="src">核对与挑错使用只读权限和新上下文，leader 审阅后交给你验收。</p>${list(c.tests.filter(t=>t.v==='fail'||t.v==='unresolved').map(t=>t.id+' · '+t.text+' · '+VERDICT[t.v]))}${renderResultGroups(c.orchestration)}${renderHistoricalReports(c)}</div>${renderHandoff(c)}
     <div class="card handoff"><details class="process"><summary><h2>▸ 开发过程 <span class="hint">默认折叠 · ${c.attempts.length} 次尝试 / ${c.log.length} 条日志</span></h2></summary><div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">尝试记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button><button id="execution-tab" class="small" aria-pressed="false" onclick="setProcessTab('execution')">执行日志</button></div><div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div><div id="execution-panel" hidden>${renderExecutionLogs(c)}</div></details></div>
@@ -4727,7 +4920,7 @@ function workerPrompt(id) {
 function openExecutionPrompt(id) { modalContract=id;modalReturnFocus=document.activeElement;$('#modal-root').innerHTML=`<div class="modal-backdrop" onclick="if(event.target===this)closeExecutionPrompt()"><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="prompt-title"><h2 id="prompt-title">执行代理启动 prompt · ${esc(getNode(id).title)}<button id="close-prompt" class="small" onclick="closeExecutionPrompt()">关闭</button></h2><pre class="prompt-preview">${esc(workerPrompt(id))}</pre><div class="actions"><button id="copy-prompt" class="primary" onclick="copyExecutionPrompt()">复制</button></div></div></div>`;$('#close-prompt').focus?.(); }
 function closeExecutionPrompt() { modalContract=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
 async function copyExecutionPrompt() { if(!modalContract)return;try{await navigator.clipboard.writeText(workerPrompt(modalContract));toast('已复制');}catch{toast('复制失败');} }
-if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(editingNode){if(event.key==='Escape'){event.preventDefault();closeNodeEditor();}return;}if(!modalContract)return;if(event.key==='Escape'){event.preventDefault();closeExecutionPrompt();}if(event.key==='Tab'){const first=$('#close-prompt'),last=$('#copy-prompt');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
+if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(artifactPreview.path){if(event.key==='Escape'){event.preventDefault();closeArtifactPreview();}else if(event.key==='Tab'){const first=$('#artifact-close'),last=$('.artifact-content');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus?.();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus?.();}}return;}if(editingNode){if(event.key==='Escape'){event.preventDefault();closeNodeEditor();}return;}if(!modalContract)return;if(event.key==='Escape'){event.preventDefault();closeExecutionPrompt();}if(event.key==='Tab'){const first=$('#close-prompt'),last=$('#copy-prompt');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
 function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='memory')renderMemory(getProject(view.id));else if(view.page==='orchestrationTemplates')renderOrchestrationTemplates();else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); }
 
 // ---------- v4 模拟页面 ----------
@@ -4743,13 +4936,13 @@ function renderExecutionLogs(c) {
 }
 function renderChecklist(o) {
   if(!o?.items)return '';
-  return `<details class="frozen-checklist"><summary>冻结清单 · ${o.items.length} 项（冻结后条目数不变）</summary>${o.items.map(item=>`<div class="checklist-item" data-item-id="${esc(item.id)}">${resultChip(item)} <b>${esc(item.id)}</b> · ${esc(item.text||item.title)}${item.reason?`<div class="v4-note">原因：${esc(item.reason)}</div>`:''}${item.sourceFile?`<div class="v4-note">来源：<code>${esc(item.sourceFile)}:${item.sourceLine}</code></div>`:''}</div>`).join('')}</details>`;
+  return `<details class="frozen-checklist"><summary>冻结清单 · ${o.items.length} 项（冻结后条目数不变）</summary>${o.items.map(item=>`<div class="checklist-item" data-item-id="${esc(item.id)}">${resultChip(item)} <b>${esc(item.id)}</b> · ${esc(item.text||item.title)}${item.reason?`<div class="v4-note">原因：${esc(item.reason)}</div>`:''}${item.sourceFile?`<div class="v4-note">来源：${previewReference(item.sourceFile+':'+item.sourceLine,'checklist')}</div>`:''}</div>`).join('')}</details>`;
 }
 function renderResultGroups(o) {
   const items=o?.items||o?.steps||[];
   return ['fail','unverifiable','unprocessed'].map(status=>{
     const entries=items.filter(x=>x.status===status);
-    return `<section class="result-report" data-result-group="${status}"><h3>${FOUR_STATE_UI[status]} · ${entries.length} 项</h3>${entries.length?entries.map(x=>`<div class="checklist-item">${resultChip(x)} <b>${esc(x.id)}</b> · ${esc(x.text||x.title||x.name)}<div>原因：${esc(x.reason||'见结构化结果与检查证据')}</div>${x.sourceFile?`<div class="v4-note">证据：${esc(x.sourceFile)}:${x.sourceLine}</div>`:''}</div>`).join(''):'<div class="v4-note">无</div>'}</section>`;
+    return `<section class="result-report" data-result-group="${status}"><h3>${FOUR_STATE_UI[status]} · ${entries.length} 项</h3>${entries.length?entries.map(x=>`<div class="checklist-item">${resultChip(x)} <b>${esc(x.id)}</b> · ${esc(x.text||x.title||x.name)}<div>原因：${esc(x.reason||'见结构化结果与检查证据')}</div>${x.sourceFile?`<div class="v4-note">证据：${previewReference(x.sourceFile+':'+x.sourceLine,'checklist')}</div>`:''}</div>`).join(''):'<div class="v4-note">无</div>'}</section>`;
   }).join('');
 }
 function renderHistoricalReports(c) {
@@ -4806,8 +4999,126 @@ function renderOrchestrationTemplates() {
   $('#main').innerHTML=`<h1>编排模板</h1><div class="intro">内置 15 个模式 · 只读。结构与参数为示意，非最终接口；原型不执行真实编排。</div>${db.orchestrationTemplates.map(t=>`<div class="card"><h2>${esc(t.name||t.title)} <span class="k">${esc(t.priority||t.demo)}</span></h2><p>${esc(t.structure)}</p><div class="v4-note">类型：${esc(t.category||'通用')} · 场景：${esc(t.scenario||t.useCase||'按节点需求选择')}</div><p>参数示意：${esc((t.params||[]).join('、'))}</p><p>共同要求：完整清单、逐项四态、异常列表、核对证据、上限与恢复点。</p></div>`).join('')}<div class="card"><h2>内置代理模板默认模型</h2>${db.agentTemplates.map(t=>`<div class="row"><b>${esc(t.name)}</b><p>作为主 agent：${esc(t.mainModel||t.model)} · ${esc(t.mainStrength||t.strength)}</p><p>作为编排步骤：${t.stepModel?esc(t.stepModel)+' · '+esc(t.stepStrength):'—'}</p></div>`).join('')}</div>`;
 }
 
+// ---------- 任务 009：合并顺序、冲突与阻塞型发现（全部为示例） ----------
+function getMergeQueue(projectId) {
+  const project=getProject(projectId);
+  if(project?.type!=='产品开发')return [];
+  return (project.nodeIds||[]).map(getNode).filter(node=>node?.status==='accepted'&&node.merge?.example)
+    .sort((a,b)=>a.merge.acceptedOrder-b.merge.acceptedOrder)
+    .map(node=>({nodeId:node.id,title:node.title,...node.merge,needsRebase:node.merge.status!=='merged'&&(node.merge.needsRebase||node.merge.baseVersion!==project.mergeBaselineVersion)}));
+}
+function registerMergeAcceptance(node) {
+  const project=getProject(node.projectId);
+  if(project?.type!=='产品开发'||!project.exampleMerge||node.status!=='accepted')return;
+  if(node.merge&&node.merge.status!=='returned')return;
+  project.mergeSerial=(project.mergeSerial||0)+1;
+  node.merge={example:true,sourceNote:'示例 · 当前页面模拟合并，未操作真实仓库',acceptedAt:coreTime(),acceptedOrder:project.mergeSerial,status:'pending',baseVersion:node.mergeWorkBaseVersion??project.mergeBaselineVersion,needsRebase:project.mergeSerial>1,leaderAttempts:[],history:[]};
+  coreLog(node,'leader','示例 · 按本次验收顺序加入合并队列，合并前先 rebase 到最新基线');
+}
+function mergePredecessor(nodeId) {
+  const node=getNode(nodeId),queue=getMergeQueue(node?.projectId),index=queue.findIndex(item=>item.nodeId===nodeId);
+  return index<0?null:queue.slice(0,index).find(item=>item.status!=='merged');
+}
+function completeExampleMerge(node,actor='leader') {
+  const project=getProject(node.projectId),merge=node.merge;
+  merge.baseVersion=project.mergeBaselineVersion;merge.needsRebase=false;merge.status='merged';
+  merge.mergedAt=coreTime();merge.mergedVersion=++project.mergeBaselineVersion;
+  merge.history.push({time:merge.mergedAt,event:'示例 · 合并完成',baseVersion:merge.baseVersion,mergedVersion:merge.mergedVersion,actor:coreActor(actor)});
+  coreLog(node,actor,`示例 · 已合并到 main@${merge.mergedVersion}，后续节点需先 rebase 到此基线`);
+  return {ok:true,nodeId:node.id,status:merge.status};
+}
+function failExampleLeaderMerge(node,time=coreTime()) {
+  const merge=node.merge,project=getProject(node.projectId);
+  // 先写 leader 尝试及失败结果，再将未解决冲突登记为人工待办。
+  const attempt={time,actor:'leader',result:'failed',text:'示例 · leader 尝试保留共享接口与搜索参数两侧改动；参数语义仍不一致，无法安全自动解决'};
+  merge.leaderAttempts.push(attempt);merge.status='conflict';merge.needsRebase=true;
+  merge.history.push({time,event:'示例 · rebase 冲突，leader 尝试失败',baseVersion:project.mergeBaselineVersion});
+  node.log ||= [];node.log.push([time,'leader',attempt.text]);
+  const conflict={id:node.id==='c-search'&&!db.mergeConflicts.some(item=>item.id==='merge-conflict-c-search')?'merge-conflict-c-search':coreId('merge-conflict'),nodeId:node.id,projectId:node.projectId,title:'示例 · '+node.title.replace(/^示例 · /,'')+'合并冲突',description:'示例 · src/search.js 的共享接口参数存在语义冲突，需要人工选择正确实现',status:'pending',example:true,leaderAttempts:cloneData(merge.leaderAttempts),escalatedAt:time,baseVersion:project.mergeBaselineVersion,sourceNote:'示例 · 未执行真实 rebase 或 git 合并'};
+  db.mergeConflicts.push(conflict);
+  recordDecision('合并冲突',node.id,'示例 · leader 解决冲突失败，升级到收件箱「合并冲突」','leader','有修改',{conflictId:conflict.id,action:'escalate',example:true});
+  return {ok:false,conflict:true,conflictId:conflict.id,reason:'示例 · leader 无法自动解决，等待你处理'};
+}
+function attemptMerge(nodeId) {
+  const node=getNode(nodeId),project=getProject(node?.projectId);
+  if(!node||!project?.exampleMerge||node.status!=='accepted'||!node.merge?.example)return {ok:false,reason:'仅可模拟合并示例项目中已验收的节点'};
+  if(node.merge.status==='merged')return {ok:false,reason:'示例 · 此节点已合并'};
+  if(node.merge.status==='conflict')return {ok:false,reason:'示例 · 请先在合并冲突中选择人工处理方式'};
+  const previous=mergePredecessor(nodeId);
+  if(previous)return coreRefuse('示例 · 请先处理更早验收的节点：'+previous.title,nodeId,'leader','合并顺序');
+  node.merge.history.push({time:coreTime(),event:'示例 · 先 rebase 到最新基线',fromVersion:node.merge.baseVersion,toVersion:project.mergeBaselineVersion});
+  if(node.merge.demoConflict&&!node.merge.manuallyResolved){const result=failExampleLeaderMerge(node);coreFinish('示例 · leader 尝试失败，冲突已进入收件箱');return result;}
+  const result=completeExampleMerge(node);coreFinish('示例 · 已 rebase 到最新基线并合并');return result;
+}
+function resolveMergeConflict(id,action,actor='human') {
+  const conflict=db.mergeConflicts.find(item=>item.id===id);
+  if(!conflict||conflict.status!=='pending')return {ok:false,reason:'没有待处理的示例合并冲突'};
+  if(actor!=='human')return coreRefuse('示例 · 合并冲突的人工处理由你决定',conflict.nodeId,actor,'合并冲突');
+  if(!['continue','return'].includes(action))return {ok:false,reason:'未知的合并冲突处理方式'};
+  const node=getNode(conflict.nodeId);
+  if(action==='continue'){
+    const previous=mergePredecessor(node.id);if(previous)return coreRefuse('示例 · 请先处理更早验收的节点：'+previous.title,node.id,actor,'合并顺序');
+    conflict.status='resolved';node.merge.manuallyResolved=true;node.merge.demoConflict=false;
+    node.merge.history.push({time:coreTime(),event:'示例 · 已手动解决，rebase 到最新基线后继续合并',actor:'你'});
+    completeExampleMerge(node,actor);
+  }else{
+    conflict.status='returned';node.mergeHistory ||= [];node.mergeHistory.push(cloneData(node.merge));
+    node.merge.status='returned';node.merge.history.push({time:coreTime(),event:'示例 · 退回节点重新处理，保留旧验收与冲突历史',actor:'你'});
+    node.status='changes_requested';node.merge.demoConflict=false;invalidateChecks(node);
+    updateHandoff(node,'示例 · 人工退回合并冲突，重新处理共享接口后再次提交验收','human');
+    coreLog(node,'human','示例 · 退回节点重新处理；旧验收与合并冲突记录保留');
+  }
+  conflict.action=action;conflict.resolvedBy='你';conflict.resolvedAt=coreTime();
+  recordDecision('合并冲突',node.id,'示例 · '+(action==='continue'?'已手动解决，继续合并':'退回节点重新处理'),actor,action==='continue'?'原样采纳':'有修改',{conflictId:id,action,example:true});
+  coreFinish(action==='continue'?'示例 · 人工解决后已继续合并':'示例 · 已退回节点，旧验收与冲突历史保留');return {ok:true,conflict,nodeId:node.id};
+}
+function renderMergeQueue(project) {
+  if(project.type!=='产品开发')return '<div class="card publication-mode" data-publication-mode="documents"><h2>验收后发布</h2><p>文档目录中的交付物在验收后发布。</p></div>';
+  const queue=getMergeQueue(project.id);
+  if(!project.exampleMerge)return `<div class="card merge-queue" data-merge-project="${esc(project.id)}"><h2>合并队列</h2><p>此项目的真实验收时点、合并顺序与合并状态未记录，现有历史记录保持原样。</p><button onclick="go('project','project-c')">查看项目 C 的合并示例</button></div>`;
+  const returned=project.nodeIds.map(getNode).filter(node=>node?.merge?.status==='returned');
+  return `<div class="card merge-queue" data-merge-project="${esc(project.id)}"><h2>合并队列 <span class="merge-label">示例</span></h2><p>示例 · 按验收先后合并；后合并者先 rebase 到最新基线 main@${project.mergeBaselineVersion}。所有状态仅保存在当前页面。</p>${queue.map((entry,index)=>`<div class="merge-item" data-merge-node="${entry.nodeId}" data-accepted-order="${entry.acceptedOrder}"><div class="merge-item-title"><b>${index+1}. ${esc(entry.title)}</b><span class="merge-status merge-${entry.status}">示例 · ${{merged:'已合并',pending:'待合并',conflict:'冲突'}[entry.status]||entry.status}</span></div><p>示例 · 验收：${esc(entry.acceptedAt)} · 工作基线 main@${entry.baseVersion}${entry.status==='merged'?' · 已合并到 main@'+entry.mergedVersion:entry.needsRebase?' · 需先 rebase 到最新基线':''}</p>${entry.status==='pending'?`<button onclick="attemptMerge('${entry.nodeId}')">模拟 rebase 并合并</button>`:''}<button onclick="go('node','${entry.nodeId}')">查看节点${entry.status==='conflict'?'与冲突':''}</button>${entry.leaderAttempts.length?`<p class="v4-note">示例 · leader 已尝试：${esc(entry.leaderAttempts.at(-1).text)} · 结果：失败，已转人工处理。</p>`:''}</div>`).join('')||'<div class="empty">示例 · 暂无已验收的合并项</div>'}${returned.length?`<details><summary>示例 · 已退回的合并历史</summary>${returned.map(node=>`<p>${esc(node.title)} · 原验收 ${esc(node.merge.acceptedAt)} · 已退出当前合并队列 <button onclick="go('node','${node.id}')">查看记录</button></p>`).join('')}</details>`:''}</div>`;
+}
+function renderMergeConflict(node) {
+  const conflicts=(db.mergeConflicts||[]).filter(item=>item.nodeId===node.id);
+  if(!conflicts.length)return '';
+  return `<div class="card merge-conflict-card"><h2>合并冲突 <span class="merge-label">示例</span></h2>${conflicts.map(conflict=>`<div class="row" data-merge-conflict="${conflict.id}"><b>${esc(conflict.description)}</b><p>示例 · 状态：${{pending:'等待人工处理',resolved:'已手动解决并继续合并',returned:'已退回节点重新处理'}[conflict.status]}</p><b>leader 先行解决记录 · 示例</b>${list(conflict.leaderAttempts.map(attempt=>attempt.time+' · '+attempt.text+' · 结果：失败'))}${conflict.status==='pending'?`<div class="resolution"><button class="ok" onclick="resolveMergeConflict('${conflict.id}','continue')">已手动解决，继续合并</button><button class="bad" onclick="resolveMergeConflict('${conflict.id}','return')">退回节点重新处理</button></div><p class="v4-note">示例 · 两种人工处理均写入决策记录；原型不会执行真实合并。</p>`:''}</div>`).join('')}</div>`;
+}
+function simulateDiscoveryCompletion(nodeId) {
+  const node=getNode(nodeId),discovery=db.discoveries.find(item=>item.newNodeId===nodeId&&item.blocking&&item.example);
+  if(!node||!discovery||!['running','verifying'].includes(node.status))return {ok:false,reason:'请先批准并启动阻塞发现起草出的示例节点'};
+  // 人工验收仍由独立的「验收」按钮完成；这里只模拟执行与核对。
+  return submitForReview(nodeId,'示例 · 已模拟处理阻塞型发现并通过独立核对；等待你最终验收');
+}
+function renderBlockingDiscoveryDemo(node) {
+  const discovery=db.discoveries.find(item=>item.newNodeId===node.id&&item.blocking&&item.example);
+  if(!discovery)return '';
+  const origin=getNode(discovery.nodeId);
+  return `<div class="card blocking-discovery-demo"><h2>阻塞型发现演示 <span class="merge-label">示例</span></h2><p>示例 · 原节点「${esc(origin?.title)}」${origin?.blockedType==='discovery'?'已暂停并依赖此节点':'已恢复'}。先确认此节点全部边界并批准，模拟核对后在页首点击「验收」。</p>${['running','verifying'].includes(node.status)?`<button class="primary" onclick="simulateDiscoveryCompletion('${node.id}')">模拟执行与核对，提交验收</button>`:node.status==='in_review'?'<p>示例 · 核对完成，等待你点击「验收」；验收后原节点自动恢复。</p>':node.status==='accepted'?'<p>示例 · 本节点已验收，原节点已恢复执行。</p>':'<p>示例 · 先确认边界并批准此节点，再进行模拟核对。</p>'}<button onclick="go('node','${discovery.nodeId}')">查看原节点</button></div>`;
+}
+function init009MergeDemo() {
+  if(db.merge009Initialized)return;db.merge009Initialized=true;db.mergeConflicts ||= [];
+  const project={id:'project-c',name:'示例 · 项目 C 搜索面板开发',type:'产品开发',site:'示例仓库/搜索面板/',leader:'agent-pm-dev',executor:'Codex CLI',goal:'示例 · 演示并行节点按验收顺序合并、冲突人工处理与阻塞型发现',nodeIds:[],edges:[],example:true,exampleMerge:true,mergeBaselineVersion:2,mergeSerial:3,budget:30,budgetNote:'示例 · 模拟预算，单位为元',memory:{instructions:[{id:'project-c-instruction',text:'示例 · 界面文字使用中文；只模拟，不改真实仓库',mandatory:true,source:'示例 · 你确认的项目指令',refs:[]}],decisions:[],conventions:[],cautions:[]}};
+  db.projects.push(project);normalizeV4Project(project);
+  const definitions=[['c-interface','示例 · 共享接口','accepted',1,'10/11 09:10'],['c-search','示例 · 搜索交互','accepted',2,'10/11 09:20'],['c-empty','示例 · 空结果提示','accepted',3,'10/11 09:30'],['c-settings','示例 · 偏好设置','running',null,null]];
+  for(const [id,title,status,order,time] of definitions){
+    const node=normalizeNode(project.id,{id,title,need:'示例 · 在独立工作目录完成'+title.replace(/^示例 · /,'')+'，产出差异并独立核对。',deliverable:'示例 · 搜索面板差异：示例/src/search.diff',sources:['示例/docs/搜索面板.md'],deps:[],boundaries:[{text:'示例 · 只修改搜索面板相关内容',enf:'advisory',src:'human',ok:true}],tests:[{id:'c-proof',kind:'evidence',text:'示例 · 差异与已批准需求逐项核对',v:status==='accepted'?'pass':'unchecked'}],seats:{execute:'agent-frontend',verify:'agent-check',challenge:null,human:false},attempts:[{number:1,actor:'agent-frontend',model:'示例 · 未调用真实模型',method:'示例 · 在独立工作目录模拟执行与核对',result:status==='accepted'?'success':'running',failure:'',tokens:null,duration:'示例',sessionId:'示例 · c-session-'+id,cost:status==='accepted'?.5:.2}],cost:status==='accepted'?.5:.2,example:true});
+    node.status=status;node.approved=true;node.started=true;
+    node.boundaries.forEach(boundary=>boundary.ok=true);if(status==='accepted')node.tests.forEach(test=>test.v='pass');
+    node.result=status==='accepted'?'示例 · 节点已通过核对并由你验收':'示例 · 偏好设置正在执行';node.signNote=status==='accepted'?'示例 · 人工验收确认':'';
+    node.mergeWorkBaseVersion=1;db.nodes[id]=node;project.nodeIds.push(id);ensureStarted(node);node.context.confirmed=true;
+    node.handoff.done=status==='accepted'?['示例 · 完成差异、核对与人工验收']:['示例 · 已完成偏好设置基础草稿'];node.handoff.outputs=[node.deliverable];
+    if(order){node.merge={example:true,sourceNote:'示例 · 当前页面模拟合并，未操作真实仓库',acceptedAt:time,acceptedOrder:order,status:order===1?'merged':'pending',baseVersion:1,needsRebase:order>1,leaderAttempts:[],history:[],demoConflict:order===2};node.log.push([time,'human','示例 · 人工验收']);if(order===1){node.merge.mergedAt='10/11 09:12';node.merge.mergedVersion=2;node.merge.history=[{time:'10/11 09:12',event:'示例 · 合并完成',baseVersion:1,mergedVersion:2,actor:'leader'}];}}
+  }
+  project.memory.instructions[0].refs=[...project.nodeIds];syncProjectInstructions(project.id);
+  failExampleLeaderMerge(getNode('c-search'),'10/11 09:21');
+  const blocking={id:'discovery-blocking-example',nodeId:'c-settings',projectId:project.id,description:'示例 · 偏好设置读取旧版配置格式，缺少迁移规则，继续执行会丢失用户偏好',evidence:'示例 · 配置样本格式 v1 与读取接口 v2 不一致',location:'示例/src/preferences.js:18',materials:['示例/docs/偏好迁移.md:8','示例/data/preferences-v1.json'],blocking:true,recommendation:{action:'draft',reason:'示例 · 迁移规则超出偏好设置节点范围，先独立处理再恢复原节点',title:'示例 · 补齐偏好配置迁移',deps:[]},status:'pending',state:'pending',example:true,sourceNote:'示例 · 预置阻塞型发现，不属于真实开发或浏览器检查记录'};
+  blocking.suggestion=blocking.recommendation;db.discoveries.push(blocking);
+}
+
 initV4();
-window.helm = { normalizeV4Node,normalizeV4Attempt,normalizeV4Project,mergeV4Instructions,validatePlan,executePlan,confirmOrchestration,freezeChecklist,updateChecklistItem,replanNode,wakeMainAgent,resultSummary,orchestrationExceptions,appendExecutionEvent,projectSpent,submitDiscovery,decideDiscovery,resumeBlockedDiscoveries,addProjectInstruction,removeProjectInstruction,syncProjectInstructions,proposeDesignDecision,confirmDesignDecision,deprecateDesignDecision,activeDesignDecisions,addCaution,confirmCaution,revokeCaution,decideGate,resolveSideEffect,renderOrchestration,renderResultGroups,renderMemory,renderOrchestrationTemplates,renderAttempts,setProcessTab,checkInvalidPlan, db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
+init009MergeDemo();
+window.helm = { getMergeQueue,registerMergeAcceptance,attemptMerge,resolveMergeConflict,renderMergeQueue,renderMergeConflict,simulateDiscoveryCompletion,renderBlockingDiscoveryDemo,INBOX_GROUPS, artifactPreviews,artifactPreview,artifactReference,previewReference,openArtifactPreview,closeArtifactPreview,renderArtifactPreview,renderMarkdown,parseCSV,renderCSV,renderDiff, normalizeV4Node,normalizeV4Attempt,normalizeV4Project,mergeV4Instructions,validatePlan,executePlan,confirmOrchestration,freezeChecklist,updateChecklistItem,replanNode,wakeMainAgent,resultSummary,orchestrationExceptions,appendExecutionEvent,projectSpent,submitDiscovery,decideDiscovery,resumeBlockedDiscoveries,addProjectInstruction,removeProjectInstruction,syncProjectInstructions,proposeDesignDecision,confirmDesignDecision,deprecateDesignDecision,activeDesignDecisions,addCaution,confirmCaution,revokeCaution,decideGate,resolveSideEffect,renderOrchestration,renderResultGroups,renderMemory,renderOrchestrationTemplates,renderAttempts,setProcessTab,checkInvalidPlan, db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
 render();
 </script>
 </body>
