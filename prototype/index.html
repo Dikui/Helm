@@ -301,9 +301,9 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
 .flow-node.selected .flow-node-box { stroke: var(--flow-port); stroke-width: 3; }
 .flow-preview-tag { fill: var(--flow-add); font-size: 12px; font-weight: 600; }
 .flow-preview-remove .flow-preview-tag { fill: var(--flow-remove); }
-.flow-edge.flow-preview-add .flow-edge-path { stroke: var(--flow-add); stroke-dasharray: 6 4; }
-.flow-edge.flow-preview-remove .flow-edge-path { stroke: var(--flow-remove); stroke-dasharray: 2 5; }
-.flow-edge.flow-preview-modify .flow-edge-path { stroke: var(--flow-modify); stroke-dasharray: 10 3 2 3; }
+.flow-edge.flow-preview-add .flow-edge-path { stroke: var(--flow-add); stroke-dasharray: 6 4; marker-end: var(--graph-arrow-add); }
+.flow-edge.flow-preview-remove .flow-edge-path { stroke: var(--flow-remove); stroke-dasharray: 2 5; marker-end: var(--graph-arrow-remove); }
+.flow-edge.flow-preview-modify .flow-edge-path { stroke: var(--flow-modify); stroke-dasharray: 10 3 2 3; marker-end: var(--graph-arrow-modify); }
 .flow-edge.flow-preview-add .flow-edge-label { fill: var(--flow-add); }
 .flow-edge.flow-preview-remove .flow-edge-label { fill: var(--flow-remove); text-decoration: line-through; }
 .flow-edge.flow-preview-modify .flow-edge-label { fill: var(--flow-modify); }
@@ -5089,9 +5089,13 @@ function flowEditProject() {
   return {...p,nodeIds,edges,_nodes:nodes,_editing:true};
 }
 function flowEditFeedback(reason) {
-  const active=document.activeElement,action=active?.getAttribute?.('onclick'),inputId=active?.getAttribute?.('id'),value=active?.value;
+  const active=document.activeElement,action=active?.getAttribute?.('onclick'),inputId=active?.getAttribute?.('id');
+  // Clicking Save moves focus to the button. Capture the editor fields
+  // themselves before rebuilding, rather than relying on the focused element.
+  const inputs=[...$('#main').querySelectorAll('input')].filter(input=>['flow-edit-name','flow-edit-condition'].includes(input.id||input.getAttribute('id'))).map(input=>({id:input.id||input.getAttribute('id'),value:input.value}));
   flowEditor.notice=reason;render();
-  if(['flow-edit-name','flow-edit-condition'].includes(inputId)){const input=$('#'+inputId);if(input){input.value=value;input.focus();}}
+  for(const {id,value} of inputs){const input=$('#main').querySelector('#'+id);if(input)input.value=value;}
+  if(inputs.length)$('#main').querySelector('#'+(inputs.some(input=>input.id===inputId)?inputId:inputs[0].id))?.focus();
   else if(flowEditor.menu){const item=[...$('#main').querySelectorAll('[data-flow-menu-item]')].find(n=>n.getAttribute('onclick')===action);if(item)item.focus();else focusFlowMenu();}
   else focusFlowEditNode(flowEditor.selected);
   return {ok:false,reason};
@@ -5458,7 +5462,7 @@ function renderFlowSVG(p,options={}) {
     const port=editing&&!layout.vertical&&n.preview!=='remove'?`<circle class="flow-connect-port" cx="${n.width}" cy="${n.height/2}" r="7" aria-hidden="true" onpointerdown="${esc(`beginFlowConnection(event,${highlight})`)}" onclick="event.stopPropagation()"><title>拖到目标添加依赖；也可用节点菜单</title></circle>`:'';
     return `<g class="flow-node${n.discovery?' discovery':''}${n.id===options.focusId?' current':''}${n.preview?' flow-preview-'+n.preview:''}${editing&&flowEditor.selected===n.id?' selected':''}" data-preview="${esc(n.preview)}" data-node-id="${esc(n.id)}" data-state="${state}" data-level="${n.level}" transform="translate(${n.x} ${n.y})" role="${editing?'button':'link'}" tabindex="0" aria-label="${esc(label)}" onclick="${esc(open)}" onkeydown="${esc(`${editing?'flowNodeKeydown':'openFlowNode'}(event,${highlight})`)}" onmouseenter="${esc(`highlightFlowNode(this,${highlight},'hover')`)}" onmouseleave="highlightFlowNode(this,null,'hover')" onfocus="${esc((editing?`flowEditor.selected=${highlight};`:'')+`highlightFlowNode(this,${highlight},'focus')`)}" onblur="highlightFlowNode(this,null,'focus')"><rect class="flow-node-box" width="${n.width}" height="${n.height}" rx="6"/>${flowSVGText(n.titleLines,16,26,'flow-title',19)}<g class="flow-state s-${state}"><rect class="flow-state-bg" x="14" y="${n.statusY}" width="${Math.min(n.width-28,Math.max(...n.statusLines.map(line=>flowTextWidth(line,12)))+20)}" height="${n.statusHeight}" rx="5"/>${flowSVGText(n.statusLines,24,n.statusY+17,'flow-state-text')}</g>${flowSVGText(n.agentLines,16,n.agentY,'flow-agent')}${n.discovery?flowSVGText(['发现'],16,discoveryY,'flow-discovery-tag'):''}${n.preview?flowSVGText([n.preview==='add'?'新增':'删除'],16,tagY,'flow-preview-tag'):''}${editing?`<text class="flow-drop-label" x="16" y="${n.height-8}" hidden></text>`:''}${port}</g>`;
   }).join('');
-  return `<svg class="flow-svg" data-direction="${layout.vertical?'vertical':'horizontal'}" data-scrollable="${layout.scrollable}" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-labelledby="${esc(key+'-title')}" style="--graph-arrow-active:url(#${esc(key+'-active')})"><title id="${esc(key+'-title')}">${esc(options.focusId?'本节点与直接上下游关系':'项目流程：'+p.name)}；${layout.vertical?'从上到下':'从左到右'}，Tab 聚焦节点，Enter ${editing?'打开节点菜单':'打开详情'}</title><defs>${markers}</defs>${edges}${nodes}${editing?'<path class="flow-temporary-line" hidden/>':''}</svg>`;
+  return `<svg class="flow-svg" data-direction="${layout.vertical?'vertical':'horizontal'}" data-scrollable="${layout.scrollable}" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-labelledby="${esc(key+'-title')}" style="${['active','add','remove','modify'].map(kind=>`--graph-arrow-${kind}:url(#${esc(key+'-'+kind)})`).join(';')}"><title id="${esc(key+'-title')}">${esc(options.focusId?'本节点与直接上下游关系':'项目流程：'+p.name)}；${layout.vertical?'从上到下':'从左到右'}，Tab 聚焦节点，Enter ${editing?'打开节点菜单':'打开详情'}</title><defs>${markers}</defs>${edges}${nodes}${editing?'<path class="flow-temporary-line" hidden/>':''}</svg>`;
 }
 function renderFlowGraph(p,options={}) {
   if(!options.focusId&&flowEditor.projectId===p.id)p=flowEditProject();
