@@ -14,6 +14,9 @@
   --on-accent: #ffffff; --on-ok: #ffffff; --on-bad: #ffffff;
   --overlay: #00000066;
   --flow-label: #605e57;
+  --graph-bg: #f6f6f3; --graph-node-bg: #ffffff; --graph-text: #1d1d1b; --graph-muted: #6b6a64;
+  --graph-line: #46453f; --graph-active: #2f5bd3; --graph-return: #c0392b; --graph-discovery: #7a4fc4;
+  --graph-label: #605e57; --graph-label-bg: #f0efea;
   --result-pass: #005b70; --result-pass-bg: #dff3f7;
   --result-fail: #8b2357; --result-fail-bg: #fae6f0;
   --result-unverifiable: #55429b; --result-unverifiable-bg: #efebfa;
@@ -33,6 +36,9 @@
     --on-accent: #161615; --on-ok: #161615; --on-bad: #161615;
     --overlay: #00000099;
     --flow-label: #c0beb5;
+    --graph-bg: #161615; --graph-node-bg: #1f1f1d; --graph-text: #ecebe6; --graph-muted: #a3a197;
+    --graph-line: #cccac2; --graph-active: #7c9cf0; --graph-return: #ef7d70; --graph-discovery: #b598ea;
+    --graph-label: #c0beb5; --graph-label-bg: #282825;
     --result-pass: #73d5e7; --result-pass-bg: #18343b;
     --result-fail: #ffa0ca; --result-fail-bg: #412337;
     --result-unverifiable: #c1b1ff; --result-unverifiable-bg: #302842;
@@ -180,7 +186,7 @@ details.process > summary::-webkit-details-marker { display: none; }
 .prompt-preview { margin: 6px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; font: 12px/1.65 var(--mono); }
 [hidden] { display: none !important; }
 
-.app > *, .flow-stage > *, .form-grid > * { min-width: 0; }
+.app > *, .form-grid > * { min-width: 0; }
 main, .card, .head, .modal { overflow-wrap: anywhere; }
 .nav-button { width: 100%; text-align: left; border-color: transparent; background: transparent; }
 .side-project { margin: 8px 0; }
@@ -195,14 +201,49 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
 .d-pending_approval { background: var(--warn); }
 .d-waiting, .d-skipped { background: var(--faint); }
 .d-needs_revalidation { background: var(--bad); }
-.flow { display: grid; gap: 12px; margin: 20px 0; }
-.flow-stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-.flow-stage.parallel { grid-template-columns: repeat(var(--flow-columns, 4), minmax(0, 1fr)); }
-.flow-node { position: relative; padding: 15px 16px 15px 22px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; background: var(--panel); color: var(--text); min-width: 0; white-space: normal; }
+.flow-diagram { margin: 20px 0; min-width: 0; }
+.flow-canvas { max-width: 100%; overflow-x: auto; background: var(--graph-bg); padding: 2px; }
+.flow-svg { display: block; background: var(--graph-bg); max-width: none; }
+.flow-node { background: var(--graph-node-bg); color: var(--graph-text); cursor: pointer; outline: none; }
 .flow-node .src { color: var(--muted); }
-.flow-status { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 7px 0 0 7px; }
-.flow-edges { display: flex; justify-content: center; gap: 8px 20px; flex-wrap: wrap; color: var(--flow-label); background: var(--bg); font-size: 12px; }
-.branch-condition { color: var(--flow-label); background: var(--panel-2); border-radius: 5px; padding: 3px 8px; }
+.flow-node-box { fill: var(--graph-node-bg); stroke: var(--graph-line); stroke-width: 1.5; }
+.flow-node.discovery .flow-node-box { stroke: var(--graph-discovery); stroke-dasharray: 6 4; }
+.flow-node:hover .flow-node-box, .flow-node:focus .flow-node-box, .flow-node.current .flow-node-box { stroke: var(--graph-active); stroke-width: 3; }
+.flow-title { fill: var(--graph-text); font-size: 14px; font-weight: 600; }
+.flow-agent { fill: var(--graph-muted); font-size: 12px; }
+.flow-discovery-tag { fill: var(--graph-discovery); font-size: 12px; }
+.flow-state-text { font-size: 12px; }
+.flow-state.s-draft .flow-state-text, .flow-state.s-waiting .flow-state-text, .flow-state.s-skipped .flow-state-text, .flow-state.s-abandoned .flow-state-text { fill: var(--muted); }
+.flow-state.s-draft .flow-state-bg, .flow-state.s-waiting .flow-state-bg, .flow-state.s-skipped .flow-state-bg, .flow-state.s-abandoned .flow-state-bg { fill: var(--panel-2); }
+.flow-state.s-ready .flow-state-text { fill: var(--accent); }
+.flow-state.s-ready .flow-state-bg { fill: var(--accent-soft); }
+.flow-state.s-running .flow-state-text, .flow-state.s-verifying .flow-state-text { fill: var(--agent); }
+.flow-state.s-running .flow-state-bg, .flow-state.s-verifying .flow-state-bg { fill: var(--agent-soft); }
+.flow-state.s-blocked .flow-state-text, .flow-state.s-pending_approval .flow-state-text, .flow-state.s-in_review .flow-state-text { fill: var(--warn); }
+.flow-state.s-blocked .flow-state-bg, .flow-state.s-pending_approval .flow-state-bg, .flow-state.s-in_review .flow-state-bg { fill: var(--warn-soft); }
+.flow-state.s-changes_requested .flow-state-text, .flow-state.s-needs_revalidation .flow-state-text { fill: var(--bad); }
+.flow-state.s-changes_requested .flow-state-bg, .flow-state.s-needs_revalidation .flow-state-bg { fill: var(--bad-soft); }
+.flow-state.s-accepted .flow-state-text { fill: var(--ok); }
+.flow-state.s-accepted .flow-state-bg { fill: var(--ok-soft); }
+.flow-edge-path { fill: none; stroke: var(--graph-line); stroke-width: 2; stroke-linejoin: round; }
+.flow-edge.returned .flow-edge-path { stroke: var(--graph-return); stroke-dasharray: 8 5; }
+.flow-edge.discovery .flow-edge-path { stroke: var(--graph-discovery); stroke-dasharray: 2 5; }
+.flow-edge.returned.discovery .flow-edge-path { stroke: var(--graph-return); stroke-dasharray: 8 4 2 4; }
+.flow-edge.is-dim .flow-edge-path { opacity: .75; }
+.flow-edge.is-active .flow-edge-path { stroke: var(--graph-active); stroke-width: 3; marker-end: var(--graph-arrow-active); }
+.flow-arrow-normal { fill: var(--graph-line); }
+.flow-arrow-returned { fill: var(--graph-return); }
+.flow-arrow-discovery { fill: var(--graph-discovery); }
+.flow-arrow-active { fill: var(--graph-active); }
+.flow-edge-label { fill: var(--graph-label); font-size: 12px; }
+.flow-label-bg { fill: var(--graph-label-bg); }
+.flow-legend { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; margin-top: 10px; color: var(--graph-label); background: var(--graph-bg); font-size: 12px; }
+.flow-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.flow-legend svg { width: 32px; height: 12px; flex: none; }
+.flow-legend-return { stroke: var(--graph-return); stroke-width: 2; stroke-dasharray: 8 5; }
+.flow-legend-discovery { fill: var(--graph-node-bg); stroke: var(--graph-discovery); stroke-width: 2; stroke-dasharray: 3 3; }
+.flow-local h2 { margin-bottom: 4px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .flow-editor { margin-top: 18px; }
 .flow-editor summary { cursor: pointer; }
 .form-card { margin-top: 18px; }
@@ -238,9 +279,9 @@ main, .card, .head, .modal { overflow-wrap: anywhere; }
   .inbox-item > .chip { flex: none; }
   .modal-backdrop { padding: 12px; }
   .tl-item { grid-template-columns: 46px 1fr; } .tl-item .who { grid-column: 2; }
-  .flow-stage.parallel, .form-grid { grid-template-columns: minmax(0, 1fr); }
-  .flow-edges { justify-content: flex-start; flex-direction: column; }
-  .flow-node .chip { white-space: normal; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .flow-canvas { overflow-x: hidden; }
+  .flow-svg { max-width: 100%; }
   .autonomy-row { flex-wrap: wrap; }
 }
 .result-pass { color: var(--result-pass); background: var(--result-pass-bg); }
@@ -4807,14 +4848,203 @@ function renderProjects() {
 }
 function submitProject() { const p=createProject({name:$('#project-name').value,type:$('#project-type').value,goal:$('#project-goal').value,site:$('#project-site').value}); if(p?.id)go('project',p.id);else if(p?.reason)toast(p.reason); }
 function flowStages(p) {
-  const levels=new Map(), remaining=new Set(p.nodeIds), stages=[];
-  while(remaining.size) { const row=[...remaining].filter(id=>(getNode(id).deps||[]).every(dep=>levels.has(dep))); if(!row.length)break; row.forEach(id=>{levels.set(id,stages.length);remaining.delete(id);}); stages.push(row); }
+  const ids=p.nodeIds.filter(id=>getNode(id)), remaining=new Set(ids), stages=[];
+  const edges=p.edges.filter(e=>remaining.has(e.from)&&remaining.has(e.to));
+  while(remaining.size) {
+    const row=ids.filter(id=>remaining.has(id)&&edges.filter(e=>e.to===id).every(e=>!remaining.has(e.from)));
+    if(!row.length)break; // 项目流程编辑已拒绝循环依赖。
+    row.forEach(id=>remaining.delete(id));stages.push(row);
+  }
+  // 两次重心排序减少分叉/汇合的交叉；相同重心保持原项目顺序。
+  const original=new Map(ids.map((id,i)=>[id,i]));
+  const sort=(row,neighbors)=>row.sort((a,b)=>{
+    const center=id=>{const values=neighbors(id);return values.length?values.reduce((sum,n)=>sum+n,0)/values.length:original.get(id);};
+    return center(a)-center(b)||original.get(a)-original.get(b);
+  });
+  for(let pass=0;pass<2;pass++) {
+    const position=()=>new Map(stages.flatMap(row=>row.map((id,i)=>[id,i])));
+    for(let i=1;i<stages.length;i++){const pos=position();sort(stages[i],id=>edges.filter(e=>e.to===id).map(e=>pos.get(e.from)));}
+    for(let i=stages.length-2;i>=0;i--){const pos=position();sort(stages[i],id=>edges.filter(e=>e.from===id).map(e=>pos.get(e.to)));}
+  }
   return stages;
 }
+function flowNeighborhood(p,focusId) {
+  const edges=p.edges.filter(e=>e.from===focusId||e.to===focusId);
+  const included=new Set([focusId,...edges.flatMap(e=>[e.from,e.to])]);
+  return {...p,nodeIds:[...new Set([...p.nodeIds.filter(id=>included.has(id)),focusId])],edges};
+}
+function flowReachable(start,edges,reverse=false) {
+  const seen=new Set([start]),queue=[start];
+  for(let i=0;i<queue.length;i++)for(const e of edges) {
+    const from=reverse?e.to:e.from,to=reverse?e.from:e.to;
+    if(from===queue[i]&&!seen.has(to)){seen.add(to);queue.push(to);}
+  }
+  return seen;
+}
+function flowEdgeMarks(p,e) {
+  const returned=db.returns.some(r=>r.status==='approved'&&
+    flowReachable(r.targetId,p.edges).has(e.from)&&flowReachable(r.fromId,p.edges,true).has(e.to));
+  const discovered=id=>Boolean(getNode(id)?.discoverySource||db.discoveries.some(d=>d.newNodeId===id));
+  return {returned,discovery:discovered(e.from)||discovered(e.to)};
+}
+function flowTextWidth(text,size) {
+  // 系统字体的保守字宽：宽拉丁字母也留足空间，不依赖 canvas 或外部字体测量。
+  return [...text].reduce((width,c)=>width+size*(/[^\u0000-\u007f]/.test(c)?1.05:/[MWmw@%]/.test(c)?1:/[A-Z]/.test(c)?.85:.75),0);
+}
+function flowTextLines(text,width,size) {
+  const lines=[];let line='';
+  for(const c of String(text||'')) {
+    if(c==='\n'){lines.push(line);line='';continue;}
+    if(line&&flowTextWidth(line+c,size)>width){lines.push(line);line='';}
+    line+=c;
+  }
+  if(line||!lines.length)lines.push(line);
+  return lines;
+}
+function flowStatusLabel(n) {
+  return n.status==='blocked'&&n.blockedType==='limit'?'阻塞·已达上限':n.status==='blocked'&&n.blockedType==='discovery'?'暂停·等待发现处理':STATUS[n.status]||n.status;
+}
+function flowViewport(canvas) {
+  const main=$('#main'),viewport=window.innerWidth||1024;
+  const vertical=typeof matchMedia==='function'?matchMedia('(max-width: 760px)').matches:viewport<=760;
+  let width=canvas?.clientWidth;
+  if(!width&&main?.clientWidth) {
+    const style=typeof getComputedStyle==='function'?getComputedStyle(main):null;
+    width=main.clientWidth-(parseFloat(style?.paddingLeft)|| (vertical?16:28))-(parseFloat(style?.paddingRight)|| (vertical?16:28));
+  }
+  return {vertical,width:Math.max(120,(width|| (vertical?viewport-32:viewport-346))-4)};
+}
+// 纯几何函数：不改 db，不读 DOM。points 是实际 SVG 折线路由，也用于 Node 绕障检查。
+function layoutFlow(p,options={}) {
+  const width=Math.max(120,Number(options.width)||960),vertical=options.vertical??width<=760;
+  const graph=options.focusId?flowNeighborhood(p,options.focusId):p,stages=flowStages(graph);
+  const included=new Set(stages.flat()),nodeWidth=vertical?Math.min(270,width-80):210;
+  const edges=graph.edges.filter(e=>included.has(e.from)&&included.has(e.to)).map(e=>{
+    const marks=flowEdgeMarks(p,e),text=[e.condition,marks.returned?'退回':'',marks.discovery?'发现':''].filter(Boolean).join(' · ');
+    const lines=flowTextLines(text,vertical?nodeWidth-24:168,12);
+    return {...e,...marks,label:text?{text,lines,width:Math.max(...lines.map(line=>flowTextWidth(line,12)))+16,height:lines.length*16+10}:null};
+  });
+  const nodes=stages.flatMap((ids,level)=>ids.map(id=>{
+    const n=getNode(id),discovery=Boolean(n.discoverySource||db.discoveries.some(d=>d.newNodeId===id));
+    const titleLines=flowTextLines(n.title,nodeWidth-32,14),statusLabel=flowStatusLabel(n),statusLines=flowTextLines(statusLabel,nodeWidth-48,12);
+    const agent=n.seats.human?'执行：你（人工节点）':'执行：'+(getAgent(n.seats.execute)?.name||'未安排');
+    const agentLines=flowTextLines(agent,nodeWidth-32,12),statusY=20+titleLines.length*19;
+    const statusHeight=statusLines.length*16+10,agentY=statusY+statusHeight+22;
+    return {id,level,width:nodeWidth,height:agentY+(agentLines.length-1)*16+(discovery?36:20),titleLines,statusLabel,statusLines,statusY,statusHeight,agent,agentLines,agentY,discovery};
+  }));
+  const byId=new Map(nodes.map(n=>[n.id,n])),labelsBefore=id=>edges.filter(e=>e.to===id&&e.label);
+  const labelSpace=id=>labelsBefore(id).reduce((sum,e)=>sum+e.label.height+8,0);
+  let graphWidth,graphHeight;
+  if(vertical) {
+    let y=24;
+    stages.forEach((ids,level)=>ids.forEach((id,index)=>{
+      if(level||index)y+=Math.max(index?44:86,labelSpace(id)+28);
+      const n=byId.get(id);n.x=(width-nodeWidth)/2;n.y=y;y+=n.height;
+    }));
+    graphWidth=width;graphHeight=y+24;
+  } else {
+    const skip=edges.filter(e=>byId.get(e.to).level>byId.get(e.from).level+1);
+    const top=28+skip.reduce((sum,e)=>sum+(e.label?.height||0)+24,0);
+    const heights=stages.map(ids=>ids.reduce((sum,id)=>sum+byId.get(id).height,0)+(ids.length-1)*44),maxHeight=Math.max(0,...heights);
+    let x=16;
+    stages.forEach((ids,level)=>{
+      let y=top+(maxHeight-heights[level])/2;
+      for(const id of ids){const n=byId.get(id);n.x=x;n.y=y;y+=n.height+44;}
+      const channel=edges.filter(e=>byId.get(e.from).level===level||byId.get(e.to).level===level+1);
+      const gap=Math.max(104,...channel.map(e=>(e.label?.width||0)+32),channel.length*8+40);
+      x+=nodeWidth+(level<stages.length-1?gap:0);
+    });
+    graphWidth=Math.max(width,x+16);graphHeight=top+maxHeight+28;
+    const shift=(graphWidth-x-16)/2;nodes.forEach(n=>n.x+=shift);
+  }
+  let skipY=20;
+  edges.forEach(e=>{
+    const source=byId.get(e.from),target=byId.get(e.to),skip=target.level>source.level+1;
+    const outgoing=edges.filter(edge=>edge.from===e.from),incoming=edges.filter(edge=>edge.to===e.to);
+    const port=(items,span)=>(items.indexOf(e)-(items.length-1)/2)*Math.min(10,(span-32)/(items.length+1));
+    if(vertical) {
+      const peers=edges.filter(edge=>(byId.get(edge.to).level>byId.get(edge.from).level+1)===skip);
+      const offset=12+24*(peers.indexOf(e)+1)/(peers.length+1),lane=skip?source.x-offset:source.x+nodeWidth+offset;
+      const sx=source.x+nodeWidth/2+port(outgoing,source.width),tx=target.x+nodeWidth/2+port(incoming,target.width),sy=source.y+source.height,ty=target.y;
+      e.points=[[sx,sy],[sx,sy+10],[lane,sy+10],[lane,ty-10],[tx,ty-10],[tx,ty]];
+      if(e.label) {
+        const labels=labelsBefore(e.to),after=labels.slice(labels.indexOf(e)+1).reduce((sum,edge)=>sum+edge.label.height+8,0);
+        e.label.x=skip?target.x:target.x+nodeWidth-e.label.width;e.label.y=target.y-16-after-e.label.height;
+      }
+    } else {
+      const sx=source.x+nodeWidth,tx=target.x,sy=source.y+source.height/2+port(outgoing,source.height),ty=target.y+target.height/2+port(incoming,target.height);
+      if(skip) {
+        const track=skipY+(e.label?.height||0)+8;skipY=track+16;
+        const start=sx+16+outgoing.indexOf(e)*6,end=tx-16-incoming.indexOf(e)*6;
+        e.points=[[sx,sy],[start,sy],[start,track],[end,track],[end,ty],[tx,ty]];
+        if(e.label){e.label.x=(start+end-e.label.width)/2;e.label.y=track-e.label.height-4;}
+      } else {
+        const peers=edges.filter(edge=>byId.get(edge.from).level===source.level&&byId.get(edge.to).level===target.level);
+        const middle=sx+(tx-sx)*(peers.indexOf(e)+1)/(peers.length+1);
+        e.points=[[sx,sy],[middle,sy],[middle,ty],[tx,ty]];
+        if(e.label){e.label.x=(sx+tx-e.label.width)/2;e.label.y=(sy+ty)/2-e.label.height-8;}
+      }
+    }
+    e.points=e.points.map(point=>point.map(value=>Math.round(value*100)/100));
+  });
+  // 极长条件也保持完整：标签需要额外顶部空间时整体平移，避免 SVG 裁切。
+  const labels=edges.map(e=>e.label).filter(Boolean),extraTop=Math.max(0,16-Math.min(16,...labels.map(label=>label.y)));
+  if(extraTop) {
+    nodes.forEach(n=>n.y+=extraTop);
+    edges.forEach(e=>{e.points.forEach(point=>point[1]+=extraTop);if(e.label)e.label.y+=extraTop;});
+    graphHeight+=extraTop;
+  }
+  graphHeight=Math.max(graphHeight,...labels.map(label=>label.y+label.height+16));
+  edges.forEach(e=>{e.path=e.points.map(([x,y],i)=>`${i?'L':'M'} ${x} ${y}`).join(' ');});
+  return {nodes,edges,width:graphWidth,height:graphHeight,vertical,stages};
+}
+function flowSVGText(lines,x,y,className,lineHeight=16) {
+  return `<text class="${className}" x="${x}" y="${y}">${lines.map((line,i)=>`<tspan x="${x}" dy="${i?lineHeight:0}">${esc(line)}</tspan>`).join('')}</text>`;
+}
+function renderFlowSVG(p,options={}) {
+  const layout=layoutFlow(p,options),key='flow-'+p.id+'-'+(options.focusId||'project');
+  const markers=['normal','returned','discovery','active'].map(kind=>`<marker id="${esc(key+'-'+kind)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="flow-arrow-${kind}" d="M 0 0 L 10 5 L 0 10 Z"/></marker>`).join('');
+  const edges=layout.edges.map(e=>`<g class="flow-edge${e.returned?' returned':''}${e.discovery?' discovery':''}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" aria-hidden="true"><path class="flow-edge-path" d="${e.path}" marker-end="url(#${esc(key+'-'+(e.returned?'returned':e.discovery?'discovery':'normal'))})"/>${e.label?`<rect class="flow-label-bg" x="${e.label.x}" y="${e.label.y}" width="${e.label.width}" height="${e.label.height}" rx="4"/>${flowSVGText(e.label.lines,e.label.x+8,e.label.y+17,'flow-edge-label')}`:''}</g>`).join('');
+  const nodes=layout.nodes.map(n=>{
+    const state=getNode(n.id).status,open=`go('node',${JSON.stringify(n.id)})`,highlight=JSON.stringify(n.id);
+    const label=[getNode(n.id).title,n.statusLabel,n.agent,n.discovery?'由发现生成':'',`第 ${n.level+1} 层`].filter(Boolean).join('，');
+    return `<g class="flow-node${n.discovery?' discovery':''}${n.id===options.focusId?' current':''}" data-node-id="${esc(n.id)}" data-state="${state}" data-level="${n.level}" transform="translate(${n.x} ${n.y})" role="link" tabindex="0" aria-label="${esc(label)}" onclick="${esc(open)}" onkeydown="${esc(`openFlowNode(event,${highlight})`)}" onmouseenter="${esc(`highlightFlowNode(this,${highlight},'hover')`)}" onmouseleave="highlightFlowNode(this,null,'hover')" onfocus="${esc(`highlightFlowNode(this,${highlight},'focus')`)}" onblur="highlightFlowNode(this,null,'focus')"><rect class="flow-node-box" width="${n.width}" height="${n.height}" rx="6"/>${flowSVGText(n.titleLines,16,26,'flow-title',19)}<g class="flow-state s-${state}"><rect class="flow-state-bg" x="14" y="${n.statusY}" width="${Math.min(n.width-28,Math.max(...n.statusLines.map(line=>flowTextWidth(line,12)))+20)}" height="${n.statusHeight}" rx="5"/>${flowSVGText(n.statusLines,24,n.statusY+17,'flow-state-text')}</g>${flowSVGText(n.agentLines,16,n.agentY,'flow-agent')}${n.discovery?flowSVGText(['发现'],16,n.height-14,'flow-discovery-tag'):''}</g>`;
+  }).join('');
+  return `<svg class="flow-svg" data-direction="${layout.vertical?'vertical':'horizontal'}" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-labelledby="${esc(key+'-title')}" style="--graph-arrow-active:url(#${esc(key+'-active')})"><title id="${esc(key+'-title')}">${esc(options.focusId?'本节点与直接上下游关系':'项目流程：'+p.name)}；${layout.vertical?'从上到下':'从左到右'}，Tab 聚焦节点，Enter 打开详情</title><defs>${markers}</defs>${edges}${nodes}</svg>`;
+}
+function renderFlowGraph(p,options={}) {
+  const settings={...flowViewport(),...options},graph=settings.focusId?flowNeighborhood(p,settings.focusId):p;
+  const states=[...new Set(graph.nodeIds.map(id=>getNode(id)?.status).filter(Boolean))];
+  const descriptions=graph.edges.map(e=>{const marks=flowEdgeMarks(p,e);return `<li data-from="${esc(e.from)}" data-to="${esc(e.to)}">${esc(getNode(e.from)?.title)} → ${esc(getNode(e.to)?.title)}${e.condition?'；条件：'+esc(e.condition):''}${marks.returned?'；退回过的依赖':''}${marks.discovery?'；由发现生成的依赖':''}</li>`;}).join('');
+  return `<section class="flow-diagram${settings.focusId?' flow-local':''}" data-project-id="${esc(p.id)}" data-focus-id="${esc(settings.focusId||'')}" aria-label="${settings.focusId?'本节点上下游小图':'项目流程图'}">${settings.focusId?'<h2>直接上下游</h2>':''}<div class="flow-canvas">${renderFlowSVG(p,settings)}</div><div class="flow-legend" aria-label="流程图图例">${states.map(state=>`<span class="flow-legend-status">${chip(state)}</span>`).join('')}<span><svg aria-hidden="true" viewBox="0 0 32 12"><path class="flow-legend-return" d="M 0 6 L 32 6"/></svg>退回</span><span><svg aria-hidden="true" viewBox="0 0 32 12"><rect class="flow-legend-discovery" x="1" y="1" width="30" height="10"/></svg>发现 · 虚线边框 / 点线</span><span>条件分支 · 连线旁的条件文字</span></div><ul class="flow-dependency-list visually-hidden" aria-label="${settings.focusId?'直接上下游依赖列表':'完整项目依赖列表'}">${descriptions||'<li>无依赖</li>'}</ul></section>`;
+}
+function openFlowNode(event,id) { if(event.key==='Enter'){event.preventDefault();go('node',id);} }
+function highlightFlowNode(element,id,kind='hover') {
+  const diagram=element.closest?.('.flow-diagram');if(!diagram)return;
+  diagram[kind==='focus'?'_flowFocus':'_flowHover']=id;
+  const active=diagram._flowFocus||diagram._flowHover,items=[...diagram.querySelectorAll('.flow-edge')];
+  const edges=items.map(item=>({from:item.dataset.from,to:item.dataset.to}));
+  const upstream=flowReachable(active,edges,true),downstream=flowReachable(active,edges);
+  items.forEach((item,i)=>{
+    const e=edges[i],related=Boolean(active&&(upstream.has(e.from)&&upstream.has(e.to)||downstream.has(e.from)&&downstream.has(e.to)));
+    item.classList.toggle('is-active',related);item.classList.toggle('is-dim',Boolean(active&&!related));
+  });
+}
+function refreshFlowLayout() {
+  if(!['project','node','contract'].includes(view.page))return;
+  for(const diagram of $('#main').querySelectorAll('.flow-diagram')) {
+    const p=getProject(diagram.dataset.projectId),canvas=diagram.querySelector('.flow-canvas');
+    if(!p||!canvas)continue;
+    const focused=document.activeElement?.closest?.('.flow-node');
+    const focusedId=focused?.closest('.flow-diagram')===diagram?focused.dataset.nodeId:null;
+    canvas.innerHTML=renderFlowSVG(p,{...flowViewport(canvas),focusId:diagram.dataset.focusId||undefined});
+    diagram._flowFocus=null;diagram._flowHover=null;
+    if(focusedId)[...canvas.querySelectorAll('.flow-node')].find(node=>node.dataset.nodeId===focusedId)?.focus();
+  }
+}
 function renderProject(p) {
-  const stages=flowStages(p);
   $('#main').innerHTML=`<div class="head"><div><div class="crumb">项目 · ${esc(p.type)}</div><h1>${esc(p.name)}</h1><div class="meta">leader：${esc(getAgent(p.leader)?.name)} · 工作现场：${esc(p.site)}</div></div><div class="actions"><button onclick="go('memory','${p.id}')">项目记忆</button><button onclick="go('settings','${p.id}')">项目设置</button></div></div>
-    ${renderBudget(p)}${renderMergeQueue(p)}<div class="intro">所有前置节点已验收后才能启动。并行节点位于同一行；分支条件标在依赖边旁。</div><div class="flow">${stages.map((ids,i)=>`${i?`<div class="flow-edges">${p.edges.filter(e=>ids.includes(e.to)).map(e=>`<span>${esc(getNode(e.from).title)} <span>→${e.condition?' '+esc(e.condition)+' →':''}</span> ${esc(getNode(e.to).title)}</span>`).join('')}</div>`:''}<div class="flow-stage ${ids.length>1?'parallel':''}" style="--flow-columns:${Math.min(4,ids.length)}">${ids.map(id=>{const n=getNode(id);const incoming=p.edges.filter(e=>e.to===id&&e.condition);return `<button class="flow-node" onclick="go('node','${id}')" data-state="${n.status}"><span class="flow-status d-${n.status}"></span>${incoming.map(e=>`<span class="branch-condition">${esc(e.condition)}</span>`).join('')}<strong>${esc(n.title)}</strong>${chip(n.status,n.blockedType)}<span class="src">${n.seats.human?'人工节点':getAgent(n.seats.execute)?.name||'未安排'}</span></button>`;}).join('')}</div>`).join('')}</div>
+    ${renderBudget(p)}${renderMergeQueue(p)}<div class="intro">所有前置节点已验收后才能启动。箭头表示依赖；同层节点可并行，分叉与汇合沿连线查看，条件标在对应连线旁。</div>${renderFlowGraph(p)}
     ${p.edges.some(e=>e.condition)?`<div class="card dependency-band"><b>条件分支</b><select id="branch-choice">${[...new Map(p.edges.filter(e=>e.condition).map(e=>[e.value||e.condition,e])).values()].map(e=>`<option value="${esc(e.value||e.condition)}" ${p.branchResult===(e.value||e.condition)?'selected':''}>${esc(e.condition)}</option>`).join('')}</select><button onclick="chooseBranch('${p.id}',document.querySelector('#branch-choice').value)">确认分支条件</button><span class="src">分支仍需等上游验收后开工</span></div>`:''}
     <details class="card flow-editor"><summary>编辑项目流程</summary><p class="src">可以增删节点、修改依赖与分支条件；执行中修改会提交变更请求。</p><label>节点<select id="flow-node">${projectNodes(p).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>操作<select id="flow-action"><option value="add">新增节点</option><option value="dependencies">修改依赖</option><option value="remove">删除节点</option></select></label><label>新节点名称<input type="text" id="flow-title"></label><label>前置节点 ID（逗号分隔）<input type="text" id="flow-deps" placeholder="${esc(p.nodeIds[0])}"></label><label>分支条件（可选）<input type="text" id="flow-condition" placeholder="若可行"></label><button class="primary" onclick="submitFlow('${p.id}')">提交项目流程变更</button></details>`;
 }
@@ -4857,7 +5087,7 @@ function renderNode(c) {
   const timeline=c.log.slice().reverse().map(([t,a,x])=>`<div class="tl-item"><span class="time">${esc(t)}</span><span class="who">${who(a)}</span><span>${esc(x)}</span></div>`).join('');
   $('#main').innerHTML=`<div class="head"><div><div class="crumb"><a onclick="go('project','${p.id}')">${esc(p.name)}</a> / ${esc(c.id)}</div><h1>${esc(c.title)}</h1><div class="meta">${chip(c.status,c.blockedType)}<span>节点项目 v${c.version}</span><span>${c.seats.human?'执行：你':'主 agent：'+esc(getAgent(c.seats.execute)?.name)}</span></div></div><div class="actions">${actions}<button onclick="openExecutionPrompt('${c.id}')">执行代理启动 prompt</button>${c.status!=='skipped'&&c.status!=='abandoned'?`<button onclick="editNodeForm('${c.id}')">编辑节点项目</button>`:''}${c.status==='in_review'&&blocker?`<div class="action-hint">${esc(blocker)}</div>`:''}</div></div>
     ${renderInfo(c)}${banner}${renderVersionDiff(c)}${renderRequests(c)}${renderMergeConflict(c)}${renderBlockingDiscoveryDemo(c)}<div class="card dependency-band"><b>前置节点</b> ${(c.deps||[]).map(id=>`<button class="small" onclick="go('node','${id}')">${esc(getNode(id).title)} · ${STATUS[getNode(id).status]}</button>`).join(' ')||'无'}${p.edges.filter(e=>e.to===c.id&&e.condition).map(e=>`<span class="k">条件：${esc(e.condition)}</span>`).join('')}</div>
-    <div class="cols"><div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div><div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}${(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden placeholder="保证机制（必填）">`:''}</div><div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div></div>
+    ${renderFlowGraph(p,{focusId:c.id})}<div class="cols"><div class="card"><div class="col-label">需求 · 要什么</div><div class="need">${esc(c.need)}</div></div><div class="card"><div class="col-label">边界 · 不能怎样</div>${renderBounds(c)}${(['draft','pending_approval'].includes(c.status)||!c.approved&&c.status==='needs_revalidation')?`<div class="add-row"><input type="text" id="newBound" placeholder="补充一条边界…"><select id="boundEnf" aria-label="边界保证类型" onchange="toggleMechanism()"><option value="advisory" selected>建议</option><option value="enforced">强制</option></select><button class="small" onclick="addBound('${c.id}')">添加</button></div><input type="text" id="newMech" hidden placeholder="保证机制（必填）">`:''}</div><div class="card"><div class="col-label">测试 · 怎么算对</div>${renderTests(c)}</div></div>
     <div class="below">${renderOrchestration(c)}${renderDiscoveries(c)}${renderSideEffects(c)}${renderSeats(c)}${renderContext(c)}${renderQuestions(c)}<div class="card handoff"><h2>验收报告</h2><div>${esc(c.result||'尚未提交结论')}</div><div class="legend">${Object.keys(VERDICT).map(v=>`<span class="k">${VERDICT[v]}：${c.tests.filter(t=>t.v===v).length}</span>`).join('')}</div><p class="src">核对与挑错使用只读权限和新上下文，leader 审阅后交给你验收。</p>${list(c.tests.filter(t=>t.v==='fail'||t.v==='unresolved').map(t=>t.id+' · '+t.text+' · '+VERDICT[t.v]))}${renderResultGroups(c.orchestration)}${renderHistoricalReports(c)}</div>${renderHandoff(c)}
     <div class="card handoff"><details class="process"><summary><h2>▸ 开发过程 <span class="hint">默认折叠 · ${c.attempts.length} 次尝试 / ${c.log.length} 条日志</span></h2></summary><div class="tabs"><button id="attempts-tab" class="small active" aria-pressed="true" onclick="setProcessTab('attempts')">尝试记录</button><button id="timeline-tab" class="small" aria-pressed="false" onclick="setProcessTab('timeline')">时间线</button><button id="execution-tab" class="small" aria-pressed="false" onclick="setProcessTab('execution')">执行日志</button></div><div id="attempts-panel">${renderAttempts(c)}</div><div id="timeline-panel" class="tl" hidden>${timeline}</div><div id="execution-panel" hidden>${renderExecutionLogs(c)}</div></details></div>
     <details class="card handoff"><summary>向 leader 提问 / 提出退回</summary><label>问题<textarea id="node-question"></textarea></label><button onclick="submitQuestion('${c.id}')">先交给 leader</button><label>退回到<select id="return-target">${projectNodes(p).filter(n=>n.id!==c.id).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label><label>退回理由<textarea id="return-reason"></textarea></label><label>证据路径<input type="text" id="return-evidence"></label><button onclick="submitReturn('${c.id}')">提交退回请求</button></details>
@@ -4921,7 +5151,7 @@ function openExecutionPrompt(id) { modalContract=id;modalReturnFocus=document.ac
 function closeExecutionPrompt() { modalContract=null;$('#modal-root').innerHTML='';modalReturnFocus?.focus?.();modalReturnFocus=null; }
 async function copyExecutionPrompt() { if(!modalContract)return;try{await navigator.clipboard.writeText(workerPrompt(modalContract));toast('已复制');}catch{toast('复制失败');} }
 if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(artifactPreview.path){if(event.key==='Escape'){event.preventDefault();closeArtifactPreview();}else if(event.key==='Tab'){const first=$('#artifact-close'),last=$('.artifact-content');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus?.();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus?.();}}return;}if(editingNode){if(event.key==='Escape'){event.preventDefault();closeNodeEditor();}return;}if(!modalContract)return;if(event.key==='Escape'){event.preventDefault();closeExecutionPrompt();}if(event.key==='Tab'){const first=$('#close-prompt'),last=$('#copy-prompt');if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
-function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='memory')renderMemory(getProject(view.id));else if(view.page==='orchestrationTemplates')renderOrchestrationTemplates();else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); }
+function render() { renderSide(); if(view.page==='inbox')renderInbox();else if(view.page==='projects')renderProjects();else if(view.page==='project')renderProject(getProject(view.id));else if(view.page==='node'||view.page==='contract')renderNode(getNode(view.id));else if(view.page==='memory')renderMemory(getProject(view.id));else if(view.page==='orchestrationTemplates')renderOrchestrationTemplates();else if(view.page==='agents')renderAgents();else if(view.page==='experience')renderExperience();else if(view.page==='decisions')renderDecisions();else if(view.page==='settings')renderSettings(getProject(view.id));else if(view.page==='templates')renderTemplates();else if(view.page==='template')renderTemplate(db.templates.find(t=>t.id===view.id)); refreshFlowLayout(); }
 
 // ---------- v4 模拟页面 ----------
 const FOUR_STATE_UI = {pass:'✓ 通过',fail:'✕ 失败',unverifiable:'? 无法验证',unprocessed:'— 未处理'};
@@ -5118,7 +5348,9 @@ function init009MergeDemo() {
 
 initV4();
 init009MergeDemo();
-window.helm = { getMergeQueue,registerMergeAcceptance,attemptMerge,resolveMergeConflict,renderMergeQueue,renderMergeConflict,simulateDiscoveryCompletion,renderBlockingDiscoveryDemo,INBOX_GROUPS, artifactPreviews,artifactPreview,artifactReference,previewReference,openArtifactPreview,closeArtifactPreview,renderArtifactPreview,renderMarkdown,parseCSV,renderCSV,renderDiff, normalizeV4Node,normalizeV4Attempt,normalizeV4Project,mergeV4Instructions,validatePlan,executePlan,confirmOrchestration,freezeChecklist,updateChecklistItem,replanNode,wakeMainAgent,resultSummary,orchestrationExceptions,appendExecutionEvent,projectSpent,submitDiscovery,decideDiscovery,resumeBlockedDiscoveries,addProjectInstruction,removeProjectInstruction,syncProjectInstructions,proposeDesignDecision,confirmDesignDecision,deprecateDesignDecision,activeDesignDecisions,addCaution,confirmCaution,revokeCaution,decideGate,resolveSideEffect,renderOrchestration,renderResultGroups,renderMemory,renderOrchestrationTemplates,renderAttempts,setProcessTab,checkInvalidPlan, db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
+window.helm = { flowStages,layoutFlow,renderFlowGraph,renderFlowSVG,flowNeighborhood,openFlowNode,highlightFlowNode,refreshFlowLayout, getMergeQueue,registerMergeAcceptance,attemptMerge,resolveMergeConflict,renderMergeQueue,renderMergeConflict,simulateDiscoveryCompletion,renderBlockingDiscoveryDemo,INBOX_GROUPS, artifactPreviews,artifactPreview,artifactReference,previewReference,openArtifactPreview,closeArtifactPreview,renderArtifactPreview,renderMarkdown,parseCSV,renderCSV,renderDiff, normalizeV4Node,normalizeV4Attempt,normalizeV4Project,mergeV4Instructions,validatePlan,executePlan,confirmOrchestration,freezeChecklist,updateChecklistItem,replanNode,wakeMainAgent,resultSummary,orchestrationExceptions,appendExecutionEvent,projectSpent,submitDiscovery,decideDiscovery,resumeBlockedDiscoveries,addProjectInstruction,removeProjectInstruction,syncProjectInstructions,proposeDesignDecision,confirmDesignDecision,deprecateDesignDecision,activeDesignDecisions,addCaution,confirmCaution,revokeCaution,decideGate,resolveSideEffect,renderOrchestration,renderResultGroups,renderMemory,renderOrchestrationTemplates,renderAttempts,setProcessTab,checkInvalidPlan, db, RETURN_LIMIT, getNode, getProject, getAgent, inbox, inboxCount, approve, startNode, completeReadyNodes, draftNode, askQuestion, answer, requestReturn, decideReturn, editNode, proposeChange, decide, signoff, resolveTest, recheckUnresolved, extendBudget, adjustContract, abandon, saveTemplate, setAutonomy, createAgent, proposeAgent, approveAgent, approveLesson, reviewExperience, confirmContext, createProject, editFlow, decideFlow, chooseBranch, proposeExperience, submitForReview, recordDecision, go, workerPrompt, openExecutionPrompt, closeExecutionPrompt, copyExecutionPrompt, openWorkerPrompt:openExecutionPrompt, closeWorkerPrompt:closeExecutionPrompt, copyWorkerPrompt:copyExecutionPrompt, renderUsage, addBound, toggleBound, render, editNodeForm, saveNodeEditor, closeNodeEditor, submitProject, submitFlow, submitAgent, fillAgentTemplate, submitQuestion, submitReturn };
+window.addEventListener?.('resize',refreshFlowLayout);
+if(typeof matchMedia==='function')matchMedia('(max-width: 760px)').addEventListener?.('change',refreshFlowLayout);
 render();
 </script>
 </body>
