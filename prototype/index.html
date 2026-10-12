@@ -8,7 +8,7 @@
 <style>
 :root {
  --bg:#f6f6f3; --panel:#ffffff; --panel-2:#eeeee8; --text:#1d1d1b; --muted:#605e57; --line:#77756e;
- --accent:#2346a6; --accent-bg:#e6ecfb; --on-accent:#ffffff; --edge:#46453f;
+ --accent:#2346a6; --accent-bg:#e6ecfb; --on-accent:#ffffff; --on-ok:#ffffff; --edge:#46453f;
  --draft:#55565f; --draft-bg:#ececf0; --ready:#2346a6; --ready-bg:#e6ecfb;
  --running:#614099; --running-bg:#efe8fa; --review:#704200; --review-bg:#fbf0dc;
  --accepted:#165c33; --accepted-bg:#e3f3ea; --integrated:#005b70; --integrated-bg:#dff3f7;
@@ -22,7 +22,7 @@
 @media (prefers-color-scheme: dark) {
  :root:not([data-theme="light"]) {
   --bg:#161615; --panel:#1f1f1d; --panel-2:#282825; --text:#ecebe6; --muted:#c0beb5; --line:#a3a197;
-  --accent:#a6bcff; --accent-bg:#232c45; --on-accent:#161615; --edge:#cccac2;
+  --accent:#a6bcff; --accent-bg:#232c45; --on-accent:#161615; --on-ok:#161615; --edge:#cccac2;
   --draft:#c1c2ce; --draft-bg:#2b2c33; --ready:#a6bcff; --ready-bg:#232c45;
   --running:#c1b1ff; --running-bg:#302842; --review:#f0bb6a; --review-bg:#3a2d17;
   --accepted:#7edba6; --accepted-bg:#1d3326; --integrated:#73d5e7; --integrated-bg:#18343b;
@@ -36,7 +36,7 @@
 }
  :root[data-theme="dark"] {
   --bg:#161615; --panel:#1f1f1d; --panel-2:#282825; --text:#ecebe6; --muted:#c0beb5; --line:#a3a197;
-  --accent:#a6bcff; --accent-bg:#232c45; --on-accent:#161615; --edge:#cccac2;
+  --accent:#a6bcff; --accent-bg:#232c45; --on-accent:#161615; --on-ok:#161615; --edge:#cccac2;
   --draft:#c1c2ce; --draft-bg:#2b2c33; --ready:#a6bcff; --ready-bg:#232c45;
   --running:#c1b1ff; --running-bg:#302842; --review:#f0bb6a; --review-bg:#3a2d17;
   --accepted:#7edba6; --accepted-bg:#1d3326; --integrated:#73d5e7; --integrated-bg:#18343b;
@@ -263,6 +263,84 @@ a,a:visited {color:var(--accent);} a:hover {text-decoration-thickness:2px;} :foc
 .acceptance-priorities {padding-left:20px;margin:8px 0;}
 .acceptance-controls {margin-top:24px;}
 #acceptance-outcome:focus,#annotation-outcome:focus {outline:3px solid var(--accent);outline-offset:3px;}
+/* 第 5 批：沿用八状态色板；文字、形状与虚线共同标记变化。 */
+.replay-controls,.replay-event,.replay-legend {color:var(--text);background:var(--panel);}
+.replay-timeline {width:100%;height:32px;accent-color:var(--accent);color:var(--text);background:var(--panel);cursor:ew-resize;}
+.replay-timeline::-webkit-slider-runnable-track {height:6px;background:var(--line);border-radius:3px;}
+.replay-timeline::-webkit-slider-thumb {margin-top:-5px;}
+.replay-new {color:var(--accepted);background:var(--accepted-bg);border:1px solid var(--accepted);padding:3px 8px;}
+.replay-changed {color:var(--changed);background:var(--changed-bg);border:2px dashed var(--changed);padding:3px 8px;}
+.replay-split {color:var(--running);background:var(--running-bg);border:1px dashed var(--running);padding:3px 8px;}
+.replay-inferred {color:var(--muted);background:var(--panel);}
+.replay-legend {display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;}
+.replay-directory {display:block;text-align:left;margin:8px 0;}
+.flow-replay-mark {fill:var(--changed);font-size:12px;font-weight:700;}
+.replay-parent-edge .flow-edge-path {stroke-dasharray:6 4;}
+.flow-node[data-replay-mark="△ 刚变化"] .flow-node-box {stroke-dasharray:6 3;stroke-width:3;}
+.flow-node[data-replay-mark="＋ 新增"] .flow-node-box {stroke-width:3;}
+.ask-backdrop {position:fixed;inset:0;z-index:45;display:flex;justify-content:flex-end;background:var(--overlay);}
+.ask-panel {width:min(640px,calc(100% - 280px));height:100dvh;overflow:auto;padding:18px 24px 40px;border-left:1px solid var(--line);color:var(--text);background:var(--panel);overscroll-behavior:contain;overflow-wrap:anywhere;}
+.ask-panel textarea {width:100%;min-height:90px;resize:vertical;}
+.ask-confirmed {color:var(--accepted);background:var(--accepted-bg);border:1px solid var(--accepted);}
+.ask-inferred {color:var(--review);background:var(--review-bg);border:2px dashed var(--review);}
+.ask-unknown {color:var(--paused);background:var(--paused-bg);border:1px solid var(--paused);}
+.ask-conclusion {padding:12px;margin:12px 0;border-radius:8px;}
+.ask-conclusion button {margin:4px 0;}
+.ask-history,.ask-suggestion,.playbook-item,.tool-item,.executor-item,.handbook-roles {color:var(--text);background:var(--panel);}
+.playbook-item {border-top:1px solid var(--line);padding:12px 0;}
+.playbook-item textarea {width:100%;min-height:100px;}
+.play-status {color:var(--accent);background:var(--accent-bg);font-size:12px;padding:3px 7px;}
+.cap-confirmed {color:var(--accepted);background:var(--accepted-bg);border:1px solid var(--accepted);}
+.cap-partial {color:var(--review);background:var(--review-bg);border:1px dashed var(--review);}
+.cap-untested {color:var(--paused);background:var(--paused-bg);border:1px solid var(--paused);}
+.cap-blocked {color:var(--changed);background:var(--changed-bg);border:1px solid var(--changed);}
+.cap-reminder {color:var(--review);background:var(--review-bg);border:1px dashed var(--review);}
+.cap-upcoming {color:var(--muted);background:var(--panel-2);border:1px solid var(--line);}
+.cap-confirmed,.cap-partial,.cap-untested,.cap-blocked,.cap-reminder,.cap-upcoming {display:inline-block;padding:4px 8px;margin:4px 0;border-radius:4px;}
+.table-scroll {overflow:auto;max-width:100%;}
+.handbook-roles th,.handbook-roles td {text-align:left;vertical-align:top;white-space:normal;}
+.settings-editor textarea {width:100%;min-height:100px;resize:vertical;}
+.artifact-backdrop {z-index:60;}
+@media(max-width:760px){.ask-panel{width:100%;padding:16px;border:0;}.replay-legend{flex-direction:column;align-items:flex-start;}}
+
+.workflow-topology,.workflow-branch {color:var(--text);background:var(--panel);}
+.workflow-branches {display:flex;flex-wrap:wrap;gap:8px;}
+.workflow-branch {border:1px solid var(--line);padding:8px;flex:1;min-width:120px;}
+.workflow-unverifiable {color:var(--paused);background:var(--paused-bg);border:1px solid var(--paused);padding:10px;margin:12px 0;}
+/* 029 返工：连续拖动保留原生 range；图和说明分别在固定高度内滚动。 */
+button.ok {color:var(--on-ok);background:var(--accepted);border-color:var(--accepted);}
+button.ok:hover {color:var(--on-ok);background:var(--accepted);}
+button.ok:disabled,button.primary:disabled {color:var(--muted);background:var(--panel-2);border-color:var(--line);}
+.flow-test-progress {fill:var(--muted);font-size:12px;text-anchor:end;}
+.replay-workspace {display:grid;grid-template-columns:minmax(290px,360px) minmax(0,1fr);gap:12px;height:min(72dvh,760px);min-height:440px;}
+.replay-controls {margin:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;}
+.replay-header {flex:none;color:var(--text);background:var(--panel);border-bottom:1px solid var(--line);padding-bottom:8px;}
+.replay-directory-panel {flex:none;max-height:30%;overflow:hidden;color:var(--text);background:var(--panel);border-top:1px solid var(--line);}
+.replay-directory-panel[open] {display:flex;flex-direction:column;}
+.replay-directory-panel > summary {flex:none;}
+.replay-directory-scroll {min-height:0;max-height:min(8dvh,64px);overflow:auto;overscroll-behavior:contain;color:var(--text);background:var(--panel);}
+.replay-explanation {flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;color:var(--text);background:var(--panel);}
+.replay-graph {display:flex;flex-direction:column;min-height:0;}
+.replay-graph .flow-canvas {flex:1;min-height:0;overflow:auto;}
+.replay-graph .flow-scroll-hint {margin:2px 0 8px;}
+.playbook-group > summary {font-size:17px;font-weight:600;cursor:pointer;}
+.test-evidence {margin:8px 0;padding:8px;border:1px solid var(--line);color:var(--text);background:var(--panel);}
+.test-correction {color:var(--accent);background:var(--accent-bg);padding:8px;}
+.inbox-item {display:flex;flex-direction:column;align-items:stretch;min-width:0;}
+.inbox-item > button {align-self:stretch;white-space:normal;overflow-wrap:anywhere;text-align:left;}
+@media(max-width:760px) {
+ .replay-workspace {grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.5fr) minmax(0,1fr);height:min(90dvh,800px);min-height:520px;}
+ .replay-header h2 {font-size:18px;margin:0 0 6px;}
+ .replay-header .actions {gap:4px;}
+ .replay-header button {padding:6px;}
+ .replay-header .replay-event {margin:6px 0;}
+ .inbox-item {display:flex;flex-direction:column;align-items:stretch;}
+ .inbox-item > button,.inbox-item > .grow,.inbox-item > .impact,.inbox-item > .src {width:100%;min-width:0;max-width:100%;flex:none;white-space:normal;overflow-wrap:anywhere;}
+}
+.playbook-group,.playbook-group > summary {color:var(--text);background:var(--panel);}
+@media(max-width:1100px) {
+ .replay-workspace {grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.5fr) minmax(0,1fr);height:min(90dvh,800px);min-height:520px;}
+}
 </style>
 </head>
 <body>

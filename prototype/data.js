@@ -4063,3 +4063,1019 @@ db.notifications.push(unknownNotice);db.sessions[unknownNotice.sessionId].unread
 // 文件列表和 diff 片段沿用真实返工的颜色变更；并行合回另列示例。
 const implementation=db.cards['b-implement'];implementation.fileBaseline='真实记录 · 661c858 → eeac9ad（返工基线）';implementation.fileChanges=[{path:'prototype/index.html',preview:'prototype/index.html',note:'真实记录 · 相对首轮实现的返工 diff 片段；不是完整提交差异',example:false}];implementation.mergeRecords=[{time:demoTime,steps:['示例 · 窄屏布局','示例 · 按钮文字'],result:'示例 · 两个隔离副本合回，无冲突',example:true}];
 for(const p of db.projects)for(const c of p.cardIds.map(id=>db.cards[id]))if(c.memberId){const member=db.members[c.memberId];member.sessionKeys=Object.values(db.sessions).filter(s=>s.role==='member'&&s.memberId===member.id).map(s=>s.id);}
+
+// 第 5 批：提交内容真实；回放卡片状态、组织理由、统计和配置均为示例推断。
+db.replayEvents={
+  "project-a": [
+    {
+      "id": "replay-a-1",
+      "time": "示例 · 2026-10-09 09:10",
+      "title": "两轮访谈达成共同理解",
+      "changes": [
+        {
+          "cardId": "a-clarify",
+          "status": "integrated",
+          "kind": "add",
+          "outputVersion": 1
+        }
+      ],
+      "reason": "示例 · 先确认需求、边界与验收标准，再组织评估。",
+      "message": "示例 · 每题有推荐答案；第 2 轮含验收标准。",
+      "example": true
+    },
+    {
+      "id": "replay-a-2",
+      "time": "示例 · 2026-10-09 09:15",
+      "title": "你确认四维并行评估",
+      "changes": [
+        {
+          "cardId": "a-tech",
+          "status": "ready",
+          "kind": "add"
+        },
+        {
+          "cardId": "a-capacity",
+          "status": "ready",
+          "kind": "add"
+        },
+        {
+          "cardId": "a-cost",
+          "status": "ready",
+          "kind": "add"
+        },
+        {
+          "cardId": "a-market",
+          "status": "ready",
+          "kind": "add"
+        },
+        {
+          "cardId": "a-summary",
+          "status": "ready",
+          "kind": "add"
+        }
+      ],
+      "reason": "示例 · 四个维度互不依赖，并行最快。",
+      "message": "示例 · 技术可行性 ∥ 交付产能 ∥ 成本报价 ∥ 市场调研 → 汇总结论。",
+      "example": true
+    },
+    {
+      "id": "replay-a-3",
+      "time": "示例 · 2026-10-09 09:20",
+      "title": "runtime 命中市场调研预设规则",
+      "changes": [
+        {
+          "cardId": "a-tech",
+          "status": "running",
+          "kind": "state"
+        },
+        {
+          "cardId": "a-capacity",
+          "status": "running",
+          "kind": "state"
+        },
+        {
+          "cardId": "a-cost",
+          "status": "running",
+          "kind": "state"
+        },
+        {
+          "cardId": "a-market",
+          "status": "running",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 市场调研按你的预设指派规则直接拉起；其余三张由项目负责人挑代理。",
+      "message": "示例 · runtime 指派市场调研员，不经过项目负责人。",
+      "example": true
+    },
+    {
+      "id": "replay-a-4",
+      "time": "示例 · 2026-10-09 09:25",
+      "title": "成员询问人天估算",
+      "changes": [
+        {
+          "cardId": "a-capacity",
+          "status": "running",
+          "kind": "state"
+        },
+        {
+          "cardId": "a-cost",
+          "status": "running",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 报价引用产能人天，按轮投递避免打断当前轮。",
+      "message": "示例 · 成本报价提问 → 交付产能本轮结束收到 → 下一轮回复 28 人天与 20% 缓冲。",
+      "example": true
+    },
+    {
+      "id": "replay-a-5",
+      "time": "示例 · 2026-10-09 09:30",
+      "title": "市场调研一支无法验证，预算暂停",
+      "changes": [
+        {
+          "cardId": "a-market",
+          "status": "paused",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 并行检索保留全部来源结果；最新统计与报价证据不足单独列出，不当作通过。",
+      "message": "示例 · 行业报告 ∥ 竞品官网 ∥ 最新统计 → 汇总（单次模型调用）；汇总尚未开始，预算到上限。",
+      "example": true
+    },
+    {
+      "id": "replay-a-6",
+      "time": "示例 · 2026-10-09 09:35",
+      "title": "技术可行性交你验收",
+      "changes": [
+        {
+          "cardId": "a-tech",
+          "status": "review",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 技术证据存在无法验证项，交给你判断，不把进程成功当作验证通过。",
+      "message": "示例 · 技术可行性验收报告单独列出缺失证据。",
+      "example": true
+    },
+    {
+      "id": "replay-a-7",
+      "time": "示例 · 2026-10-09 09:40",
+      "title": "可行情景下交付新范围先问你",
+      "changes": [
+        {
+          "cardId": "a-delivery",
+          "status": "draft",
+          "kind": "add"
+        },
+        {
+          "cardId": "a-decline",
+          "status": "cancelled",
+          "kind": "add"
+        }
+      ],
+      "reason": "示例 · 授权说明写了新范围先问我；交付准备与实施提议进入收件箱。",
+      "message": "示例 · 汇总结论仍待开工；可行后的交付提议是独立情景示例，不表示当前已经汇总完成。",
+      "example": true
+    }
+  ],
+  "project-b": [
+    {
+      "id": "replay-b-1",
+      "commit": "661c858c100226d5671e48d850c0a836f9feb62c",
+      "time": "2026-10-08T09:09:59+08:00",
+      "subject": "原型 v2：强制/建议边界、上限、交接记录、执行记录、无法判定、模板、worker 启动 prompt",
+      "title": "任务 001：规格、实现与审查卡出现",
+      "changes": [
+        {
+          "cardId": "b-spec",
+          "status": "accepted",
+          "kind": "add",
+          "outputVersion": 1
+        },
+        {
+          "cardId": "b-implement",
+          "status": "review",
+          "kind": "add",
+          "outputVersion": 1
+        },
+        {
+          "cardId": "b-browser",
+          "status": "running",
+          "kind": "add"
+        }
+      ],
+      "reason": "示例 · 推断：界面改动要有浏览器检查截图，所以在合并前单开审查卡。",
+      "message": "真实任务 001 的首轮产出；Helm 开卡、申请时序没有真实记录。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-2",
+      "commit": "eeac9ad2a364203f1f888b168a4c75777fa9bdeb",
+      "time": "2026-10-08T09:27:57+08:00",
+      "subject": "原型 v2 返工：窄屏收件箱布局、实色按钮前景色对比度；附浏览器检查证据",
+      "title": "初检 31/34，退回实现",
+      "changes": [
+        {
+          "cardId": "b-browser",
+          "status": "running",
+          "kind": "state"
+        },
+        {
+          "cardId": "b-implement",
+          "status": "running",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 推断：S10 对比度与 S11 窄屏可读性是实现问题；S03 是测试要求写错，分别处理。",
+      "message": "真实检查：S10 2.16:1，S11 正文列 59.3px；检查记录随返工提交保存，映射到返工前阶段为推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-3",
+      "commit": "eeac9ad2a364203f1f888b168a4c75777fa9bdeb",
+      "time": "2026-10-08T09:27:57+08:00",
+      "subject": "原型 v2 返工：窄屏收件箱布局、实色按钮前景色对比度；附浏览器检查证据",
+      "title": "任务 001 返工：产出 v2",
+      "changes": [
+        {
+          "cardId": "b-spec",
+          "status": "accepted",
+          "kind": "state",
+          "outputVersion": 2
+        },
+        {
+          "cardId": "b-implement",
+          "status": "review",
+          "kind": "state",
+          "outputVersion": 2
+        },
+        {
+          "cardId": "b-browser",
+          "status": "running",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 推断：修复两项界面缺陷后复检；纠正 S03 对象，保留修正链要求。",
+      "message": "真实颜色变更 --ok #1f8a4c → #1f874c；同一提交内部先后为推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-4",
+      "commit": "34fb6583f2f57007e618e441e0a6442a548f35ec",
+      "time": "2026-10-08T09:33:40+08:00",
+      "subject": "原型 v2 浏览器复检证据（38/38 通过）",
+      "title": "浏览器复检 38/38",
+      "changes": [
+        {
+          "cardId": "b-browser",
+          "status": "review",
+          "kind": "state"
+        },
+        {
+          "cardId": "b-implement",
+          "status": "accepted",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 推断：复检全部通过后，把审查结果交给你验收。",
+      "message": "真实任务 002 复检 38/38；验收状态为示例映射。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-5",
+      "commit": "7206fe491f2d92296c69ab5e90854d75a2189fc7",
+      "time": "2026-10-11T03:50:50+08:00",
+      "subject": "调研：执行编排的通用模板与动态生成（15 个模式、生成方式、沙箱、恢复与幂等、Codex 映射）",
+      "title": "ADE 底层功能调研登记",
+      "changes": [
+        {
+          "cardId": "b-ade",
+          "status": "integrated",
+          "kind": "add",
+          "outputVersion": 1
+        }
+      ],
+      "reason": "示例 · 推断：一手来源调研适合一张独立卡，结论写入项目记忆。",
+      "message": "真实任务 003：通用编排模式与动态生成。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-6",
+      "commit": "f097007e47c6bdfb173a1af2509d905456b29156",
+      "time": "2026-10-11T04:11:44+08:00",
+      "subject": "实测：Codex CLI 作为编排步骤执行器（13 个用例，30 次内层运行）",
+      "title": "Codex 沙箱设计发现未能确认项",
+      "changes": [
+        {
+          "cardId": "b-sandbox",
+          "status": "running",
+          "kind": "add"
+        }
+      ],
+      "reason": "示例 · 推断：嵌套沙箱无法确认几项能力，需要在外层环境补测，不把未能确认当作通过。",
+      "message": "真实任务 004 的限制与发现；拆卡时机尚未记录。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-7",
+      "commit": "c19c48442301de1c33bbed492d1a1ee09baed629",
+      "time": "2026-10-11T05:28:14+08:00",
+      "subject": "原型更新 A：迁移到项目 / 项目流程 / 节点模型（v3 基础），术语更新，两个 Demo 项目；14 项检查通过",
+      "title": "原型结构与术语迁移",
+      "changes": [
+        {
+          "cardId": "b-prototype-a",
+          "status": "review",
+          "kind": "add",
+          "outputVersion": 1
+        }
+      ],
+      "reason": "示例 · 推断：两张原型卡都修改 prototype/index.html，让后一张等待前一张合并，避开文件冲突。",
+      "message": "真实任务 005 的产出；组织理由为示例推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-8",
+      "commit": "c3cf88836515d2bdacc50a3775afe3fedf6fb89e",
+      "time": "2026-10-11T05:48:57+08:00",
+      "subject": "原型更新 A 返工：补 Claude Code 选项、状态标签与流程文字对比度、流程边箭头；附浏览器检查与复检证据（168/168 通过）",
+      "title": "第一张原型卡合并，影响判断",
+      "changes": [
+        {
+          "cardId": "b-prototype-a",
+          "status": "integrated",
+          "kind": "state",
+          "upstreamChanged": true
+        }
+      ],
+      "reason": "示例 · 推断：颜色差异只涉及 --ok，术语迁移的结构结论不受影响；保留结果。",
+      "message": "示例 · 使用过的上游版本变化：不受影响；真实变更依据为 eeac9ad。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-9",
+      "commit": "04b8693625f4e3fdc04f52426c7ae83212275d79",
+      "time": "2026-10-11T06:04:50+08:00",
+      "subject": "原型更新 B：v4 新增内容（执行编排与四态结果、尝试记录、发现转新节点、项目指令与记忆、人工关卡、副作用状态、预算）；15 项检查通过",
+      "title": "第二张原型卡错开开工并完成",
+      "changes": [
+        {
+          "cardId": "b-prototype-b",
+          "status": "review",
+          "kind": "add",
+          "outputVersion": 1
+        }
+      ],
+      "reason": "示例 · 推断：前一张已合并，后一张才修改同一文件；记录与记忆作为第二个增量。",
+      "message": "真实任务 007；提交只有完成时间，开工与合并状态为推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-10",
+      "commit": "f4e6b8a8beb7980d304339fddbad33010081bcdc",
+      "time": "2026-10-11T06:26:25+08:00",
+      "subject": "原型更新 B 返工：全站链接颜色；附浏览器检查、任务 A 回归与复检证据（307/307 通过）",
+      "title": "第二张原型卡返工与合并",
+      "changes": [
+        {
+          "cardId": "b-prototype-b",
+          "status": "integrated",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 推断：修复链接颜色后复检通过，再合并。",
+      "message": "真实检查 307/307；Helm 验收状态为示例。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-11",
+      "commit": "6531332706ae6ab947e914a6dfc4a4e94681232e",
+      "time": "2026-10-11T23:56:52+08:00",
+      "subject": "沙箱外补测 Codex 沙箱：只读与续接收紧有效、显式权限配置可系统级禁读、工作区外写入被拦、.vscode 与 package.json scripts 可改、禁用钩子有效、跨会话缓存不可依赖（含返工 1）",
+      "title": "发现拆为 Codex 沙箱补测子卡",
+      "changes": [
+        {
+          "cardId": "b-sandbox",
+          "status": "accepted",
+          "kind": "state"
+        },
+        {
+          "cardId": "b-sandbox-recheck",
+          "status": "integrated",
+          "kind": "split",
+          "outputVersion": 1,
+          "parentId": "b-sandbox"
+        }
+      ],
+      "reason": "示例 · 推断：把未能确认项独立补测，保留自己的证据与验收。",
+      "message": "真实任务 019，会话 01a12b84-b3fc-7451-83df-bd60e4dfb1ef；提交只保存完成结果，拆卡与完成在同一步展示。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-12",
+      "commit": "7e84953bb38543d8d8a3b2aaa1703e7b4e27511f",
+      "time": "2026-10-12T21:11:56+08:00",
+      "subject": "调研 agent team 开源方案：信箱、看板认领、运行中投递、文件冲突与信息流标签",
+      "title": "v6 协作设计需要了解现有方案",
+      "changes": [
+        {
+          "cardId": "b-collaboration",
+          "status": "running",
+          "kind": "add"
+        }
+      ],
+      "reason": "示例 · 推断：先了解信箱、看板认领与信息流标签，再确定协作设计。",
+      "message": "父设计首次提交晚于调研提交；在此时间点出现父卡只是因任务 020 起因而推断，不能当作真实开工时间。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-13",
+      "commit": "7e84953bb38543d8d8a3b2aaa1703e7b4e27511f",
+      "time": "2026-10-12T21:11:56+08:00",
+      "subject": "调研 agent team 开源方案：信箱、看板认领、运行中投递、文件冲突与信息流标签",
+      "title": "拆子卡 agent team 开源调研",
+      "changes": [
+        {
+          "cardId": "b-agent-team",
+          "status": "integrated",
+          "kind": "split",
+          "outputVersion": 1,
+          "parentId": "b-collaboration"
+        }
+      ],
+      "reason": "示例 · 推断：开一张独立调研子卡，验收后把结论交回父卡。",
+      "message": "真实任务 020，会话 01a13029-7a46-7ad2-b77a-8f5b3018d583。拆卡、验收先后为推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-14",
+      "commit": "169ad12e9179b378e2aa08ccaa206ed56da47c11",
+      "time": "2026-10-12T21:25:53+08:00",
+      "subject": "设计草稿 v6：共享看板、协作原语与硬关口，协作约定降为默认打法，信箱按轮投递",
+      "title": "调研结论回到父卡",
+      "changes": [
+        {
+          "cardId": "b-collaboration",
+          "status": "running",
+          "kind": "state",
+          "outputVersion": 1
+        }
+      ],
+      "reason": "示例 · 推断：把共享看板、按轮信箱和协作原语纳入父卡，父卡仍须验证自己的设计。",
+      "message": "真实 v6 设计草稿；结论回流路径为示例推断。",
+      "inferred": true
+    },
+    {
+      "id": "replay-b-15",
+      "commit": "756c7f78477bbfaa6919edc7b49ae7af947e62d4",
+      "time": "2026-10-12T23:57:20+08:00",
+      "subject": "功能规格 v6：按设计草稿改写 FEATURES.md",
+      "title": "v6 功能规格成稿",
+      "changes": [
+        {
+          "cardId": "b-collaboration",
+          "status": "accepted",
+          "kind": "state"
+        }
+      ],
+      "reason": "示例 · 推断：整理设计为功能规格，把后续能力测试留给首个真实执行任务。",
+      "message": "Codex 0.160.1 的读取、网络与凭据测试仍待测。",
+      "inferred": true
+    }
+  ]
+};
+db.playbookLibrary=[
+  {
+    "id": "play-1",
+    "kind": "卡片组合",
+    "title": "产品开发 · 新需求",
+    "content": "方案设计 → 方案对抗审查 → Spec 定稿；审查不通过退回设计。",
+    "source": "HANDBOOK.md 2.3",
+    "stats": {
+      "references": 8,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-2",
+    "kind": "卡片组合",
+    "title": "产品开发 · 小增量",
+    "content": "实现 → 独立验证 → 合并前交叉代码审查 / 浏览器检查 → 你验收 → 合并；跨增量回归在合并后。",
+    "source": "HANDBOOK.md 2.3",
+    "stats": {
+      "references": 9,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-3",
+    "kind": "卡片组合",
+    "title": "缺陷常驻分组",
+    "content": "问题分诊 → 缺陷诊断 → 修复 → 回归测试 / 开新卡 / 忽略；解决后整理教训。",
+    "source": "HANDBOOK.md 2.3",
+    "stats": {
+      "references": 10,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-4",
+    "kind": "卡片组合",
+    "title": "客户交付 · 承接评估",
+    "content": "技术可行性 ∥ 交付产能 ∥ 成本报价 ∥ 市场调研 → 汇总结论；可行后的新范围按授权先问用户。",
+    "source": "HANDBOOK.md 2.3",
+    "stats": {
+      "references": 11,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-5",
+    "kind": "卡片组合",
+    "title": "调研",
+    "content": "单张调研卡，基于一手来源，结论附引用；可并列审查或卡内分轮对抗。",
+    "source": "HANDBOOK.md 2.3",
+    "stats": {
+      "references": 12,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-6",
+    "kind": "卡片模板",
+    "title": "方案设计",
+    "content": "产出方案与取舍 · wayfinder、first-principles",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 13,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-7",
+    "kind": "卡片模板",
+    "title": "方案对抗审查",
+    "content": "审查上游方案，找反例 · adversarial-review、occams-razor",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 14,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-8",
+    "kind": "卡片模板",
+    "title": "Spec 定稿",
+    "content": "产出需求文档与验收标准 · to-spec",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 15,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-9",
+    "kind": "卡片模板",
+    "title": "任务拆分",
+    "content": "把 Spec 拆成可独立验证的增量 · to-tickets",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 16,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-10",
+    "kind": "卡片模板",
+    "title": "实现",
+    "content": "实现一个增量并自测 · implement、tdd",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 17,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-11",
+    "kind": "卡片模板",
+    "title": "交叉代码审查",
+    "content": "审查上游 diff，使用与实现卡不同的模型 · code-review、adversarial-review",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 18,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-12",
+    "kind": "卡片模板",
+    "title": "浏览器检查 / 端到端测试",
+    "content": "在测试环境执行真实业务、取证、对照预期 · 端到端检查（浏览器 / API）",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 19,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-13",
+    "kind": "卡片模板",
+    "title": "问题分诊",
+    "content": "常驻分组：分类并分流 · triage",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 20,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-14",
+    "kind": "卡片模板",
+    "title": "缺陷诊断",
+    "content": "复现、缩小、验证假设、回归测试 · diagnosing-bugs",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 21,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-15",
+    "kind": "卡片模板",
+    "title": "调研",
+    "content": "基于一手来源调研，结论附引用 · research",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 22,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-16",
+    "kind": "卡片模板",
+    "title": "原型验证",
+    "content": "用临时原型回答一个设计问题；边界写明\"不合并\" · prototype",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 23,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-17",
+    "kind": "卡片模板",
+    "title": "整理教训",
+    "content": "把异常整理成教训草稿与验证方法更新 · —",
+    "source": "HANDBOOK.md 2.4",
+    "stats": {
+      "references": 24,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-18",
+    "kind": "workflow 模式",
+    "title": "单步",
+    "content": "一个代理调用 · 小改动",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 25,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-19",
+    "kind": "workflow 模式",
+    "title": "顺序",
+    "content": "A → B → C · 先分析再修改",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 26,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-20",
+    "kind": "workflow 模式",
+    "title": "并行汇总",
+    "content": "拆开 → 并行 → 汇总（单次模型调用） · 多维度调研",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 27,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-21",
+    "kind": "workflow 模式",
+    "title": "批量清单",
+    "content": "枚举 → 逐项处理 → 逐项验证 · 迁移 40 个调用点",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 28,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-22",
+    "kind": "workflow 模式",
+    "title": "分类分流",
+    "content": "分类（单次模型调用）→ 按类别交给不同处理者 · 问题分诊",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 29,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-23",
+    "kind": "workflow 模式",
+    "title": "生成-验证",
+    "content": "做 → 测 → 改，直到通过 · 修 bug 到测试全绿",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 30,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-24",
+    "kind": "workflow 模式",
+    "title": "指标优化",
+    "content": "尝试 → 测量 → 保留更好、回滚更差 · 性能调优",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 31,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-25",
+    "kind": "workflow 模式",
+    "title": "轮询等待",
+    "content": "检查 → 等待 → 再检查 · 等 CI、等外部审批",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 32,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-26",
+    "kind": "workflow 模式",
+    "title": "对抗验证",
+    "content": "攻击 → 核实 → 下一轮（无新成立反例或满 N 轮停止） · 方案审查、代码审查",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 33,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-27",
+    "kind": "workflow 模式",
+    "title": "多视角评审",
+    "content": "多个评审者并行 → 去重合并 · 合同审查",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 34,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-28",
+    "kind": "workflow 模式",
+    "title": "生成后筛选",
+    "content": "生成 N 份 → 按标准过滤 → 选一份 · 文案、方案草稿",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 35,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-29",
+    "kind": "workflow 模式",
+    "title": "竞赛比较",
+    "content": "多种思路分别实现 → 两两评判 · 技术选型",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 36,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-30",
+    "kind": "workflow 模式",
+    "title": "人工关卡",
+    "content": "中途暂停，等用户决定 · 发布前确认",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 37,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  },
+  {
+    "id": "play-31",
+    "kind": "workflow 模式",
+    "title": "对齐点",
+    "content": "并行分支汇合并统一 · 并行分支的接口统一",
+    "source": "HANDBOOK.md 第 4 节",
+    "stats": {
+      "references": 38,
+      "firstPass": 7,
+      "total": 10,
+      "cost": 12.4,
+      "returns": 3,
+      "example": true
+    }
+  }
+];
+db.handbookRoles=[
+  [
+    "项目负责人",
+    "全部"
+  ],
+  [
+    "成员",
+    "2.1、2.4（本卡用到的模板）、3.1 最后一条、3.5、第 4 节、5.1、第 6 节、10.2–10.3"
+  ],
+  [
+    "出题会话",
+    "3.1、3.4、3.5、10.2"
+  ],
+  [
+    "验证会话",
+    "3.2、3.5、10.2，加上本卡选定的验证方法"
+  ],
+  [
+    "答疑负责人",
+    "全部，用来判断问题是否出在调度决定上"
+  ],
+  [
+    "步骤 agent",
+    "不放"
+  ]
+];
+db.playbookProposals=[{id:'play-proposal-1',title:'调研先列证据缺口',kind:'卡片组合',content:'示例 · 并行检索 → 汇总缺失证据 → 请求资料；不删无法验证项。',reason:'示例 · 两个项目中减少了无依据的结论。',status:'pending',example:true}];
+db.toolLibrary=[
+ {id:'research',name:'research',kind:'技能',purpose:'一手来源调研',permissions:'示例 · 只读资料，允许网络',version:'示例 · gungnir-demo-v1',dependencies:['资料检索'],boundAgents:['agent-market']},
+ {id:'code-review',name:'code-review',kind:'验证方法',purpose:'合并前交叉代码审查',permissions:'示例 · 一次性副本内读写，无凭据',version:'示例 · gungnir-demo-v1',dependencies:['git'],boundAgents:['agent-check'],when:'实现独立验证后、申请验收前',run:'示例 · 对照规格审查被验证提交的 diff',results:'逐项通过 / 失败 / 无法验证 / 未处理',debug:'先查覆盖清单、提交一致性与未通过项'},
+ {id:'browser-check',name:'浏览器检查',kind:'验证方法',purpose:'真实界面业务检查与截图',permissions:'示例 · 测试环境读写，允许本机网络',version:'示例 · 1',dependencies:['浏览器','本机 HTTP 服务'],boundAgents:['agent-browser'],when:'界面实现完成后、申请验收前',run:'示例 · 按行为清单操作，保存截图和断言',results:'逐项对照预期，保留全部非通过项',debug:'先查截图、原始断言、视口尺寸与对比度'},
+ {id:'git',name:'git',kind:'命令行工具',purpose:'基线快照与差异',permissions:'示例 · 只读仓库；推送列入禁止动作',version:'未记录',dependencies:[],boundAgents:['agent-frontend','agent-check']},
+ {id:'query',name:'runtime 查询接口',kind:'MCP 服务',purpose:'查询看板、记录与产出',permissions:'示例 · 按会话授权；答疑只读',version:'示例 · v7',dependencies:['runtime'],boundAgents:['agent-pm-dev','agent-pm-client','agent-answer']}
+];
+db.toolProposals=[{id:'method-1',name:'窄屏可读性验证',kind:'验证方法',purpose:'示例 · 防止无溢出但正文仍挤压',permissions:'示例 · 测试副本与截图',version:'示例 · 1',dependencies:['浏览器'],boundAgents:['agent-browser'],when:'窄屏布局变化后',run:'示例 · 核对 375px 正文宽度和短标题行数',results:'保持失败项，不以无滚动条代替可读',debug:'查 S11 截图和正文列宽',status:'pending',source:'evidence/002/assertions.txt:33',example:true}];
+db.gungnir={version:'示例 · gungnir-demo-v1',next:'示例 · gungnir-demo-v2'};
+db.executors=[{name:'Codex CLI',versions:[{version:'0.160.1',tests:[
+ {id:'I1',name:'限制读取',status:'partial',text:'部分测过，待测',source:'任务 019 S05b；只用 codex sandbox 测过，尚缺 codex exec 与 Helm 目录隔离测试'},
+ {id:'I2',name:'网络开关',status:'partial',text:'部分测过，待测',source:'任务 004 S09；旧沙箱模式测试，尚缺权限配置下网络开 / 关与读写组合'},
+ {id:'I4',name:'限制写入',status:'confirmed',text:'已确认',source:'任务 019 S01–S03；只读、续接收紧与工作区外写入被拦'},
+ {id:'I9',name:'凭据',status:'untested',text:'未测 · 待测',source:'尚缺 shell_environment_policy 白名单、SSH_AUTH_SOCK 与 token 不可用测试'},
+ {id:'I9-actions',name:'禁止动作清单',status:'untested',text:'未测 · 待测',source:'尚缺 execpolicy .rules 拦截并记录日志的测试；未通过只算提醒'}
+ ]}]},...['Claude Code','DeepSeek','Grok Build'].map(name=>({name,upcoming:true,versions:[]}))];
+db.askHistory=[];
+for(const p of db.projects){
+ p.answerBudget={limit:8,spent:0,example:true};
+ p.enabledPlaybookIds=db.playbookLibrary.filter(t=>t.kind==='卡片组合'&&(p.type==='客户交付'?t.title.includes('客户交付'):!t.title.includes('客户交付'))).map(t=>t.id);
+ p.assignmentRules=p.id==='project-a'?'示例 · 卡片标题=市场调研 → 市场调研员（agent-market）→ runtime 直接拉起；其他卡由项目负责人指派。':'示例 · 未配置预设规则；由项目负责人选代理。';
+ p.resourceTemplate='示例 · 端口=2；数据库=helm_{slot}；初始化=init-demo；销毁=cleanup-demo；输出目录=dist/；共享目录=node_modules/（只读）；复制文件=.env.example（无凭据）；部署命令=deploy-demo（禁止动作）。';
+ p.forbiddenActions='示例 · git push；部署命令 deploy-demo；发布；联系客户；删除项目外文件。对外动作须由你决定；执行者清单能力未测时只算提醒。';
+}
+for(const a of db.agents){a.instructions=a.instructions.replace('节点批准的','卡片确认的');a.permissions=a.permissions.replace('节点','卡片');}
+db.agents.find(a=>a.id==='agent-frontend').stat={firstPass:7,total:10,failures:['示例 · 窄屏可读性不足（2）','示例 · 对比度不足（1）']};
+db.agents.find(a=>a.id==='agent-market').stat={firstPass:6,total:8,failures:['示例 · 最新来源缺证据（2）']};
+db.agents.push({id:'agent-answer',name:'答疑（Gungnir）',tasks:'项目答疑、证据定位与建议草稿',instructions:'示例 · 只读全部记录，每个结论附依据；建议只起草。',executor:'Codex CLI',model:'gpt-6.1-sol',mainModel:'gpt-6.1-sol',mainStrength:'high',strength:'high',stepModel:null,stepStrength:null,tools:['diagnosing-bugs','wait-what','first-principles','runtime 查询接口'],sources:['项目全部记录'],defaultBoundaries:[],defaultTests:[],stat:{firstPass:0,total:0,failures:[]},example:true});
+for(const [name,tasks,tools,model,strength,step] of [
+ ['项目经理（Gungnir）','项目负责人',['grilling','to-spec','to-tickets','wayfinder','triage','domain-modeling'],'gpt-6.1-sol','ultra',null],
+ ['答疑（Gungnir）','答疑负责人',['diagnosing-bugs','wait-what','first-principles'],'gpt-6.1-sol','high',null],
+ ['执行（Gungnir）','成员',['implement','tdd','research'],'gpt-6.1-sol','ultra','gpt-6.1-sol'],
+ ['出题（Gungnir）','起草测试',['只读访问验证方法库'],'gpt-6.1-sol','ultra',null],
+ ['审查（Gungnir）','独立验证、审查卡',['adversarial-review','code-review'],'gpt-6-astra','high',null],
+ ['通用执行','成员',[],'gpt-6.1-sol','ultra','gpt-6.1-sol'],['通用验证','验证会话',[],'gpt-6-astra','high',null],['通用管理者','项目负责人',[],'gpt-6.1-sol','ultra',null]
+])db.agentTemplates.push({id:'template-v7-'+db.agentTemplates.length,name,tasks,tools,model,strength,executor:'Codex CLI',stepModel:step,stepStrength:step?'high':null,instructions:'参考调度手册的适用章节，遵守用户要求与五条硬约束。',sources:[],defaultBoundaries:[],defaultTests:[],example:true});
+const market029=db.cards['a-market'];
+market029.assignmentNote='示例 · 命中预设指派规则：市场调研 → 市场调研员；runtime 直接拉起，不经过项目负责人。';
+market029.contextPackages[0].sent.push(market029.assignmentNote);
+market029.attempts[0].steps.forEach(s=>{s.callType=s.id==='market-join'?'单次模型调用':'代理调用';s.parallelGroup=['market-industry','market-competitors','market-pricing'].includes(s.id)?'sources':null;});
+market029.workflowNote='示例 · 行业报告 ∥ 竞品官网 ∥ 最新统计与报价（代理调用，并行）→ 汇总（单次模型调用）；最新统计与报价无法验证，单独保留。汇总因预算暂停未开始。';
+db.decisions.push({id:'a-runtime-assignment',projectId:'project-a',cardId:market029.id,title:'示例 · runtime 预设指派市场调研',reason:market029.assignmentNote,decisionMaker:'runtime',time:'示例 · 2026-10-09 09:40',outcome:'直接拉起',example:true});
+for(const id of ['a-tech','a-capacity','a-cost'])db.cards[id].assignmentNote='示例 · 项目负责人根据专业配置挑选 '+db.agents.find(a=>a.id===db.members[db.cards[id].memberId].agentId).name+'，分配预算后派单。';
+db.cards['b-sandbox'].findings=[{time:'未记录',text:'真实记录 · 任务 004 在嵌套沙箱里测得的几项结论未能确认；任务 019 在外层环境补测。示例 · 由此发现拆子卡 Codex 沙箱补测。',example:true}];
+db.cards['b-collaboration'].findings=[{time:'未记录',text:'示例 · v6 协作设计需要了解现有方案，拆子卡 agent team 开源调研（任务 020）。',example:true}];
+db.cards['b-collaboration'].handoffs.push({time:'未记录',text:'示例 · 子卡验收后结论回到父卡：信箱按轮投递、共享看板认领、并行文件冲突与信息流标签。真实来源：tasks/020-report.md 与 git:169ad12。',example:true});
+db.projects[1].memory.cautions.push('真实调研资料：ADE 底层功能调研 → research/workflow-templates.md。示例 · 单卡调研产出登记到项目记忆，参考清单、恢复与幂等模式。');
+db.projects[0].conversation.push({id:'a-feasible-scenario',speaker:'项目负责人',kind:'message',time:'2026-10-10 10:59',text:'示例 · 可行情景：若汇总结论为可行，交付准备与实施属于新范围，按“新范围先问我”提议到收件箱；当前汇总仍待开工，本条独立演示后续授权。',example:true});
+const serialReason029=db.decisions.find(d=>d.id==='seed-serial');
+serialReason029.reason+='；示例 · 两张卡都改 prototype/index.html，后一张等前一张合并后再开工，避免文件冲突。真实依据是任务 005 / 007 的范围与提交先后，组织决定为推断。';
+serialReason029.organizationReason=serialReason029.reason;
+for(const template of db.agentTemplates){template.instructions=template.instructions?.replace('节点批准的','卡片确认的');template.permissions=template.permissions?.replace('节点','卡片');}
+// 工具库与代理配置共用绑定关系；后续新建代理的工具也在库页派生显示。
+for(const tool of db.toolLibrary)for(const id of tool.boundAgents){const agent=db.agents.find(a=>a.id===id);if(agent&&!agent.tools.includes(tool.name))agent.tools.push(tool.name);}
+
+// 029 返工：恢复证据阅读，不把旧检查要求误当 t2 的执行缺陷。
+const s03EvidenceDetail={method:'独立代理复核；按任务 002 复检要求区分 method 与 redteam 修正链',correction:'t2 只检查 method；t3 检查先不通过后通过以及修正链。原 S03 把 t3 的 correction 要求放到 t2，是检查要求错误。',note:'真实检查说明：tasks/002-recheck-1.md。该说明中的 t2 / t3 是历史技术可行性测试对象，与当前浏览器检查卡的测试编号不同。',source:'tasks/002-recheck-1.md:6',relatedCard:'a-tech'};
+db.cards['b-browser'].tests.find(t=>t.id==='t2').evidenceDetail={...s03EvidenceDetail};
+db.cards['a-tech'].tests.find(t=>t.id==='t2').evidenceDetail={...s03EvidenceDetail};
+db.cards['a-tech'].tests.find(t=>t.id==='t3').evidenceDetail={method:'独立代理复核',note:'示例 · 复用仓库 34fb658 的历史原型 redteam 检查链；不是新增真实客户检查记录。',checks:[{result:'fail',reason:'基准未覆盖插单'},{result:'pass',reason:'回应充分',correction:'补充 P-2024-07 插单率 18% 场景数据'}]};

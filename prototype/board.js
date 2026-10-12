@@ -68,16 +68,18 @@ function layoutFlow(p,options={}) {
   const gaps=stages.slice(0,-1).map((_,level)=>Math.max(56,edges.filter(e=>levelOf.get(e.from)===level||levelOf.get(e.to)===level+1).length*6+32));
   const nodeWidth=vertical?Math.min(270,width-80):Math.max(204,Math.min(240,(width-32-gaps.reduce((a,b)=>a+b,0))/Math.max(1,stages.length)));
   const nodes=stages.flatMap((ids,level)=>ids.map(id=>{
-    const c=getCard(id),titleLines=flowTextLines(c.title+(c.example?' · 示例':''),nodeWidth-(cardChildren(id).length?96:44),14);
+    const c=options.cards?.[id]||getCard(id),titleLines=flowTextLines(c.title+(c.example?' · 示例':''),nodeWidth-(cardChildren(id).length?96:44),14);
     const statusLabel=flowStatusLabel(c),statusLines=flowTextLines(statusLabel,nodeWidth-92,12);
     const statusY=22+(titleLines.length-1)*17+10,statusHeight=statusLines.length*15+5;
-    const agent='负责人：'+memberName(c),agentLines=flowTextLines(agent,nodeWidth-24,12),agentY=statusY+statusHeight+16;
+    const progressLines=flowTextLines('测试 '+cardProgress(c),nodeWidth-24,12),progressWidth=Math.max(...progressLines.map(line=>flowTextWidth(line,12))),badgeWidth=Math.max(...statusLines.map(line=>flowTextWidth(line,12)))+16;
+    const progressSeparate=progressLines.length>1||badgeWidth+progressWidth+12>nodeWidth-24,progressY=progressSeparate?statusY+statusHeight+14:statusY+14;
+    const agent='负责人：'+memberName(c),agentLines=flowTextLines(agent,nodeWidth-24,12),agentY=statusY+statusHeight+16+(progressSeparate?progressLines.length*16:0);
     const metadata=cardLines(c,nodeWidth-24),metaY=agentY+agentLines.length*15+2;
     const contentHeight=metaY+(metadata.length-1)*16+12;
     const inCount=edges.filter(e=>e.to===id).length,outCount=edges.filter(e=>e.from===id).length;
     const inSide=vertical&&(inCount-1)*12>nodeWidth-32,outSide=vertical&&(outCount-1)*12>nodeWidth-32;
     const portHeight=!vertical||inSide||outSide?(Math.max(inCount,outCount)-1)*16+32:0;
-    return {id,level,width:nodeWidth,height:Math.max(contentHeight,portHeight),inPortSide:inSide?'left':vertical?'top':'left',outPortSide:outSide?'right':vertical?'bottom':'right',titleLines,statusLabel,statusLines,statusY,statusHeight,agent,agentLines,agentY,metadata,metaY,contentHeight};
+    return {id,level,width:nodeWidth,height:Math.max(contentHeight,portHeight),inPortSide:inSide?'left':vertical?'top':'left',outPortSide:outSide?'right':vertical?'bottom':'right',titleLines,statusLabel,statusLines,statusY,statusHeight,progressLines,progressSeparate,progressY,progressWidth,badgeWidth,agent,agentLines,agentY,metadata,metaY,contentHeight};
   }));
   const byId=new Map(nodes.map(n=>[n.id,n])),primary=id=>getCard(id).groups[0]||'未分组';
   const names=[...new Set(graph.cardIds.filter(id=>included.has(id)).map(primary))].sort((a,b)=>groupIndex(a)-groupIndex(b));
