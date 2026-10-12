@@ -208,6 +208,61 @@ a,a:visited {color:var(--accent);} a:hover {text-decoration-thickness:2px;} :foc
  .board-toolbar-demo {grid-template-columns:120px minmax(0,1fr);}
  .board-round {grid-column:1/-1;}
 }
+
+/* v7 第 4 批：可读的验收报告与原行批注 */
+.filters .check {display:flex;gap:6px;align-items:center;white-space:nowrap;font-size:12px;}
+.filters .check input[type=checkbox], .check input[type=checkbox] {width:16px;max-width:16px;min-width:16px;flex:0 0 16px;margin:0;}
+.card-information {justify-content:flex-start;gap:8px 16px;}
+.card-tabs {display:flex;gap:6px;flex-wrap:wrap;}
+.card-tabs [role=tab] {color:var(--text);background:var(--panel);}
+.card-tabs [aria-selected=true] {color:var(--accent);background:var(--accent-bg);border-color:var(--accent);}
+.acceptance-controls,.acceptance-report,.core-report,.leader-report,.modified-tests,.acceptance-actions,.registered-tests {color:var(--text);background:var(--panel);}
+.verification-card,.nonpassing-tests,.historical-checks,.workflow-step {color:var(--text);background:var(--panel-2);border:1px solid var(--line);padding:12px;border-radius:8px;margin:10px 0;}
+.report-test {color:var(--text);background:var(--panel);padding:8px;margin:6px 0;border:1px solid var(--line);border-radius:6px;}
+.acceptance-notice {color:var(--changed);background:var(--changed-bg);padding:8px;min-height:1em;border-radius:6px;}
+.test-readonly {color:var(--muted);background:var(--panel-2);padding:3px 6px;border:1px solid var(--line);border-radius:4px;}
+.workflow-map {display:flex;flex-direction:column;gap:4px;padding-left:24px;}
+.workflow-step::marker {color:var(--accent);}
+.annotation-lines {min-width:0;}
+.annotation-row {min-width:0;}
+.annotation-line {display:flex;align-items:flex-start;text-align:left;width:100%;gap:8px;border-radius:0;padding:6px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);background:var(--panel);}
+.annotation-line code {white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;flex:1;}
+.annotation-number {color:var(--muted);background:var(--panel);flex:0 0 28px;}
+.annotation-line.preview-diff-add {color:var(--accepted);background:var(--accepted-bg);}
+.annotation-line.preview-diff-delete {color:var(--changed);background:var(--changed-bg);}
+.annotation-line.annotation-selected {color:var(--accent);background:var(--accent-bg);border-color:var(--accent);}
+.annotation-marker,.annotation-open {color:var(--changed);background:var(--changed-bg);padding:2px 6px;border:1px solid var(--changed);border-radius:4px;}
+.annotation-bubble {color:var(--text);background:var(--panel-2);border:1px solid var(--line);border-left:4px solid var(--accent);padding:12px;margin:4px 0 12px 28px;border-radius:6px;}
+.annotation-bubble .src {color:var(--muted);}
+.annotation-resolved {color:var(--integrated);background:var(--integrated-bg);padding:2px 6px;border:1px solid var(--integrated);border-radius:4px;}
+.annotation-editor {color:var(--text);background:var(--panel-2);border:1px solid var(--line);padding:12px;margin:10px 0;}
+.annotation-editor textarea {width:100%;min-height:100px;resize:vertical;}
+.auto-acceptance {color:var(--text);background:var(--panel);display:grid;gap:10px;}
+.auto-acceptance .check {display:flex;align-items:center;gap:6px;}
+.card-detail pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+.card-detail select,.card-detail textarea {min-width:0;max-width:100%;width:100%;}
+.card-detail .form-row {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+@media (max-width:760px) {
+ .card-detail .form-row {grid-template-columns:minmax(0,1fr);}
+ .annotation-bubble {margin-left:0;}
+ .card-tabs [role=tab] {flex:1 1 25%;}
+}
+
+
+.card-detail-overview {max-height:60dvh;overflow:auto;}
+@media (max-width:760px) {.card-detail-overview {max-height:none;overflow:visible;}}
+/* 027 返工：顶部只读状态行，验收先结论后操作。 */
+.card-status-summary {display:flex;align-items:center;gap:8px;margin:8px 0;}
+.card-status-summary .status-line {flex:1;min-width:0;margin:0;}
+.card-status-summary button {flex:none;}
+.status-editor {color:var(--text);background:var(--panel);}
+.acceptance-summary {color:var(--text);background:var(--panel);}
+.acceptance-state {color:var(--text);background:var(--panel);}
+.result-counts {display:flex;gap:8px;flex-wrap:wrap;}
+.result-count {padding:3px 7px;border-radius:5px;}
+.acceptance-priorities {padding-left:20px;margin:8px 0;}
+.acceptance-controls {margin-top:24px;}
+#acceptance-outcome:focus,#annotation-outcome:focus {outline:3px solid var(--accent);outline-offset:3px;}
 </style>
 </head>
 <body>
