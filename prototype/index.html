@@ -112,10 +112,42 @@ a,a:visited {color:var(--accent);} a:hover {text-decoration-thickness:2px;} :foc
  .flow-canvas {max-height:min(65dvh,560px);overflow:auto;}
  .app {grid-template-columns:minmax(0,1fr);height:auto;} aside {border-right:0;border-bottom:1px solid var(--line);max-height:220px;} main {padding:16px;overflow-x:hidden;} .filters {grid-template-columns:repeat(2,minmax(0,1fr));} .spec-grid {grid-template-columns:minmax(0,1fr);} .columns {display:grid;grid-template-columns:minmax(0,1fr);overflow-x:clip;} .state-column,.state-column[open] {width:100%;min-width:0;} .flow-connect-port {display:none;} .head {align-items:flex-start;} .card {padding:12px;} .crumb select {width:100%;} .toolbar {align-items:stretch;} button {overflow-wrap:anywhere;}
 }
+
+/* 项目对话常驻右侧；详情覆盖其上，窄屏面板全屏。 */
+.board-content.with-conversation {padding-right:380px;}
+.project-topbar {display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);}
+.project-dialog {position:fixed;right:0;top:0;bottom:0;width:360px;z-index:20;overflow:auto;padding:16px;background:var(--panel);color:var(--text);border-left:1px solid var(--line);overflow-wrap:anywhere;}
+.panel-header {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;position:sticky;top:-16px;padding:12px 0;background:var(--panel);color:var(--text);z-index:1;border-bottom:1px solid var(--line);}
+.conversation-bubble {color:var(--text);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;margin:12px 0;}
+.bubble-user {color:var(--text);background:var(--accent-bg);}
+.interview-question {color:var(--text);background:var(--panel);border:1px solid var(--line);padding:10px;margin:10px 0;border-radius:6px;}
+.question-type {color:var(--accent);background:var(--accent-bg);font-size:12px;padding:2px 6px;border:1px solid var(--accent);border-radius:4px;}
+.proposal-card {color:var(--text);background:var(--panel);border:1px solid var(--line);padding:10px;margin:10px 0;border-radius:6px;}
+.organization-reason {color:var(--text);background:var(--panel-2);}
+.user-answer {color:var(--text);background:var(--accent-bg);padding:6px;border-radius:4px;white-space:pre-wrap;}
+.inbox-group {color:var(--text);background:var(--panel);border:1px solid var(--line);padding:16px;border-radius:10px;margin:16px 0;}
+.inbox-item {color:var(--text);background:var(--panel-2);border:1px solid var(--line);padding:12px;border-radius:6px;margin:10px 0;}
+.revoked {color:var(--cancelled);background:var(--cancelled-bg);border:1px solid var(--cancelled);border-radius:4px;padding:2px 6px;font-size:12px;}
+.detail-backdrop {position:fixed;inset:0;z-index:40;background:var(--overlay);}
+.card-detail {position:absolute;right:0;top:0;bottom:0;width:min(720px,calc(100% - 280px));overflow:auto;padding:16px 24px 40px;border-left:1px solid var(--line);color:var(--text);background:var(--panel);animation:detail-slide .15s ease-out;}
+.card-detail .spec-grid {grid-template-columns:minmax(0,1fr);}
+.project-dialog textarea,.card-detail textarea,.requirement-editor textarea {width:100%;min-height:88px;resize:vertical;}
+.project-dialog button {margin-top:5px;}
+.project-dialog input {width:100%;}
+.requirement-editor textarea {min-height:120px;}
+@keyframes detail-slide {from {transform:translateX(25px);}to {transform:translateX(0);}}
+@media (prefers-reduced-motion:reduce) {.card-detail {animation:none;}}
+@media (max-width:1100px) and (min-width:761px) {.board-content.with-conversation {padding-right:316px;} .project-dialog {width:300px;} .filters {grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (max-width:760px) {
+ .board-content.with-conversation {padding-right:0;}
+ .project-dialog {inset:0;width:100%;height:100dvh;z-index:30;border:0;padding:16px;}
+ .card-detail {inset:0;width:100%;height:100dvh;padding:16px;border:0;}
+ .panel-header {top:-16px;}
+}
 </style>
 </head>
 <body>
-<div class="app"><aside id="side" aria-label="主导航"></aside><main id="main" aria-live="polite"></main></div>
+<div class="app"><aside id="side" aria-label="主导航"></aside><main id="main" tabindex="-1" aria-live="polite"></main></div>
 <div id="modal-root"></div><div id="artifact-root"></div>
 <script src="data.js"></script>
 <script src="board.js"></script>

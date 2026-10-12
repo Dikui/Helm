@@ -3958,3 +3958,53 @@ const db = {
     }
   ]
 };
+
+// 第 2 批：以下对话、时间、访谈、授权与调度决定均为示例，不冒充真实历史。
+const DEFAULT_REQUIREMENTS={产品开发:'合并前有不同模型的代码审查；改动界面的有浏览器检查截图',客户交付:'发布前有对抗型审查',调研:'结论附一手来源',空白:''};
+for(const p of db.projects){
+ p.authorization='示例 · 新范围的卡先问我；缺陷分组的子卡你自己批；上游新版本的影响判断由你决定。';
+ p.requirementEdits=Object.fromEntries(['instructions','requirements','authorization'].map(k=>[k,{time:'示例 · 2026-10-09 09:00',actor:'你'}]));
+ p.autoAcceptance='示例 · 未设置，由你验收';p.assignmentRules=p.id==='project-a'?'示例 · 市场调研指派市场调研员':'示例 · 未设置';
+ p.playbooks=p.type==='产品开发'?['设计','开发','缺陷','调研']:['承接评估','交付'];
+ p.resourceTemplate='示例 · 本地沙箱';p.forbiddenActions='示例 · 未经你批准不得推送、发布或联系客户';
+ p.conversation=[];
+}
+const demoQuestion=(id,type,text,recommended,answer=null)=>({id,type,text,recommended,answer,adopted:answer===recommended});
+db.interviews=[{id:'a-interview-1',projectId:'project-a',round:1,time:'2026-10-09 09:10',questions:[
+ demoQuestion('q1','需求','这次承接评估要回答什么？','判断技术、产能、成本与市场四个维度是否支持承接。','判断技术、产能、成本与市场四个维度是否支持承接。'),
+ demoQuestion('q2','边界','本轮可以直接联系客户吗？','不联系客户，只使用公开数据与内部资料。','不联系客户，只使用公开数据与内部资料。')
+]},{id:'a-interview-2',projectId:'project-a',round:2,time:'2026-10-09 09:20',questions:[
+ demoQuestion('q1','需求','结论中的风险需要怎样说明？','逐项给出风险、依据与成立条件。','逐项给出风险、依据与成立条件。'),
+ demoQuestion('q2','验收标准','怎样判断承接结论可以验收？','四维证据齐全，给出可行、有条件可行或不可行，并列出无法验证项。','四维证据齐全，给出可行、有条件可行或不可行，并列出无法验证项。')
+]}];
+db.proposals=[{id:'a-assessment',projectId:'project-a',status:'confirmed',time:'2026-10-09 09:30',reason:'四个维度互不依赖，并行最快',cards:['a-tech','a-capacity','a-cost','a-market','a-summary'].map(id=>({id,title:db.cards[id].title,requirements:db.cards[id].requirements.map(r=>r.text).join('\n'),groups:['承接评估'],dependencies:db.cards[id].dependencies.slice()})),decisionId:'a-assessment-confirm'},
+{id:'a-delivery-proposal',projectId:'project-a',status:'pending',time:'2026-10-10 11:00',newScope:true,reason:'示例 · 交付准备与实施分别验收，实施依赖准备；这属于新范围，按授权说明先问你。',cards:[
+ {id:'a-delivery-plan',title:'交付准备',requirements:'示例 · 核对范围、里程碑和人天，形成交付计划。',groups:['交付'],dependencies:['a-summary']},
+ {id:'a-delivery-build',title:'交付实施',requirements:'示例 · 按确认的计划实施并提交交付证据，不执行对外发布。',groups:['交付'],dependencies:['a-delivery-plan']}
+]}];
+db.questions=[{id:'b-member-question',projectId:'project-b',cardId:'b-defect-diagnose',kind:'member',time:'2026-10-10 12:00',text:'示例 · 窄屏溢出诊断是否需要覆盖 320px？',recommended:'覆盖 320px、375px、760px，并保留截图。',answer:null},
+{id:'a-gate',projectId:'project-a',cardId:'a-summary',kind:'gate',time:'2026-10-10 10:00',text:'示例 · 决策关卡：资料不齐时，是否先提交有条件可行的结论？',recommended:'先提交，并明确列出缺失证据，不承诺上线时间。',answer:null}];
+db.hardItems=[{id:'a-budget',projectId:'project-a',cardId:'a-market',kind:'budget',title:'示例 · 市场调研达到预算上限',reason:'示例 · 预算已用尽，runtime 已暂停卡片。',status:'pending'},
+{id:'b-external',projectId:'project-b',cardId:'b-implement',kind:'external',title:'示例 · 把 main 推送到远程仓库',reason:'示例 · 对外动作必须由你决定；本原型仅记录，不执行命令。',status:'pending'},
+{id:'b-unknown',projectId:'project-b',cardId:'b-defect-fix',kind:'unknown',title:'示例 · 副作用状态不明',reason:'示例 · 上一次发布请求的回执丢失，需要你核对结果后决定，不自动重试。',status:'pending'}];
+for(const d of db.decisions){d.example=true;d.adoptedAsIs=null;d.delegated=d.id==='seed-upstream';d.affectedCardIds=d.delegated?['b-implement']:[];if(d.id==='seed-serial')d.organizationReason=d.reason;}
+db.decisions.push({id:'a-assessment-confirm',projectId:'project-a',cardId:'a-summary',title:'示例 · 确认承接评估五张卡',reason:'按访谈确认四维评估后汇总。',organizationReason:'四个维度互不依赖，并行最快',decisionMaker:'你',time:'示例 · 2026-10-09 09:31',outcome:'已确认',adoptedAsIs:true,example:true},
+{id:'a-budget-auto',projectId:'project-a',cardId:'a-market',title:'示例 · 预算到达上限，自动暂停',reason:'硬约束：不能超出预算。',decisionMaker:'runtime 自动',time:'示例 · 2026-10-10 10:30',outcome:'已暂停',adoptedAsIs:null,example:true});
+for(const p of db.projects){
+ p.conversation.push({id:p.id+'-intro',kind:'message',speaker:'你',text:'示例 · '+p.goal,time:'2026-10-09 09:00',example:true});
+ for(const i of db.interviews.filter(i=>i.projectId===p.id))p.conversation.push({id:i.id,kind:'interview',ref:i.id,time:i.time,example:true});
+ for(const r of db.proposals.filter(r=>r.projectId===p.id))p.conversation.push({id:r.id,kind:'proposal',ref:r.id,time:r.time,example:true});
+ for(const q of db.questions.filter(q=>q.projectId===p.id))p.conversation.push({id:q.id,kind:'question',ref:q.id,time:q.time,example:true});
+ for(const d of db.decisions.filter(d=>d.projectId===p.id&&d.delegated))p.conversation.push({id:d.id,kind:'delegated',ref:d.id,time:'2026-10-10 11:30',example:true});
+}
+for(const i of db.interviews)for(const q of i.questions)db.decisions.push({id:i.id+'-'+q.id,projectId:i.projectId,title:'示例 · 访谈第 '+i.round+' 轮 '+q.id.toUpperCase(),reason:q.text+' 回答：'+q.answer,decisionMaker:'你',time:'示例 · '+i.time,outcome:'已回答',adoptedAsIs:q.adopted,example:true});
+
+// 市场调研已暂停的原因是预算到达上限；与数值保持一致，花费历史不改。
+db.cards['a-market'].budget=db.cards['a-market'].spent;
+db.cards['a-market'].budgetNote='示例 · 上限 ¥12.20，已用 ¥12.20';
+db.projects[0].conversation.push({id:'a-understanding-confirmed',kind:'message',speaker:'你',text:'示例 · 确认两轮访谈达成共同理解，所有分支已处理，无未说明的假设；请按四维评估组织卡片。',time:'2026-10-09 09:25',example:true});
+
+// 授权内批准缺陷子卡，独立于真实规格版本的影响判断。
+const defectDecision={id:'seed-defect-ready',projectId:'project-b',cardId:'b-defect-fix',title:'示例 · 代你确认缺陷子卡的规格',reason:'示例 · 授权说明允许缺陷分组子卡自行批准；保持诊断 → 修复 → 回归的依赖，修复规格已确认。',decisionMaker:'项目负责人',time:'示例 · 2026-10-10 11:40',outcome:'待开工',adoptedAsIs:null,delegated:true,affectedCardIds:['b-defect-fix'],example:true};
+db.decisions.push(defectDecision);
+db.projects[1].conversation.push({id:defectDecision.id,kind:'delegated',ref:defectDecision.id,time:'2026-10-10 11:40',example:true});
