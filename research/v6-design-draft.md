@@ -1,6 +1,6 @@
 # Helm v6 设计草稿
 
-> 状态：**草稿，决定均已定（2026-10-12），待定稿**。定稿后改写 `FEATURES.md`。正文只写 v6 的设计；本文没展开的部分沿用 v5（`FEATURES.md`），在括号里注明章节；与 v5 的差异见附录 A，决定记录见附录 B。
+> 状态：**已定稿，已改写进 `FEATURES.md`（v6）**。本文保留为设计过程与决定记录；规格以 `FEATURES.md` 为准。正文只写 v6 的设计；本文没展开的部分沿用 v5（`FEATURES.md`），在括号里注明章节；与 v5 的差异见附录 A，决定记录见附录 B。
 >
 > 依据：2026-10-12 的设计讨论与第一轮审阅；《Agent 编排（Orchestration），一篇就够了》（周星星，知乎）；任务 020 `research/agent-team-oss.md`；任务 019 `research/codex-sandbox-recheck.md`。
 
