@@ -144,6 +144,70 @@ a,a:visited {color:var(--accent);} a:hover {text-decoration-thickness:2px;} :foc
  .card-detail {inset:0;width:100%;height:100dvh;padding:16px;border:0;}
  .panel-header {top:-16px;}
 }
+/* 成员、信箱与暂停：颜色沿用已验证的八状态调色板。 */
+.member-board {display:grid;grid-template-columns:repeat(4,minmax(210px,1fr));gap:12px;overflow:auto;padding:4px 0 16px;}
+.member-column {border:1px solid var(--line);border-radius:10px;padding:10px;min-width:0;}
+.member-needs-you {color:var(--review);background:var(--review-bg);}
+.member-running {color:var(--running);background:var(--running-bg);}
+.member-completed {color:var(--accepted);background:var(--accepted-bg);}
+.member-idle {color:var(--draft);background:var(--draft-bg);}
+.member-card {color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 0;overflow-wrap:anywhere;}
+.status-line {color:var(--text);background:var(--panel-2);border-left:3px solid var(--accent);padding:6px 8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;}
+.flow-status-line {fill:var(--text);font-size:12px;}
+.unread-marker {color:var(--accent);background:var(--accent-bg);font-size:12px;padding:2px 6px;border-radius:5px;}
+.flow-unread {fill:var(--accent);font-size:12px;font-weight:600;}
+.dispatch-unknown {color:var(--changed);background:var(--changed-bg);border:1px solid var(--changed);padding:8px;border-radius:6px;}
+.has-unknown {border:2px solid var(--changed);}
+.pause-marker {color:var(--paused);background:var(--paused-bg);border:1px solid var(--paused);border-radius:5px;padding:3px 6px;}
+.runtime-header {display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.demo-round {font-size:12px;}
+.session-backdrop {position:fixed;inset:0;z-index:65;background:var(--overlay);display:flex;justify-content:flex-end;}
+.session-detail {color:var(--text);background:var(--panel);width:min(720px,100%);height:100%;overflow:auto;border-left:1px solid var(--line);padding:20px;overflow-wrap:anywhere;}
+.session-output {color:var(--text);background:var(--panel-2);height:230px;overflow:auto;border:1px solid var(--line);padding:10px;border-radius:6px;}
+.output-line {border-bottom:1px solid var(--line);padding:6px 0;}
+.output-line time {color:var(--muted);font-size:12px;}
+.output-line pre {margin:0;padding:4px 0;}
+.dispatch-record {padding:12px;border-bottom:1px solid var(--line);overflow-wrap:anywhere;}
+.completion-report {color:var(--text);background:var(--panel-2);padding:10px;border-left:3px solid var(--accepted);}
+.mail-message {color:var(--text);background:var(--panel);padding:12px;margin:12px 0;border:1px solid var(--line);border-radius:8px;overflow-wrap:anywhere;}
+.message-type,.delivery-status {font-size:12px;display:inline-block;padding:2px 6px;border-radius:5px;}
+.mt-status {color:var(--draft);background:var(--draft-bg);}
+.mt-dispatch {color:var(--ready);background:var(--ready-bg);}
+.mt-completion {color:var(--accepted);background:var(--accepted-bg);}
+.mt-escalation {color:var(--changed);background:var(--changed-bg);}
+.mt-question {color:var(--review);background:var(--review-bg);}
+.mt-heartbeat {color:var(--integrated);background:var(--integrated-bg);}
+.ds-pending {color:var(--review);background:var(--review-bg);}
+.ds-delivered {color:var(--ready);background:var(--ready-bg);}
+.ds-confirmed {color:var(--accepted);background:var(--accepted-bg);}
+.ds-undeliverable {color:var(--changed);background:var(--changed-bg);}
+.message-undeliverable {border:2px solid var(--changed);}
+.delivery-error {color:var(--changed);background:var(--changed-bg);padding:6px;}
+.runtime-notices {color:var(--text);background:var(--panel);position:static;max-width:100%;max-height:240px;overflow:auto;border:2px solid var(--accent);border-radius:8px;padding:8px;box-shadow:0 6px 20px #0003;}
+.runtime-notices button {color:var(--accent);background:var(--accent-bg);text-align:left;width:100%;margin:3px 0;}
+@media (max-width:760px) {.member-board {grid-template-columns:minmax(0,1fr);overflow:visible;}.session-detail {width:100%;padding:16px;}}
+
+/* 返工：固有宽度不得撑开原生选择框；变动计数不参与按钮行换行。 */
+.session-detail label,.session-detail select,.session-detail input,.session-detail textarea,.filters select,.filters input {min-width:0;width:100%;max-width:100%;}
+.board-toolbar {display:grid;grid-template-columns:minmax(0,1fr);gap:6px;}
+.board-toolbar-primary {display:flex;flex-wrap:wrap;gap:8px;}
+.board-toolbar-demo {display:grid;grid-template-columns:120px max-content minmax(0,1fr);gap:8px;align-items:center;}
+.board-count {white-space:nowrap;}
+.board-round {min-width:0;}
+.notification-center,.pause-summary {min-width:0;max-width:100%;}
+.notification-center[open],.pause-summary[open] {flex-basis:100%;width:100%;}
+.notification-center summary,.pause-summary summary {cursor:pointer;}
+.notification-center summary {color:var(--accent);background:var(--accent-bg);padding:3px 6px;border-radius:5px;}
+.notification-row {display:grid;grid-template-columns:minmax(0,1fr) max-content;gap:6px;padding:6px 0;}
+.notification-row .src {grid-column:1/-1;}
+.notification-actions {display:flex;justify-content:flex-end;}
+.pause-list {color:var(--text);background:var(--panel);border:1px solid var(--line);padding:10px;}
+.sample-marker {color:var(--muted);background:var(--panel-2);font-size:11px;border-radius:4px;padding:1px 4px;}
+@media (max-width:760px) {
+ .session-detail .card {max-width:100%;}
+ .board-toolbar-demo {grid-template-columns:120px minmax(0,1fr);}
+ .board-round {grid-column:1/-1;}
+}
 </style>
 </head>
 <body>

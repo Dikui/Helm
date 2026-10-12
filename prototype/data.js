@@ -4008,3 +4008,58 @@ db.projects[0].conversation.push({id:'a-understanding-confirmed',kind:'message',
 const defectDecision={id:'seed-defect-ready',projectId:'project-b',cardId:'b-defect-fix',title:'示例 · 代你确认缺陷子卡的规格',reason:'示例 · 授权说明允许缺陷分组子卡自行批准；保持诊断 → 修复 → 回归的依赖，修复规格已确认。',decisionMaker:'项目负责人',time:'示例 · 2026-10-10 11:40',outcome:'待开工',adoptedAsIs:null,delegated:true,affectedCardIds:['b-defect-fix'],example:true};
 db.decisions.push(defectDecision);
 db.projects[1].conversation.push({id:defectDecision.id,kind:'delegated',ref:defectDecision.id,time:'2026-10-10 11:40',example:true});
+
+// 第 3 批：派单是尝试的唯一数据源；attempts 是同一数组的兼容名字。
+// 未记录的真实会话 ID 保持 null / 未记录；session-* 仅是本地展示键（示例）。
+db.dispatches=[];db.sessions={};db.messages=[];db.gates=[];db.notifications=[];
+const demoTime='2026-10-13 09:00:00';
+function seedSession(c,attempt=null,role='member') {
+ const member=db.members[c.memberId],key=`session-${c.id}-${attempt?.number||'idle'}`;
+ const result=attempt?.result,completed=['success','failed'].includes(result);
+ const s={id:key,projectId:c.projectId,memberId:c.memberId,agentId:member?.agentId||getProjectAgent(c.projectId),externalId:attempt?.sessionId&&attempt.sessionId!=='未记录'?attempt.sessionId:null,cardIds:[c.id],currentCardId:c.id,currentDispatchId:attempt?.id||null,role,roundState:result==='unknown'?'needs-you':result==='running'||result==='limit'?'running':'idle',completed,spent:attempt?.cost||0,budget:c.budget,pendingCount:0,unread:false,hasMailbox:true,round:0,pauseReasons:[],output:[{time:demoTime,text:attempt?'示例 · 输出摘录：'+attempt.method:'示例 · 尚未派单，等待项目负责人安排'}],example:true};
+ db.sessions[key]=s;return s;
+}
+function getProjectAgent(projectId){return db.projects.find(p=>p.id===projectId).leaderId;}
+for(const p of db.projects){p.paused=false;p.demoRound=0;p.leaderSessionId='session-leader-'+p.id;db.sessions[p.leaderSessionId]={id:p.leaderSessionId,projectId:p.id,agentId:p.leaderId,externalId:null,role:'coordinator',cardIds:[],currentCardId:null,currentDispatchId:null,roundState:'idle',completed:false,spent:0,budget:p.budget,pendingCount:0,unread:false,hasMailbox:true,round:0,pauseReasons:[],output:[],example:true};}
+for(const c of Object.values(db.cards)) {
+ c.dispatches=c.attempts;c.dispatchIds=[];c.unread=false;c.pauseReasons=c.status==='paused'?['budget:a-budget']:[];c.beforePauseStatus=c.status==='paused'?'running':null;
+ c.statusLineHistory=[{time:demoTime,actor:'示例 · 项目负责人',text:c.statusLine,example:true}];
+ c.contextPackages=[];c.handoffs=[];c.findings=[];c.fileChanges=[];c.mergeRecords=[];c.fileBaseline='未记录';
+ for(const a of c.dispatches){
+  if(a.result==='limit'){a.originalResult=a.result;a.result='running';}
+  Object.assign(a,{id:`dispatch-${c.id}-${a.number}`,projectId:c.projectId,cardId:c.id,agentId:db.members[c.memberId]?.agentId,workspace:{description:'示例 · '+db.projects.find(p=>p.id===c.projectId).site,baseline:'未记录',example:true},startedAt:c.example?demoTime:null,endedAt:['success','failed'].includes(a.result)?(c.example?demoTime:null):null,heartbeatAt:null,completionReport:null,reportNote:c.example?'示例 · 完成报告':'真实历史结果摘要；runtime 报告格式为示例',example:c.example});
+  const s=seedSession(c,a);a.sessionKey=s.id;c.dispatchIds.push(a.id);db.dispatches.push(a);
+  if(['success','failed'].includes(a.result))a.completionReport={id:'report-'+a.id,result:a.result,summary:a.method+(a.failure?'；'+a.failure:''),changedFiles:c.id==='b-implement'?['prototype/index.html']:[],time:a.endedAt,example:true,sourceFiles:a.sourceFiles||[],note:'示例 · 根据原尝试记录整理；未记录的文件列表不补造'};
+  c.contextPackages.push({dispatchId:a.id,sent:['示例 · 本卡规格','示例 · 项目指令','HANDBOOK.md 第 7、10 节'],omitted:[{item:'其他卡的全部原始输出',reason:'示例 · 与本轮目标无关，提供摘要即可'}],example:true});
+ }
+ if(!c.dispatches.length)seedSession(c);
+ if(c.dispatches.length)c.handoffs.push({time:demoTime,text:'示例 · 项目负责人整理上一次派单结果与下一步目标',example:true});
+ c.findings.push({time:demoTime,text:c.id==='b-browser'?'真实记录 · S03 原检查要求写错；复检修正，不能归为实现缺陷':'示例 · 当前没有新增发现；资料缺口交给项目负责人',example:c.id!=='b-browser'});
+}
+function seedDispatch(cardId,result,summary,number=1) {
+ const c=db.cards[cardId],a={id:`dispatch-${cardId}-${number}`,number,projectId:c.projectId,cardId,agentId:db.members[c.memberId].agentId,sessionId:'未记录',model:'示例 · gpt-6.1-sol · high',actor:db.members[c.memberId].name,workspace:{description:'示例 · 当前工作区的隔离副本',baseline:'示例 · 本轮开始快照',example:true},startedAt:demoTime,endedAt:result==='unknown'?demoTime:null,result,method:summary,sourceFiles:[],cost:0,heartbeatAt:null,completionReport:null,reportNote:result==='unknown'?'示例 · 会话退出，未收到完成报告；交项目负责人处理':'示例 · 派单进行中，尚未发完成报告',steps:[],example:true};
+ c.dispatches.push(a);c.dispatchIds.push(a.id);db.dispatches.push(a);const s=seedSession(c,a);a.sessionKey=s.id;
+ // 没有尝试的责任占位会话替换为本次派单会话。
+ delete db.sessions[`session-${cardId}-idle`];
+ c.contextPackages.push({dispatchId:a.id,sent:['示例 · 本卡规格','示例 · 项目指令','HANDBOOK.md 第 7、10 节'],omitted:[{item:'客户原始数据',reason:'示例 · 本轮仅使用模拟资料'}],example:true});return a;
+}
+seedDispatch('b-defect-diagnose','running','示例 · 已定位 320px 布局溢出，正在核对复现条件');
+seedDispatch('b-defect-fix','unknown','示例 · 会话退出前输出停在工作区检查，未收到完成报告');
+for(const [id,line] of Object.entries({'a-capacity':'示例 · 已核对资源台账，正在估算交付人天；目标：保留排期缓冲','a-cost':'示例 · 已整理成本项，等待交付产能的人天估算；约束：不承诺上线日期','b-defect-diagnose':'示例 · 已复现 320px 横向溢出，正在确认检查范围'})){const c=db.cards[id];c.statusLine=line;c.statusLineHistory.push({time:demoTime,actor:'示例 · 成员',text:line,example:true});}
+const costSession=db.sessions['session-a-cost-1'];costSession.roundState='waiting-workflow';
+// 从第 2 批的提问对象建立关卡，不新增重复收件箱事项。
+for(const q of db.questions){db.gates.push({id:'gate-'+q.id,projectId:q.projectId,cardId:q.cardId,questionId:q.id,question:q.text,options:[q.recommended,'补齐证据后再继续'],answerBy:'你',answeredBy:null,answer:null,status:'waiting',resumeStatus:q.cardId==='a-summary'?'running':db.cards[q.cardId].status,example:true});}
+// 验证辅助会话没有信箱：不能直接接受成员来信（示例）。
+db.sessions['session-validation-example']={id:'session-validation-example',projectId:'project-b',agentId:'agent-check',externalId:null,role:'auxiliary',cardIds:['b-browser'],currentCardId:'b-browser',currentDispatchId:null,roundState:'idle',completed:false,spent:0,budget:0,pendingCount:0,unread:false,hasMailbox:false,round:0,pauseReasons:[],output:[],example:true};
+function seedMail(id,projectId,type,fromSession,recipient,cardIds,content,status='pending',reason='') {
+ const m={id,projectId,type,fromSession,recipient,cardIds,groupNames:[...new Set(cardIds.flatMap(id=>db.cards[id]?.groups||[]))],status,time:demoTime,content,agentOrigin:true,example:true,reason,deliveries:[],dispatchId:null,deliveredAt:null,confirmedAt:null};db.messages.push(m);return m;
+}
+seedMail('a-person-days','project-a','question','session-a-cost-1',{kind:'card-owner',id:'a-capacity'},['a-cost','a-capacity'],'示例 · 请给出交付所需人天估算及缓冲依据，成本报价需要引用。');
+seedMail('b-undeliverable','project-b','question','session-b-implement-2',{kind:'session',id:'session-validation-example'},['b-implement','b-browser'],'示例 · 想请验证会话直接确认这次实现的结论。','undeliverable','示例 · 验证辅助会话没有信箱；请通过项目负责人安排验证。');
+for(const [id,type,recipient,content] of [['b-team-status','status',{kind:'group',id:'all'},'示例 · 两次实现与两次浏览器检查已保留，请引用各次证据。'],['b-idle-dispatch','dispatch',{kind:'group',id:'idle'},'示例 · 空闲成员请准备下轮资料，实际派单由项目负责人决定。'],['b-group-escalation','escalation',{kind:'group',id:'缺陷'},'示例 · 状态不明派单已升级给项目负责人，不自动重派。']])seedMail(id,'project-b',type,'session-leader-project-b',recipient,['b-defect-fix'],content);
+for(const a of db.dispatches.filter(a=>a.completionReport)){const m=seedMail('message-'+a.completionReport.id,a.projectId,'completion',a.sessionKey,{kind:'session',id:db.projects.find(p=>p.id===a.projectId).leaderSessionId},[a.cardId],a.completionReport.summary,'confirmed');m.dispatchId=a.id;m.reportId=a.completionReport.id;m.deliveredAt=demoTime;m.confirmedAt=demoTime;}
+const unknownNotice={id:'notice-unknown-seed',projectId:'project-b',sessionId:'session-b-defect-fix-1',cardId:'b-defect-fix',text:'示例 · 窄屏溢出修复的派单状态不明，等待项目负责人处理',time:demoTime,unread:true,example:true};
+db.notifications.push(unknownNotice);db.sessions[unknownNotice.sessionId].unread=true;db.cards[unknownNotice.cardId].unread=true;
+// 文件列表和 diff 片段沿用真实返工的颜色变更；并行合回另列示例。
+const implementation=db.cards['b-implement'];implementation.fileBaseline='真实记录 · 661c858 → eeac9ad（返工基线）';implementation.fileChanges=[{path:'prototype/index.html',preview:'prototype/index.html',note:'真实记录 · 相对首轮实现的返工 diff 片段；不是完整提交差异',example:false}];implementation.mergeRecords=[{time:demoTime,steps:['示例 · 窄屏布局','示例 · 按钮文字'],result:'示例 · 两个隔离副本合回，无冲突',example:true}];
+for(const p of db.projects)for(const c of p.cardIds.map(id=>db.cards[id]))if(c.memberId){const member=db.members[c.memberId];member.sessionKeys=Object.values(db.sessions).filter(s=>s.role==='member'&&s.memberId===member.id).map(s=>s.id);}
