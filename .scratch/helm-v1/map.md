@@ -62,6 +62,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - [ACP 能否作为接入各家 agent CLI 的统一通道](issues/20-acp-coverage-research.md) — 能：registry 43 家，pi/Qoder/DeepSeek Harness/Gemini 等原生或经适配器支持；v1 稳定覆盖多轮、一轮派单、取消、cwd/MCP 注入，权限由运行层代答；不覆盖中途追加和套餐额度；zcode 无 ACP（终端版见 21）
 - [经 ACP 或其他非原生方式接入时，订阅套餐是否仍然有效](issues/21-subscription-via-acp-research.md) — 订阅取决于"直接拉起厂商的未修改程序 + 环境里没有压过订阅的 key"，与是否 ACP 无关；Claude 直接用 `claude` stream-json（ACP 适配器灰色），Codex 直接用 `codex app-server`，Grok 用 `grok agent stdio`；GLM 用 Claude Code + 智谱端点或 `zcode --prompt --json`；DeepSeek 按量用 key；pi 只给 API key；封号风险低，撞限额要停不能换号绕过
 - [技术栈与进程结构](issues/04-tech-stack.md) — TS/Node；每台机器一个 `helmd`（运行层，只监听本机），调度者每项工作一个长时会话、执行者每次派单一个会话，都由管道拉起官方程序；驱动同 Todos：Claude 用 Agent SDK、Codex 用 app-server、其余走 ACP、一次性命令兜底；SQLite `~/.helm/`、React+Vite+SSE、用户级服务自启动、clone+`npm link`；v1 实测 Claude Code、Codex、Grok、DeepSeek
+- [任务库数据模型与状态](issues/05-task-store-model.md) — 状态表+事件表同事务写，事件记执行者，步骤为库外输出的序号；每项工作一条对话（消息不可改 + 决策关卡单独成实体，确认工作说明和审核是固定关卡，审核正文即汇总报告）；卡片完成由调度者标记、需验收的须先通过，完成为终态、返工建修复卡片；依赖到位后才派单，不预派
 
 ## Not yet specified
 
