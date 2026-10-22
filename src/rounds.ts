@@ -108,6 +108,11 @@ export class RoundScheduler {
         env: templateEnvironment(template),
         sandbox: { mode: 'read-only', writableRoots: [] },
         mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
+        onProcess: process => this.store.transaction(() => {
+          this.store.db.prepare('UPDATE coordinator_rounds SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, process.startedAt, id);
+          this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'process-started',
+            { ...process, cwd: brief.work.workPath ?? projectPath(this.store, workId), role: 'coordinator' }, { workId });
+        }),
       });
       this.sessions.set(workId, session);
       this.store.transaction(() => { this.store.db.prepare('UPDATE coordinator_rounds SET session_id = ? WHERE id = ?').run(session.id, id); });

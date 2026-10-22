@@ -32,7 +32,11 @@ npm start -- --help
 
 客户端默认连接 `http://127.0.0.1:4242`，可通过 `HELM_URL` 或各子命令的 `--url` 指定。也可用 `node dist/src/cli.js` 直接运行；通过 npm 链接这个包后可使用 `helm` 命令。
 
-HTTP 操作统一为 `POST /api/<操作名称>`，参数为 JSON。成功返回 `{ "ok": true, "result": ... }`；约束失败返回 `{ "ok": false, "error": { "code": ..., "reason": ..., "allowedOperations": [...] } }`，并记录 `operation-rejected` 事件。全局并发上限默认为 10，目前保存设置，实际派单与排队由后续任务实现。
+HTTP 操作统一为 `POST /api/<操作名称>`，参数为 JSON。成功返回 `{ "ok": true, "result": ... }`；约束失败返回 `{ "ok": false, "error": { "code": ..., "reason": ..., "allowedOperations": [...] } }`，并记录 `operation-rejected` 事件。执行者派单的全局并发上限默认为 10，满了按创建顺序排队，调度轮次不占名额。`get-settings` 返回 `concurrencyLimit`、`runningDispatches` 和 `queuedDispatches`；调低上限不打断已启动的派单，调高立即补位。
+
+每次派单通过 `HELM_PORT_START`、`HELM_PORT_END` 得到 20 个连续本机端口（两端包含），从 20000 起分配，清理结束后回收。`set-dispatch-watchdog --wallTimeoutMs 1800000 --idleTimeoutMs 600000` 设置后续派单的墙钟与无输出阈值，默认分别为 30 分钟和 10 分钟；超时记 `timed-out`。进程驱动须用独立进程组，并在启动时通过 `SessionOptions.onProcess` 上报 `pid`、`pgid` 和 `startedAt`；派单详情和 `process-started` 事件保留进程记录。
+
+派单结束先清理工作目录位于卡片副本内的进程及进程组：`SIGTERM` 后最多等 5 秒，仍存活则 `SIGKILL`，确认退出后再清理 git 并提交。macOS 用系统 `lsof`，Linux 用 `/proc` 查工作目录。请在工作分支查看代码；卡片副本内自行开启的终端也会被清理。副本外切换目录或另建会话的进程可能无法按目录找到。开始前发现未忽略的脏文件会记录 `dispatch-copy-reset` 并重置；收尾移除 `index.lock`，中止半截 git 操作并记录 `dispatch-git-aborted`，保留其余执行进度。
 
 通过 `POST /events` 订阅 SSE，参数与 `get-events` 相同：`after`、`workId`、`cardId`、`dispatchId`、`actorType`、`actorId`。筛选条件取交集，按事件 id 递增返回历史并继续推送新事件。支持 `Last-Event-ID` 断线续读；同时提供 `after` 时取两者的较大值。
 
@@ -48,7 +52,7 @@ SSE 的 `event` 为动作名，`id` 为事件 id，`data` 是完整结构化事�
 
 用户消息和关卡决定持久入队，同一工作同时最多一个调度轮次。每轮都是新会话，启动简报包括工作说明（草稿标“未确认”）、卡片图摘要（任务单 03 接入前为空）、未决关卡、调度笔记、新事件和最近 20 条对话。当前轮次运行时收到的消息留到下一轮；只有正常结束才标记这批事件已处理。轮次输出逐步写入数据目录的 `rounds/<轮次id>.jsonl`，`round-started` 事件提供路径，`round-ended` 提供结束方式和 token 用量。
 
-`startHelmd({ driver: new FakeDriver(scripts), ... })` 可注入按轮次排列的脚本；脚本支持真实 MCP 工具调用、按沙箱限制写文件、步骤输出、压缩通知、指定结束方式、挂住和崩溃。驱动接口同时接受 cwd、环境变量、沙箱、MCP 服务与可选续跑会话 id；调度轮次始终新开。确认前调度者只读项目目录，确认后只读 `_work`。`helm serve` 默认使用空脚本假驱动，正常退出而不生成模型回答；可运行的对齐脚本见 `tests/alignment.test.ts`。Claude 驱动、自动失败重试、看门狗和启动对账由后续任务实现。
+`startHelmd({ driver: new FakeDriver(scripts), ... })` 可注入按轮次排列的脚本；脚本支持真实 MCP 工具调用、按沙箱限制写文件、步骤输出、压缩通知、指定结束方式、挂住和崩溃。驱动接口同时接受 cwd、环境变量、沙箱、MCP 服务与可选续跑会话 id；调度轮次始终新开。确认前调度者只读项目目录，确认后只读 `_work`。`helm serve` 默认使用空脚本假驱动，正常退出而不生成模型回答；可运行的对齐脚本见 `tests/alignment.test.ts`。Claude 驱动、自动失败重试、调度轮次看门狗和启动对账由后续任务实现。
 
 代码分为任务库与事务（`store.ts`）、操作定义（`operations.ts`）、工作说明与 git 确认（`alignment.ts`）、调度轮次（`rounds.ts`）、驱动接口与假驱动（`driver.ts`）、HTTP/SSE（`server.ts`）、MCP 适配（`mcp.ts`）和 CLI 薄客户端（`cli.ts`）。新增业务操作时在操作表中登记，无需分别增加 HTTP 路由、MCP 工具和 CLI 分支。任务库通过 `PRAGMA user_version` 标识 schema 版本，并保留任务单 01 数据升级到版本 2。
 

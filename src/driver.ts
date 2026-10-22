@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AgentTemplate } from './templates.js';
+import type { ManagedProcess } from './processes.js';
 
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 export interface TokenUsage { inputTokens: number; outputTokens: number }
@@ -14,6 +15,9 @@ export interface SessionOptions {
   sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
   mcpServers: Record<string, { url: string; headers: Record<string, string> }>;
   resumeSessionId?: string;
+  signal?: AbortSignal;
+  // Report each detached group at spawn time, including if start() has not resolved.
+  onProcess?: (process: ManagedProcess) => void;
 }
 export type DriverEvent =
   | { type: 'output'; step: number; text: string }

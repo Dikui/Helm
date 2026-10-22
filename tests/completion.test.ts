@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { access, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -123,8 +124,13 @@ test('两张卡片冲突时保持原状态，修复卡片合入原分支后可�
     ctx => {
       assert.equal(git(ctx.options.cwd, 'rev-parse', 'HEAD'), workTip);
       assert.match(JSON.parse(ctx.input).content, new RegExp(originalBranch));
-      assert.throws(() => git(ctx.options.cwd, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'merge', '--no-ff', '--no-edit', originalBranch));
-      return [{ type: 'write', path: 'shared.txt', content: 'resolved: first + original\n' }];
+      const identity = ['-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid'];
+      assert.throws(() => git(ctx.options.cwd, ...identity, 'merge', '--no-ff', '--no-edit', originalBranch));
+      // helmd aborts merges left in progress when a dispatch ends, so the executor commits its own resolution.
+      writeFileSync(join(ctx.options.cwd, 'shared.txt'), 'resolved: first + original\n');
+      git(ctx.options.cwd, 'add', 'shared.txt');
+      git(ctx.options.cwd, ...identity, 'commit', '--no-edit');
+      return [];
     },
     ctx => {
       assert.equal(git(ctx.options.cwd, 'show', 'HEAD:shared.txt'), 'resolved: first + original');

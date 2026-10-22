@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
@@ -14,6 +14,7 @@ export interface Dispatch {
   needsBrowser: boolean; browserPgid: number | null; browserStartedAt: string | null;
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
   startCommit: string | null; endCommit: string | null; outputPath: string;
+  portStart: number | null; portEnd: number | null; pgid: number | null; processStartedAt: string | null;
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
   conclusion: 'completed' | 'blocked' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
 }
@@ -23,7 +24,8 @@ const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
   conclusion, conclusion_reason AS conclusionReason, usage, failure,
-  needs_browser AS needsBrowser, browser_pgid AS browserPgid, browser_started_at AS browserStartedAt`;
+  needs_browser AS needsBrowser, browser_pgid AS browserPgid, browser_started_at AS browserStartedAt,
+  port_start AS portStart, port_end AS portEnd, pgid, process_started_at AS processStartedAt`;
 
 function readDispatch(row: Record<string, unknown>): Dispatch {
   return { ...row, needsBrowser: Boolean(row.needsBrowser), template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
@@ -50,6 +52,53 @@ export function dispatchGit(path: string, ...args: string[]) {
 
 export function committedFile(path: string, commit: string, name: string) {
   return execFileSync('git', ['-C', path, 'show', `${commit}:${name}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+export function abortCardGit(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch: string) {
+  const gitPath = (name: string) => resolve(workPath, dispatchGit(workPath, 'rev-parse', '--git-path', name));
+  const record = (action: string, details: object) => store.transaction(() => store.appendEvent(
+    { type: 'runtime', id: 'helmd' }, { type: 'dispatch', id: dispatch.id }, action, details,
+    { workId: dispatch.workId, cardId: dispatch.cardId, dispatchId: dispatch.id },
+  ));
+  if (existsSync(gitPath('index.lock'))) {
+    rmSync(gitPath('index.lock'));
+    record('dispatch-index-lock-removed', {});
+  }
+  // A rebase can leave both a detached HEAD and conflict entries. Abort it first.
+  const operations = [
+    { name: 'rebase', markers: ['rebase-merge', 'rebase-apply'] },
+    { name: 'merge', markers: ['MERGE_HEAD'] },
+    { name: 'cherry-pick', markers: ['CHERRY_PICK_HEAD'] },
+    { name: 'revert', markers: ['REVERT_HEAD'] },
+  ];
+  for (const operation of operations) if (operation.markers.some(marker => existsSync(gitPath(marker)))) {
+    dispatchGit(workPath, operation.name, '--abort');
+    record('dispatch-git-aborted', { operation: operation.name });
+  }
+  // Sequencer directories can remain between two clean cherry-pick/revert steps.
+  if (existsSync(gitPath('sequencer'))) {
+    const todo = readFileSync(join(gitPath('sequencer'), 'todo'), 'utf8');
+    const operation = /^revert /m.test(todo) ? 'revert' : 'cherry-pick';
+    dispatchGit(workPath, operation, '--abort');
+    record('dispatch-git-aborted', { operation });
+  }
+  if (dispatchGit(workPath, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${cardBranch}`) {
+    throw new RuleError('CARD_BRANCH_CHANGED', '卡片副本未处于卡片分支，拒绝提交游离或其他分支上的改动。');
+  }
+  if (dispatchGit(workPath, 'ls-files', '--unmerged')) throw new RuleError('UNMERGED_CARD', '卡片副本仍有冲突，拒绝提交。');
+}
+
+export function prepareCardCopy(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch: string) {
+  abortCardGit(store, dispatch, workPath, cardBranch);
+  if (!dispatchGit(workPath, 'status', '--porcelain')) return;
+  const files = [...new Set([
+    ...dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0'),
+    ...dispatchGit(workPath, 'diff', '--cached', '--name-only', '-z').split('\0'),
+  ].filter(Boolean))].sort();
+  store.transaction(() => store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'dispatch', id: dispatch.id }, 'dispatch-copy-reset', { files },
+    { workId: dispatch.workId, cardId: dispatch.cardId, dispatchId: dispatch.id }));
+  dispatchGit(workPath, 'reset', '--hard', `refs/heads/${cardBranch}`);
+  dispatchGit(workPath, 'clean', '-fd');
 }
 
 // This is an external action: finish it before publishing the dispatch transaction.

@@ -117,7 +117,25 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'get-settings', description: '读取全局设置', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
-    execute: ({ store }) => ({ concurrencyLimit: store.db.prepare('SELECT concurrency_limit FROM settings WHERE id = 1').get()!.concurrency_limit }),
+    execute: ({ store }) => ({
+      concurrencyLimit: store.db.prepare('SELECT concurrency_limit FROM settings WHERE id = 1').get()!.concurrency_limit,
+      dispatchWallTimeoutMs: store.db.prepare('SELECT dispatch_wall_timeout_ms FROM settings WHERE id = 1').get()!.dispatch_wall_timeout_ms,
+      dispatchIdleTimeoutMs: store.db.prepare('SELECT dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!.dispatch_idle_timeout_ms,
+      runningDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'running'`).get()!.count,
+      queuedDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'queued'`).get()!.count,
+    }),
+  }),
+  operation({
+    name: 'set-dispatch-watchdog', description: '设置派单墙钟总时长和无输出超时（毫秒），对后续派单生效', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ wallTimeoutMs: z.number().int().min(1).max(2147483647), idleTimeoutMs: z.number().int().min(1).max(2147483647) }).strict(),
+    execute({ store, actor }, { wallTimeoutMs, idleTimeoutMs }) {
+      const current = store.db.prepare('SELECT dispatch_wall_timeout_ms, dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!;
+      if (current.dispatch_wall_timeout_ms !== wallTimeoutMs || current.dispatch_idle_timeout_ms !== idleTimeoutMs) {
+        store.db.prepare('UPDATE settings SET dispatch_wall_timeout_ms = ?, dispatch_idle_timeout_ms = ? WHERE id = 1').run(wallTimeoutMs, idleTimeoutMs);
+        store.appendEvent(actor, { type: 'settings', id: 'global' }, 'dispatch-watchdog-set', { wallTimeoutMs, idleTimeoutMs });
+      }
+      return { dispatchWallTimeoutMs: wallTimeoutMs, dispatchIdleTimeoutMs: idleTimeoutMs };
+    },
   }),
   operation({
     name: 'set-concurrency', description: '设置全局执行者并发上限', callers: ['user'], keyed: false, mutates: true,
