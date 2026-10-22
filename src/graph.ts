@@ -137,7 +137,8 @@ export function refreshCardReadiness(store: TaskStore, workId: string) {
       const upstream = graphNode(store, workId, node);
       return upstream.status !== (node.type === 'card' ? 'completed' : 'decided');
     });
-    const status = blocked ? 'waiting' : card.latestDispatchId ? 'executing' : 'ready';
+    const latest = card.latestDispatchId ? store.db.prepare('SELECT purpose FROM dispatches WHERE id = ?').get(card.latestDispatchId) : undefined;
+    const status = blocked ? 'waiting' : latest ? latest.purpose === 'verification' ? 'verifying' : 'executing' : 'ready';
     if (status === card.status) continue;
     store.db.prepare('UPDATE cards SET status = ? WHERE id = ?').run(status, card.id);
     const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id },

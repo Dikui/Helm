@@ -9,19 +9,21 @@ import { agentTemplate, type AgentTemplate } from './templates.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 
 export interface Dispatch {
-  id: string; workId: string; cardId: string; key: string; purpose: 'execution'; templateId: string;
+  id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; templateId: string;
   template: AgentTemplate; content: string; status: 'queued' | 'running' | 'ended';
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
   startCommit: string | null; endCommit: string | null; outputPath: string;
+  cardContentSnapshot: string | null; workDescriptionId: string | null; workDescriptionVersion: number | null;
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
-  conclusion: 'completed' | 'blocked' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
+  conclusion: 'completed' | 'blocked' | 'passed' | 'failed' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
 }
 
 const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, template_id AS templateId,
   template_snapshot AS template, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
-  conclusion, conclusion_reason AS conclusionReason, usage, failure`;
+  conclusion, conclusion_reason AS conclusionReason, usage, failure,
+  card_content_snapshot AS cardContentSnapshot, work_description_id AS workDescriptionId, work_description_version AS workDescriptionVersion`;
 
 function readDispatch(row: Record<string, unknown>): Dispatch {
   return { ...row, template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
@@ -72,7 +74,7 @@ function cardCopy(store: TaskStore, workId: string, cardId: string) {
 }
 
 export function createDispatch(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; key: string; templateId: string; content?: string; resumeSessionId?: string;
+  workId: string; cardId: string; key: string; templateId: string; purpose?: Dispatch['purpose']; content?: string; resumeSessionId?: string;
 }) {
   const existing = listDispatches(store, params.workId).find(item => item.key === params.key);
   if (existing) return existing;
@@ -81,9 +83,11 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、暂停或终态卡片不能派单。');
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '卡片已有运行中或排队中的派单。');
+  const purpose = params.purpose ?? 'execution';
+  if (purpose === 'verification' && params.resumeSessionId) throw new RuleError('INVALID_RESUME', '验收派单一律新开对话，不能续跑。');
   let template = agentTemplate(store, params.templateId, 'executor');
   if (params.resumeSessionId) {
-    const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended');
+    const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended' && item.purpose === 'execution');
     if (!previous || previous.templateId !== params.templateId) throw new RuleError('INVALID_RESUME', '只能用原模板续跑本卡片以前的执行者对话。');
     if (store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND status IN ('queued', 'running')`).get(params.resumeSessionId)) {
       throw new RuleError('SESSION_ACTIVE', '同一会话不能同时被两次派单续跑。');
@@ -91,21 +95,26 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
     template = previous.template;
   }
   let content = params.content ?? card.content;
-  if (card.repairOfCardId) {
+  if (card.repairOfCardId && purpose === 'execution') {
     const original = cardDetails(store, work.id, card.repairOfCardId);
     if (!original.cardBranch || ['completed', 'cancelled'].includes(original.status)) throw new RuleError('REPAIR_SOURCE_UNAVAILABLE', '修复自卡片的分支已不可用。');
     content = `修复自卡片 ${original.id}。请把原卡片分支 ${original.cardBranch} 合进当前卡片分支并解决冲突，保留合并关系。\n\n${content}`;
   }
+  const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
+  const cardContentSnapshot = purpose === 'verification' ? card.content : null;
+  if (cardContentSnapshot !== null) content = `卡片说明快照：\n${cardContentSnapshot}\n\n${content}`;
   const copy = cardCopy(store, work.id, card.id);
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
   mkdirSync(outputPath, { recursive: true });
   return store.transaction(() => {
     store.db.prepare(`INSERT INTO dispatches
-      (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path)
-      VALUES (?, ?, ?, ?, 'execution', ?, ?, ?, 'queued', ?, ?, ?, ?)`)
-      .run(id, work.id, card.id, params.key, template.id, JSON.stringify(template), content,
-        params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath);
+      (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path,
+        card_content_snapshot, work_description_id, work_description_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, work.id, card.id, params.key, purpose, template.id, JSON.stringify(template), content,
+        params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath,
+        cardContentSnapshot, description?.id ?? null, description?.version ?? null);
     store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, template_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
       .run(copy.workPath, copy.cardBranch, template.id, id, card.id);
     const dispatch = getDispatch(store, work.id, id);
@@ -121,8 +130,10 @@ export function activeDispatch(store: TaskStore, actor: Actor) {
   return dispatch;
 }
 
-export function submitConclusion(store: TaskStore, actor: Actor, params: { conclusion: 'completed' | 'blocked'; reason: string }) {
+export function submitConclusion(store: TaskStore, actor: Actor, params: { conclusion: Exclude<Dispatch['conclusion'], 'undeclared'>; reason: string }) {
   const dispatch = activeDispatch(store, actor);
+  const allowed = dispatch.purpose === 'verification' ? ['passed', 'failed'] : ['completed', 'blocked'];
+  if (!allowed.includes(params.conclusion)) throw new RuleError('INVALID_PARAMS', '结论必须符合派单用途：执行报完成或受阻，验收报通过或不通过。', 400);
   if (dispatch.conclusion === params.conclusion && dispatch.conclusionReason === params.reason) return { conclusion: params.conclusion, reason: params.reason };
   store.db.prepare('UPDATE dispatches SET conclusion = ?, conclusion_reason = ? WHERE id = ?').run(params.conclusion, params.reason, dispatch.id);
   store.appendEvent(actor, { type: 'dispatch', id: dispatch.id }, 'conclusion-submitted', params,
