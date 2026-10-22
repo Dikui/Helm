@@ -10,6 +10,7 @@ import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getD
 import { agentTemplates, configureTemplate } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
+import { requestReview, reviewDetails } from './review.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -260,12 +261,12 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
-    execute: ({ store }, { workId }) => store.conversation(workId).map(item => confirmationDetails(store, item)),
+    execute: ({ store }, { workId }) => store.conversation(workId).map(item => reviewDetails(store, confirmationDetails(store, item))),
   }),
   operation({
     name: 'list-pending', description: '列出所有待用户处理的事项', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(), execute: ({ store }) => [
-      ...store.pending().map(gate => confirmationDetails(store, gate)),
+      ...store.pending().map(gate => reviewDetails(store, confirmationDetails(store, gate))),
       ...store.db.prepare(`SELECT id, id AS workId, status, runtime_pause_reason AS runtimePauseReason
         FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
         .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
@@ -287,13 +288,20 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
   }),
   operation({
-    name: 'decide-gate', description: '用户确认工作说明、选择关卡选项或写自由回答', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional() }).strict(),
-    execute({ store, actor }, params) {
-      if (store.gate(params.workId, params.gateId).kind !== 'work-confirmation') return decideGate(store, actor, params);
+    name: 'decide-gate', description: '用户确认工作说明、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional() }).strict(),
+    execute({ store, actor, userOperations }, params) {
+      const kind = store.gate(params.workId, params.gateId).kind;
+      if (kind === 'review') return userOperations.decideReview(actor, params);
+      if (kind !== 'work-confirmation') return decideGate(store, actor, params);
       if (params.decision !== 'confirm' || !params.descriptionId) throw new RuleError('INVALID_PARAMS', '确认工作说明须指定所查看的版本并选择 confirm。', 400);
       return confirmDescription(store, actor, { ...params, descriptionId: params.descriptionId });
     },
+  }),
+  operation({
+    name: 'request-review', description: '以汇总报告发起审核，只能由用户接受或退回', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), body: z.string().trim().min(1) }).strict(),
+    execute: ({ store, actor }, params) => requestReview(store, actor, params),
   }),
   operation({
     name: 'propose-gate', description: '提出一般决策关卡', callers: ['coordinator-round'], keyed: true, mutates: true,
@@ -386,7 +394,9 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
     if (actor.type === 'dispatch') activeDispatch(store, actor);
     if (definition.mutates && typeof parsed.data.workId === 'string') {
       const work = store.work(parsed.data.workId);
-      if (['completed', 'cancelled'].includes(work.status) && !(name === 'cancel-work' && work.status === 'cancelled')) {
+      const acceptedReview = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
+      const repeatReview = name === 'decide-gate' && parsed.data.gateId === acceptedReview?.id;
+      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !(name === 'cancel-work' && work.status === 'cancelled')) {
         throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       }
     }

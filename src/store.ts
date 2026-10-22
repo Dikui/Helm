@@ -21,12 +21,12 @@ export interface Gate {
   id: string; workId: string; kind: string; status: string; key: string | null;
   question: string; body: string; options: string[]; creator: Actor;
   createdAt: string; sequence: number; descriptionId: string | null;
-  decision: string | null; withdrawalReason: string | null;
+  decision: string | null; withdrawalReason: string | null; comment: string | null;
 }
 
 const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options,
   creator_type AS creatorType, creator_id AS creatorId, created_at AS createdAt, sequence,
-  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason`;
+  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment`;
 
 function readGate(row: Record<string, unknown>): Gate {
   const { creatorType, creatorId, options, ...fields } = row;
@@ -67,7 +67,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (![0, 1, 2, 3, 4, 5, 6, 7, 8, 9].includes(Number(version))) {
+    if (![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(version))) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -237,6 +237,12 @@ export class TaskStore {
       ALTER TABLE dispatches ADD COLUMN work_description_id TEXT REFERENCES work_descriptions(id);
       ALTER TABLE dispatches ADD COLUMN work_description_version INTEGER;
       PRAGMA user_version = 9;
+      COMMIT;
+    `);
+    if (Number(version) < 10) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE gates ADD COLUMN comment TEXT;
+      PRAGMA user_version = 10;
       COMMIT;
     `);
   }
