@@ -6,9 +6,30 @@ import { dispatchGit, listDispatches, revokeDispatch } from './dispatch.js';
 import type { ExecutionRunner } from './execution.js';
 import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import { completeReviewedWork, decideReview } from './review.js';
 
 export class UserOperations {
+  private reviewCompletions = new Map<string, Promise<unknown>>();
   constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler) {}
+
+  async decideReview(actor: Actor, params: { workId: string; gateId: string; decision: string; comment?: string }) {
+    const gate = decideReview(this.store, actor, params);
+    if (gate.decision === 'accept' && this.store.work(params.workId).status !== 'completed') {
+      let completion = this.reviewCompletions.get(params.workId);
+      if (!completion) {
+        completion = this.finishReview(actor, params.workId, gate.id).finally(() => this.reviewCompletions.delete(params.workId));
+        this.reviewCompletions.set(params.workId, completion);
+      }
+      await completion;
+    }
+    return this.store.gate(params.workId, gate.id);
+  }
+
+  private async finishReview(actor: Actor, workId: string, gateId: string) {
+    this.store.transaction(() => this.abortDispatches(actor, workId, '审核接受'));
+    await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '审核接受')]);
+    return completeReviewedWork(this.store, workId, gateId);
+  }
 
   private abortDispatches(actor: Actor, workId: string, reason: string, cardId?: string) {
     for (const dispatch of listDispatches(this.store, workId, cardId)) {

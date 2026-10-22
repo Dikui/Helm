@@ -80,6 +80,7 @@ export class RoundScheduler {
         WHERE q.processed_by IS NULL AND (w.status IN ('aligning', 'executing', 'awaiting-review')
           OR (w.status = 'paused' AND e.action = 'message-sent' AND e.actor_type = 'user'
             AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
+        AND NOT EXISTS (SELECT 1 FROM gates g WHERE g.work_id = w.id AND g.kind = 'review' AND g.decision = 'accept')
         AND NOT EXISTS (SELECT 1 FROM coordinator_rounds r WHERE r.work_id = q.work_id AND r.status = 'running')`).all();
       for (const work of works) {
         const workId = String(work.id);
@@ -130,7 +131,7 @@ export class RoundScheduler {
       abortReason = reason;
       // Work cancellation must settle a session still starting before deleting _work.
       // The watchdog remains active if that start never resolves.
-      if (reason === '工作取消' && !this.sessions.has(workId)) controller.abort();
+      if ((reason === '工作取消' || reason === '审核接受') && !this.sessions.has(workId)) controller.abort();
       else stop('aborted');
     });
     const settings = this.store.db.prepare('SELECT round_total_timeout_ms, round_idle_timeout_ms FROM settings WHERE id = 1').get()!;
@@ -223,7 +224,7 @@ export class RoundScheduler {
     }
   }
 
-  async cancel(workId: string, reason: '用户打断' | '工作取消') {
+  async cancel(workId: string, reason: '用户打断' | '工作取消' | '审核接受') {
     const running = this.running.get(workId);
     if (running) {
       this.cancellations.get(workId)?.(reason);

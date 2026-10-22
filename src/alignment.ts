@@ -96,10 +96,11 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
     store.db.prepare(`UPDATE work_descriptions SET status = 'superseded' WHERE work_id = ? AND status = 'active'`).run(work.id);
     store.db.prepare(`UPDATE work_descriptions SET status = 'active' WHERE id = ?`).run(description.id);
     store.db.prepare(`UPDATE gates SET status = 'decided', decision = ? WHERE id = ?`).run(params.decision, params.gateId);
-    store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE 'executing' END,
-      paused_from_status = CASE WHEN status = 'paused' THEN 'executing' ELSE paused_from_status END,
+    const status = store.gates(work.id).some(item => item.kind === 'review' && item.status === 'pending') ? 'awaiting-review' : 'executing';
+    store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE ? END,
+      paused_from_status = CASE WHEN status = 'paused' THEN ? ELSE paused_from_status END,
       base_ref = ?, base_commit = ?, work_branch = ?, work_path = ?, active_description_id = ? WHERE id = ?`)
-      .run(description.baseRef, description.baseCommit, workBranch, workPath, description.id, work.id);
+      .run(status, status, description.baseRef, description.baseCommit, workBranch, workPath, description.id, work.id);
     const event = store.appendEvent(actor, { type: 'gate', id: params.gateId }, 'gate-decided', { decision: params.decision, descriptionId: description.id, workBranch, workPath }, { workId: work.id });
     store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, work.id);
     refreshCardReadiness(store, work.id);
