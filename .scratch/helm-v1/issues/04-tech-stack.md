@@ -49,3 +49,5 @@ Helm 用什么语言和框架实现？进程怎么组成（一个后台守护进
 - 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：驱动前提实测，没有推翻 04 的选择。Claude Agent SDK 指向本机 `claude` 时 `apiKeySource: none`（未看用量条）；Codex 只设 `CODEX_SQLITE_HOME` 仍是 ChatGPT 登录，新 sqlite 目录能续跑旧 thread，一个 app-server 10 个 thread 真并行、10 个进程也不撞锁；Grok ACP 支持 cancel、load、resume。DeepSeek（dsh ACP）跑通，但默认路线要 API key，用 `dsh web` 登录的账号要在会话里选 `deepseek-account` 路线；它不支持 `session/load`，续跑只能用 `session/resume`。Grok ACP 没有按会话的权限参数，权限跟随用户全局配置，见 07 的评论。
 
 - 2026-10-22 15 张整体复查：修订。调度者已由 [06](06-coordinator-lifecycle.md) 改为任务型（每次唤醒新开一个调度轮次，不续跑、不常驻），正文"长时会话""重启后按 session id 续跑"对调度者已不成立，已在原句标注。驱动选择不变。
+
+- 2026-10-22 来自 [11](11-persistence-and-recovery.md)：修订"`helmd` 重启后按 session id 续跑"。重启时运行中的派单记为"被中止：运行层重启"并唤醒调度者，续跑、新开还是改派由调度者决定，运行层不自动续跑。另：不假设子进程随 `helmd` 退出，启动时按库里记的 pgid 和启动时间杀掉残留进程组。

@@ -62,3 +62,5 @@ ADR：[0003 不加外层隔离，完成即合并到工作分支](../../../docs/a
   5. 执行者不读本机全局配置（hook、`CLAUDE.md`、`AGENTS.md`），见 [06](06-coordinator-lifecycle.md) 的复查评论。
 
 - 2026-10-22 来自 [09](09-acceptance.md)：**修订执行者的网络设置**。实测（`codex sandbox`、Agent SDK）：Codex `workspace-write` 默认 `network_access=false` 时，既不能监听本机端口（`listen EPERM`），`npm` 也连不上源，"执行者自己装依赖"（第 7 条）在 Codex 上跑不通；Claude SDK 沙箱默认同样不能监听本机端口。改为：Codex 执行者设 `sandbox_workspace_write.network_access = true`（实测能监听、能连本机、`npm view` 正常），Claude 执行者 `sandbox.network.allowLocalBinding: true`（实测能监听、能连本机）。Grok、DeepSeek 默认就能监听，不改。出网不作为边界，四家都能出网。另：执行者在沙箱里不能自己启动 Chromium（四家 × 四种启动方式全失败），需要浏览器时由 helmd 在沙箱外提供，见 09。
+
+- 2026-10-22 来自 [11](11-persistence-and-recovery.md)：① 第 3 条"每次执行派单结束后提交"明确包括超时、出错退出、被中止；因运行层重启中断的，由启动对账补提交，提交信息写结束方式。② git 相关的外部动作都先做、成功后再写库，且可安全重做；启动对账负责 `_work` 半截合并 `merge --abort`、补做未记结果的基准分支合并与推送（用户项目目录里留有 helmd 发起的 `MERGE_HEAD` 时先 abort）、补删终态卡片残留的 worktree 和分支。
