@@ -116,7 +116,8 @@ test('同一工作串行调度，当前轮次中的消息合并到下一轮，�
   assert.equal(nextBrief.workDescription!.requirements, '网页版游戏');
   assert.equal(nextBrief.coordinatorNotes, '下一轮先查看用户消息');
   assert.equal(nextBrief.pendingGates.length, 1);
-  assert.deepEqual(nextBrief.cardGraph, []);
+  assert.equal(nextBrief.cardGraph.length, 1);
+  assert.equal((nextBrief.cardGraph[0] as any).kind, 'work-confirmation');
   assert.equal(nextBrief.wakeEvents.length, 25);
   assert.equal(nextBrief.newEvents.some(event => event.action === 'coordinator-notes-written'), true);
   assert.equal(nextBrief.recentConversation.length, 20);

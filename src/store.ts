@@ -14,6 +14,21 @@ export interface WorkDescription {
   requirements: string; boundary: string; criteria: string; gateId: string;
   baseRef: string; baseCommit: string;
 }
+export interface Gate {
+  id: string; workId: string; kind: string; status: string; key: string | null;
+  question: string; body: string; options: string[]; creator: Actor;
+  createdAt: string; sequence: number; descriptionId: string | null;
+  decision: string | null; withdrawalReason: string | null;
+}
+
+const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options,
+  creator_type AS creatorType, creator_id AS creatorId, created_at AS createdAt, sequence,
+  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason`;
+
+function readGate(row: Record<string, unknown>): Gate {
+  const { creatorType, creatorId, options, ...fields } = row;
+  return { ...fields, options: JSON.parse(String(options)), creator: { type: creatorType, id: creatorId } } as Gate;
+}
 export interface EventFilter {
   after?: number;
   workId?: string;
@@ -49,7 +64,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (version !== 0 && version !== 1 && version !== 2) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -117,6 +132,31 @@ export class TaskStore {
       ) STRICT;
       CREATE INDEX wake_queue_work ON wake_queue(work_id, event_id) WHERE processed_by IS NULL;
       PRAGMA user_version = 2;
+      COMMIT;
+    `);
+    if (Number(version) < 3) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE cards (
+        id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), key TEXT NOT NULL,
+        content TEXT NOT NULL, needs_verification INTEGER NOT NULL CHECK(needs_verification IN (0, 1)),
+        status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(work_id, key)
+      ) STRICT;
+      ALTER TABLE gates ADD COLUMN key TEXT;
+      ALTER TABLE gates ADD COLUMN body TEXT NOT NULL DEFAULT '';
+      ALTER TABLE gates ADD COLUMN options TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE gates ADD COLUMN creator_type TEXT NOT NULL DEFAULT 'runtime';
+      ALTER TABLE gates ADD COLUMN creator_id TEXT NOT NULL DEFAULT 'helmd';
+      ALTER TABLE gates ADD COLUMN withdrawal_reason TEXT;
+      UPDATE gates SET creator_type = (SELECT actor_type FROM events WHERE id = gates.sequence),
+        creator_id = (SELECT actor_id FROM events WHERE id = gates.sequence);
+      CREATE UNIQUE INDEX gates_key ON gates(work_id, key) WHERE key IS NOT NULL;
+      CREATE TABLE dependencies (
+        work_id TEXT NOT NULL REFERENCES works(id),
+        upstream_type TEXT NOT NULL CHECK(upstream_type IN ('card', 'gate')), upstream_id TEXT NOT NULL,
+        downstream_type TEXT NOT NULL CHECK(downstream_type IN ('card', 'gate')), downstream_id TEXT NOT NULL,
+        PRIMARY KEY(work_id, upstream_type, upstream_id, downstream_type, downstream_id)
+      ) STRICT;
+      PRAGMA user_version = 3;
       COMMIT;
     `);
   }
@@ -207,13 +247,23 @@ export class TaskStore {
       UNION ALL
       SELECT 'gate', id, work_id, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision
       FROM gates WHERE work_id = ? ORDER BY sequence
-    `).all(workId, workId);
+    `).all(workId, workId).map(item => item.type === 'gate' ? { ...item, ...this.gate(workId, String(item.id)) } : item);
+  }
+
+  gate(workId: string, gateId: string): Gate {
+    this.work(workId);
+    const row = this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE id = ? AND work_id = ?`).get(gateId, workId);
+    if (!row) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
+    return readGate(row);
+  }
+
+  gates(workId: string): Gate[] {
+    this.work(workId);
+    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE work_id = ? ORDER BY sequence`).all(workId).map(readGate);
   }
 
   pending() {
-    return this.db.prepare(`SELECT id, work_id AS workId, kind, status, question,
-      created_at AS createdAt, sequence, description_id AS descriptionId, decision
-      FROM gates WHERE status = 'pending' ORDER BY sequence`).all();
+    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE status = 'pending' ORDER BY sequence`).all().map(readGate);
   }
 
   subscribe(listener: (events: HelmEvent[]) => void) {

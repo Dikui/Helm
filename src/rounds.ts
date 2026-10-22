@@ -3,13 +3,14 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Driver, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
+import { cardGraph } from './graph.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 
 export interface StartupBrief {
   work: Work;
   workDescription: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
   activeWorkDescription: WorkDescription | null;
-  cardGraph: unknown[];
+  cardGraph: ReturnType<typeof cardGraph>;
   pendingGates: ReturnType<TaskStore['pending']>;
   coordinatorNotes: string;
   newEvents: HelmEvent[];
@@ -26,7 +27,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     work,
     workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
     activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
-    cardGraph: [], // Card operations and their graph are introduced by ticket 03.
+    cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
     coordinatorNotes: String(store.notes(workId).body),
     newEvents: store.events({ workId, after: Number(lastStart ?? 0) }),
@@ -48,7 +49,8 @@ export class RoundScheduler {
 
   constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
-      const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user') || event.action === 'gate-decided');
+      const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
+        || ['gate-decided', 'card-ready', 'card-cancelled', 'gate-withdrawn'].includes(event.action));
       for (const event of wakes) if (event.workId) this.failed.delete(event.workId);
       if (wakes.length) this.schedule();
     });

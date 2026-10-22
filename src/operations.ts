@@ -5,6 +5,7 @@ import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
+import { addDependency, cancelCard, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 
 interface Context { store: TaskStore; actor: Actor }
 interface Operation {
@@ -32,6 +33,9 @@ export const eventFilterSchema = z.object({
   workId: z.string().min(1).optional(), cardId: z.string().min(1).optional(), dispatchId: z.string().min(1).optional(),
   actorType: z.enum(['user', 'coordinator-round', 'dispatch', 'runtime']).optional(), actorId: z.string().min(1).optional(),
 }).strict();
+
+const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();
+const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 
 export const operations: readonly Operation[] = [
   operation({
@@ -160,9 +164,65 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
   }),
   operation({
-    name: 'decide-gate', description: '用户确认所查看的工作说明版本', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.literal('confirm'), descriptionId: z.string().min(1) }).strict(),
-    execute: ({ store, actor }, params) => confirmDescription(store, actor, params),
+    name: 'decide-gate', description: '用户确认工作说明、选择关卡选项或写自由回答', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional() }).strict(),
+    execute({ store, actor }, params) {
+      if (store.gate(params.workId, params.gateId).kind !== 'work-confirmation') return decideGate(store, actor, params);
+      if (params.decision !== 'confirm' || !params.descriptionId) throw new RuleError('INVALID_PARAMS', '确认工作说明须指定所查看的版本并选择 confirm。', 400);
+      return confirmDescription(store, actor, { ...params, descriptionId: params.descriptionId });
+    },
+  }),
+  operation({
+    name: 'propose-gate', description: '提出一般决策关卡', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), question: z.string().trim().min(1), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional() }).strict(),
+    execute: ({ store, actor }, params) => proposeGate(store, actor, params),
+  }),
+  operation({
+    name: 'update-gate', description: '修改一般决策关卡并保存历史', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), question: z.string().trim().min(1).optional(), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional() }).strict(),
+    execute: ({ store, actor }, params) => updateGate(store, actor, params),
+  }),
+  operation({
+    name: 'withdraw-gate', description: '撤回调度者提出的一般关卡', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), reason: z.string().trim().min(1) }).strict(),
+    execute: ({ store, actor }, params) => withdrawGate(store, actor, params),
+  }),
+  operation({
+    name: 'get-gate-history', description: '读取关卡修改历史', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId, gateId }) => gateHistory(store, workId, gateId),
+  }),
+  operation({
+    name: 'create-card', description: '建卡片', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional() }).strict(),
+    execute: ({ store, actor }, params) => createCard(store, actor, params),
+  }),
+  operation({
+    name: 'update-card', description: '修改卡片内容或是否需要验收', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional() }).strict(),
+    execute: ({ store, actor }, params) => updateCard(store, actor, params),
+  }),
+  operation({
+    name: 'cancel-card', description: '调度者取消卡片并唤醒后续处理', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), reason: z.string().trim().min(1) }).strict(),
+    execute: ({ store, actor }, params) => cancelCard(store, actor, params),
+  }),
+  operation({
+    name: 'get-card', description: '读取卡片详情', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId, cardId }) => cardDetails(store, workId, cardId),
+  }),
+  operation({
+    name: 'get-card-graph', description: '读取卡片、关卡及其依赖', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => cardGraph(store, workId),
+  }),
+  operation({
+    name: 'add-dependency', description: '添加卡片或关卡之间的依赖', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: dependencySchema, execute: ({ store, actor }, params) => addDependency(store, actor, params),
+  }),
+  operation({
+    name: 'remove-dependency', description: '删除依赖并重新推导卡片状态', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: dependencySchema, execute: ({ store, actor }, params) => removeDependency(store, actor, params),
   }),
   operation({
     name: 'get-coordinator-notes', description: '读取调度笔记全文与版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,

@@ -202,7 +202,9 @@ test('约束失败返回结构化错误并记录拒绝事件，事务回滚且�
   assert.deepEqual(timeline.map((event: any) => event.action), ['operation-rejected', 'operation-rejected', 'project-registered', 'operation-rejected']);
   const started = (await daemon.call('send-message', { projectId: project.id, body: 'test', key: 'rollback' })).body.result;
   const gate = (await daemon.call('list-pending')).body.result[0];
-  assert.equal((await daemon.call('withdraw-gate', { workId: started.work.id, gateId: gate.id })).status, 404);
+  const withdraw = await daemon.call('withdraw-gate', { workId: started.work.id, gateId: gate.id, reason: '不能撤回固定关卡' });
+  assert.equal(withdraw.status, 403);
+  assert.equal(withdraw.body.error.code, 'FORBIDDEN');
   assert.equal((await daemon.call('list-pending')).body.result[0].status, 'pending');
   assert.equal((await daemon.call('send-message', { projectId: project.id, body: 'test' })).body.error.code, 'INVALID_PARAMS');
 });

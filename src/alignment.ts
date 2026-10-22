@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.js';
+import { refreshCardReadiness } from './graph.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -14,11 +15,12 @@ export function projectPath(store: TaskStore, workId: string) {
   return String(store.db.prepare('SELECT path FROM projects WHERE id = ?').get(work.projectId)!.path);
 }
 
-export function confirmationDetails(store: TaskStore, gate: Record<string, unknown>) {
-  if (gate.kind !== 'work-confirmation') return gate;
-  const description = store.descriptions(String(gate.workId)).find(item => item.id === gate.descriptionId) ?? null;
+export function confirmationDetails<T extends object>(store: TaskStore, gate: T) {
+  const fields = gate as { kind?: unknown; workId?: unknown; descriptionId?: unknown };
+  if (fields.kind !== 'work-confirmation') return gate;
+  const description = store.descriptions(String(fields.workId)).find(item => item.id === fields.descriptionId) ?? null;
   return { ...gate, description, baseRef: description?.baseRef ?? null, baseCommit: description?.baseCommit ?? null,
-    uncommittedChanges: git(projectPath(store, String(gate.workId)), 'status', '--porcelain') };
+    uncommittedChanges: git(projectPath(store, String(fields.workId)), 'status', '--porcelain') };
 }
 
 export function draftDescription(store: TaskStore, actor: Actor, params: {
@@ -40,8 +42,8 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   if (!gate) {
     const id = randomUUID();
     const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'work-confirmation', question: '确认工作说明' }, { workId: work.id });
-    store.db.prepare(`INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, work.id, 'work-confirmation', 'pending', '确认工作说明', event.time, event.id);
+    store.db.prepare(`INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence, creator_type, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, work.id, 'work-confirmation', 'pending', '确认工作说明', event.time, event.id, actor.type, actor.id);
     store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'gate', id }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId: work.id });
     gate = { id };
   }
@@ -98,6 +100,7 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
       .run(description.baseRef, description.baseCommit, workBranch, workPath, description.id, work.id);
     const event = store.appendEvent(actor, { type: 'gate', id: params.gateId }, 'gate-decided', { decision: params.decision, descriptionId: description.id, workBranch, workPath }, { workId: work.id });
     store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, work.id);
+    refreshCardReadiness(store, work.id);
     return store.work(work.id);
   });
 }
