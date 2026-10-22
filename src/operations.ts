@@ -52,7 +52,7 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'create-dispatch', description: '给卡片派执行单，新开或续跑执行者对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), templateId: z.string().min(1),
-      purpose: z.literal('execution').optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional() }).strict(),
+      purpose: z.literal('execution').optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional(), needsBrowser: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => createDispatch(store, actor, params),
   }),
   operation({
