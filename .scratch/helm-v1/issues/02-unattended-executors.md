@@ -18,3 +18,7 @@ Codex CLI/SDK、Grok CLI、Claude Code CLI/Agent SDK 怎样在无人值守下启
 - **进度与续跑**：三者都有 JSON 或流式事件输出，都能按 session 或 thread id 续跑。
 - **A4：推翻**。worktree 加 cwd 只能保证"五个执行者不改同一份工作副本"。Claude 的文件工具和 hook 不在 Bash 沙箱里；Grok 的 workspace 模式仍可写 `~/.grok/`，读范围是整台机器；Codex 默认可写 `/tmp`，五个进程共用 `~/.codex` 的 SQLite，锁残留会让后续进程启动超时。要防"被提示带偏的执行者读到密钥、写到仓库外、锁死共享状态"，还需要一层它们进不去的边界：容器或 VM，至少要按进程拆开家目录和凭证。交给 [隔离与合并](08-isolation-and-merge.md) 决定。
 - **待实测**：Codex `workspace-write` 下 `.git` 只读，worktree 里能否提交，文档没有写清（会影响谁来提交）。并入 [调度者实测](14-coordinator-trial.md) 或 08 一起验证。
+
+## Comments
+
+- 2026-10-22 冲突复核：本单的无人值守参数和沙箱分析都基于一次性命令（`codex exec`、`grok -p`、`claude -p`）。04 已改为 Claude Agent SDK、`codex app-server`、ACP，对应的设置（`approvalPolicy`、ACP 权限代答、SDK `permissionMode`）以及"Codex `workspace-write` 下 worktree 能否提交"并入 [22](22-driver-and-subscription-trial.md) 实测。

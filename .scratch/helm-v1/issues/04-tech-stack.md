@@ -39,3 +39,9 @@ Helm 用什么语言和框架实现？进程怎么组成（一个后台守护进
 - 2026-10-21 Q14：和 Todos 一样，Codex 走原生 `codex app-server`（可在一轮中追加消息、读额度），不走 `codex-acp`，也不用 Codex SDK。驱动定为：Claude Agent SDK、Codex app-server、通用 ACP（Grok、DeepSeek Harness 及以后的 agent）、一次性命令兜底。ACP 读不到任何一家的套餐额度。
 - 2026-10-21 Q15（多个 Codex 并行时的状态库争用）调研见 [codex-concurrency.md](../../../docs/research/codex-concurrency.md)：`state_5.sqlite` 是线程索引，`logs_2.sqlite` 是诊断日志，对话正文在 `CODEX_HOME/sessions/*.jsonl`，`thread/resume` 靠 rollout 文件；`CODEX_SQLITE_HOME` / `-c sqlite_home=` 只挪数据库，登录仍从 `CODEX_HOME` 读；#32160、#26454 仍未修复；vibe-kanban 每次执行起一个 app-server、共用 `~/.codex`（即方案 A），VS Code 扩展和桌面应用一个 app-server 承载多个会话，没有产品复制登录。
 - 2026-10-21 Q15：选 D。每个 Codex 执行者一个独立的 `codex app-server` 进程，各用 `CODEX_SQLITE_HOME` 指定自己的数据库目录（只设在 Helm 拉起的进程上，不写进用户的 `config.toml`）；登录和对话记录共用 `~/.codex`，不复制登录。
+
+- 2026-10-22 冲突复核（Claude 驱动）：保留 Claude Agent SDK，补理由。21 和封号调研把"直接拉起 `claude`"当作稳妥的前提；SDK 设 `pathToClaudeCodeExecutable` 后拉起的就是用户本机那份未修改的 `claude`，登录由 `claude` 自己完成，Helm 不读取、不转发凭证；SDK 概览禁止的是"第三方在自己的产品里提供 claude.ai 登录"，Helm 只供用户自用，不提供登录；帮助中心写明订阅登录下 SDK 用量从计划额度扣。这是假设，由 [22](22-driver-and-subscription-trial.md) 实测；扣到 API 或 extra usage 就改用 `claude -p` stream-json。
+
+- 2026-10-22 冲突复核：本单依赖的驱动与订阅前提（原并入 14 的①–④）拆到 [22](22-driver-and-subscription-trial.md)，排在 06 之前实测。
+
+- 2026-10-22 冲突复核：本单定的是架构；交付顺序由 [15](15-v1-slice.md) 定，第一个可运行版本先打通一种驱动。

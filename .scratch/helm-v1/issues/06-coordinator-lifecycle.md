@@ -3,7 +3,7 @@
 Type: grilling
 Status: open
 Labels: wayfinder:grilling
-Blocked by: 01, 03, 17
+Blocked by: 01, 03, 17, 22
 Map: [Helm v1 设计](../map.md)
 
 ## Question
@@ -17,3 +17,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-21 来自 [04](04-tech-stack.md)：调度者与执行者用同一套驱动（Claude Agent SDK、`codex app-server`、通用 ACP）；`codex exec`、`claude -p`、`grok -p` 这类一次性命令跑完即退出，不能当长时调度者，zcode 这类只有一次性命令的 agent 只能当执行者。会话是长时的；两次唤醒之间进程是否常驻、上下文满了怎么换会话，仍由本单决定。ACP 和 Claude SDK 下，调度者正在一轮里时，用户的新消息要排到下一轮或先取消再重发；只有 Codex app-server 能 `turn/steer` 插进当前轮。
 
 - 来自 [05](05-task-store-model.md)（2026-10-21）：运行层唤醒调度者的事件：卡片变为待派单、派单结束、用户发来消息、关卡有了决定（含审核退回）、上游被取消或撤回导致下游卡住。工作暂停期间只投递用户消息，其余攒到恢复后。调度者会话作为实体入库（模板、对话 id、起止、结束原因），一项工作先后可有多个。
+
+- 2026-10-22 冲突复核：调度者的驱动选择依赖 [22](22-driver-and-subscription-trial.md) 的实测结果（Claude SDK 是否扣订阅、Codex app-server 登录与并发、Grok 取消），本单排在 22 之后。

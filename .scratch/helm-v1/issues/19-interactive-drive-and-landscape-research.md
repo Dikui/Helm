@@ -20,3 +20,5 @@ Map: [Helm v1 设计](../map.md)
 - **待实测**：`codex app-server` 无 API key 时是否读 ChatGPT 登录；`claude -p` stream-json 输入下进程是否在第一条结果后继续收消息；`grok agent stdio` 是否支持 `session/cancel`、`session/load`。
 
 ## Comments
+
+- 2026-10-22 冲突复核：本单"执行者默认一次性 spawn"的建议被 [04](04-tech-stack.md) 推翻。执行者和调度者用同一套驱动（Claude Agent SDK、`codex app-server`、ACP），每次派单一个会话；一次性命令只用于没有协议模式的 agent。

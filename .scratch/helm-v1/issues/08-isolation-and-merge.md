@@ -15,3 +15,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-21 来自 [04](04-tech-stack.md)：隔离方案要和订阅登录一起考虑。Claude 在 macOS 上把登录存在钥匙串里，Codex 存在 `~/.codex`，Grok 存在 `~/.grok`；按进程拆开家目录或放进容器，可能导致读不到登录。Claude Agent SDK 运行在 `helmd` 进程里，执行者如果放进容器，`pathToClaudeCodeExecutable` 要指向一个包装脚本（例如 `docker exec`）。多个 Codex 执行者共用 `~/.codex` 时的 SQLite 锁争用见 04 的 Q15。
 
 - 来自 [05](05-task-store-model.md)（2026-10-21）：任务库模型没有包含 worktree、分支和合并状态，由本单补充。已有字段：成果的种类含"分支"，记路径或 ref；返工时新建修复卡片（不重开已完成的卡片），已放行的下游可能已基于原卡片的成果开工。
+
+- 2026-10-22 冲突复核：外层边界不预设前提，由本单从头讨论。已知冲突：02 建议的容器、VM、按进程拆家目录和凭证，都会让执行者读不到订阅登录（Claude 在钥匙串，Codex 在 `~/.codex`，Grok 在 `~/.grok`），见 04 的评论。Codex 在 worktree 里能否提交由 [22](22-driver-and-subscription-trial.md) 实测。
