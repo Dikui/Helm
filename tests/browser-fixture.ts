@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
-import { FakeDriver, type FakeContext, type FakeScript } from '../src/driver.js';
+import { FakeDriver, type Driver, type FakeContext, type FakeScript } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -25,6 +25,7 @@ export async function until<T>(read: () => Promise<T>, ready: (value: T) => bool
 export async function fixture(t: TestContext, executors: FakeScript[], config: {
   needsBrowser?: boolean; purpose?: 'execution' | 'verification'; browserArgs?: string[]; realBrowser?: boolean; after?: FakeScript;
   watchdog?: { wallTimeoutMs: number; idleTimeoutMs: number };
+  executorDriver?: Driver; content?: string; model?: string;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-browser-')));
   const repo = join(directory, 'project');
@@ -34,12 +35,12 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   git('add', 'index.html');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const options = {
-    port: 0, dataDir: join(directory, 'data'), executorDriver: new FakeDriver(executors),
+    port: 0, dataDir: join(directory, 'data'), executorDriver: config.executorDriver ?? new FakeDriver(executors),
     browserCommand: config.realBrowser ? undefined : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), ...(config.browserArgs ?? [])] },
     driver: new FakeDriver([[
       { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '浏览器派单', boundary: '本机', criteria: '截图匹配页面' }), check: ok },
     ], [
-      { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
+      { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: config.content ?? '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', purpose: config.purpose, needsBrowser: config.needsBrowser ?? false }), check: ok },
       { type: 'end', reason: 'completed', finalAnswer: 'created' },
     ], ...(config.after ? [config.after] : [])]),
@@ -54,13 +55,14 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   const work = (await call('send-message', { projectId: project.id, key: 'start', body: '检查页面' })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
+  if (config.model) ok(await call('configure-agent-template', { templateId: 'claude-executor', model: config.model, reasoningEffort: 'low' }));
   const gate = (await call('list-pending')).result[0];
   if (config.watchdog) ok(await call('set-dispatch-watchdog', config.watchdog));
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   await until(events, values => values.some(event => event.action === 'round-ended' && event.details.finalAnswer === 'created'));
   const dispatch = (await call('list-dispatches', { workId: work.id })).result[0];
   assert.ok(dispatch, JSON.stringify(await events()));
-  const ended = () => until(async () => (await call('get-dispatch', { workId: work.id, dispatchId: dispatch.id })).result, (value: any) => value.status === 'ended', config.realBrowser ? 120_000 : 10_000);
+  const ended = () => until(async () => (await call('get-dispatch', { workId: work.id, dispatchId: dispatch.id })).result, (value: any) => value.status === 'ended', config.executorDriver ? 180_000 : config.realBrowser ? 120_000 : 10_000);
   return { ...daemon, call, work, dispatch, ended, events, directory };
 }
 

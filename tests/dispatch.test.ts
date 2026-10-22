@@ -160,7 +160,10 @@ test('派单看门狗分别限制无输出和墙钟总时长，超时保留改�
       steps.push({ type: 'hang' });
       return steps;
     }], { beforeConfirm: async call => {
-      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: threshold === 'wall' ? 400 : 5000, idleTimeoutMs: 150 }));
+      // Isolate each deadline: MCP startup under parallel load must not make
+      // the wall-clock case hit its idle deadline before streaming starts.
+      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: threshold === 'wall' ? 1000 : 5000,
+        idleTimeoutMs: threshold === 'wall' ? 5000 : 150 }));
     } });
     await daemon.finished();
     const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));

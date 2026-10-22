@@ -5,6 +5,7 @@ import { invoke, rejectOperation } from './operations.js';
 import { RuleError, TaskStore, type Actor, type EventFilter } from './store.js';
 import { handleMcp } from './mcp.js';
 import { FakeDriver, type Driver } from './driver.js';
+import { ClaudeExecutorDriver } from './claude-driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
@@ -85,7 +86,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
-  executions = new ExecutionRunner(store, options.executorDriver ?? new FakeDriver(), `${url}/mcp`, options.browserCommand);
+  executions = new ExecutionRunner(store, options.executorDriver ?? new ClaudeExecutorDriver(), `${url}/mcp`, options.browserCommand);
   userOperations = new UserOperations(store, executions, scheduler);
   let closing: Promise<void> | undefined;
   return {
