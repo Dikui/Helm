@@ -1,0 +1,257 @@
+import assert from 'node:assert/strict';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { test, type TestContext } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { CanUseTool, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
+import type { DriverEvent, SessionOptions } from '../src/driver.js';
+import { fixture as dispatchFixture } from './browser-fixture.js';
+
+async function fixture(t: TestContext): Promise<SessionOptions> {
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  return {
+    cwd, env: { PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
+    template: { id: 'claude-executor', role: 'executor', model: 'haiku', reasoningEffort: 'low' },
+    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
+    mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
+  };
+}
+
+function result(overrides: Partial<SDKResultMessage> = {}): SDKResultMessage {
+  return {
+    type: 'result', subtype: 'success', is_error: false, result: '最终回答',
+    uuid: 'result-uuid', session_id: 'session', duration_ms: 1, duration_api_ms: 1,
+    num_turns: 1, stop_reason: 'end_turn', total_cost_usd: 0,
+    usage: { input_tokens: 999, output_tokens: 999 },
+    modelUsage: {
+      main: { inputTokens: 10, outputTokens: 4, cacheReadInputTokens: 20, cacheCreationInputTokens: 3,
+        webSearchRequests: 0, costUSD: 0, contextWindow: 200000, maxOutputTokens: 1000 },
+      helper: { inputTokens: 2, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+        webSearchRequests: 0, costUSD: 0, contextWindow: 200000, maxOutputTokens: 1000 },
+    },
+    permission_denials: [], ...overrides,
+  } as SDKResultMessage;
+}
+
+function fakeQuery(messages: SDKMessage[], inspect?: (args: Parameters<ClaudeQuery>[0]) => void): ClaudeQuery {
+  return args => {
+    inspect?.(args);
+    return { close() {}, async *[Symbol.asyncIterator]() { yield* messages; } };
+  };
+}
+
+async function collect(driver: ClaudeExecutorDriver, options: SessionOptions) {
+  const session = await driver.start(options);
+  await session.send('派单内容');
+  const events: DriverEvent[] = [];
+  for await (const event of session.events) events.push(event);
+  return { session, events, end: events.find(event => event.type === 'end') };
+}
+
+test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新开/续跑选项', async t => {
+  const options = await fixture(t);
+  for (const resumeSessionId of [undefined, 'previous-session']) {
+    let requestedId: string | undefined;
+    const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: fakeQuery([result()], args => {
+        assert.equal(args.prompt, '派单内容');
+        const sdk = args.options!;
+        assert.equal(sdk.pathToClaudeCodeExecutable, '/test/bin/claude');
+        assert.equal(sdk.cwd, options.cwd);
+        assert.deepEqual(sdk.settingSources, []);
+        assert.equal(sdk.permissionMode, 'default');
+        assert.deepEqual(sdk.sandbox, {
+          enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
+          filesystem: { allowWrite: [options.cwd] }, network: { allowLocalBinding: true },
+        });
+        assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
+        assert.equal(sdk.strictMcpConfig, true);
+        assert.equal(sdk.model, 'haiku');
+        assert.equal(sdk.effort, 'low');
+        assert.equal(sdk.env?.HELM_PORT_START, '4500');
+        assert.equal(sdk.env?.NO_PROXY, 'example.test,127.0.0.1,localhost');
+        assert.equal(sdk.env?.no_proxy, sdk.env?.NO_PROXY);
+        assert.equal(sdk.resume, resumeSessionId);
+        if (resumeSessionId) assert.equal(sdk.sessionId, undefined);
+        else assert.match(sdk.sessionId!, /^[0-9a-f-]{36}$/);
+        requestedId = sdk.resume ?? sdk.sessionId;
+      }) });
+    const { session, end } = await collect(driver, { ...options, resumeSessionId });
+    assert.equal(session.id, requestedId);
+    assert.equal(end?.reason, 'completed');
+  }
+  assert.equal(options.env.NO_PROXY, undefined, '不能修改运行层传入的环境');
+});
+
+test('Claude 只凭 result 结束，记录原始输出、压缩通知和所有模型的 token（含缓存输入）', async t => {
+  const options = await fixture(t);
+  const messages = [
+    { type: 'assistant', message: { content: [{ type: 'text', text: '已完成，额度用完' }] } },
+    { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 100 } },
+    result(),
+  ] as SDKMessage[];
+  const { events, end } = await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+  assert.equal(events.filter(event => event.type === 'compaction').length, 1);
+  assert.deepEqual(events.map(event => event.step), [1, 2, 3, 4, 5]);
+  assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
+  assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5 } });
+});
+
+test('Claude canUseTool 只单次批准副本内写入，拒绝路径穿越、符号链接越界及沙箱逃逸', async t => {
+  const options = await fixture(t);
+  const outside = await fixture(t);
+  await symlink(outside.cwd, join(options.cwd, 'escape'));
+  await symlink(join(outside.cwd, 'not-created'), join(options.cwd, 'dangling'));
+  await mkdir(join(options.cwd, 'nested'));
+  await symlink(join(options.cwd, 'nested'), join(options.cwd, 'safe-link'));
+  let canUseTool: CanUseTool | undefined;
+  await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    query: fakeQuery([result()], args => { canUseTool = args.options?.canUseTool; }) }), options);
+  assert.ok(canUseTool);
+  const permission = (extra: Partial<Parameters<CanUseTool>[2]> = {}): Parameters<CanUseTool>[2] => ({
+    signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
+    suggestions: [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'userSettings' }], ...extra,
+  });
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+    const key = tool === 'NotebookEdit' ? 'notebook_path' : 'file_path';
+    for (const path of ['new/deep/file.txt', join(options.cwd, 'inside.txt'), 'safe-link/new.txt']) {
+      const input = { [key]: path };
+      const decision = await canUseTool(tool, input, permission());
+      assert.deepEqual(decision, { behavior: 'allow', updatedInput: input });
+    }
+    for (const path of [join(outside.cwd, 'outside.txt'), '../outside.txt', `${options.cwd}-sibling/file`,
+      'escape/deep/file.txt', 'dangling', 'dangling/deep/file.txt', '', undefined]) {
+      const decision = await canUseTool(tool, { [key]: path }, permission());
+      assert.equal(decision?.behavior, 'deny', `${tool}: ${path}`);
+    }
+  }
+  assert.equal((await canUseTool('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, permission()))?.behavior, 'deny');
+  assert.equal((await canUseTool('Bash', { command: 'touch file' }, permission({ blockedPath: outside.cwd })))?.behavior, 'deny');
+  for (const [tool, input] of [['Bash', { command: 'npm test' }], ['mcp__helm__submit-conclusion', { conclusion: 'completed' }]] as const) {
+    assert.deepEqual(await canUseTool(tool, input, permission()), { behavior: 'allow', updatedInput: input });
+  }
+  assert.equal((await canUseTool('Write', { file_path: 'inside' }, permission({ signal: AbortSignal.abort() })))?.behavior, 'deny');
+});
+
+test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI、只读角色和扩大的可写范围', async t => {
+  const options = await fixture(t);
+  const bin = join(options.cwd, 'bin');
+  await mkdir(bin);
+  const executable = join(bin, 'claude');
+  await writeFile(executable, '#!/bin/sh\nexit 0\n');
+  await chmod(executable, 0o755);
+  let path: string | undefined;
+  await collect(new ClaudeExecutorDriver({ query: fakeQuery([result()], args => { path = args.options?.pathToClaudeCodeExecutable; }) }),
+    { ...options, env: { PATH: bin } });
+  assert.equal(path, executable);
+  const driver = new ClaudeExecutorDriver({ query: fakeQuery([]) });
+  await assert.rejects(driver.start({ ...options, env: { PATH: join(bin, 'missing') } }), /Local claude executable not found/);
+  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'read-only', writableRoots: [] } }), /executor card copy/);
+  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'workspace-write', writableRoots: [options.cwd, bin] } }), /only its card copy/);
+});
+
+test('Claude 将订阅拒绝和结构化限额错误映射为额度用完，警告、预算和普通回答不误判', async t => {
+  const options = await fixture(t);
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } } as SDKMessage;
+  const warning = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning' } } as SDKMessage;
+  const rateError = { type: 'assistant', error: 'rate_limit', message: { content: [] } } as unknown as SDKMessage;
+  const ordinary = { type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your limit" }] } } as SDKMessage;
+  const error = result({ subtype: 'error_during_execution', is_error: true, errors: ['Request failed'] });
+  const cases: { messages: SDKMessage[]; reason: string }[] = [
+    { messages: [rejected, error], reason: 'quota-exhausted' },
+    { messages: [rateError, error], reason: 'quota-exhausted' },
+    { messages: [result({ subtype: 'success', is_error: true, result: "You've hit your limit · resets 3pm" })], reason: 'quota-exhausted' },
+    { messages: [result({ subtype: 'error_during_execution', is_error: true, errors: ['Weekly usage limit reached'] })], reason: 'quota-exhausted' },
+    { messages: [warning, error], reason: 'error' },
+    { messages: [result({ subtype: 'error_max_budget_usd', is_error: true, errors: ['Max budget exceeded'] })], reason: 'error' },
+    { messages: [result({ is_error: true, result: 'Authentication failed' })], reason: 'error' },
+    { messages: [rejected, result()], reason: 'completed' },
+    { messages: [ordinary, result()], reason: 'completed' },
+  ];
+  for (const { messages, reason } of cases) {
+    const { end } = await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+    assert.equal(end?.reason, reason, JSON.stringify(messages));
+    assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
+    assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
+  }
+});
+
+test('Claude 无 result 或 CLI 崩溃不能报告成功；结束和取消均关闭 SDK 查询流', async t => {
+  const options = await fixture(t);
+  const config = { pathToClaudeCodeExecutable: '/test/bin/claude' };
+  await assert.rejects(collect(new ClaudeExecutorDriver({ ...config, query: fakeQuery([
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as SDKMessage,
+  ]) }), options), /without a result/);
+  await assert.rejects(collect(new ClaudeExecutorDriver({ ...config, query: () => ({
+    close() {}, async *[Symbol.asyncIterator]() { throw new Error('Claude Code process exited with code 7'); },
+  }) }), options), /exited with code 7/);
+  let closed = false;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const driver = new ClaudeExecutorDriver({ ...config, query: args => ({
+    close() { closed = true; },
+    async *[Symbol.asyncIterator]() {
+      started();
+      await new Promise<void>(resolve => args.options!.abortController!.signal.addEventListener('abort', () => resolve(), { once: true }));
+      throw new Error('Query aborted');
+    },
+  }) });
+  const session = await driver.start(options);
+  await session.send('派单');
+  await assert.rejects(session.send('第二份输入'), /already received/);
+  const pending = session.events[Symbol.asyncIterator]().next();
+  await ready;
+  session.cancel();
+  assert.equal((await pending).done, true);
+  assert.equal(closed, true);
+  const beforeInput = await driver.start(options);
+  beforeInput.cancel();
+  assert.equal((await beforeInput.events[Symbol.asyncIterator]().next()).done, true);
+  await assert.rejects(beforeInput.send('取消后'), /cancelled/);
+  closed = false;
+  await collect(new ClaudeExecutorDriver({ ...config, query: () => ({
+    close() { closed = true; }, async *[Symbol.asyncIterator]() { yield result(); },
+  }) }), options);
+  assert.equal(closed, true);
+});
+
+test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身，HTTP 可读到 token 和压缩事件', async t => {
+  const site = createServer((_request, response) => response.end('<h1>SDK browser substitute</h1>'));
+  await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => site.close(() => resolve())));
+  const address = site.address();
+  assert.ok(address && typeof address !== 'string');
+  const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: args => ({
+    close() {},
+    async *[Symbol.asyncIterator]() {
+      const endpoint = args.options!.mcpServers!.helm;
+      assert.ok(endpoint && 'url' in endpoint && endpoint.type === 'http');
+      const client = new Client({ name: 'fake-sdk-query', version: '1' });
+      try {
+        await client.connect(new StreamableHTTPClientTransport(new URL(endpoint.url), { requestInit: { headers: endpoint.headers } }));
+        const tools = (await client.listTools()).tools.map(tool => tool.name);
+        assert.ok(tools.includes('submit-conclusion') && tools.includes('browser_navigate'));
+        const navigation = await client.callTool({ name: 'browser_navigate', arguments: { url: `http://127.0.0.1:${address.port}` } });
+        assert.equal(navigation.isError, undefined);
+        const snapshot = await client.callTool({ name: 'browser_snapshot', arguments: {} });
+        assert.match(JSON.stringify(snapshot.content), /SDK browser substitute/);
+        const conclusion = await client.callTool({ name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'SDK MCP round trip' } });
+        assert.equal((conclusion.structuredContent as { ok: boolean }).ok, true);
+        yield { type: 'system', subtype: 'compact_boundary' } as SDKMessage;
+        yield result();
+      } finally { await client.close(); }
+    },
+  }) });
+  const daemon = await dispatchFixture(t, [], { needsBrowser: true, executorDriver: driver });
+  const dispatch = await daemon.ended();
+  assert.equal(dispatch.endReason, 'completed', dispatch.failure);
+  assert.equal(dispatch.conclusion, 'completed');
+  assert.equal(dispatch.conclusionReason, 'SDK MCP round trip');
+  assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5 });
+  assert.ok((await daemon.events()).some(event => event.action === 'context-compacted' && event.dispatchId === dispatch.id));
+});
