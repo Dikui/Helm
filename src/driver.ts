@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -91,15 +91,11 @@ export class FakeDriver implements Driver {
               const roots = await Promise.all(options.sandbox.writableRoots.map(root => realpath(root)));
               let ancestor = dirname(path);
               for (;;) {
-                try { ancestor = await realpath(ancestor); break; }
-                catch (error) {
-                  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-                  ancestor = dirname(ancestor);
-                }
+                const existing = await existingPath(ancestor);
+                if (existing) { ancestor = existing; break; }
+                ancestor = dirname(ancestor);
               }
-              let target = path;
-              try { target = await realpath(path); }
-              catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+              const target = await existingPath(path) ?? path;
               if (!roots.some(root => inside(root, path) && inside(root, ancestor) && inside(root, target))) throw new Error('Sandbox rejects write outside writable roots');
               await mkdir(dirname(path), { recursive: true });
               await writeFile(path, instruction.content);
@@ -128,4 +124,15 @@ export class FakeDriver implements Driver {
       })(),
     };
   }
+}
+
+async function existingPath(path: string): Promise<string | undefined> {
+  try { return await realpath(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  const entry = await lstat(path).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (entry?.isSymbolicLink()) throw new Error('Sandbox rejects unresolved symbolic link');
+  return undefined;
 }

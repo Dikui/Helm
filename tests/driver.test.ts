@@ -67,12 +67,14 @@ test('假驱动遵守只读和可写目录边界，拒绝路径穿越与符号�
   const options = await fixture(t);
   const outside = await fixture(t);
   await symlink(outside.cwd, join(options.cwd, 'escape'));
+  await symlink(join(outside.cwd, 'forbidden.txt'), join(options.cwd, 'dangling'));
   const driver = new FakeDriver([
     [{ type: 'write', path: 'forbidden.txt', content: '不能写' }],
     [{ type: 'write', path: '../forbidden.txt', content: '不能写' }],
     [{ type: 'write', path: 'escape/forbidden.txt', content: '不能写' }],
+    [{ type: 'write', path: 'dangling', content: '不能写' }],
   ]);
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < 4; index++) {
     const session = await driver.start(index === 0 ? { ...options, sandbox: { mode: 'read-only', writableRoots: [] } } : options);
     await session.send('写文件');
     await assert.rejects(session.events[Symbol.asyncIterator]().next(), /Sandbox rejects/);
