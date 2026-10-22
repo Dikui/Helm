@@ -67,6 +67,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - [任务库数据模型与状态](issues/05-task-store-model.md) — 状态表+事件表同事务写，事件记执行者，步骤为库外输出的序号；每项工作一条对话（消息不可改 + 决策关卡单独成实体，确认工作说明和审核是固定关卡，审核正文即汇总报告）；卡片完成由调度者标记、需验收的须先通过，完成为终态、返工建修复卡片；依赖到位后才派单，不预派
 - [驱动与订阅实测](issues/22-driver-and-subscription-trial.md) — 04 的驱动选择不变：Claude SDK 走本机登录、Codex 只改 sqlite 目录仍是 ChatGPT 登录且能续跑、一个 app-server 10 个 thread 真并行、Grok ACP 可取消和续跑；推翻一条：Codex `workspace-write` 下不能提交（交 08）；Grok 权限跟随用户全局配置，`allow_always` 按 cwd 落盘（交 07）；DeepSeek 默认路线要 API key，账号登录要选 `deepseek-account` 路线，只能 resume 不能 load
 - [调度者生命周期](issues/06-coordinator-lifecycle.md) — 任务型：每次唤醒新开 CLI 会话（调度轮次），读运行层拼的启动简报（工作说明、卡片摘要、未决关卡、调度笔记、新事件、最近 20 条对话）处理完退出；事件排队合并投递，用户可打断；轮内靠 CLI 自动压缩兜底；失败重投，连败 3 次暂停；Claude Code、Codex 两个调度者模板，官方默认配置、不读本机全局配置
+- [运行层硬约束与调度者工具集](issues/07-hard-constraints-and-tools.md) — 违规当场返回结构化错误并记事件；`helmd` 本机 HTTP MCP、按轮次发令牌限定所属工作（待 14 实测）；新建类工具带 `key` 去重；调度者对代码只读、执行者无 Helm 工具；补齐依赖、派单（每卡最多一个活动派单）、凭据、权限代答约束；对外动作与 Grok 全局放行交 08
 
 ## Not yet specified
 

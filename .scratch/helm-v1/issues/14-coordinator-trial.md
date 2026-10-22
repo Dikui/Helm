@@ -19,3 +19,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-22 冲突复核：上面 04 那条评论里的①–④（Claude SDK 扣订阅、Codex app-server 登录与并发、Grok、DeepSeek）拆到 [22](22-driver-and-subscription-trial.md)，排在 06 之前做，并发实测按新上限改为同时 10 个 Codex 执行者。本单只测 A1、A2 和⑤（调度者在一轮中时用户消息的排队体验）。
 
 - 2026-10-22 来自 [06](06-coordinator-lifecycle.md)：调度者改为任务型，上面 01 那条（上下文满后接续、token 增长）作废。改为验证：任务型调度者跨轮次不失忆（不重复派单、不忘与用户商定的结论、调度笔记够用），对齐阶段一问一答的体验可接受，每轮简报的 token 量；⑤ 改为验证"排队 + 打断"的体验。推翻时退到混合形态（对齐阶段续跑 CLI 会话）。
+
+- 2026-10-22 来自 [07](07-hard-constraints-and-tools.md)：加一项验证：Claude Code（Agent SDK）和 Codex（app-server）都能按会话加载带令牌的 HTTP MCP，调度者能用它完成建卡、派单、改依赖；同一批事件重投时，靠 `key` 不重复建卡和派单；调度者对项目代码只读的设置（Claude 关写工具、Codex `read-only`）生效。有一家不能按会话加载 HTTP MCP，就改为每轮一个 stdio 小程序转发给 `helmd`。
