@@ -21,3 +21,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-22 冲突复核：派单输出和调度者会话输出不精简，推翻 01 的"工作结束后精简"。原样保存，工作结束后 gzip 压缩，不删内容。本单只需定一条提示条件（总量超过多少，或工作结束超过多少天），提示用户手动删除，不自动删。依据：本机 `~/.codex/sessions` 713 个会话中位数 2.6 MB、最大 32 MB，`~/.claude/projects` 127 个中位数 0.6 MB；一项工作估计 80–100 MB，压缩后约 10–20 MB。
 
 - 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：续跑实测：Codex 在全新 sqlite 目录的新进程里 `thread/resume` 旧 thread 成功；Grok 新进程 `session/load`、`session/resume` 都成功。未确认：Grok `session/cancel` 后正在跑的子进程是否被杀，看门狗不能假设取消会清掉子进程。
+
+- 2026-10-22 来自 [06](06-coordinator-lifecycle.md)：调度者改为任务型，崩溃恢复不再续跑 CLI 会话：轮次失败就开新一轮重投未处理事件，连续失败 3 次暂停工作并通知用户；helmd 重启后，运行中的轮次按失败处理。原"调度者会话输出"改称"调度轮次输出"，保存策略同派单输出。
