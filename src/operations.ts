@@ -82,9 +82,9 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => configureTemplate(store, actor, params),
   }),
   operation({
-    name: 'create-dispatch', description: '给卡片派执行单，新开或续跑执行者对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
+    name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑，验收一律新开对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), templateId: z.string().min(1),
-      purpose: z.literal('execution').optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional(), needsBrowser: z.boolean().optional() }).strict(),
+      purpose: z.enum(['execution', 'verification']).optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional(), needsBrowser: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => createDispatch(store, actor, params),
   }),
   operation({
@@ -93,8 +93,8 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => revokeDispatch(store, actor, params),
   }),
   operation({
-    name: 'submit-conclusion', description: '执行者提交完成或受阻及一句理由，以最后一次为准', callers: ['dispatch'], keyed: false, mutates: true,
-    schema: z.object({ conclusion: z.enum(['completed', 'blocked']), reason: z.string().trim().min(1) }).strict(),
+    name: 'submit-conclusion', description: '执行派单报完成或受阻，验收派单报通过或不通过；附一句理由，以最后一次为准', callers: ['dispatch'], keyed: false, mutates: true,
+    schema: z.object({ conclusion: z.enum(['completed', 'blocked', 'passed', 'failed']), reason: z.string().trim().min(1) }).strict(),
     execute: ({ store, actor }, params) => submitConclusion(store, actor, params),
   }),
   operation({

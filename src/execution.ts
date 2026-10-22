@@ -9,6 +9,7 @@ import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
+import { resetVerificationCopy } from './verification.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -132,7 +133,7 @@ export class ExecutionRunner {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, ports.start, ports.end, dispatch.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
-          this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ?`).run(card.id);
+          this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit, portStart: ports.start, portEnd: ports.end }, scope);
       });
@@ -148,7 +149,7 @@ export class ExecutionRunner {
             this.store.db.prepare('UPDATE dispatches SET browser_pgid = ?, browser_started_at = ? WHERE id = ?').run(browser.pgid, browser.startedAt, dispatch.id);
             this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-started', { pgid: browser.pgid, startedAt: browser.startedAt }, scope);
           });
-          await browser.connect();
+          await abortable(browser.connect(), stop.signal);
         }
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason || this.stopping) return;
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
@@ -228,25 +229,24 @@ export class ExecutionRunner {
         this.browsers.delete(dispatch.id);
       }
       if (browserFailed) reason = 'error';
-      let current = getDispatch(this.store, dispatch.workId, dispatch.id);
-      if (this.stopping && !current.abortReason) {
-        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET abort_reason = ? WHERE id = ?').run('运行层停止', dispatch.id); });
-        current = getDispatch(this.store, dispatch.workId, dispatch.id);
-      }
-      if (current.abortReason) reason = 'aborted';
+      if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
       try {
         const cleaned = await cleanupWorktreeProcesses(workPath, processes);
         if (cleaned.pids.length) this.store.transaction(() => this.store.appendEvent(runtime,
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        // Runtime commits are outside the executor's restricted environment.
-        abortCardGit(this.store, dispatch, workPath, card.cardBranch!);
-        const changes = dispatchGit(workPath, 'status', '--porcelain');
-        if (changes) {
-          const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-          if (names.length) dispatchGit(workPath, 'add', '--', ...names);
-          dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}`);
+        if (dispatch.purpose === 'verification') {
+          if (startCommit) resetVerificationCopy(this.store, dispatch, workPath, card.cardBranch!, startCommit);
+        } else {
+          // Runtime commits are outside the executor's restricted environment.
+          abortCardGit(this.store, dispatch, workPath, card.cardBranch!);
+          const changes = dispatchGit(workPath, 'status', '--porcelain');
+          if (changes) {
+            const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+            if (names.length) dispatchGit(workPath, 'add', '--', ...names);
+            dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}`);
+          }
         }
         endCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
         const files = startCommit ? dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=ACMRT', '-z', startCommit, endCommit).split('\0').filter(Boolean) : [];
@@ -263,6 +263,13 @@ export class ExecutionRunner {
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
       }
+      // Revocation or shutdown can arrive while verification processes are exiting.
+      let current = getDispatch(this.store, dispatch.workId, dispatch.id);
+      if (this.stopping && !current.abortReason) {
+        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET abort_reason = ? WHERE id = ?').run('运行层停止', dispatch.id); });
+        current = getDispatch(this.store, dispatch.workId, dispatch.id);
+      }
+      if (current.abortReason) reason = 'aborted';
       if (reason !== 'completed') finalAnswer = null;
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, final_answer = ?, usage = ?, failure = ?, end_commit = ?,

@@ -95,6 +95,31 @@ test('需要浏览器的派单只获得检查工具，截图的图像与结构�
   } finally { await user.close(); }
 });
 
+test('验收派单可在同一端点检查页面并提交通过，关闭浏览器后丢弃临时改动', async t => {
+  let workPath = '';
+  const daemon = await fixture(t, [ctx => {
+    workPath = ctx.options.cwd;
+    assert.ok(JSON.parse(ctx.input).content.startsWith('卡片说明快照：\n检查页面'));
+    return [
+      { type: 'write', path: 'index.html', content: 'temporary review edit' },
+      { type: 'tool', name: 'browser_snapshot', arguments: {}, check: value => assert.ok(value) },
+      { type: 'tool', name: 'browser_take_screenshot', arguments: {}, check: value => assert.ok(value) },
+      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '用途不匹配' }, check: value => assert.equal((value as any).error.code, 'INVALID_PARAMS') },
+      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '页面验收通过' }, check: ok },
+    ];
+  }], { purpose: 'verification', needsBrowser: true });
+  const result = await daemon.ended();
+  assert.equal(result.purpose, 'verification');
+  assert.equal(result.needsBrowser, true);
+  assert.equal(result.endReason, 'completed', result.failure);
+  assert.equal(result.conclusion, 'passed');
+  assert.equal(result.endCommit, result.startCommit);
+  assert.equal(await readFile(join(workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
+  assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
+  const events = await daemon.events();
+  assert.ok(events.findIndex(event => event.action === 'browser-stopped') < events.findIndex(event => event.action === 'dispatch-ended'));
+});
+
 for (const reason of ['error', 'quota-exhausted', 'timed-out', 'aborted', 'context-overflow'] as const) {
   test(`浏览器派单以 ${reason} 结束时关闭进程组并使令牌失效`, async t => {
     let token = '';
@@ -160,6 +185,17 @@ test('浏览器尚未就绪时停止运行层会取消启动并清理进程', as
     value => Boolean(value.browserPgid));
   await daemon.close();
   assert.throws(() => process.kill(dispatch.browserPgid, 0), { code: 'ESRCH' });
+});
+
+test('验收浏览器尚未就绪时看门狗仍能中止启动、清理进程并重置副本', async t => {
+  const daemon = await fixture(t, [], { purpose: 'verification', needsBrowser: true, browserArgs: ['--hang-start'],
+    watchdog: { wallTimeoutMs: 1000, idleTimeoutMs: 10000 } });
+  const result = await daemon.ended();
+  assert.equal(result.endReason, 'timed-out', result.failure);
+  assert.equal(result.sessionId, null);
+  assert.equal(result.conclusion, 'undeclared');
+  assert.equal(result.endCommit, result.startCommit);
+  assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
 });
 
 test('运行中的浏览器 MCP 意外退出会结束挂住的执行者并记录错误', async t => {

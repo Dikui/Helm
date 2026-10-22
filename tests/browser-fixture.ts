@@ -23,7 +23,8 @@ export async function until<T>(read: () => Promise<T>, ready: (value: T) => bool
 }
 
 export async function fixture(t: TestContext, executors: FakeScript[], config: {
-  needsBrowser?: boolean; browserArgs?: string[]; realBrowser?: boolean; after?: FakeScript;
+  needsBrowser?: boolean; purpose?: 'execution' | 'verification'; browserArgs?: string[]; realBrowser?: boolean; after?: FakeScript;
+  watchdog?: { wallTimeoutMs: number; idleTimeoutMs: number };
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-browser-')));
   const repo = join(directory, 'project');
@@ -38,8 +39,8 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
     driver: new FakeDriver([[
       { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '浏览器派单', boundary: '本机', criteria: '截图匹配页面' }), check: ok },
     ], [
-      { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '检查页面' }), saveAs: 'card', check: ok },
-      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', needsBrowser: config.needsBrowser ?? false }), check: ok },
+      { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
+      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', purpose: config.purpose, needsBrowser: config.needsBrowser ?? false }), check: ok },
       { type: 'end', reason: 'completed', finalAnswer: 'created' },
     ], ...(config.after ? [config.after] : [])]),
   } satisfies Parameters<typeof startHelmd>[0];
@@ -54,6 +55,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
   const gate = (await call('list-pending')).result[0];
+  if (config.watchdog) ok(await call('set-dispatch-watchdog', config.watchdog));
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   await until(events, values => values.some(event => event.action === 'round-ended' && event.details.finalAnswer === 'created'));
   const dispatch = (await call('list-dispatches', { workId: work.id })).result[0];

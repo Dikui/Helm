@@ -67,7 +67,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (![0, 1, 2, 3, 4, 5, 6, 7, 8].includes(Number(version))) {
+    if (![0, 1, 2, 3, 4, 5, 6, 7, 8, 9].includes(Number(version))) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -229,6 +229,14 @@ export class TaskStore {
       ALTER TABLE settings ADD COLUMN round_total_timeout_ms INTEGER NOT NULL DEFAULT 1800000;
       ALTER TABLE settings ADD COLUMN round_idle_timeout_ms INTEGER NOT NULL DEFAULT 600000;
       PRAGMA user_version = 8;
+      COMMIT;
+    `);
+    if (Number(version) < 9) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE dispatches ADD COLUMN card_content_snapshot TEXT;
+      ALTER TABLE dispatches ADD COLUMN work_description_id TEXT REFERENCES work_descriptions(id);
+      ALTER TABLE dispatches ADD COLUMN work_description_version INTEGER;
+      PRAGMA user_version = 9;
       COMMIT;
     `);
   }
