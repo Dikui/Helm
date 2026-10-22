@@ -60,3 +60,5 @@ ADR：[0003 不加外层隔离，完成即合并到工作分支](../../../docs/a
   3. **合进基准分支**（细化第 6 条）：先用 `git merge-tree --write-tree <基准分支> helm/<工作>` 预检，不碰任何目录；有冲突就不合并，在对话里报告冲突文件和工作分支名。没冲突时：基准分支未在用户项目目录检出，用 `git commit-tree` + `git update-ref` 直接写分支；已检出，就在项目目录里 `git merge --no-ff`，未提交改动与之重叠时 git 自己拒绝，只报告。然后推送基准分支。不论成败，工作都进入"已完成"，结果记成事件、显示在界面上。原因：git 不允许从外面移动已检出的分支，硬改会让用户的文件与分支对不上；预检让用户目录永远不会停在冲突状态。本机 git 2.54 支持 `merge-tree --write-tree`。
   4. Claude 执行者固定 `permissionMode: 'default'`，否则 SDK 默认 `auto` 可能不调用 `canUseTool`，副本外的 Write/Edit 拦不住（实测脚本用的就是 `default`）。
   5. 执行者不读本机全局配置（hook、`CLAUDE.md`、`AGENTS.md`），见 [06](06-coordinator-lifecycle.md) 的复查评论。
+
+- 2026-10-22 来自 [09](09-acceptance.md)：**修订执行者的网络设置**。实测（`codex sandbox`、Agent SDK）：Codex `workspace-write` 默认 `network_access=false` 时，既不能监听本机端口（`listen EPERM`），`npm` 也连不上源，"执行者自己装依赖"（第 7 条）在 Codex 上跑不通；Claude SDK 沙箱默认同样不能监听本机端口。改为：Codex 执行者设 `sandbox_workspace_write.network_access = true`（实测能监听、能连本机、`npm view` 正常），Claude 执行者 `sandbox.network.allowLocalBinding: true`（实测能监听、能连本机）。Grok、DeepSeek 默认就能监听，不改。出网不作为边界，四家都能出网。另：执行者在沙箱里不能自己启动 Chromium（四家 × 四种启动方式全失败），需要浏览器时由 helmd 在沙箱外提供，见 09。

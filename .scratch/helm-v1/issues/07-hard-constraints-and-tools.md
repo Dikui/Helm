@@ -64,3 +64,5 @@ Map: [Helm v1 设计](../map.md)
 已在 08、09、10、13、14 留评论。
 
 - 2026-10-22 15 张整体复查：① "卡片与关卡"一行改为：从没正常完成过**任何**派单的卡片不能标完成（原为"执行派单"），使整体验收卡片（只派验收派单）能正常完成。② 验收通过后的改动一律走新卡片，不加"验收须晚于最近执行派单"的约束，写进调度者提示词："验收通过后不要再给这张卡片派执行单"。③ 权限一行补：Claude 执行者固定 `permissionMode: 'default'`（SDK 默认 `auto` 可能不调用 `canUseTool`，08 的越界拒绝会失效）；Claude 调度者的只读须靠沙箱不可写或去掉 Bash（见 [06](06-coordinator-lifecycle.md) 的复查评论）。④ 执行者也不读本机全局配置（见 06 的复查评论）。⑤ "不做成硬约束"中 Grok 一条已过时，08 已用 `GROK_SANDBOX=workspace` 堵上。
+
+- 2026-10-22 来自 [09](09-acceptance.md)：① "执行者"一行改为：执行者只有一个 `提交结论` 工具（经 helmd 本机 HTTP MCP，令牌限于本次派单），派单标了"需要浏览器"时再加 helmd 转发的浏览器工具，没有其他 Helm 工具。② 新增硬约束：验收派单结束后 helmd 把卡片副本重置到派单开始时的 HEAD（`reset --hard` + `clean -fd`），丢弃验收者的改动和提交。③ 调度者工具"派单"加参数"需要浏览器"；验收派单的内容由运行层自动前置卡片说明快照。④ 实测 Codex 在 `approvalPolicy: never` 下会拒绝 MCP 工具调用，注入的 Helm 工具须配 `default_tools_approval_mode: approve`；本机有代理环境变量时须设 `NO_PROXY` 含 `127.0.0.1,localhost`。这两条同样适用于调度者的 Helm MCP。
