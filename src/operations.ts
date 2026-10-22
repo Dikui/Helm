@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 import { addDependency, cancelCard, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
+import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
+import { agentTemplates, configureTemplate } from './templates.js';
 
 interface Context { store: TaskStore; actor: Actor }
 interface Operation {
@@ -38,6 +40,56 @@ const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 
 export const operations: readonly Operation[] = [
+  operation({
+    name: 'list-agent-templates', description: '读取内置 Agent 模板', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => agentTemplates(store),
+  }),
+  operation({
+    name: 'configure-agent-template', description: '设置内置 Agent 模板的模型和推理强度', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ templateId: z.string().min(1), model: z.string().trim().min(1).optional(), reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).optional() }).strict(),
+    execute: ({ store, actor }, params) => configureTemplate(store, actor, params),
+  }),
+  operation({
+    name: 'create-dispatch', description: '给卡片派执行单，新开或续跑执行者对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), templateId: z.string().min(1),
+      purpose: z.literal('execution').optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional() }).strict(),
+    execute: ({ store, actor }, params) => createDispatch(store, actor, params),
+  }),
+  operation({
+    name: 'revoke-dispatch', description: '调度者撤销派单并写明原因', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1), reason: z.string().trim().min(1) }).strict(),
+    execute: ({ store, actor }, params) => revokeDispatch(store, actor, params),
+  }),
+  operation({
+    name: 'submit-conclusion', description: '执行者提交完成或受阻及一句理由，以最后一次为准', callers: ['dispatch'], keyed: false, mutates: true,
+    schema: z.object({ conclusion: z.enum(['completed', 'blocked']), reason: z.string().trim().min(1) }).strict(),
+    execute: ({ store, actor }, params) => submitConclusion(store, actor, params),
+  }),
+  operation({
+    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结果', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1).optional() }).strict(),
+    execute: ({ store }, { workId, cardId }) => listDispatches(store, workId, cardId),
+  }),
+  operation({
+    name: 'get-dispatch', description: '读取派单详情和完整最终回答', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId, dispatchId }) => getDispatch(store, workId, dispatchId),
+  }),
+  operation({
+    name: 'get-dispatch-output', description: '按步骤读取派单输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1), fromStep: z.number().int().positive().optional(), toStep: z.number().int().positive().optional() }).strict(),
+    execute: ({ store }, params) => dispatchOutput(store, params),
+  }),
+  operation({
+    name: 'get-dispatch-artifacts', description: '读取派单成果：分支、文件和测试输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId, dispatchId }) => dispatchArtifacts(store, workId, dispatchId),
+  }),
+  operation({
+    name: 'read-artifact', description: '读取成果内容', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId, artifactId }) => readArtifact(store, workId, artifactId),
+  }),
   operation({
     name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,
     schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional() }).strict(),
@@ -255,6 +307,7 @@ export function invoke(store: TaskStore, actor: Actor, name: string, input: unkn
       if (!round) throw new RuleError('INVALID_TOKEN', '轮次令牌已失效。', 401);
       if (parsed.data.workId !== round.work_id || actor.workId !== round.work_id) throw new RuleError('WORK_SCOPE', '轮次令牌只能操作所属工作。', 403);
     }
+    if (actor.type === 'dispatch') activeDispatch(store, actor);
     const run = () => definition.execute({ store, actor }, parsed.data);
     const result = definition.mutates && definition.transactional !== false ? store.transaction(run) : run();
     return { status: 200, body: { ok: true as const, result } };

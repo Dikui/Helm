@@ -64,7 +64,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3) {
+    if (![0, 1, 2, 3, 4].includes(Number(version))) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -157,6 +157,38 @@ export class TaskStore {
         PRIMARY KEY(work_id, upstream_type, upstream_id, downstream_type, downstream_id)
       ) STRICT;
       PRAGMA user_version = 3;
+      COMMIT;
+    `);
+    if (Number(version) < 4) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE agent_templates (
+        id TEXT PRIMARY KEY, role TEXT NOT NULL, model TEXT, reasoning_effort TEXT
+      ) STRICT;
+      INSERT INTO agent_templates VALUES ('claude-coordinator', 'coordinator', NULL, NULL), ('claude-executor', 'executor', NULL, NULL);
+      ALTER TABLE cards ADD COLUMN work_path TEXT;
+      ALTER TABLE cards ADD COLUMN card_branch TEXT;
+      ALTER TABLE cards ADD COLUMN template_id TEXT REFERENCES agent_templates(id);
+      ALTER TABLE cards ADD COLUMN latest_dispatch_id TEXT;
+      ALTER TABLE cards ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE cards ADD COLUMN latest_step_summary TEXT;
+      CREATE TABLE dispatches (
+        id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), card_id TEXT NOT NULL REFERENCES cards(id),
+        key TEXT NOT NULL, purpose TEXT NOT NULL, template_id TEXT NOT NULL REFERENCES agent_templates(id),
+        template_snapshot TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
+        resume_session_id TEXT, session_id TEXT, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT,
+        start_commit TEXT, end_commit TEXT, output_path TEXT NOT NULL,
+        end_reason TEXT, abort_reason TEXT, final_answer TEXT, conclusion TEXT NOT NULL DEFAULT 'undeclared',
+        conclusion_reason TEXT, usage TEXT NOT NULL DEFAULT '{"inputTokens":0,"outputTokens":0}', failure TEXT,
+        UNIQUE(work_id, key)
+      ) STRICT;
+      CREATE UNIQUE INDEX one_active_dispatch_per_card ON dispatches(card_id) WHERE status IN ('queued', 'running');
+      CREATE UNIQUE INDEX one_active_dispatch_per_session ON dispatches(session_id) WHERE status IN ('queued', 'running') AND session_id IS NOT NULL;
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY, dispatch_id TEXT NOT NULL REFERENCES dispatches(id),
+        kind TEXT NOT NULL, name TEXT NOT NULL, path TEXT, ref TEXT, commit_sha TEXT
+      ) STRICT;
+      CREATE INDEX artifacts_dispatch ON artifacts(dispatch_id);
+      PRAGMA user_version = 4;
       COMMIT;
     `);
   }

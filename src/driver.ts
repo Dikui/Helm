@@ -3,10 +3,12 @@ import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { AgentTemplate } from './templates.js';
 
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 export interface TokenUsage { inputTokens: number; outputTokens: number }
 export interface SessionOptions {
+  template?: AgentTemplate;
   cwd: string;
   env: Record<string, string>;
   sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
@@ -15,6 +17,7 @@ export interface SessionOptions {
 }
 export type DriverEvent =
   | { type: 'output'; step: number; text: string }
+  | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }
   | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage };
 export interface DriverSession {
@@ -34,6 +37,7 @@ export type FakeStep =
   | { type: 'tool'; name: string; arguments: Record<string, unknown> | ((context: FakeContext) => Record<string, unknown>); saveAs?: string; check?: (result: unknown) => void }
   | { type: 'write'; path: string; content: string }
   | { type: 'output'; text: string }
+  | { type: 'artifact'; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction' }
   | { type: 'end'; reason: EndReason; finalAnswer?: string; usage?: TokenUsage }
   | { type: 'hang'; until?: Promise<void> }

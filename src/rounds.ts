@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Driver, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardGraph } from './graph.js';
+import { agentTemplate, templateEnvironment } from './templates.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 
 export interface StartupBrief {
@@ -50,7 +51,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-ready', 'card-cancelled', 'gate-withdrawn'].includes(event.action));
+        || ['gate-decided', 'card-ready', 'card-cancelled', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       for (const event of wakes) if (event.workId) this.failed.delete(event.workId);
       if (wakes.length) this.schedule();
     });
@@ -100,9 +101,11 @@ export class RoundScheduler {
     let finalAnswer: string | undefined;
     let failure: string | undefined;
     try {
+      const template = agentTemplate(this.store, 'claude-coordinator', 'coordinator');
       const session = await this.driver.start({
+        template,
         cwd: brief.work.workPath ?? projectPath(this.store, workId),
-        env: { NO_PROXY: '127.0.0.1,localhost' },
+        env: templateEnvironment(template),
         sandbox: { mode: 'read-only', writableRoots: [] },
         mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
       });

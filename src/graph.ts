@@ -3,12 +3,18 @@ import { RuleError, TaskStore, type Actor } from './store.js';
 
 export interface Card {
   id: string; workId: string; key: string; content: string; needsVerification: boolean;
-  status: string; createdAt: string;
+  status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
+  templateId?: string | null; latestDispatchId?: string | null; currentStep?: number;
+  latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
 }
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
-const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt`;
+const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt,
+  work_path AS workPath, card_branch AS cardBranch, template_id AS templateId, latest_dispatch_id AS latestDispatchId,
+  current_step AS currentStep, latest_step_summary AS latestStepSummary,
+  (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
+  (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion`;
 
 function readCard(row: Record<string, unknown>): Card {
   return { ...row, needsVerification: Boolean(row.needsVerification) } as unknown as Card;
@@ -119,20 +125,21 @@ function ancestors(edges: Dependency[], node: NodeRef): NodeRef[] {
   return [...result.values()];
 }
 
-// Only idle, never-dispatched cards use waiting/ready. Running and paused states stay intact.
+// Re-evaluate idle cards; active dispatches and user-set paused/terminal states stay intact.
 export function refreshCardReadiness(store: TaskStore, workId: string) {
   const edges = dependencies(store, workId);
-  const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND status IN ('waiting', 'ready')`).all(workId).map(readCard);
+  const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND status NOT IN ('paused', 'completed', 'cancelled')
+    AND NOT EXISTS (SELECT 1 FROM dispatches WHERE card_id = cards.id AND status IN ('queued', 'running'))`).all(workId).map(readCard);
   for (const card of cards) {
     const blocked = ancestors(edges, { type: 'card', id: card.id }).some(node => {
       const upstream = graphNode(store, workId, node);
       return upstream.status !== (node.type === 'card' ? 'completed' : 'decided');
     });
-    const status = blocked ? 'waiting' : 'ready';
+    const status = blocked ? 'waiting' : card.latestDispatchId ? 'executing' : 'ready';
     if (status === card.status) continue;
     store.db.prepare('UPDATE cards SET status = ? WHERE id = ?').run(status, card.id);
     const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id },
-      status === 'ready' ? 'card-ready' : 'card-waiting', { previousStatus: card.status, status }, { workId, cardId: card.id });
+      status === 'waiting' ? 'card-waiting' : status === 'ready' ? 'card-ready' : 'card-unblocked', { previousStatus: card.status, status }, { workId, cardId: card.id });
     if (status === 'ready') wake(store, event.id, workId);
   }
 }

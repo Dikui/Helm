@@ -140,7 +140,8 @@ test('轮次令牌隔离工作、限制用户操作，并在轮次结束时失�
     assert.equal(ctx.options.cwd, daemon.repo);
     assert.equal(ctx.options.sandbox.mode, 'read-only');
     assert.equal(ctx.options.resumeSessionId, undefined);
-    assert.equal(ctx.options.env.NO_PROXY, '127.0.0.1,localhost');
+    assert.ok(ctx.options.env.NO_PROXY?.split(',').includes('127.0.0.1'));
+    assert.ok(ctx.options.env.NO_PROXY?.split(',').includes('localhost'));
     return [
       { type: 'hang', until: barrier },
       { type: 'tool', name: 'get-work', arguments: { workId: workIdOf(ctx) }, check: result => results.push(result) },
