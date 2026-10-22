@@ -64,7 +64,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (![0, 1, 2, 3, 4].includes(Number(version))) {
+    if (![0, 1, 2, 3, 4, 5].includes(Number(version))) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -189,6 +189,19 @@ export class TaskStore {
       ) STRICT;
       CREATE INDEX artifacts_dispatch ON artifacts(dispatch_id);
       PRAGMA user_version = 4;
+      COMMIT;
+    `);
+    if (Number(version) < 5) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE dispatches ADD COLUMN port_start INTEGER;
+      ALTER TABLE dispatches ADD COLUMN port_end INTEGER;
+      ALTER TABLE dispatches ADD COLUMN pgid INTEGER;
+      ALTER TABLE dispatches ADD COLUMN process_started_at TEXT;
+      ALTER TABLE coordinator_rounds ADD COLUMN pgid INTEGER;
+      ALTER TABLE coordinator_rounds ADD COLUMN process_started_at TEXT;
+      ALTER TABLE settings ADD COLUMN dispatch_wall_timeout_ms INTEGER NOT NULL DEFAULT 1800000 CHECK(dispatch_wall_timeout_ms > 0);
+      ALTER TABLE settings ADD COLUMN dispatch_idle_timeout_ms INTEGER NOT NULL DEFAULT 600000 CHECK(dispatch_idle_timeout_ms > 0);
+      PRAGMA user_version = 5;
       COMMIT;
     `);
   }
