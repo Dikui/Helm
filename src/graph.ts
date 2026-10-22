@@ -6,12 +6,13 @@ export interface Card {
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
   templateId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
+  repairOfCardId?: string | null;
 }
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
 const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt,
-  work_path AS workPath, card_branch AS cardBranch, template_id AS templateId, latest_dispatch_id AS latestDispatchId,
+  work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, template_id AS templateId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion`;
@@ -40,16 +41,17 @@ function wake(store: TaskStore, eventId: number, workId: string) {
 }
 
 export function createCard(store: TaskStore, actor: Actor, params: {
-  workId: string; key: string; content: string; needsVerification?: boolean;
+  workId: string; key: string; content: string; needsVerification?: boolean; repairOfCardId?: string;
 }) {
   store.work(params.workId);
   const existing = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND key = ?`).get(params.workId, params.key);
   if (existing) return readCard(existing);
   requireExecuting(store, params.workId);
+  if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
   const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false,
     status: 'ready', createdAt: new Date().toISOString() };
-  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt);
+  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
   const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
   wake(store, event.id, card.workId);

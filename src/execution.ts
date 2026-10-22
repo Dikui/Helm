@@ -6,6 +6,7 @@ import { activeDispatch, committedFile, dispatchGit, getDispatch, reportedArtifa
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { templateEnvironment } from './templates.js';
 import { TaskStore, type Actor } from './store.js';
+import { removeCardCopy } from './completion.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -71,7 +72,7 @@ export class ExecutionRunner {
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, dispatch.id);
-        this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ?`).run(card.id);
+        this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ? AND status NOT IN ('completed', 'cancelled')`).run(card.id);
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit }, scope);
       });
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
@@ -141,6 +142,11 @@ export class ExecutionRunner {
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
         if (reason !== 'aborted') reason = 'error';
+      }
+      try {
+        if (cardDetails(this.store, dispatch.workId, card.id).status === 'cancelled') removeCardCopy(this.store, card);
+      } catch (error) {
+        failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
       }
       if (reason !== 'completed') finalAnswer = null;
       this.store.transaction(() => {

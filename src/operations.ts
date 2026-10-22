@@ -5,9 +5,10 @@ import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
-import { addDependency, cancelCard, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
+import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { agentTemplates, configureTemplate } from './templates.js';
+import { cancelCard, completeCard } from './completion.js';
 
 interface Context { store: TaskStore; actor: Actor }
 interface Operation {
@@ -246,7 +247,7 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'create-card', description: '建卡片', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional() }).strict(),
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), repairOfCardId: z.string().min(1).optional() }).strict(),
     execute: ({ store, actor }, params) => createCard(store, actor, params),
   }),
   operation({
@@ -255,7 +256,12 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => updateCard(store, actor, params),
   }),
   operation({
-    name: 'cancel-card', description: '调度者取消卡片并唤醒后续处理', callers: ['coordinator-round'], keyed: false, mutates: true,
+    name: 'complete-card', description: '合并卡片分支后标记完成并删除卡片副本', callers: ['coordinator-round'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, params) => completeCard(store, actor, params),
+  }),
+  operation({
+    name: 'cancel-card', description: '调度者取消卡片并唤醒后续处理', callers: ['coordinator-round'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), reason: z.string().trim().min(1) }).strict(),
     execute: ({ store, actor }, params) => cancelCard(store, actor, params),
   }),
