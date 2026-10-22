@@ -72,16 +72,34 @@ function executorPermission(cwd: string): CanUseTool {
   };
 }
 
-export class ClaudeExecutorDriver implements Driver {
-  constructor(private config: { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery } = {}) {}
+function coordinatorPermission(servers: string[]): CanUseTool {
+  return async (tool, input, context) => {
+    const allowed = ['Bash', 'Read', 'Grep', 'Glob'].includes(tool)
+      || servers.some(name => tool.startsWith(`mcp__${name}__`));
+    if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
+      return { behavior: 'deny', message: 'Helm coordinator may only read project code and use the injected Helm tools; Bash must stay sandboxed.' };
+    }
+    return { behavior: 'allow', updatedInput: input };
+  };
+}
+
+interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery }
+
+class ClaudeDriver implements Driver {
+  constructor(private config: ClaudeDriverConfig, private role: 'coordinator' | 'executor') {}
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    if (options.sandbox.mode !== 'workspace-write' || options.template?.role === 'coordinator') {
+    const coordinator = this.role === 'coordinator';
+    if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
+      || options.template?.role === 'executor' || options.resumeSessionId !== undefined)) {
+      throw new Error('ClaudeCoordinatorDriver requires a fresh read-only coordinator round');
+    }
+    if (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.template?.role === 'coordinator')) {
       throw new Error('ClaudeExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
+    if (!coordinator && (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd)) {
       throw new Error('Claude executor writable roots must contain only its card copy');
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
@@ -104,7 +122,9 @@ export class ClaudeExecutorDriver implements Driver {
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
       cwd, env, pathToClaudeCodeExecutable: executable, settingSources: [], strictMcpConfig: true,
-      permissionMode: 'default', abortController: controller, canUseTool: executorPermission(cwd),
+      permissionMode: 'default', abortController: controller,
+      canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
+      ...(coordinator ? { tools: ['Bash', 'Read', 'Grep', 'Glob'] } : {}),
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
         const child = spawn(processOptions.command, processOptions.args, {
@@ -117,7 +137,10 @@ export class ClaudeExecutorDriver implements Driver {
       },
       sandbox: {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        filesystem: { allowWrite: [cwd] }, network: { allowLocalBinding: true },
+        // Claude grants cwd writes by default; an empty allowWrite alone does
+        // not make it read-only. Explicitly deny cwd, including temp worktrees.
+        filesystem: coordinator ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] },
+        network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, { type: 'http', ...server }])),
       ...(options.template?.model ? { model: options.template.model } : {}),
@@ -162,4 +185,12 @@ export class ClaudeExecutorDriver implements Driver {
       })(),
     };
   }
+}
+
+export class ClaudeExecutorDriver extends ClaudeDriver {
+  constructor(config: ClaudeDriverConfig = {}) { super(config, 'executor'); }
+}
+
+export class ClaudeCoordinatorDriver extends ClaudeDriver {
+  constructor(config: ClaudeDriverConfig = {}) { super(config, 'coordinator'); }
 }

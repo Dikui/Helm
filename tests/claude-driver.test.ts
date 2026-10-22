@@ -7,17 +7,17 @@ import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CanUseTool, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
-import type { DriverEvent, SessionOptions } from '../src/driver.js';
+import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
+import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 
-async function fixture(t: TestContext): Promise<SessionOptions> {
+async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'executor'): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   return {
     cwd, env: { PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
-    template: { id: 'claude-executor', role: 'executor', model: 'haiku', reasoningEffort: 'low' },
-    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
+    template: { id: `claude-${role}`, role, model: 'haiku', reasoningEffort: 'low' },
+    sandbox: role === 'executor' ? { mode: 'workspace-write', writableRoots: [cwd] } : { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
   };
 }
@@ -45,13 +45,67 @@ function fakeQuery(messages: SDKMessage[], inspect?: (args: Parameters<ClaudeQue
   };
 }
 
-async function collect(driver: ClaudeExecutorDriver, options: SessionOptions) {
+async function collect(driver: Driver, options: SessionOptions) {
   const session = await driver.start(options);
   await session.send('派单内容');
   const events: DriverEvent[] = [];
   for await (const event of session.events) events.push(event);
   return { session, events, end: events.find(event => event.type === 'end') };
 }
+
+test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP 与单次读取权限', async t => {
+  const base = await fixture(t);
+  const cwd = join(base.cwd, '_work');
+  await mkdir(cwd);
+  const options: SessionOptions = { ...base, cwd,
+    template: { id: 'claude-coordinator', role: 'coordinator', model: 'haiku', reasoningEffort: 'low' },
+    sandbox: { mode: 'read-only', writableRoots: [] },
+    mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-token' } } },
+  };
+  let permission: CanUseTool | undefined;
+  const driver = new ClaudeCoordinatorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    query: fakeQuery([result()], args => {
+      const sdk = args.options!;
+      assert.equal(sdk.cwd, cwd);
+      assert.deepEqual(sdk.settingSources, []);
+      assert.equal(sdk.permissionMode, 'default');
+      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob']);
+      assert.deepEqual(sdk.sandbox, {
+        enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
+        filesystem: { allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
+      });
+      assert.equal(sdk.strictMcpConfig, true);
+      assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
+      assert.equal(sdk.env?.NO_PROXY, 'example.test,127.0.0.1,localhost');
+      assert.equal(sdk.model, 'haiku');
+      assert.equal(sdk.effort, 'low');
+      assert.equal(sdk.resume, undefined);
+      permission = sdk.canUseTool;
+    }) });
+  const first = await collect(driver, options);
+  const next = await collect(driver, options);
+  assert.notEqual(first.session.id, next.session.id);
+  assert.equal(first.end?.reason, 'completed');
+  assert.ok(permission);
+  const context: Parameters<CanUseTool>[2] = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
+    suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' }] };
+  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency']) {
+    const input = { command: 'cat README.md' };
+    assert.deepEqual(await permission(tool, input, context), { behavior: 'allow', updatedInput: input });
+  }
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'Skill', 'AskUserQuestion', 'ExitPlanMode', 'mcp__other__write']) {
+    assert.equal((await permission(tool, { file_path: join(cwd, 'file') }, context))?.behavior, 'deny', tool);
+  }
+  assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
+  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: cwd }))?.behavior, 'deny');
+  assert.equal((await permission('Read', {}, { ...context, signal: AbortSignal.abort() }))?.behavior, 'deny');
+  for (const invalid of [
+    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd] } },
+    { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [cwd] } },
+    { ...options, template: base.template },
+    { ...options, resumeSessionId: 'previous-round' },
+  ]) await assert.rejects(driver.start(invalid), /fresh read-only coordinator round/);
+});
 
 test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新开/续跑选项', async t => {
   const options = await fixture(t);
@@ -88,19 +142,21 @@ test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新
   assert.equal(options.env.NO_PROXY, undefined, '不能修改运行层传入的环境');
 });
 
-test('Claude 只凭 result 结束，记录原始输出、压缩通知和所有模型的 token（含缓存输入）', async t => {
-  const options = await fixture(t);
-  const messages = [
-    { type: 'assistant', message: { content: [{ type: 'text', text: '已完成，额度用完' }] } },
-    { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 100 } },
-    result(),
-  ] as SDKMessage[];
-  const { events, end } = await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
-  assert.equal(events.filter(event => event.type === 'compaction').length, 1);
-  assert.deepEqual(events.map(event => event.step), [1, 2, 3, 4, 5]);
-  assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
-  assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5 } });
-});
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  test(`${role}: Claude 只凭 result 结束，记录原始输出、压缩通知和所有模型的 token（含缓存输入）`, async t => {
+    const options = await fixture(t, role);
+    const messages = [
+      { type: 'assistant', message: { content: [{ type: 'text', text: '已完成，额度用完' }] } },
+      { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 100 } },
+      result(),
+    ] as SDKMessage[];
+    const { events, end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+    assert.equal(events.filter(event => event.type === 'compaction').length, 1);
+    assert.deepEqual(events.map(event => event.step), [1, 2, 3, 4, 5]);
+    assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
+    assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5 } });
+  });
+}
 
 test('Claude canUseTool 只单次批准副本内写入，拒绝路径穿越、符号链接越界及沙箱逃逸', async t => {
   const options = await fixture(t);
@@ -155,105 +211,111 @@ test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI、只读角色和扩�
   await assert.rejects(driver.start({ ...options, sandbox: { mode: 'workspace-write', writableRoots: [options.cwd, bin] } }), /only its card copy/);
 });
 
-test('Claude 将订阅拒绝和结构化限额错误映射为额度用完，警告、预算和普通回答不误判', async t => {
-  const options = await fixture(t);
-  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } } as SDKMessage;
-  const warning = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning' } } as SDKMessage;
-  const rateError = { type: 'assistant', error: 'rate_limit', message: { content: [] } } as unknown as SDKMessage;
-  const ordinary = { type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your limit" }] } } as SDKMessage;
-  const error = result({ subtype: 'error_during_execution', is_error: true, errors: ['Request failed'] });
-  const cases: { messages: SDKMessage[]; reason: string }[] = [
-    { messages: [rejected, error], reason: 'quota-exhausted' },
-    { messages: [rateError, error], reason: 'quota-exhausted' },
-    { messages: [result({ subtype: 'success', is_error: true, result: "You've hit your limit · resets 3pm" })], reason: 'quota-exhausted' },
-    { messages: [result({ subtype: 'error_during_execution', is_error: true, errors: ['Weekly usage limit reached'] })], reason: 'quota-exhausted' },
-    { messages: [warning, error], reason: 'error' },
-    { messages: [result({ subtype: 'error_max_budget_usd', is_error: true, errors: ['Max budget exceeded'] })], reason: 'error' },
-    { messages: [result({ is_error: true, result: 'Authentication failed' })], reason: 'error' },
-    { messages: [rejected, result()], reason: 'completed' },
-    { messages: [ordinary, result()], reason: 'completed' },
-  ];
-  for (const { messages, reason } of cases) {
-    const { end } = await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
-    assert.equal(end?.reason, reason, JSON.stringify(messages));
-    assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
-    assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
-  }
-});
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  test(`${role}: Claude 将订阅拒绝和结构化限额错误映射为额度用完，警告、预算和普通回答不误判`, async t => {
+    const options = await fixture(t, role);
+    const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } } as SDKMessage;
+    const warning = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning' } } as SDKMessage;
+    const rateError = { type: 'assistant', error: 'rate_limit', message: { content: [] } } as unknown as SDKMessage;
+    const ordinary = { type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your limit" }] } } as SDKMessage;
+    const error = result({ subtype: 'error_during_execution', is_error: true, errors: ['Request failed'] });
+    const cases: { messages: SDKMessage[]; reason: string }[] = [
+      { messages: [rejected, error], reason: 'quota-exhausted' },
+      { messages: [rateError, error], reason: 'quota-exhausted' },
+      { messages: [result({ subtype: 'success', is_error: true, result: "You've hit your limit · resets 3pm" })], reason: 'quota-exhausted' },
+      { messages: [result({ subtype: 'error_during_execution', is_error: true, errors: ['Weekly usage limit reached'] })], reason: 'quota-exhausted' },
+      { messages: [warning, error], reason: 'error' },
+      { messages: [result({ subtype: 'error_max_budget_usd', is_error: true, errors: ['Max budget exceeded'] })], reason: 'error' },
+      { messages: [result({ is_error: true, result: 'Authentication failed' })], reason: 'error' },
+      { messages: [rejected, result()], reason: 'completed' },
+      { messages: [ordinary, result()], reason: 'completed' },
+    ];
+    for (const { messages, reason } of cases) {
+      const { end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+      assert.equal(end?.reason, reason, JSON.stringify(messages));
+      assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
+      assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
+    }
+  });
+}
 
-test('Claude 无 result 或 CLI 崩溃不能报告成功；结束和取消均关闭 SDK 查询流', async t => {
-  const options = await fixture(t);
-  const config = { pathToClaudeCodeExecutable: '/test/bin/claude' };
-  await assert.rejects(collect(new ClaudeExecutorDriver({ ...config, query: fakeQuery([
-    { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as SDKMessage,
-  ]) }), options), /without a result/);
-  await assert.rejects(collect(new ClaudeExecutorDriver({ ...config, query: () => ({
-    close() {}, async *[Symbol.asyncIterator]() { throw new Error('Claude Code process exited with code 7'); },
-  }) }), options), /exited with code 7/);
-  let closed = false;
-  let started!: () => void;
-  const ready = new Promise<void>(resolve => { started = resolve; });
-  const driver = new ClaudeExecutorDriver({ ...config, query: args => ({
-    close() { closed = true; },
-    async *[Symbol.asyncIterator]() {
-      started();
-      await new Promise<void>(resolve => args.options!.abortController!.signal.addEventListener('abort', () => resolve(), { once: true }));
-      throw new Error('Query aborted');
-    },
-  }) });
-  const session = await driver.start(options);
-  await session.send('派单');
-  await assert.rejects(session.send('第二份输入'), /already received/);
-  const pending = session.events[Symbol.asyncIterator]().next();
-  await ready;
-  session.cancel();
-  assert.equal((await pending).done, true);
-  assert.equal(closed, true);
-  const beforeInput = await driver.start(options);
-  beforeInput.cancel();
-  assert.equal((await beforeInput.events[Symbol.asyncIterator]().next()).done, true);
-  await assert.rejects(beforeInput.send('取消后'), /cancelled/);
-  closed = false;
-  await collect(new ClaudeExecutorDriver({ ...config, query: () => ({
-    close() { closed = true; }, async *[Symbol.asyncIterator]() { yield result(); },
-  }) }), options);
-  assert.equal(closed, true);
-});
-
-test('运行层取消信号可在输入前或查询期间结束 Claude 会话', async t => {
-  const options = await fixture(t);
-  for (const phase of ['before-start', 'before-input', 'query'] as const) {
-    const controller = new AbortController();
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  test(`${role}: Claude 无 result 或 CLI 崩溃不能报告成功；结束和取消均关闭 SDK 查询流`, async t => {
+    const options = await fixture(t, role);
+    const config = { pathToClaudeCodeExecutable: '/test/bin/claude' };
+    await assert.rejects(collect(new DriverType({ ...config, query: fakeQuery([
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as SDKMessage,
+    ]) }), options), /without a result/);
+    await assert.rejects(collect(new DriverType({ ...config, query: () => ({
+      close() {}, async *[Symbol.asyncIterator]() { throw new Error('Claude Code process exited with code 7'); },
+    }) }), options), /exited with code 7/);
     let closed = false;
-    let ready!: () => void;
-    const started = new Promise<void>(resolve => { ready = resolve; });
-    const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: args => ({
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const driver = new DriverType({ ...config, query: args => ({
       close() { closed = true; },
       async *[Symbol.asyncIterator]() {
-        ready();
+        started();
         await new Promise<void>(resolve => args.options!.abortController!.signal.addEventListener('abort', () => resolve(), { once: true }));
+        throw new Error('Query aborted');
       },
     }) });
-    if (phase === 'before-start') {
-      controller.abort();
-      await assert.rejects(driver.start({ ...options, signal: controller.signal }), { name: 'AbortError' });
-      continue;
+    const session = await driver.start(options);
+    await session.send('派单');
+    await assert.rejects(session.send('第二份输入'), /already received/);
+    const pending = session.events[Symbol.asyncIterator]().next();
+    await ready;
+    session.cancel();
+    assert.equal((await pending).done, true);
+    assert.equal(closed, true);
+    const beforeInput = await driver.start(options);
+    beforeInput.cancel();
+    assert.equal((await beforeInput.events[Symbol.asyncIterator]().next()).done, true);
+    await assert.rejects(beforeInput.send('取消后'), /cancelled/);
+    closed = false;
+    await collect(new DriverType({ ...config, query: () => ({
+      close() { closed = true; }, async *[Symbol.asyncIterator]() { yield result(); },
+    }) }), options);
+    assert.equal(closed, true);
+  });
+}
+
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  test(`${role}: 运行层取消信号可在输入前或查询期间结束 Claude 会话`, async t => {
+    const options = await fixture(t, role);
+    for (const phase of ['before-start', 'before-input', 'query'] as const) {
+      const controller = new AbortController();
+      let closed = false;
+      let ready!: () => void;
+      const started = new Promise<void>(resolve => { ready = resolve; });
+      const driver = new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: args => ({
+        close() { closed = true; },
+        async *[Symbol.asyncIterator]() {
+          ready();
+          await new Promise<void>(resolve => args.options!.abortController!.signal.addEventListener('abort', () => resolve(), { once: true }));
+        },
+      }) });
+      if (phase === 'before-start') {
+        controller.abort();
+        await assert.rejects(driver.start({ ...options, signal: controller.signal }), { name: 'AbortError' });
+        continue;
+      }
+      const session = await driver.start({ ...options, signal: controller.signal });
+      if (phase === 'before-input') {
+        controller.abort();
+        assert.equal((await session.events[Symbol.asyncIterator]().next()).done, true);
+        await assert.rejects(session.send('取消后'), /cancelled/);
+      } else {
+        await session.send('运行中的验收');
+        const pending = session.events[Symbol.asyncIterator]().next();
+        await started;
+        controller.abort();
+        assert.equal((await pending).done, true);
+        assert.equal(closed, true);
+      }
     }
-    const session = await driver.start({ ...options, signal: controller.signal });
-    if (phase === 'before-input') {
-      controller.abort();
-      assert.equal((await session.events[Symbol.asyncIterator]().next()).done, true);
-      await assert.rejects(session.send('取消后'), /cancelled/);
-    } else {
-      await session.send('运行中的验收');
-      const pending = session.events[Symbol.asyncIterator]().next();
-      await started;
-      controller.abort();
-      assert.equal((await pending).done, true);
-      assert.equal(closed, true);
-    }
-  }
-});
+  });
+}
 
 test('Claude 进程组登记接入验收收尾：正常、额度用完、看门狗和暂停都先杀进程再重置', async t => {
   for (const mode of ['completed', 'quota-exhausted', 'timed-out', 'pause-card'] as const) await t.test(mode, async t => {
