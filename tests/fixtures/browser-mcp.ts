@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const option = (name: string) => args[args.indexOf(name) + 1];
 const config = JSON.parse(readFileSync(option('--config')!, 'utf8'));
 if (args.includes('--headless') || !args.includes('--isolated') || option('--browser') !== 'chromium'
-  || option('--allowed-hosts') !== '127.0.0.1' || config.browser.launchOptions.headless !== false) {
+  || option('--host') !== '127.0.0.1' || config.browser.launchOptions.headless !== false) {
   throw new Error('Expected isolated, headed, bundled Chromium on loopback');
 }
 if (args.includes('--crash')) process.exit(2);
@@ -53,6 +53,7 @@ else {
   server.listen(Number(option('--port')), option('--host'), () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('No TCP port');
-    console.error(`Listening on http://127.0.0.1:${address.port}`);
+    // Mirrors the real Playwright MCP, which reports localhost for a 127.0.0.1 bind.
+    console.error(`Listening on http://localhost:${address.port}`);
   });
 }

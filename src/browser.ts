@@ -52,7 +52,7 @@ export class BrowserProcess {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('PLAYWRIGHT_MCP_')));
     env.NO_PROXY = [env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',');
     env.no_proxy = env.NO_PROXY;
-    this.child = spawn(command.file, [...command.args, '--port', '0', '--host', '127.0.0.1', '--allowed-hosts', '127.0.0.1',
+    this.child = spawn(command.file, [...command.args, '--port', '0', '--host', '127.0.0.1',
       '--isolated', '--browser', 'chromium', '--config', configPath], { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     this.endpoint = new Promise((resolve, reject) => {
       let output = '';
@@ -62,7 +62,8 @@ export class BrowserProcess {
       const finish = () => { clearTimeout(timer); this.controller.signal.removeEventListener('abort', abort); };
       const data = (chunk: Buffer) => {
         output = (output + chunk.toString()).slice(-8192);
-        const match = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
+        // Playwright MCP prints localhost for a 127.0.0.1 bind and by default only accepts that exact host:port.
+        const match = /Listening on (http:\/\/(?:127\.0\.0\.1|localhost):\d+)/.exec(output);
         if (match) { finish(); resolve(`${match[1]}/mcp`); }
       };
       this.child.stdout!.on('data', data);
