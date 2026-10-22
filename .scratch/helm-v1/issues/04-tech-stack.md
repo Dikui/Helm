@@ -15,7 +15,7 @@ Helm 用什么语言和框架实现？进程怎么组成（一个后台守护进
 2026-10-21 grilling 定稿。依据见 [reference-runtime-stack.md](../../../docs/research/reference-runtime-stack.md)（18）、[interactive-drive-and-landscape.md](../../../docs/research/interactive-drive-and-landscape.md)（19）、[acp-coverage.md](../../../docs/research/acp-coverage.md)（20）、[subscription-via-acp.md](../../../docs/research/subscription-via-acp.md) 与 [subscription-ban-risk.md](../../../docs/research/subscription-ban-risk.md)（21）、[codex-concurrency.md](../../../docs/research/codex-concurrency.md)。
 
 - **语言**：TypeScript，Node 22 或更高。
-- **进程组成**：每台机器一个后台进程 `helmd`（即运行层），只监听 `127.0.0.1`，管理所有项目。它负责任务库、依赖检查、并发上限、看门狗、HTTP/MCP 接口和各家驱动，并托管界面页面。调度者每项工作一个长时会话；执行者每次派单一个会话，派单结束即关闭。两者用同一套驱动，都是 `helmd` 通过管道拉起的厂商官方程序，不用 PTY 或 tmux。`helmd` 重启后按 session id 续跑（细节交 11）。
+- **进程组成**：每台机器一个后台进程 `helmd`（即运行层），只监听 `127.0.0.1`，管理所有项目。它负责任务库、依赖检查、并发上限、看门狗、HTTP/MCP 接口和各家驱动，并托管界面页面。调度者每项工作一个长时会话（已修订：[06](06-coordinator-lifecycle.md) 改为任务型，每次唤醒新开一个调度轮次）；执行者每次派单一个会话，派单结束即关闭。两者用同一套驱动，都是 `helmd` 通过管道拉起的厂商官方程序，不用 PTY 或 tmux。`helmd` 重启后按 session id 续跑（细节交 11；已修订：只对执行者成立，调度轮次按失败重投，见 06）。
 - **驱动**（同 Todos）：Claude Code 用 Claude Agent SDK，`pathToClaudeCodeExecutable` 指向本机 `claude`；Codex 用 `codex app-server`（不用 `codex-acp`，也不用 Codex SDK）；Grok（`grok agent stdio`）、DeepSeek Harness（`dsh --profile acp`）及以后的 agent 走通用 ACP，客户端用官方 `@agentclientprotocol/sdk`，锁定确切版本、用 v1 入口；没有协议模式的 agent 用一次性命令兜底，只能当执行者。各家差异写在 Agent 模板里（驱动方式、命令、参数、环境变量、认证方式），接一家原生支持 ACP 的 agent 只需登记模板。
 - **结束判定**：派单结束看执行者程序发出的结束消息（ACP 的 `session/prompt` 响应、app-server 的 `turn/completed`、SDK 的 `result`），不看模型文字；进程崩溃看退出码，挂死由看门狗（墙钟、无输出）杀进程组。正常完成后 `helmd` 关闭管道收尾，几秒不退出再强杀。
 - **多个 Codex 并行**：每个执行者一个独立 app-server 进程，各用 `CODEX_SQLITE_HOME` 指定自己的数据库目录（只设在 Helm 拉起的进程上），登录和对话记录共用 `~/.codex`，不复制登录。
@@ -47,3 +47,5 @@ Helm 用什么语言和框架实现？进程怎么组成（一个后台守护进
 - 2026-10-22 冲突复核：本单定的是架构；交付顺序由 [15](15-v1-slice.md) 定，第一个可运行版本先打通一种驱动。
 
 - 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：驱动前提实测，没有推翻 04 的选择。Claude Agent SDK 指向本机 `claude` 时 `apiKeySource: none`（未看用量条）；Codex 只设 `CODEX_SQLITE_HOME` 仍是 ChatGPT 登录，新 sqlite 目录能续跑旧 thread，一个 app-server 10 个 thread 真并行、10 个进程也不撞锁；Grok ACP 支持 cancel、load、resume。DeepSeek（dsh ACP）跑通，但默认路线要 API key，用 `dsh web` 登录的账号要在会话里选 `deepseek-account` 路线；它不支持 `session/load`，续跑只能用 `session/resume`。Grok ACP 没有按会话的权限参数，权限跟随用户全局配置，见 07 的评论。
+
+- 2026-10-22 15 张整体复查：修订。调度者已由 [06](06-coordinator-lifecycle.md) 改为任务型（每次唤醒新开一个调度轮次，不续跑、不常驻），正文"长时会话""重启后按 session id 续跑"对调度者已不成立，已在原句标注。驱动选择不变。

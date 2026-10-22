@@ -21,3 +21,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-22 来自 [06](06-coordinator-lifecycle.md)：调度者改为任务型，上面 01 那条（上下文满后接续、token 增长）作废。改为验证：任务型调度者跨轮次不失忆（不重复派单、不忘与用户商定的结论、调度笔记够用），对齐阶段一问一答的体验可接受，每轮简报的 token 量；⑤ 改为验证"排队 + 打断"的体验。推翻时退到混合形态（对齐阶段续跑 CLI 会话）。
 
 - 2026-10-22 来自 [07](07-hard-constraints-and-tools.md)：加一项验证：Claude Code（Agent SDK）和 Codex（app-server）都能按会话加载带令牌的 HTTP MCP，调度者能用它完成建卡、派单、改依赖；同一批事件重投时，靠 `key` 不重复建卡和派单；调度者对项目代码只读的设置（Claude 关写工具、Codex `read-only`）生效。有一家不能按会话加载 HTTP MCP，就改为每轮一个 stdio 小程序转发给 `helmd`。
+
+- 2026-10-22 15 张整体复查：加两项验证。① 执行者和调度者都不读本机全局配置：Claude `settingSources: []` 下不加载 `~/.claude/CLAUDE.md`；Codex 能否在不丢登录的前提下不读 `~/.codex/config.toml`、`~/.codex/AGENTS.md`（如单独 `CODEX_HOME` 只链接登录文件）；Grok 能否不加载 `~/.grok/hooks`。做不到的一家，在模板说明里写明会继承哪些全局配置。② 原"调度者只读设置生效"一项细化：Claude 调度者在 `_work` 里用 Bash 写文件也被拦（沙箱不可写，或不给 Bash）；Claude 执行者 `permissionMode: 'default'` 下副本外 Write 由 `canUseTool` 拒绝。

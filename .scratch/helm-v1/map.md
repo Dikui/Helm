@@ -66,9 +66,9 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - [技术栈与进程结构](issues/04-tech-stack.md) — TS/Node；每台机器一个 `helmd`（运行层，只监听本机），调度者每次唤醒一个会话（06 改为任务型）、执行者每次派单一个会话，都由管道拉起官方程序；驱动同 Todos：Claude 用 Agent SDK、Codex 用 app-server、其余走 ACP、一次性命令兜底；SQLite `~/.helm/`、React+Vite+SSE、用户级服务自启动、clone+`npm link`；v1 实测 Claude Code、Codex、Grok、DeepSeek
 - [任务库数据模型与状态](issues/05-task-store-model.md) — 状态表+事件表同事务写，事件记执行者，步骤为库外输出的序号；每项工作一条对话（消息不可改 + 决策关卡单独成实体，确认工作说明和审核是固定关卡，审核正文即汇总报告）；卡片完成由调度者标记、需验收的须先通过，完成为终态、返工建修复卡片；依赖到位后才派单，不预派
 - [驱动与订阅实测](issues/22-driver-and-subscription-trial.md) — 04 的驱动选择不变：Claude SDK 走本机登录、Codex 只改 sqlite 目录仍是 ChatGPT 登录且能续跑、一个 app-server 10 个 thread 真并行、Grok ACP 可取消和续跑；推翻一条：Codex `workspace-write` 下不能提交（交 08）；Grok 权限跟随用户全局配置，`allow_always` 按 cwd 落盘（交 07）；DeepSeek 默认路线要 API key，账号登录要选 `deepseek-account` 路线，只能 resume 不能 load
-- [调度者生命周期](issues/06-coordinator-lifecycle.md) — 任务型：每次唤醒新开 CLI 会话（调度轮次），读运行层拼的启动简报（工作说明、卡片摘要、未决关卡、调度笔记、新事件、最近 20 条对话）处理完退出；事件排队合并投递，用户可打断；轮内靠 CLI 自动压缩兜底；失败重投，连败 3 次暂停；Claude Code、Codex 两个调度者模板，官方默认配置、不读本机全局配置
-- [运行层硬约束与调度者工具集](issues/07-hard-constraints-and-tools.md) — 违规当场返回结构化错误并记事件；`helmd` 本机 HTTP MCP、按轮次发令牌限定所属工作（待 14 实测）；新建类工具带 `key` 去重；调度者对代码只读、执行者无 Helm 工具；补齐依赖、派单（每卡最多一个活动派单）、凭据、权限代答约束；对外动作与 Grok 全局放行交 08
-- [隔离与合并](issues/08-isolation-and-merge.md) — 不加外层边界，helmd 强制打开各家自带的沙箱，只允许写卡片副本（Grok 设 `GROK_SANDBOX=workspace`，实测能压过全局 always-approve）；工作分支从基准 ref 开出，每张卡片一个 worktree，helmd 在派单结束后提交；标记完成即 `--no-ff` 合进工作分支，冲突时拒绝；调度者读 `_work`；审核被接受后 helmd 合并到基准分支并推送，执行者的推送被拦；终态时删除副本和卡片分支
+- [调度者生命周期](issues/06-coordinator-lifecycle.md) — 任务型：每次唤醒新开 CLI 会话（调度轮次），读运行层拼的启动简报（工作说明、卡片摘要、未决关卡、调度笔记、新事件、最近 20 条对话）处理完退出；事件排队合并投递，用户可打断；轮内靠 CLI 自动压缩兜底；失败重投，连败 3 次暂停；Claude Code、Codex 两个调度者模板，官方默认配置、不读本机全局配置（复查后执行者同样）
+- [运行层硬约束与调度者工具集](issues/07-hard-constraints-and-tools.md) — 违规当场返回结构化错误并记事件；`helmd` 本机 HTTP MCP、按轮次发令牌限定所属工作（待 14 实测）；新建类工具带 `key` 去重；没正常完成过任何派单的卡片不能标完成；调度者对代码只读、执行者无 Helm 工具；补齐依赖、派单（每卡最多一个活动派单）、凭据、权限代答约束；对外动作与 Grok 全局放行交 08
+- [隔离与合并](issues/08-isolation-and-merge.md) — 不加外层边界，helmd 强制打开各家自带的沙箱，只允许写卡片副本（Grok 设 `GROK_SANDBOX=workspace`，实测能压过全局 always-approve）；工作分支从基准 ref 开出，每张卡片一个 worktree，helmd 在派单结束后提交；卡片副本在第一次派单时开出；标记完成即 `--no-ff` 合进工作分支，冲突时拒绝、由修复卡片解决；调度者读 `_work`；审核被接受后 helmd 用 `git merge-tree` 预检、无冲突才合并到基准分支并推送，执行者的推送被拦；终态时删除副本和卡片分支
 
 ## Not yet specified
 
@@ -86,3 +86,4 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 ## Global checks
 
 - 已解决 5、10 张时（2026-10-22，一次覆盖）：见 Notes 的"冲突复核"，结论记在各单评论里。
+- 已解决 15 张时（2026-10-22）：冲突 2 项、风险 4 项，均已决定。冲突：整体验收卡片因"没执行过不能完成"永远标不了完成 → 放宽为"没正常完成过任何派单"，副本改在第一次派单时建；04、07 正文过时 → 补修订。风险：验收通过后再改代码旧"通过"仍算数 → 改动一律走新卡片，08 的冲突处理改为修复卡片，不加约束；审核接受后合进基准分支会碰用户工作目录 → `git merge-tree` 预检，按是否检出分别合并，失败只报告；执行者读用户全局配置 → 执行者也只用模板配置，Codex、Grok 能否做到交 14；Claude 只读和越界拦截有漏洞 → 执行者固定 `permissionMode: 'default'`，调度者靠沙箱或去掉 Bash。改写：[04](issues/04-tech-stack.md)、[05](issues/05-task-store-model.md)、[06](issues/06-coordinator-lifecycle.md)、[07](issues/07-hard-constraints-and-tools.md)、[08](issues/08-isolation-and-merge.md)、[09](issues/09-acceptance.md)、[10](issues/10-human-touchpoints.md)、[14](issues/14-coordinator-trial.md)，以及 GLOSSARY、ADR 0003。

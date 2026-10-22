@@ -38,3 +38,5 @@ Map: [Helm v1 设计](../map.md)
 **待验证**（交 [14](14-coordinator-trial.md)）：任务型调度者跨轮次不失忆，即不重复派单、不忘记与用户商定的结论，对齐阶段一问一答的体验可接受。推翻时退到混合形态：对齐阶段按 CLI 会话 id 续跑，确认工作说明后改任务型。
 
 已在 01、05、07、10、11、14、17 留评论。
+
+- 2026-10-22 15 张整体复查：修订第 2 条。"只用模板配置、不读本机全局配置"扩展到**执行者**：用户的 `~/.claude/CLAUDE.md` 写的是手动调度时派 Codex、Grok 的规则，执行者读到会再派 agent，绕开并发上限和记录；08 实测 Grok 会加载全局 hook；Codex 会读 `~/.codex/config.toml`、`~/.codex/AGENTS.md`。Claude 用 `settingSources: []`；Codex 的登录也在 `CODEX_HOME`，"不读全局配置"能否做到（如单独 `CODEX_HOME` 只链接登录文件）、Grok 能否不加载全局 hook，交 [14](14-coordinator-trial.md) 验证，做不到的一家在模板说明里写明会继承哪些全局配置。另：Claude 调度者的只读不能只靠"关写工具"，Bash 仍能写 `_work`；须打开 SDK 沙箱且不把 `_work` 设为可写，做不到就不给 Bash，只留 Read/Grep/Glob。
