@@ -5,6 +5,7 @@ import { access, lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TokenUsage } from './driver.js';
+import { coordinatorPrompt, executorPrompt } from './prompts.js';
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
 export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void };
@@ -122,6 +123,7 @@ class ClaudeDriver implements Driver {
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
       cwd, env, pathToClaudeCodeExecutable: executable, settingSources: [], strictMcpConfig: true,
+      systemPrompt: coordinator ? coordinatorPrompt : executorPrompt,
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
       ...(coordinator ? { tools: ['Bash', 'Read', 'Grep', 'Glob'] } : {}),

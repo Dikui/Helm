@@ -53,6 +53,65 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
+test('真实 Claude 驱动把默认调度规则注入 SDK 提示词，保留启动简报原文', async t => {
+  const options = await fixture(t, 'coordinator');
+  let inspected = false;
+  const driver = new ClaudeCoordinatorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    query: fakeQuery([result()], args => {
+      inspected = true;
+      assert.equal(args.prompt, '派单内容');
+      const prompt = args.options?.systemPrompt;
+      assert.equal(typeof prompt, 'string');
+      for (const requirement of [
+        /整体验收卡片.*needsVerification.*true/s,
+        /整体验收卡片.*依赖所有其他卡片.*只派验收派单/s,
+        /验收通过后.*不再.*执行派单.*改动.*新卡片/s,
+        /冲突.*修复卡片.*repairOfCardId/s,
+        /修复卡片.*合入.*冲突卡片.*完成/s,
+        /优先.*不同模板.*交叉验收.*只有一家.*同家/s,
+        /验收.*卡片说明.*本卡.*边界和标准/s,
+        /整体验收卡片.*工作说明.*标准/s,
+        /额度用完.*改派.*无处可派.*关卡/s,
+        /决策关卡尽量少提/,
+        /中途修改冲突太大/,
+        /密钥或凭据/,
+        /超出边界或需改工作说明/,
+        /多次返工仍失败或多个执行者受阻/,
+        /标准判断不了的取舍/,
+        /汇总报告.*逐卡.*结果.*验收是否通过.*由谁完成.*成果链接/s,
+        /调度笔记.*约 4k token/,
+        /不推送、不部署/,
+      ]) assert.match(prompt as string, requirement);
+    }) });
+  assert.equal((await collect(driver, options)).end?.reason, 'completed');
+  assert.equal(inspected, true, '必须实际到达真实驱动的 SDK 查询边界');
+});
+
+test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，保留派单原文', async t => {
+  const options = await fixture(t);
+  for (const resumeSessionId of [undefined, 'previous-executor-session']) {
+    let inspected = false;
+    const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: fakeQuery([result()], args => {
+        inspected = true;
+        assert.equal(args.prompt, '派单内容');
+        const prompt = args.options?.systemPrompt;
+        assert.equal(typeof prompt, 'string');
+        for (const requirement of [
+          /不推送、不部署/,
+          /开发服务.*分配的端口.*HELM_PORT_START.*HELM_PORT_END/s,
+          /检查过程和证据.*最终回答/,
+          /最后调用.*提交结论.*submit-conclusion/s,
+          /执行派单.*completed.*blocked/s,
+          /验收派单.*passed.*failed/s,
+          /理由/,
+        ]) assert.match(prompt as string, requirement);
+      }) });
+    assert.equal((await collect(driver, { ...options, resumeSessionId })).end?.reason, 'completed');
+    assert.equal(inspected, true, '必须实际到达真实驱动的 SDK 查询边界');
+  }
+});
+
 test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP 与单次读取权限', async t => {
   const base = await fixture(t);
   const cwd = join(base.cwd, '_work');
