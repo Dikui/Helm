@@ -76,15 +76,20 @@ export class ExecutionRunner {
         if (this.running.size >= limit) break;
         const id = String(row.id);
         if (this.running.has(id)) continue;
-        const range = this.allocatePorts();
-        if (!range) break;
-        this.ports.set(id, range);
-        const promise = this.run(getDispatch(this.store, String(row.workId), id), range).finally(() => {
-          this.ports.delete(id); this.running.delete(id); this.schedule();
-        });
-        this.running.set(id, promise);
+        if (!this.start(id, String(row.workId))) break;
       }
     });
+  }
+
+  private start(id: string, workId: string) {
+    const range = this.allocatePorts();
+    if (!range) return undefined;
+    this.ports.set(id, range);
+    const promise = this.run(getDispatch(this.store, workId, id), range).finally(() => {
+      this.ports.delete(id); this.running.delete(id); this.schedule();
+    });
+    this.running.set(id, promise);
+    return promise;
   }
 
   private allocatePorts() {
@@ -126,7 +131,9 @@ export class ExecutionRunner {
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, ports.start, ports.end, dispatch.id);
-        this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ? AND status NOT IN ('completed', 'cancelled')`).run(card.id);
+        if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
+          this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ?`).run(card.id);
+        }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit, portStart: ports.start, portEnd: ports.end }, scope);
       });
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
@@ -268,6 +275,18 @@ export class ExecutionRunner {
         this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
       });
     }
+  }
+
+  async settle(workId: string, cardId?: string) {
+    const active = this.store.db.prepare(`SELECT id FROM dispatches WHERE work_id = ? AND (? IS NULL OR card_id = ?)
+      AND status IN ('queued', 'running')`).all(workId, cardId ?? null, cardId ?? null);
+    const pending = active.map(row => {
+      const id = String(row.id);
+      const promise = this.running.get(id) ?? this.start(id, workId);
+      if (!promise) throw new Error('No free port range to settle dispatch');
+      return promise;
+    });
+    await Promise.all(pending);
   }
 
   async close() {

@@ -6,10 +6,11 @@ import { z } from 'zod';
 import { invoke, operations, rejectOperation } from './operations.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import type { BrowserProcess } from './browser.js';
+import type { UserOperations } from './user-operations.js';
 
 // Stateless transport; the HTTP layer resolves and validates round and dispatch tokens.
 export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor,
-  browserFor: () => BrowserProcess | undefined = () => undefined) {
+  userOperations: UserOperations, browserFor: () => BrowserProcess | undefined = () => undefined) {
   const server = new Server({ name: 'helm', version: '0.1.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: operations.filter(operation => operation.callers.includes(actor.type)).map<Tool>(operation => ({
@@ -31,7 +32,7 @@ export async function handleMcp(request: IncomingMessage, response: ServerRespon
         return { isError: true, content: [{ type: 'text', text: JSON.stringify(result.body) }], structuredContent: result.body };
       }
     }
-    const result = invoke(store, actor, request.params.name, request.params.arguments ?? {});
+    const result = await invoke(store, actor, request.params.name, request.params.arguments ?? {}, userOperations);
     return {
       isError: !result.body.ok,
       content: [{ type: 'text' as const, text: JSON.stringify(result.body) }],

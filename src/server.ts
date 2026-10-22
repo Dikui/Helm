@@ -8,6 +8,7 @@ import { FakeDriver, type Driver } from './driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
+import { UserOperations } from './user-operations.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -32,6 +33,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'));
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
+  let userOperations: UserOperations;
   const server = createServer(async (request, response) => {
     let name = request.url ?? '/';
     let actor: Actor = { type: 'user', id: 'user' };
@@ -43,7 +45,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
       if (request.headers.authorization !== undefined) actor = executions.authenticate(request.headers.authorization) ?? scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
       const input = await readBody(request);
-      if (path === '/mcp') return await handleMcp(request, response, input, store, actor, () => executions.browserFor(actor));
+      if (path === '/mcp') return await handleMcp(request, response, input, store, actor, userOperations, () => executions.browserFor(actor));
       if (path === '/events') {
         let filter = input;
         const lastId = request.headers['last-event-id'];
@@ -56,11 +58,11 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
             if (typeof after === 'number' && Number.isSafeInteger(after) && after >= 0) filter = { ...input, after: Math.max(after, Number(lastId)) };
           }
         }
-        const result = invoke(store, actor, 'get-events', filter);
+        const result = await invoke(store, actor, 'get-events', filter, userOperations);
         if (!result.body.ok) return json(response, result.status, result.body);
         return streamEvents(store, response, filter as EventFilter);
       }
-      const result = invoke(store, actor, name, input);
+      const result = await invoke(store, actor, name, input, userOperations);
       json(response, result.status, result.body);
     } catch (error) {
       if (error instanceof SyntaxError) error = new RuleError('INVALID_JSON', '请求必须是 JSON。', 400);
@@ -84,6 +86,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
   executions = new ExecutionRunner(store, options.executorDriver ?? new FakeDriver(), `${url}/mcp`, options.browserCommand);
+  userOperations = new UserOperations(store, executions, scheduler);
   let closing: Promise<void> | undefined;
   return {
     url,

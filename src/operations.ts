@@ -9,8 +9,9 @@ import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHist
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { agentTemplates, configureTemplate } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
+import type { UserOperations } from './user-operations.js';
 
-interface Context { store: TaskStore; actor: Actor }
+interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
   name: string;
   description: string;
@@ -41,6 +42,36 @@ const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 
 export const operations: readonly Operation[] = [
+  operation({
+    name: 'pause-card', description: '暂停卡片并中止派单', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, params) => userOperations.pauseCard(actor, params),
+  }),
+  operation({
+    name: 'resume-card', description: '恢复卡片并唤醒调度者', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, params) => userOperations.resumeCard(actor, params),
+  }),
+  operation({
+    name: 'pause-work', description: '暂停工作并中止全部派单', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.pauseWork(actor, workId),
+  }),
+  operation({
+    name: 'resume-work', description: '恢复工作并投递积压事件', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.resumeWork(actor, workId),
+  }),
+  operation({
+    name: 'cancel-work', description: '取消工作，中止派单并删除副本', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.cancelWork(actor, workId),
+  }),
+  operation({
+    name: 'interrupt-round', description: '打断当前调度轮次并重投事件和用户消息', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.interruptRound(actor, workId),
+  }),
   operation({
     name: 'list-agent-templates', description: '读取内置 Agent 模板', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => agentTemplates(store),
@@ -176,6 +207,7 @@ export const operations: readonly Operation[] = [
       const work = store.work(workId);
       const existing = store.message(workId, params.key);
       if (existing) return { work, message: existing };
+      if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       if (params.gateId) {
         const gate = store.db.prepare('SELECT id FROM gates WHERE id = ? AND work_id = ?').get(params.gateId, workId);
         if (!gate) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
@@ -202,7 +234,7 @@ export const operations: readonly Operation[] = [
     name: 'list-works', description: '列出工作及状态和待决定关卡', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({ projectId: z.string().min(1).optional() }).strict(),
     execute: ({ store }, { projectId }) => store.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
-      EXISTS(SELECT 1 FROM gates WHERE gates.work_id = works.id AND gates.status = 'pending') AS hasPendingGate
+      (status NOT IN ('completed', 'cancelled') AND EXISTS(SELECT 1 FROM gates WHERE gates.work_id = works.id AND gates.status = 'pending')) AS hasPendingGate
       FROM works WHERE (? IS NULL OR project_id = ?) ORDER BY created_at, id`).all(projectId ?? null, projectId ?? null)
       .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate) })),
   }),
@@ -279,9 +311,9 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => completeCard(store, actor, params),
   }),
   operation({
-    name: 'cancel-card', description: '调度者取消卡片并唤醒后续处理', callers: ['coordinator-round'], keyed: false, mutates: true, transactional: false,
+    name: 'cancel-card', description: '取消卡片、中止派单并唤醒后续处理', callers: ['user', 'coordinator-round'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), reason: z.string().trim().min(1) }).strict(),
-    execute: ({ store, actor }, params) => cancelCard(store, actor, params),
+    execute: ({ actor, userOperations }, params) => userOperations.cancelCard(actor, params),
   }),
   operation({
     name: 'get-card', description: '读取卡片详情', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
@@ -319,7 +351,7 @@ export const operations: readonly Operation[] = [
   }),
 ];
 
-export function invoke(store: TaskStore, actor: Actor, name: string, input: unknown) {
+export async function invoke(store: TaskStore, actor: Actor, name: string, input: unknown, userOperations: UserOperations) {
   const definition = operations.find(item => item.name === name);
   try {
     if (!definition) throw new RuleError('UNKNOWN_OPERATION', `未知操作：${name}`, 404);
@@ -332,8 +364,14 @@ export function invoke(store: TaskStore, actor: Actor, name: string, input: unkn
       if (parsed.data.workId !== round.work_id || actor.workId !== round.work_id) throw new RuleError('WORK_SCOPE', '轮次令牌只能操作所属工作。', 403);
     }
     if (actor.type === 'dispatch') activeDispatch(store, actor);
-    const run = () => definition.execute({ store, actor }, parsed.data);
-    const result = definition.mutates && definition.transactional !== false ? store.transaction(run) : run();
+    if (definition.mutates && typeof parsed.data.workId === 'string') {
+      const work = store.work(parsed.data.workId);
+      if (['completed', 'cancelled'].includes(work.status) && !(name === 'cancel-work' && work.status === 'cancelled')) {
+        throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
+      }
+    }
+    const run = () => definition.execute({ store, actor, userOperations }, parsed.data);
+    const result = await (definition.mutates && definition.transactional !== false ? store.transaction(run) : run());
     return { status: 200, body: { ok: true as const, result } };
   } catch (error) {
     if (!(error instanceof RuleError)) throw error;
