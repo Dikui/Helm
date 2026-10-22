@@ -7,6 +7,7 @@ import { cardDetails, refreshCardReadiness } from './graph.js';
 import { templateEnvironment } from './templates.js';
 import { TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
+import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -20,14 +21,18 @@ export class ExecutionRunner {
   private tokens = new Map<string, Actor>();
   private running = new Map<string, Promise<void>>();
   private sessions = new Map<string, DriverSession>();
+  private browsers = new Map<string, BrowserProcess>();
   private scheduled = false;
   private stopping = false;
   private unsubscribe: () => void;
 
-  constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string) {
+  constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string, private browserCommand: BrowserCommand = playwrightCommand) {
     this.unsubscribe = store.subscribe(events => {
       for (const event of events) {
-        if (event.action === 'dispatch-revoked' && event.dispatchId) this.sessions.get(event.dispatchId)?.cancel();
+        if (event.action === 'dispatch-revoked' && event.dispatchId) {
+          this.sessions.get(event.dispatchId)?.cancel();
+          void this.browsers.get(event.dispatchId)?.close().catch(() => {});
+        }
       }
       if (events.some(event => event.action === 'dispatch-created')) this.schedule();
     });
@@ -38,6 +43,12 @@ export class ExecutionRunner {
     const actor = header.startsWith('Bearer ') ? this.tokens.get(header.slice(7)) : undefined;
     if (actor) activeDispatch(this.store, actor);
     return actor;
+  }
+
+  browserFor(actor: Actor) {
+    if (actor.type !== 'dispatch') return undefined;
+    const dispatch = activeDispatch(this.store, actor);
+    return dispatch.needsBrowser ? this.browsers.get(dispatch.id) : undefined;
   }
 
   private schedule() {
@@ -63,6 +74,7 @@ export class ExecutionRunner {
     let finalAnswer: string | null = null;
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
     let failure: string | null = null;
+    let browserFailed = false;
     let startCommit: string | null = null;
     let endCommit: string | null = null;
     const card = cardDetails(this.store, dispatch.workId, dispatch.cardId);
@@ -76,6 +88,20 @@ export class ExecutionRunner {
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit }, scope);
       });
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
+        if (dispatch.needsBrowser) {
+          const browser = new BrowserProcess(this.browserCommand, workPath, join(dispatch.outputPath, '..', 'browser'), () => {
+            browserFailed = true;
+            failure = 'Browser MCP exited unexpectedly';
+            this.sessions.get(dispatch.id)?.cancel();
+          });
+          this.browsers.set(dispatch.id, browser);
+          this.store.transaction(() => {
+            this.store.db.prepare('UPDATE dispatches SET browser_pgid = ?, browser_started_at = ? WHERE id = ?').run(browser.pgid, browser.startedAt, dispatch.id);
+            this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-started', { pgid: browser.pgid, startedAt: browser.startedAt }, scope);
+          });
+          await browser.connect();
+        }
+        if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason || this.stopping) return;
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
@@ -119,6 +145,18 @@ export class ExecutionRunner {
       this.tokens.delete(token);
       this.sessions.get(dispatch.id)?.cancel();
       this.sessions.delete(dispatch.id);
+      const browser = this.browsers.get(dispatch.id);
+      if (browser) {
+        try {
+          await browser.close();
+          this.store.transaction(() => this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-stopped', { pgid: browser.pgid }, scope));
+        } catch (error) {
+          failure = [failure, String(error)].filter(Boolean).join('; ');
+          reason = 'error';
+        }
+        this.browsers.delete(dispatch.id);
+      }
+      if (browserFailed) reason = 'error';
       let current = getDispatch(this.store, dispatch.workId, dispatch.id);
       if (this.stopping && !current.abortReason) {
         this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET abort_reason = ? WHERE id = ?').run('运行层停止', dispatch.id); });
@@ -166,6 +204,7 @@ export class ExecutionRunner {
     this.stopping = true;
     this.unsubscribe();
     for (const session of this.sessions.values()) session.cancel();
+    for (const browser of this.browsers.values()) void browser.close().catch(() => {});
     await Promise.all(this.running.values());
     this.tokens.clear();
   }

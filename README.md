@@ -58,3 +58,19 @@ npm test
 ```
 
 测试启动真实 `helmd`（含 CLI 子进程），使用临时任务库和 git 项目，经 HTTP、SSE、真实 MCP、CLI 和文件系统验证行为，不读取内部数据表；另有假驱动公共接口的契约测试。
+
+调度者调用 `create-dispatch` 时可加 `needsBrowser: true`。运行层为这次派单在执行者沙箱外启动独立的 Playwright HTTP MCP，执行者通过同一个派单 MCP 端点使用导航、快照、点击、输入、截图等检查工具和 `submit-conclusion`。浏览器工具使用明确的白名单，包含执行代码的工具不会转发；未标记派单、用户和调度轮次都拿不到浏览器工具。运行层记录浏览器的 pgid 和启动时间；派单结束、撤销或服务停止时，先 TERM 整组，5 秒后仍存活则 KILL，再处理副本。
+
+浏览器固定为 `@playwright/mcp@0.0.83` 对应的 Playwright 自带 Chromium（Chrome for Testing），有界面、`--isolated`，HTTP 只绑定 `127.0.0.1` 并设置 `--allowed-hosts 127.0.0.1`。按锁定的依赖版本安装浏览器：
+
+```sh
+npm run browser:install
+```
+
+普通 `npm test` 只运行浏览器工具替身，不启动浏览器。真实浏览器测试须在沙箱外、有显示服务的环境单独运行，不使用无头模式或系统 Chrome：
+
+```sh
+npm run test:browser
+```
+
+该测试用假执行者在卡片副本中启动静态页，经派单端点导航并截图，将 PNG 保存在系统临时目录并输出路径。验收时须打开截图，核对页面标题 `Helm browser dispatch`。`startHelmd` 的 `browserCommand` 仅供边界替身测试替换外部 MCP 进程；浏览器生命周期不依赖派单用途，验收派单由任务单 07 接入。端口段分配由任务单 05 实现，当前测试用系统分配的本机空闲端口运行静态服务。

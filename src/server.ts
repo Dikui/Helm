@@ -7,6 +7,7 @@ import { handleMcp } from './mcp.js';
 import { FakeDriver, type Driver } from './driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
+import type { BrowserCommand } from './browser.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -27,7 +28,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; driver?: Driver; executorDriver?: Driver } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; driver?: Driver; executorDriver?: Driver; browserCommand?: BrowserCommand } = {}) {
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'));
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
@@ -42,7 +43,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
       if (request.headers.authorization !== undefined) actor = executions.authenticate(request.headers.authorization) ?? scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
       const input = await readBody(request);
-      if (path === '/mcp') return await handleMcp(request, response, input, store, actor);
+      if (path === '/mcp') return await handleMcp(request, response, input, store, actor, () => executions.browserFor(actor));
       if (path === '/events') {
         let filter = input;
         const lastId = request.headers['last-event-id'];
@@ -82,7 +83,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
-  executions = new ExecutionRunner(store, options.executorDriver ?? new FakeDriver(), `${url}/mcp`);
+  executions = new ExecutionRunner(store, options.executorDriver ?? new FakeDriver(), `${url}/mcp`, options.browserCommand);
   let closing: Promise<void> | undefined;
   return {
     url,

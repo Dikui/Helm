@@ -11,6 +11,7 @@ import { RuleError, TaskStore, type Actor } from './store.js';
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution'; templateId: string;
   template: AgentTemplate; content: string; status: 'queued' | 'running' | 'ended';
+  needsBrowser: boolean; browserPgid: number | null; browserStartedAt: string | null;
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
   startCommit: string | null; endCommit: string | null; outputPath: string;
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
@@ -21,10 +22,11 @@ const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose,
   template_snapshot AS template, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
-  conclusion, conclusion_reason AS conclusionReason, usage, failure`;
+  conclusion, conclusion_reason AS conclusionReason, usage, failure,
+  needs_browser AS needsBrowser, browser_pgid AS browserPgid, browser_started_at AS browserStartedAt`;
 
 function readDispatch(row: Record<string, unknown>): Dispatch {
-  return { ...row, template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
+  return { ...row, needsBrowser: Boolean(row.needsBrowser), template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
 }
 
 export function getDispatch(store: TaskStore, workId: string, dispatchId: string) {
@@ -72,7 +74,7 @@ function cardCopy(store: TaskStore, workId: string, cardId: string) {
 }
 
 export function createDispatch(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; key: string; templateId: string; content?: string; resumeSessionId?: string;
+  workId: string; cardId: string; key: string; templateId: string; content?: string; resumeSessionId?: string; needsBrowser?: boolean;
 }) {
   const existing = listDispatches(store, params.workId).find(item => item.key === params.key);
   if (existing) return existing;
@@ -102,10 +104,10 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
   mkdirSync(outputPath, { recursive: true });
   return store.transaction(() => {
     store.db.prepare(`INSERT INTO dispatches
-      (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path)
-      VALUES (?, ?, ?, ?, 'execution', ?, ?, ?, 'queued', ?, ?, ?, ?)`)
+      (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path, needs_browser)
+      VALUES (?, ?, ?, ?, 'execution', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`)
       .run(id, work.id, card.id, params.key, template.id, JSON.stringify(template), content,
-        params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath);
+        params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath, params.needsBrowser ? 1 : 0);
     store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, template_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
       .run(copy.workPath, copy.cardBranch, template.id, id, card.id);
     const dispatch = getDispatch(store, work.id, id);
