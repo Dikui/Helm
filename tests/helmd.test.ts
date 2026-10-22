@@ -15,7 +15,7 @@ const cliPath = fileURLToPath(new URL('../src/cli.js', import.meta.url));
 
 async function startDaemon(t: TestContext, dataDir: string) {
   const child = spawn(process.execPath, [cliPath, 'serve', '--port', '0', '--data-dir', dataDir], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HELM_FAKE_COORDINATOR: '1' },
   });
   let stderr = '';
   child.stderr!.on('data', chunk => { stderr += chunk; });
