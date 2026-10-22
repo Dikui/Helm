@@ -8,6 +8,7 @@ import { confirmationDetails, confirmDescription, draftDescription } from './ali
 import { addDependency, cancelCard, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { agentTemplates, configureTemplate } from './templates.js';
+import { resumeWork } from './work-control.js';
 
 interface Context { store: TaskStore; actor: Actor }
 interface Operation {
@@ -116,7 +117,20 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'get-settings', description: '读取全局设置', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
-    execute: ({ store }) => ({ concurrencyLimit: store.db.prepare('SELECT concurrency_limit FROM settings WHERE id = 1').get()!.concurrency_limit }),
+    execute: ({ store }) => store.db.prepare(`SELECT concurrency_limit AS concurrencyLimit,
+      round_total_timeout_ms AS roundTotalTimeoutMs, round_idle_timeout_ms AS roundIdleTimeoutMs FROM settings WHERE id = 1`).get(),
+  }),
+  operation({
+    name: 'set-round-watchdog', description: '设置调度轮次的总时长和无输出时长上限（毫秒，下一轮生效）', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ totalTimeoutMs: z.number().int().min(1).max(2 ** 31 - 1).optional(), idleTimeoutMs: z.number().int().min(1).max(2 ** 31 - 1).optional() })
+      .strict().refine(params => params.totalTimeoutMs !== undefined || params.idleTimeoutMs !== undefined, '至少指定一个时长。'),
+    execute({ store, actor }, { totalTimeoutMs, idleTimeoutMs }) {
+      store.db.prepare(`UPDATE settings SET round_total_timeout_ms = COALESCE(?, round_total_timeout_ms),
+        round_idle_timeout_ms = COALESCE(?, round_idle_timeout_ms) WHERE id = 1`).run(totalTimeoutMs ?? null, idleTimeoutMs ?? null);
+      const settings = store.db.prepare(`SELECT round_total_timeout_ms AS roundTotalTimeoutMs, round_idle_timeout_ms AS roundIdleTimeoutMs FROM settings WHERE id = 1`).get()!;
+      store.appendEvent(actor, { type: 'settings', id: 'global' }, 'round-watchdog-set', settings);
+      return settings;
+    },
   }),
   operation({
     name: 'set-concurrency', description: '设置全局执行者并发上限', callers: ['user'], keyed: false, mutates: true,
@@ -183,9 +197,15 @@ export const operations: readonly Operation[] = [
     name: 'list-works', description: '列出工作及状态和待决定关卡', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({ projectId: z.string().min(1).optional() }).strict(),
     execute: ({ store }, { projectId }) => store.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
+      runtime_pause_reason AS runtimePauseReason,
       EXISTS(SELECT 1 FROM gates WHERE gates.work_id = works.id AND gates.status = 'pending') AS hasPendingGate
       FROM works WHERE (? IS NULL OR project_id = ?) ORDER BY created_at, id`).all(projectId ?? null, projectId ?? null)
-      .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate) })),
+      .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate), usage: store.workUsage(String(work.id)) })),
+  }),
+  operation({
+    name: 'resume-work', description: '手动恢复被运行层暂停的工作', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, { workId }) => resumeWork(store, actor, workId),
   }),
   operation({
     name: 'get-work', description: '读取工作', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
@@ -198,7 +218,12 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'list-pending', description: '列出所有待用户处理的事项', callers: ['user'], keyed: false, mutates: false,
-    schema: z.object({}).strict(), execute: ({ store }) => store.pending().map(gate => confirmationDetails(store, gate)),
+    schema: z.object({}).strict(), execute: ({ store }) => [
+      ...store.pending().map(gate => confirmationDetails(store, gate)),
+      ...store.db.prepare(`SELECT id, id AS workId, status, runtime_pause_reason AS runtimePauseReason
+        FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
+        .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
+    ],
   }),
   operation({
     name: 'get-events', description: '按卡片、派单或执行方读取事件时间线', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,

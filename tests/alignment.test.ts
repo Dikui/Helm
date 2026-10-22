@@ -221,7 +221,7 @@ test('确认后的工作说明修订需新关卡，旧版继续生效直到用�
   assert.equal(events.filter(event => event.action === 'gate-decided').length, 2);
 });
 
-test('轮次崩溃不处理已投递的事件，下一次用户唤醒仍收到它们，正常完成后不再重投', async t => {
+test('轮次崩溃自动重投已投递的事件，附中断提示，正常完成后不再重投', async t => {
   let retryBrief: StartupBrief | undefined;
   let nextBrief: StartupBrief | undefined;
   let headers: Record<string, string> | undefined;
@@ -237,14 +237,15 @@ test('轮次崩溃不处理已投递的事件，下一次用户唤醒仍收到�
   }, ctx => { nextBrief = ctx.brief; return []; }]);
   const work = await daemon.begin();
   const failed = await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
-  assert.equal(failed.at(-1).details.reason, 'error');
-  assert.equal(failed.at(-1).details.processed, false);
-  assert.match(failed.at(-1).details.failure, /模拟进程崩溃/);
+  const interrupted = failed.find(event => event.action === 'round-ended');
+  assert.equal(interrupted.details.reason, 'error');
+  assert.equal(interrupted.details.processed, false);
+  assert.match(interrupted.details.failure, /模拟进程崩溃/);
   const expired = await fetch(`${daemon.url}/api/get-work`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ workId: work.id }) });
   assert.equal(expired.status, 401);
-  await daemon.call('send-message', { workId: work.id, body: '再试一次', key: 'retry' });
   await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
-  assert.deepEqual(retryBrief!.wakeEvents.map(event => (event.details as any).body), ['做一个软件项目', '再试一次']);
+  assert.deepEqual(retryBrief!.wakeEvents.map(event => (event.details as any).body), ['做一个软件项目']);
+  assert.equal((retryBrief as any).interruptionNotice, '上一轮中断，期间已做的操作见任务库');
   assert.equal((await daemon.call('get-work-descriptions', { workId: work.id })).result.length, 1);
   await daemon.call('send-message', { workId: work.id, body: '第三次消息', key: 'third' });
   await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 3);

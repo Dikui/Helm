@@ -1,6 +1,7 @@
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import type { TokenUsage } from './driver.js';
 
 export type ActorType = 'user' | 'coordinator-round' | 'dispatch' | 'runtime';
 export interface Actor { type: ActorType; id: string; workId?: string }
@@ -8,6 +9,8 @@ export interface Work {
   id: string; projectId: string; status: string; createdAt: string;
   baseRef: string | null; baseCommit: string | null; workBranch: string | null;
   workPath: string | null; activeDescriptionId: string | null;
+  runtimePauseReason: string | null;
+  usage: TokenUsage;
 }
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string; key: string;
@@ -64,7 +67,7 @@ export class TaskStore {
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (![0, 1, 2, 3, 4].includes(Number(version))) {
+    if (![0, 1, 2, 3, 4, 5].includes(Number(version))) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -191,6 +194,16 @@ export class TaskStore {
       PRAGMA user_version = 4;
       COMMIT;
     `);
+    if (Number(version) < 5) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE works ADD COLUMN runtime_pause_reason TEXT;
+      ALTER TABLE works ADD COLUMN paused_from_status TEXT;
+      ALTER TABLE works ADD COLUMN consecutive_round_failures INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE settings ADD COLUMN round_total_timeout_ms INTEGER NOT NULL DEFAULT 1800000;
+      ALTER TABLE settings ADD COLUMN round_idle_timeout_ms INTEGER NOT NULL DEFAULT 600000;
+      PRAGMA user_version = 5;
+      COMMIT;
+    `);
   }
 
   transaction<T>(run: () => T): T {
@@ -247,9 +260,18 @@ export class TaskStore {
   work(id: string): Work {
     const work = this.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
       base_ref AS baseRef, base_commit AS baseCommit, work_branch AS workBranch,
-      work_path AS workPath, active_description_id AS activeDescriptionId FROM works WHERE id = ?`).get(id);
+      work_path AS workPath, active_description_id AS activeDescriptionId,
+      runtime_pause_reason AS runtimePauseReason FROM works WHERE id = ?`).get(id);
     if (!work) throw new RuleError('NOT_FOUND', '找不到这项工作。', 404);
-    return work as unknown as Work;
+    return { ...work, usage: this.workUsage(id) } as unknown as Work;
+  }
+
+  workUsage(workId: string): TokenUsage {
+    return this.db.prepare(`SELECT COALESCE(SUM(json_extract(usage, '$.inputTokens')), 0) AS inputTokens,
+      COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0) AS outputTokens FROM (
+        SELECT usage FROM dispatches WHERE work_id = ? UNION ALL
+        SELECT usage FROM coordinator_rounds WHERE work_id = ?
+      )`).get(workId, workId) as unknown as TokenUsage;
   }
 
   descriptions(workId: string): WorkDescription[] {
