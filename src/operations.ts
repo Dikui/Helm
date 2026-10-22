@@ -118,9 +118,9 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, dispatchId }) => dispatchArtifacts(store, workId, dispatchId),
   }),
   operation({
-    name: 'read-artifact', description: '读取成果内容', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1) }).strict(),
-    execute: ({ store }, { workId, artifactId }) => readArtifact(store, workId, artifactId),
+    name: 'read-artifact', description: '读取成果内容，二进制文件用 encoding: base64', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional() }).strict(),
+    execute: ({ store }, { workId, artifactId, encoding }) => readArtifact(store, workId, artifactId, encoding),
   }),
   operation({
     name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,

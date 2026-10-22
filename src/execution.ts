@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Driver, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, type Dispatch } from './dispatch.js';
@@ -139,7 +139,7 @@ export class ExecutionRunner {
       });
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
         if (dispatch.needsBrowser) {
-          const browser = new BrowserProcess(this.browserCommand, workPath, join(dispatch.outputPath, '..', 'browser'), () => {
+          const browser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), () => {
             browserFailed = true;
             failure = 'Browser MCP exited unexpectedly';
             this.sessions.get(dispatch.id)?.cancel();
@@ -227,6 +227,20 @@ export class ExecutionRunner {
           reason = 'error';
         }
         this.browsers.delete(dispatch.id);
+        try {
+          const files = readdirSync(browser.outputDir, { recursive: true }) as string[];
+          this.store.transaction(() => {
+            for (const name of files) {
+              const path = join(browser.outputDir, name);
+              if (name !== 'config.json' && lstatSync(path).isFile()) {
+                saveArtifact(this.store, dispatch, 'file', `browser/${name}`, readFileSync(path));
+              }
+            }
+          });
+        } catch (error) {
+          failure = [failure, String(error)].filter(Boolean).join('; ');
+          reason = 'error';
+        }
       }
       if (browserFailed) reason = 'error';
       if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';

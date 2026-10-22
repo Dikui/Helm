@@ -217,7 +217,7 @@ export function dispatchArtifacts(store: TaskStore, workId: string, dispatchId: 
   return store.db.prepare('SELECT id, dispatch_id AS dispatchId, kind, name, path, ref, commit_sha AS commitSha FROM artifacts WHERE dispatch_id = ? ORDER BY rowid').all(dispatchId);
 }
 
-export function saveArtifact(store: TaskStore, dispatch: Dispatch, kind: 'branch' | 'file' | 'test-output', name: string, value: string, commit?: string) {
+export function saveArtifact(store: TaskStore, dispatch: Dispatch, kind: 'branch' | 'file' | 'test-output', name: string, value: string | Buffer, commit?: string) {
   const id = randomUUID();
   const path = kind === 'branch' ? null : join(store.dataDir, 'dispatches', dispatch.id, 'artifacts', id);
   if (path) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); }
@@ -233,10 +233,10 @@ export function reportedArtifact(workPath: string, path: string) {
   return { name: suffix, content: readFileSync(source, 'utf8') };
 }
 
-export function readArtifact(store: TaskStore, workId: string, artifactId: string) {
+export function readArtifact(store: TaskStore, workId: string, artifactId: string, encoding: 'utf8' | 'base64' = 'utf8') {
   store.work(workId);
   const artifact = store.db.prepare(`SELECT a.id, a.kind, a.name, a.path, a.ref, a.commit_sha AS commitSha FROM artifacts a
     JOIN dispatches d ON d.id = a.dispatch_id WHERE a.id = ? AND d.work_id = ?`).get(artifactId, workId);
   if (!artifact) throw new RuleError('INVALID_ARTIFACT', '成果必须属于这项工作。', 400);
-  return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path), 'utf8') : null };
+  return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path)).toString(encoding) : null };
 }

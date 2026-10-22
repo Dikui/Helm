@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
+import { processTargetExists, signalProcess } from './processes.js';
 
 export interface BrowserCommand { file: string; args: string[] }
 const require = createRequire(import.meta.url);
@@ -21,16 +22,6 @@ const inspectionTools = new Set([
   'browser_console_messages', 'browser_network_requests', 'browser_close',
 ]);
 
-function groupExists(pgid: number) {
-  try { process.kill(-pgid, 0); return true; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
-}
-
-function signalGroup(pgid: number, signal: NodeJS.Signals) {
-  try { process.kill(-pgid, signal); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
-}
-
 export class BrowserProcess {
   private child: ChildProcess;
   private controller = new AbortController();
@@ -41,7 +32,7 @@ export class BrowserProcess {
   readonly pgid: number;
   readonly startedAt: string;
 
-  constructor(command: BrowserCommand, cwd: string, outputDir: string, onExit: () => void) {
+  constructor(command: BrowserCommand, readonly outputDir: string, onExit: () => void) {
     mkdirSync(outputDir, { recursive: true });
     const configPath = join(outputDir, 'config.json');
     writeFileSync(configPath, JSON.stringify({
@@ -53,7 +44,9 @@ export class BrowserProcess {
     env.NO_PROXY = [env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',');
     env.no_proxy = env.NO_PROXY;
     this.child = spawn(command.file, [...command.args, '--port', '0', '--host', '127.0.0.1',
-      '--isolated', '--browser', 'chromium', '--config', configPath], { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // With no client roots, Playwright resolves explicit filenames against cwd.
+      // Use the same root for both named and automatically generated output files.
+      '--isolated', '--browser', 'chromium', '--config', configPath], { cwd: outputDir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     this.endpoint = new Promise((resolve, reject) => {
       let output = '';
       const timer = setTimeout(() => reject(new Error(`Browser MCP startup timed out: ${output}`)), 15_000);
@@ -106,15 +99,23 @@ export class BrowserProcess {
   private async stop() {
     this.controller.abort();
     const closeClient = this.client.close();
-    if (this.pgid && groupExists(this.pgid)) {
-      signalGroup(this.pgid, 'SIGTERM');
-      const deadline = Date.now() + 5_000;
-      while (groupExists(this.pgid) && Date.now() < deadline) await delay(25);
-      if (groupExists(this.pgid)) signalGroup(this.pgid, 'SIGKILL');
-    }
-    if (this.child.pid && this.child.exitCode === null && this.child.signalCode === null) {
-      await new Promise<void>(resolve => this.child.once('exit', () => resolve()));
-    }
-    await closeClient;
+    try {
+      if (this.pgid && await processTargetExists(-this.pgid)) {
+        await signalProcess(-this.pgid, 'SIGTERM');
+        const deadline = Date.now() + 5_000;
+        while (await processTargetExists(-this.pgid) && Date.now() < deadline) await delay(25);
+        if (await processTargetExists(-this.pgid)) {
+          await signalProcess(-this.pgid, 'SIGKILL');
+          const killedDeadline = Date.now() + 2_000;
+          while (await processTargetExists(-this.pgid)) {
+            if (Date.now() >= killedDeadline) throw new Error(`Browser process group ${this.pgid} survived SIGKILL`);
+            await delay(25);
+          }
+        }
+      }
+      if (this.child.pid && this.child.exitCode === null && this.child.signalCode === null) {
+        await new Promise<void>(resolve => this.child.once('exit', () => resolve()));
+      }
+    } finally { await closeClient; }
   }
 }

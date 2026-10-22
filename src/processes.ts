@@ -42,9 +42,29 @@ async function processDirectories(): Promise<ProcessDirectory[]> {
   return processes;
 }
 
-function signal(target: number, value: NodeJS.Signals) {
+export async function processTargetExists(target: number) {
+  try { process.kill(target, 0); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code !== 'EPERM') throw error;
+  }
+  // Darwin can return EPERM for a group containing only zombies. A reaped
+  // group leader also says nothing about surviving children. Inspect the whole
+  // group independently of cwd; exited processes cannot write or hold ports.
+  // The existing process directory scan uses lsof on macOS and /proc on Linux.
+  // Zombies have no cwd, so neither scan includes them.
+  return (await processDirectories()).some(entry => target < 0 ? entry.pgid === -target : entry.pid === target);
+}
+
+export async function signalProcess(target: number, value: NodeJS.Signals) {
   try { process.kill(target, value); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH' || (code === 'EPERM' && !await processTargetExists(target))) return;
+    const identity = target < 0 ? `process group ${-target}` : `process ${target}`;
+    throw new Error(`Cannot send ${value} to ${identity}: ${String(error)}`, { cause: error });
+  }
 }
 
 export async function cleanupWorktreeProcesses(path: string, managed: ManagedProcess[] = []) {
@@ -64,8 +84,8 @@ export async function cleanupWorktreeProcesses(path: string, managed: ManagedPro
   const pids = targets(snapshot).map(entry => entry.pid);
   const result = { pids, pgids: [...groups], escalated: false };
   if (!pids.length) return result;
-  for (const group of groups) signal(-group, 'SIGTERM');
-  for (const pid of individual) signal(pid, 'SIGTERM');
+  for (const group of groups) await signalProcess(-group, 'SIGTERM');
+  for (const pid of individual) await signalProcess(pid, 'SIGTERM');
   const deadline = Date.now() + 5000;
   do {
     await delay(50);
@@ -73,8 +93,8 @@ export async function cleanupWorktreeProcesses(path: string, managed: ManagedPro
     if (!targets(snapshot).length) return result;
   } while (Date.now() < deadline);
   result.escalated = true;
-  for (const group of groups) if (snapshot.some(entry => entry.pgid === group)) signal(-group, 'SIGKILL');
-  for (const pid of individual) if (snapshot.some(entry => entry.pid === pid)) signal(pid, 'SIGKILL');
+  for (const group of groups) if (snapshot.some(entry => entry.pgid === group)) await signalProcess(-group, 'SIGKILL');
+  for (const pid of individual) if (snapshot.some(entry => entry.pid === pid)) await signalProcess(pid, 'SIGKILL');
   // Do not let git race a process that has received SIGKILL but has not exited yet.
   for (let poll = 0; poll < 40; poll++) {
     await delay(50);

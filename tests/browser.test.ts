@@ -1,13 +1,103 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fixture, until } from './browser-fixture.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
+
+test('浏览器进程组退出后探测返回 EPERM，已提交结论的派单仍正常完成', async t => {
+  const kill = process.kill.bind(process);
+  let exitedGroupProbes = 0;
+  t.mock.method(process, 'kill', (target: number, signal?: NodeJS.Signals | number) => {
+    try { return kill(target, signal); }
+    catch (error) {
+      if (target < -1 && signal === 0 && (error as NodeJS.ErrnoException).code === 'ESRCH') {
+        exitedGroupProbes++;
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+      }
+      throw error;
+    }
+  });
+  const daemon = await fixture(t, [[
+    { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '页面检查完成' }, check: ok },
+  ]], { needsBrowser: true });
+  const result = await daemon.ended();
+  assert.ok(exitedGroupProbes > 0, '必须命中已退出组的 EPERM');
+  assert.equal(result.endReason, 'completed', result.failure);
+  assert.equal(result.conclusion, 'completed');
+  assert.equal(result.failure, null);
+  assert.ok((await daemon.events()).some(event => event.action === 'browser-stopped'));
+});
+
+test('浏览器进程组仍存活且信号被 EPERM 拒绝，派单记录目标与信号', async t => {
+  const kill = process.kill.bind(process);
+  let deniedGroup = 0;
+  t.mock.method(process, 'kill', (target: number, signal?: NodeJS.Signals | number) => {
+    if (target < -1 && signal === 'SIGTERM') {
+      deniedGroup = -target;
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    }
+    return kill(target, signal);
+  });
+  // This test deliberately denies cleanup; remove only its own group afterwards.
+  t.after(() => { if (deniedGroup) { try { kill(-deniedGroup, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; } } });
+  const daemon = await fixture(t, [[]], { needsBrowser: true });
+  const result = await daemon.ended();
+  assert.ok(deniedGroup > 1);
+  assert.equal(result.endReason, 'error');
+  assert.match(result.failure, /EPERM/);
+  assert.match(result.failure, /SIGTERM/);
+  assert.match(result.failure, new RegExp(`process group ${deniedGroup}`));
+  assert.ok(!(await daemon.events()).some(event => event.action === 'browser-stopped'));
+});
+
+for (const purpose of ['execution', 'verification'] as const) {
+  test(`${purpose} 派单的显式与自动命名浏览器成果留在输出目录且可读取，不进入卡片提交`, async t => {
+    let workPath = '';
+    const daemon = await fixture(t, [ctx => {
+      workPath = ctx.options.cwd;
+      return [
+        { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: 'screens/round-1.svg' }, check: value => assert.ok(!(value as any).isError) },
+        { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: 'round-1.png', type: 'png' }, check: value => assert.ok(!(value as any).isError) },
+        { type: 'tool', name: 'browser_take_screenshot', arguments: {}, check: value => assert.ok(!(value as any).isError) },
+        { type: 'tool', name: 'browser_snapshot', arguments: { filename: 'snapshot.txt' }, check: value => assert.ok(!(value as any).isError) },
+        { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: join(workPath, 'escaped.svg') }, check: value => assert.equal((value as any).ok, false) },
+        { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: '../escaped.svg' }, check: value => assert.equal((value as any).ok, false) },
+        { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'execution' ? 'completed' : 'passed', reason: '成果已保存' }, check: ok },
+      ];
+    }], { needsBrowser: true, purpose });
+    const result = await daemon.ended();
+    assert.equal(result.endReason, 'completed', result.failure);
+    const browserDir = join(dirname(result.outputPath), 'browser');
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="80"><text x="10" y="40"></text></svg>';
+    assert.equal(await readFile(join(browserDir, 'screens/round-1.svg'), 'utf8'), svg);
+    assert.equal(await readFile(join(browserDir, 'page.svg'), 'utf8'), svg);
+    assert.equal(await readFile(join(browserDir, 'snapshot.txt'), 'utf8'), '');
+    const png = await readFile(join(browserDir, 'round-1.png'));
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(result.endCommit, result.startCommit);
+    assert.equal(execFileSync('git', ['-C', workPath, 'ls-tree', '-r', '--name-only', result.endCommit], { encoding: 'utf8' }), 'index.html\n');
+    assert.equal(execFileSync('git', ['-C', workPath, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+    const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
+    for (const name of ['browser/screens/round-1.svg', 'browser/page.svg', 'browser/snapshot.txt']) {
+      const artifact = artifacts.find((item: any) => item.name === name);
+      assert.ok(artifact, `缺少浏览器成果 ${name}`);
+      const read = await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: artifact.id, encoding: 'base64' });
+      ok(read);
+      assert.equal(Buffer.from(read.result.content, 'base64').toString(), name.endsWith('.svg') ? svg : '');
+    }
+    const artifact = artifacts.find((item: any) => item.name === 'browser/round-1.png');
+    assert.ok(artifact, '缺少 PNG 成果');
+    const read = await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: artifact.id, encoding: 'base64' });
+    ok(read);
+    assert.deepEqual(Buffer.from(read.result.content, 'base64'), png);
+  });
+}
 
 test('派单持久记录是否需要浏览器，未标记时不启动浏览器', async t => {
   const daemon = await fixture(t, [ctx => {

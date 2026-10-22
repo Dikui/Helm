@@ -1,6 +1,7 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-executor.
 // Requires a locally logged-in claude CLI and the bundled, headed Chromium.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { copyFile, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
@@ -103,6 +104,16 @@ test('冒烟①⑤：三次真实派单在同端点使用结论与浏览器工�
         const png = await readFile(screenshot);
         assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
         assert.ok(png.length > 100);
+        const params = { workId: daemon.work.id, dispatchId: dispatch.id };
+        const artifacts = (await daemon.call('get-dispatch-artifacts', params)).result;
+        const artifact = artifacts.find((item: any) => item.kind === 'file' && item.name === `browser/${filename}`);
+        assert.ok(artifact, '截图必须登记为派单成果');
+        const read = await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: artifact.id, encoding: 'base64' });
+        assert.equal(read.ok, true, JSON.stringify(read));
+        assert.deepEqual(Buffer.from(read.result.content, 'base64'), png);
+        assert.equal(dispatch.endCommit, dispatch.startCommit, '浏览器截图不应产生卡片提交');
+        const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
+        assert.equal(execFileSync('git', ['-C', card.workPath, 'ls-tree', '-r', '--name-only', dispatch.endCommit], { encoding: 'utf8' }), 'index.html\n');
         const saved = join(evidence, filename);
         await copyFile(screenshot, saved);
         console.log(`请打开截图核对页面标题「Helm browser dispatch」：${saved}`);
