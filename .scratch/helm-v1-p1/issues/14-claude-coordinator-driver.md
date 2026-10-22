@@ -4,10 +4,14 @@
 
 **Blocked by:** 10 — 用户的直接操作；13 — Claude 执行者驱动
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 调度者 cwd 为 `_work`，`settingSources: []`；只读靠 SDK 沙箱不把 `_work` 设为可写，做不到就不给 Bash、只留 Read/Grep/Glob
+- [x] 调度者 cwd 为 `_work`，`settingSources: []`；只读靠 SDK 沙箱不把 `_work` 设为可写，做不到就不给 Bash、只留 Read/Grep/Glob
 - [ ] 冒烟①（调度者部分）：调度者经 MCP 建卡、派单、改依赖成功
 - [ ] 冒烟②：用打断让同一批事件重投，靠 `key` 不重复建卡和派单
 - [ ] 冒烟③（调度者部分）：调度者在 `_work` 里用 Bash 写文件被拦
 - [ ] 冒烟测试用消耗小的模型和低推理强度
+
+## Comments
+
+复用执行者的 Claude SDK 会话与事件映射，实现调度者每轮新开、`_work` 显式只读沙箱及带令牌 HTTP MCP，并以假 SDK 流覆盖映射和打断重投去重；另提供 Haiku/low 的独立脚本 `npm run test:claude-coordinator`，按要求未运行真实 CLI 冒烟，相关勾选留待沙箱外验证。
