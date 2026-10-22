@@ -37,7 +37,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 **方向假设**（不保留多个方向，仍需实测）：
 - A1：调度者按需唤醒。有新需求、执行者完成或失败、用户改计划时，由运行层唤醒；一项工作从开始到审核结束期间常驻，结束后退出；按工作类型加载不同技能。常驻期间能凭任务库稳定地拆单、派单、处理返工。→ [14](issues/14-coordinator-trial.md)。用户在 01 选定**长时对话**（同 Agent Teams、Factory），未采用 17 建议的"短回合"；上下文满了怎么办、两次唤醒之间进程是否常驻，由 06 定。→ [17](issues/17-coordinator-runtime-form-research.md)
 - A2：调度者崩溃或上下文满了，开一个新会话、读任务库就能接着干。用户认可。→ [14](issues/14-coordinator-trial.md)
-- A3：调度者能用订阅额度运行，不必按 API 计费。用户认可。**已验证**（03，限个人自用、官方程序）；04 修订：Claude 改用 Agent SDK（指向本机 `claude`），Codex 用 `codex app-server`，其余走 ACP，都由用户自己登录、Helm 不碰凭证；Claude SDK 是否扣订阅待 [22](issues/22-driver-and-subscription-trial.md) 实测。→ [03](issues/03-subscription-billing.md)
+- A3：调度者能用订阅额度运行，不必按 API 计费。用户认可。**已验证**（03，限个人自用、官方程序）；04 修订：Claude 改用 Agent SDK（指向本机 `claude`），Codex 用 `codex app-server`，其余走 ACP，都由用户自己登录、Helm 不碰凭证；[22](issues/22-driver-and-subscription-trial.md) 实测 Claude SDK `apiKeySource: none`、Codex 为 ChatGPT 登录，未看用量条。→ [03](issues/03-subscription-billing.md)
 - A4：git worktree 加上执行者自带的沙箱参数，隔离就足够了。用户认可。**已证伪**（02）：只能隔开工作副本，外层边界由 08 决定。→ [02](issues/02-unattended-executors.md)、[08](issues/08-isolation-and-merge.md)
 
 **接入范围**：以后要接入市面上大多数 coding agent（pi、DeepSeek Harness、Qoder、zcode……），不只 Codex、Claude Code、Grok（用户在 04 补充）。
@@ -65,6 +65,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - [经 ACP 或其他非原生方式接入时，订阅套餐是否仍然有效](issues/21-subscription-via-acp-research.md) — 订阅取决于"直接拉起厂商的未修改程序 + 环境里没有压过订阅的 key"，与是否 ACP 无关；Claude 直接用 `claude` stream-json（ACP 适配器灰色；04 改为 Agent SDK 指向本机 `claude`，待 22 实测），Codex 直接用 `codex app-server`，Grok 用 `grok agent stdio`；GLM 用 Claude Code + 智谱端点或 `zcode --prompt --json`；DeepSeek 按量用 key；pi 只给 API key；封号风险低，撞限额要停不能换号绕过
 - [技术栈与进程结构](issues/04-tech-stack.md) — TS/Node；每台机器一个 `helmd`（运行层，只监听本机），调度者每项工作一个长时会话、执行者每次派单一个会话，都由管道拉起官方程序；驱动同 Todos：Claude 用 Agent SDK、Codex 用 app-server、其余走 ACP、一次性命令兜底；SQLite `~/.helm/`、React+Vite+SSE、用户级服务自启动、clone+`npm link`；v1 实测 Claude Code、Codex、Grok、DeepSeek
 - [任务库数据模型与状态](issues/05-task-store-model.md) — 状态表+事件表同事务写，事件记执行者，步骤为库外输出的序号；每项工作一条对话（消息不可改 + 决策关卡单独成实体，确认工作说明和审核是固定关卡，审核正文即汇总报告）；卡片完成由调度者标记、需验收的须先通过，完成为终态、返工建修复卡片；依赖到位后才派单，不预派
+- [驱动与订阅实测](issues/22-driver-and-subscription-trial.md) — 04 的驱动选择不变：Claude SDK 走本机登录、Codex 只改 sqlite 目录仍是 ChatGPT 登录且能续跑、一个 app-server 10 个 thread 真并行、Grok ACP 可取消和续跑；推翻一条：Codex `workspace-write` 下不能提交（交 08）；Grok 权限跟随用户全局配置，`allow_always` 按 cwd 落盘（交 07）；DeepSeek 默认路线要 API key，账号登录要选 `deepseek-account` 路线，只能 resume 不能 load
 
 ## Not yet specified
 
@@ -77,3 +78,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - 关机后继续运行：只要求后台进程在时持续运行（Q13）。
 - 基于 Orca 开发（方向 O，暂不采用）：依赖不是硬约束，没有对外 API，编排仍在实验阶段，运行时状态是全局的；worker 是交互式终端会话，无人值守时可能卡在提示上。重新考虑的条件：Orca 支持无头 worker，并提供稳定的对外 API。
 - 固定工作流引擎（方向 W，暂不采用）：流程和分支写死在代码里，正是用户要摆脱的"编排写死"。重新考虑的条件：A1 实测不成立，调度者无法稳定地按任务库推进。固定流程以后可以做成模板，当作工具交给调度者调用。
+
+## Global checks
+
+- 已解决 5、10 张时（2026-10-22，一次覆盖）：见 Notes 的"冲突复核"，结论记在各单评论里。

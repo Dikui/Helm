@@ -45,3 +45,5 @@ Helm 用什么语言和框架实现？进程怎么组成（一个后台守护进
 - 2026-10-22 冲突复核：本单依赖的驱动与订阅前提（原并入 14 的①–④）拆到 [22](22-driver-and-subscription-trial.md)，排在 06 之前实测。
 
 - 2026-10-22 冲突复核：本单定的是架构；交付顺序由 [15](15-v1-slice.md) 定，第一个可运行版本先打通一种驱动。
+
+- 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：驱动前提实测，没有推翻 04 的选择。Claude Agent SDK 指向本机 `claude` 时 `apiKeySource: none`（未看用量条）；Codex 只设 `CODEX_SQLITE_HOME` 仍是 ChatGPT 登录，新 sqlite 目录能续跑旧 thread，一个 app-server 10 个 thread 真并行、10 个进程也不撞锁；Grok ACP 支持 cancel、load、resume。DeepSeek（dsh ACP）跑通，但默认路线要 API key，用 `dsh web` 登录的账号要在会话里选 `deepseek-account` 路线；它不支持 `session/load`，续跑只能用 `session/resume`。Grok ACP 没有按会话的权限参数，权限跟随用户全局配置，见 07 的评论。

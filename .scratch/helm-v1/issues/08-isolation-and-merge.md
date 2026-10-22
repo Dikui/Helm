@@ -17,3 +17,5 @@ Map: [Helm v1 设计](../map.md)
 - 来自 [05](05-task-store-model.md)（2026-10-21）：任务库模型没有包含 worktree、分支和合并状态，由本单补充。已有字段：成果的种类含"分支"，记路径或 ref；返工时新建修复卡片（不重开已完成的卡片），已放行的下游可能已基于原卡片的成果开工。
 
 - 2026-10-22 冲突复核：外层边界不预设前提，由本单从头讨论。已知冲突：02 建议的容器、VM、按进程拆家目录和凭证，都会让执行者读不到订阅登录（Claude 在钥匙串，Codex 在 `~/.codex`，Grok 在 `~/.grok`），见 04 的评论。Codex 在 worktree 里能否提交由 [22](22-driver-and-subscription-trial.md) 实测。
+
+- 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：Codex 在 `workspace-write` 下**一律不能提交**：普通仓库、worktree、git 目录加进 `writableRoots`、`--separate-git-dir` 改名，都被 Codex 沙箱拦下；`danger-full-access` 能提交。可选：helmd 在派单结束后替执行者提交，或给 Codex 放开沙箱（`SandboxPolicy` 有 `externalSandbox` 类型，表示由外层负责）。DeepSeek（dsh）默认 workspace-write，可写根是 cwd，`/private/tmp` 也可写，网络不受限，模式由 `DSH_PERMISSION_MODE` 环境变量决定。另：Grok 的 `allow_always` 授权按 cwd 记在 `~/.grok/sessions/` 下，worktree 路径若被复用，授权会被继承。

@@ -19,3 +19,5 @@ Map: [Helm v1 设计](../map.md)
 - 来自 [05](05-task-store-model.md)（2026-10-21）：任务库为当前状态表 + 事件表、同事务写入（[ADR 0001](../../../docs/adr/0001-state-tables-plus-event-log.md)）。派单输出和调度者会话输出按序号存成库外文件，库里只记路径；保留多久由本单定。暂停是终止派单而非冻结进程，恢复时由调度者重新派单、续跑同一对话。
 
 - 2026-10-22 冲突复核：派单输出和调度者会话输出不精简，推翻 01 的"工作结束后精简"。原样保存，工作结束后 gzip 压缩，不删内容。本单只需定一条提示条件（总量超过多少，或工作结束超过多少天），提示用户手动删除，不自动删。依据：本机 `~/.codex/sessions` 713 个会话中位数 2.6 MB、最大 32 MB，`~/.claude/projects` 127 个中位数 0.6 MB；一项工作估计 80–100 MB，压缩后约 10–20 MB。
+
+- 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：续跑实测：Codex 在全新 sqlite 目录的新进程里 `thread/resume` 旧 thread 成功；Grok 新进程 `session/load`、`session/resume` 都成功。未确认：Grok `session/cancel` 后正在跑的子进程是否被杀，看门狗不能假设取消会清掉子进程。
