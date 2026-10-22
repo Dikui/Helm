@@ -38,7 +38,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - A1：调度者按需唤醒。有新需求、执行者完成或失败、用户改计划时，由运行层唤醒；一项工作从开始到审核结束期间常驻，结束后退出；按工作类型加载不同技能。常驻期间能凭任务库稳定地拆单、派单、处理返工。→ [14](issues/14-coordinator-trial.md)。**06 修订**：不再常驻，改为任务型：每次唤醒新开 CLI 会话（调度轮次），读启动简报和调度笔记，处理完退出；推翻 01 的长时对话，采用 17 的"短回合"（不在对齐阶段续跑）。跨轮次不失忆待 14 实测。→ [06](issues/06-coordinator-lifecycle.md)、[17](issues/17-coordinator-runtime-form-research.md)
 - A2：调度者崩溃或上下文满了，开一个新会话、读任务库就能接着干。用户认可。→ [14](issues/14-coordinator-trial.md)
 - A3：调度者能用订阅额度运行，不必按 API 计费。用户认可。**已验证**（03，限个人自用、官方程序）；04 修订：Claude 改用 Agent SDK（指向本机 `claude`），Codex 用 `codex app-server`，其余走 ACP，都由用户自己登录、Helm 不碰凭证；[22](issues/22-driver-and-subscription-trial.md) 实测 Claude SDK `apiKeySource: none`、Codex 为 ChatGPT 登录，未看用量条。→ [03](issues/03-subscription-billing.md)
-- A4：git worktree 加上执行者自带的沙箱参数，隔离就足够了。用户认可。**已证伪**（02）：只能隔开工作副本，外层边界由 08 决定。→ [02](issues/02-unattended-executors.md)、[08](issues/08-isolation-and-merge.md)
+- A4：git worktree 加上执行者自带的沙箱参数，隔离就足够了。用户认可。**已证伪**（02）：只能隔开工作副本。08 决定不加外层边界，改为强制打开各家自带的沙箱，只允许写卡片副本；Grok 的 `GROK_SANDBOX` 和 Claude 的 SDK 沙箱已实测有效。→ [02](issues/02-unattended-executors.md)、[08](issues/08-isolation-and-merge.md)
 
 **接入范围**：以后要接入市面上大多数 coding agent（pi、DeepSeek Harness、Qoder、zcode……），不只 Codex、Claude Code、Grok（用户在 04 补充）。
 
@@ -68,6 +68,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - [驱动与订阅实测](issues/22-driver-and-subscription-trial.md) — 04 的驱动选择不变：Claude SDK 走本机登录、Codex 只改 sqlite 目录仍是 ChatGPT 登录且能续跑、一个 app-server 10 个 thread 真并行、Grok ACP 可取消和续跑；推翻一条：Codex `workspace-write` 下不能提交（交 08）；Grok 权限跟随用户全局配置，`allow_always` 按 cwd 落盘（交 07）；DeepSeek 默认路线要 API key，账号登录要选 `deepseek-account` 路线，只能 resume 不能 load
 - [调度者生命周期](issues/06-coordinator-lifecycle.md) — 任务型：每次唤醒新开 CLI 会话（调度轮次），读运行层拼的启动简报（工作说明、卡片摘要、未决关卡、调度笔记、新事件、最近 20 条对话）处理完退出；事件排队合并投递，用户可打断；轮内靠 CLI 自动压缩兜底；失败重投，连败 3 次暂停；Claude Code、Codex 两个调度者模板，官方默认配置、不读本机全局配置
 - [运行层硬约束与调度者工具集](issues/07-hard-constraints-and-tools.md) — 违规当场返回结构化错误并记事件；`helmd` 本机 HTTP MCP、按轮次发令牌限定所属工作（待 14 实测）；新建类工具带 `key` 去重；调度者对代码只读、执行者无 Helm 工具；补齐依赖、派单（每卡最多一个活动派单）、凭据、权限代答约束；对外动作与 Grok 全局放行交 08
+- [隔离与合并](issues/08-isolation-and-merge.md) — 不加外层边界，helmd 强制打开各家自带的沙箱，只允许写卡片副本（Grok 设 `GROK_SANDBOX=workspace`，实测能压过全局 always-approve）；工作分支从基准 ref 开出，每张卡片一个 worktree，helmd 在派单结束后提交；标记完成即 `--no-ff` 合进工作分支，冲突时拒绝；调度者读 `_work`；审核被接受后 helmd 合并到基准分支并推送，执行者的推送被拦；终态时删除副本和卡片分支
 
 ## Not yet specified
 
@@ -79,6 +80,7 @@ Helm v1 的设计定稿，并拆出可以直接开发的任务单。开发不在
 - 软件项目以外的工作类型：v1 只做"做软件项目"（Q11）。
 - 关机后继续运行：只要求后台进程在时持续运行（Q13）。
 - 基于 Orca 开发（方向 O，暂不采用）：依赖不是硬约束，没有对外 API，编排仍在实验阶段，运行时状态是全局的；worker 是交互式终端会话，无人值守时可能卡在提示上。重新考虑的条件：Orca 支持无头 worker，并提供稳定的对外 API。
+- 执行者外层隔离（Seatbelt 外壳、独立系统用户、容器或 VM）：v1 只用各家自带的沙箱，外层方案会让执行者读不到订阅登录（[08](issues/08-isolation-and-merge.md)）。重新考虑的条件：出现越界事故，或要跑不可信的仓库。
 - 固定工作流引擎（方向 W，暂不采用）：流程和分支写死在代码里，正是用户要摆脱的"编排写死"。重新考虑的条件：A1 实测不成立，调度者无法稳定地按任务库推进。固定流程以后可以做成模板，当作工具交给调度者调用。
 
 ## Global checks

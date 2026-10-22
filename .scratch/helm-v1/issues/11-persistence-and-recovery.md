@@ -23,3 +23,5 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-22 来自 [22](22-driver-and-subscription-trial.md)：续跑实测：Codex 在全新 sqlite 目录的新进程里 `thread/resume` 旧 thread 成功；Grok 新进程 `session/load`、`session/resume` 都成功。未确认：Grok `session/cancel` 后正在跑的子进程是否被杀，看门狗不能假设取消会清掉子进程。
 
 - 2026-10-22 来自 [06](06-coordinator-lifecycle.md)：调度者改为任务型，崩溃恢复不再续跑 CLI 会话：轮次失败就开新一轮重投未处理事件，连续失败 3 次暂停工作并通知用户；helmd 重启后，运行中的轮次按失败处理。原"调度者会话输出"改称"调度轮次输出"，保存策略同派单输出。
+
+- 2026-10-22 来自 [08](08-isolation-and-merge.md)：恢复时要处理 git 状态：执行派单中断后，卡片副本里可能有未提交的改动（helmd 只在派单正常结束时提交）；`_work` 里可能有一半的合并（中断时应 `merge --abort`）；还有终态卡片残留的 worktree 和分支（按 08 的规则补删）。worktree 在 `~/.helm/worktrees/`。
