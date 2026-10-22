@@ -90,6 +90,12 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
     }
     template = previous.template;
   }
+  let content = params.content ?? card.content;
+  if (card.repairOfCardId) {
+    const original = cardDetails(store, work.id, card.repairOfCardId);
+    if (!original.cardBranch || ['completed', 'cancelled'].includes(original.status)) throw new RuleError('REPAIR_SOURCE_UNAVAILABLE', '修复自卡片的分支已不可用。');
+    content = `修复自卡片 ${original.id}。请把原卡片分支 ${original.cardBranch} 合进当前卡片分支并解决冲突，保留合并关系。\n\n${content}`;
+  }
   const copy = cardCopy(store, work.id, card.id);
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
@@ -98,7 +104,7 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
     store.db.prepare(`INSERT INTO dispatches
       (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path)
       VALUES (?, ?, ?, ?, 'execution', ?, ?, ?, 'queued', ?, ?, ?, ?)`)
-      .run(id, work.id, card.id, params.key, template.id, JSON.stringify(template), params.content ?? card.content,
+      .run(id, work.id, card.id, params.key, template.id, JSON.stringify(template), content,
         params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath);
     store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, template_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
       .run(copy.workPath, copy.cardBranch, template.id, id, card.id);
