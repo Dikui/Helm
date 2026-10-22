@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
+import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 
 interface Context { store: TaskStore; actor: Actor }
 interface Operation {
@@ -13,6 +14,7 @@ interface Operation {
   callers: readonly ActorType[];
   keyed: boolean;
   mutates: boolean;
+  transactional?: boolean;
   execute: (context: Context, params: Record<string, unknown>) => unknown;
 }
 
@@ -73,7 +75,7 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
-    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作', callers: ['user'], keyed: true, mutates: true,
+    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作', callers: ['user', 'coordinator-round'], keyed: true, mutates: true,
     schema: z.object({
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
@@ -89,7 +91,7 @@ export const operations: readonly Operation[] = [
         if (existing) workId = String(existing.id);
         else {
           workId = randomUUID();
-          store.db.prepare('INSERT INTO works VALUES (?, ?, ?, ?, ?)').run(workId, params.projectId, 'aligning', params.key, new Date().toISOString());
+          store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES (?, ?, ?, ?, ?)').run(workId, params.projectId, 'aligning', params.key, new Date().toISOString());
           store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId }, { workId });
           isNew = true;
         }
@@ -108,11 +110,12 @@ export const operations: readonly Operation[] = [
       store.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
         id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id,
       );
+      if (actor.type === 'user') store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
       if (isNew) {
         const gateId = randomUUID();
         const runtime = { type: 'runtime', id: 'helmd' } as const;
         const created = store.appendEvent(runtime, { type: 'gate', id: gateId }, 'gate-created', { kind: 'work-confirmation', question: '确认工作说明' }, { workId });
-        store.db.prepare('INSERT INTO gates VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        store.db.prepare('INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
@@ -129,21 +132,54 @@ export const operations: readonly Operation[] = [
       .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate) })),
   }),
   operation({
-    name: 'get-work', description: '读取工作', callers: ['user'], keyed: false, mutates: false,
+    name: 'get-work', description: '读取工作', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.work(workId),
   }),
   operation({
-    name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.conversation(workId),
+    name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId }) => store.conversation(workId).map(item => confirmationDetails(store, item)),
   }),
   operation({
     name: 'list-pending', description: '列出所有待用户处理的事项', callers: ['user'], keyed: false, mutates: false,
-    schema: z.object({}).strict(), execute: ({ store }) => store.pending(),
+    schema: z.object({}).strict(), execute: ({ store }) => store.pending().map(gate => confirmationDetails(store, gate)),
   }),
   operation({
-    name: 'get-events', description: '按卡片、派单或执行方读取事件时间线', callers: ['user'], keyed: false, mutates: false,
+    name: 'get-events', description: '按卡片、派单或执行方读取事件时间线', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: eventFilterSchema,
     execute: ({ store }, params) => store.events(params),
+  }),
+  operation({
+    name: 'draft-work-description', description: '起草工作说明新版本并请求用户确认', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), requirements: z.string().trim().min(1),
+      boundary: z.string().trim().min(1), criteria: z.string().trim().min(1), baseRef: z.string().min(1).optional() }).strict(),
+    execute: ({ store, actor }, params) => draftDescription(store, actor, params),
+  }),
+  operation({
+    name: 'get-work-descriptions', description: '读取工作说明的全部版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
+  }),
+  operation({
+    name: 'decide-gate', description: '用户确认所查看的工作说明版本', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.literal('confirm'), descriptionId: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, params) => confirmDescription(store, actor, params),
+  }),
+  operation({
+    name: 'get-coordinator-notes', description: '读取调度笔记全文与版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.notes(workId),
+  }),
+  operation({
+    name: 'write-coordinator-notes', description: '整份改写调度笔记', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), body: z.string() }).strict(),
+    execute({ store, actor }, { workId, body }) {
+      const current = store.notes(workId);
+      if (current.body === body) return current;
+      const version = Number(current.version) + 1;
+      store.db.prepare(`INSERT INTO coordinator_notes VALUES (?, ?, ?) ON CONFLICT(work_id) DO UPDATE SET body = excluded.body, version = excluded.version`)
+        .run(workId, body, version);
+      store.appendEvent(actor, { type: 'coordinator-notes', id: workId }, 'coordinator-notes-written', { body, version }, { workId });
+      return { body, version };
+    },
   }),
 ];
 
@@ -154,8 +190,13 @@ export function invoke(store: TaskStore, actor: Actor, name: string, input: unkn
     if (!definition.callers.includes(actor.type)) throw new RuleError('FORBIDDEN', '该调用方不能执行此操作。', 403);
     const parsed = definition.schema.safeParse(input);
     if (!parsed.success) throw new RuleError('INVALID_PARAMS', parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; '), 400);
+    if (actor.type === 'coordinator-round') {
+      const round = store.db.prepare(`SELECT work_id FROM coordinator_rounds WHERE id = ? AND status = 'running'`).get(actor.id);
+      if (!round) throw new RuleError('INVALID_TOKEN', '轮次令牌已失效。', 401);
+      if (parsed.data.workId !== round.work_id || actor.workId !== round.work_id) throw new RuleError('WORK_SCOPE', '轮次令牌只能操作所属工作。', 403);
+    }
     const run = () => definition.execute({ store, actor }, parsed.data);
-    const result = definition.mutates ? store.transaction(run) : run();
+    const result = definition.mutates && definition.transactional !== false ? store.transaction(run) : run();
     return { status: 200, body: { ok: true as const, result } };
   } catch (error) {
     if (!(error instanceof RuleError)) throw error;
@@ -166,7 +207,7 @@ export function invoke(store: TaskStore, actor: Actor, name: string, input: unkn
 export function rejectOperation(store: TaskStore, actor: Actor, name: string, error: RuleError, input?: unknown) {
   const allowedOperations = operations.filter(item => item.callers.includes(actor.type)).map(item => item.name);
   const failure = { code: error.code, reason: error.message, allowedOperations };
-  const workId = input && typeof input === 'object' && 'workId' in input && typeof input.workId === 'string' ? input.workId : undefined;
+  const workId = actor.workId ?? (input && typeof input === 'object' && 'workId' in input && typeof input.workId === 'string' ? input.workId : undefined);
   store.transaction(() => store.appendEvent(actor, { type: 'operation', id: name }, 'operation-rejected', failure, { workId }));
   return { status: error.status, body: { ok: false as const, error: failure } };
 }

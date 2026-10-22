@@ -2,8 +2,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { invoke, rejectOperation } from './operations.js';
-import { RuleError, TaskStore, type EventFilter } from './store.js';
+import { RuleError, TaskStore, type Actor, type EventFilter } from './store.js';
 import { handleMcp } from './mcp.js';
+import { FakeDriver, type Driver } from './driver.js';
+import { RoundScheduler } from './rounds.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -24,16 +26,18 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; driver?: Driver } = {}) {
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'));
+  let scheduler: RoundScheduler;
   const server = createServer(async (request, response) => {
     let name = request.url ?? '/';
-    const actor = { type: 'user', id: 'user' } as const;
+    let actor: Actor = { type: 'user', id: 'user' };
     try {
       let path: string;
       try { path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname; }
       catch { throw new RuleError('INVALID_PATH', '请求路径无效。', 400); }
       name = path.startsWith('/api/') ? path.slice('/api/'.length) : path;
+      if (request.headers.authorization !== undefined) actor = scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
       const input = await readBody(request);
       if (path === '/mcp') return await handleMcp(request, response, input, store, actor);
@@ -74,14 +78,16 @@ export async function startHelmd(options: { port?: number; dataDir?: string } = 
   } catch (error) { store.close(); throw error; }
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
+  const url = `http://127.0.0.1:${address.port}`;
+  scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
   let closing: Promise<void> | undefined;
   return {
-    url: `http://127.0.0.1:${address.port}`,
+    url,
     close() {
-      closing ??= new Promise<void>((resolve, reject) => {
+      closing ??= scheduler.close().then(() => new Promise<void>((resolve, reject) => {
         server.close(error => { store.close(); error ? reject(error) : resolve(); });
         server.closeAllConnections();
-      });
+      }));
       return closing;
     },
   };

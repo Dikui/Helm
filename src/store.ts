@@ -1,9 +1,19 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
 export type ActorType = 'user' | 'coordinator-round' | 'dispatch' | 'runtime';
-export interface Actor { type: ActorType; id: string }
+export interface Actor { type: ActorType; id: string; workId?: string }
+export interface Work {
+  id: string; projectId: string; status: string; createdAt: string;
+  baseRef: string | null; baseCommit: string | null; workBranch: string | null;
+  workPath: string | null; activeDescriptionId: string | null;
+}
+export interface WorkDescription {
+  id: string; workId: string; version: number; status: string; key: string;
+  requirements: string; boundary: string; criteria: string; gateId: string;
+  baseRef: string; baseCommit: string;
+}
 export interface EventFilter {
   after?: number;
   workId?: string;
@@ -33,12 +43,13 @@ export class TaskStore {
   private pendingEvents: HelmEvent[] = [];
   private listeners = new Set<(events: HelmEvent[]) => void>();
 
-  constructor(dataDir: string) {
+  constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true });
-    this.db = new DatabaseSync(join(dataDir, 'helm.db'));
+    this.dataDir = realpathSync(dataDir);
+    this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-    if (version !== 0 && version !== 1) {
+    if (version !== 0 && version !== 1 && version !== 2) {
       this.db.close();
       throw new Error(`Unsupported task store version: ${version}`);
     }
@@ -74,6 +85,38 @@ export class TaskStore {
         sequence INTEGER NOT NULL REFERENCES events(id), UNIQUE(work_id, key)
       ) STRICT;
       PRAGMA user_version = 1;
+      COMMIT;
+    `);
+    if (version === 0 || version === 1) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE works ADD COLUMN base_ref TEXT;
+      ALTER TABLE works ADD COLUMN base_commit TEXT;
+      ALTER TABLE works ADD COLUMN work_branch TEXT;
+      ALTER TABLE works ADD COLUMN work_path TEXT;
+      ALTER TABLE works ADD COLUMN active_description_id TEXT;
+      ALTER TABLE gates ADD COLUMN description_id TEXT;
+      ALTER TABLE gates ADD COLUMN decision TEXT;
+      CREATE TABLE work_descriptions (
+        id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), version INTEGER NOT NULL,
+        status TEXT NOT NULL, key TEXT NOT NULL, requirements TEXT NOT NULL, boundary TEXT NOT NULL,
+        criteria TEXT NOT NULL, gate_id TEXT NOT NULL REFERENCES gates(id), base_ref TEXT NOT NULL, base_commit TEXT NOT NULL,
+        UNIQUE(work_id, key), UNIQUE(work_id, version)
+      ) STRICT;
+      CREATE TABLE coordinator_notes (
+        work_id TEXT PRIMARY KEY REFERENCES works(id), body TEXT NOT NULL, version INTEGER NOT NULL
+      ) STRICT;
+      CREATE TABLE coordinator_rounds (
+        id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), status TEXT NOT NULL,
+        session_id TEXT, started_at TEXT NOT NULL, ended_at TEXT, reason TEXT,
+        event_ids TEXT NOT NULL, output_path TEXT NOT NULL, usage TEXT
+      ) STRICT;
+      CREATE UNIQUE INDEX one_running_round ON coordinator_rounds(work_id) WHERE status = 'running';
+      CREATE TABLE wake_queue (
+        event_id INTEGER PRIMARY KEY REFERENCES events(id), work_id TEXT NOT NULL REFERENCES works(id),
+        processed_by TEXT REFERENCES coordinator_rounds(id)
+      ) STRICT;
+      CREATE INDEX wake_queue_work ON wake_queue(work_id, event_id) WHERE processed_by IS NULL;
+      PRAGMA user_version = 2;
       COMMIT;
     `);
   }
@@ -129,11 +172,24 @@ export class TaskStore {
     }));
   }
 
-  work(id: string) {
-    const work = this.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt
-      FROM works WHERE id = ?`).get(id);
+  work(id: string): Work {
+    const work = this.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
+      base_ref AS baseRef, base_commit AS baseCommit, work_branch AS workBranch,
+      work_path AS workPath, active_description_id AS activeDescriptionId FROM works WHERE id = ?`).get(id);
     if (!work) throw new RuleError('NOT_FOUND', '找不到这项工作。', 404);
-    return work;
+    return work as unknown as Work;
+  }
+
+  descriptions(workId: string): WorkDescription[] {
+    this.work(workId);
+    return this.db.prepare(`SELECT id, work_id AS workId, version, status, key, requirements, boundary, criteria,
+      gate_id AS gateId, base_ref AS baseRef, base_commit AS baseCommit
+      FROM work_descriptions WHERE work_id = ? ORDER BY version`).all(workId) as unknown as WorkDescription[];
+  }
+
+  notes(workId: string) {
+    this.work(workId);
+    return this.db.prepare('SELECT body, version FROM coordinator_notes WHERE work_id = ?').get(workId) ?? { body: '', version: 0 };
   }
 
   message(workId: string, key: string) {
@@ -145,17 +201,19 @@ export class TaskStore {
     this.work(workId);
     return this.db.prepare(`
       SELECT 'message' AS type, id, work_id AS workId, sender, body, gate_id AS gateId,
-        NULL AS kind, NULL AS status, NULL AS question, created_at AS createdAt, sequence
+        NULL AS kind, NULL AS status, NULL AS question, created_at AS createdAt, sequence,
+        NULL AS descriptionId, NULL AS decision
       FROM messages WHERE work_id = ?
       UNION ALL
-      SELECT 'gate', id, work_id, NULL, NULL, NULL, kind, status, question, created_at, sequence
+      SELECT 'gate', id, work_id, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision
       FROM gates WHERE work_id = ? ORDER BY sequence
     `).all(workId, workId);
   }
 
   pending() {
     return this.db.prepare(`SELECT id, work_id AS workId, kind, status, question,
-      created_at AS createdAt, sequence FROM gates WHERE status = 'pending' ORDER BY sequence`).all();
+      created_at AS createdAt, sequence, description_id AS descriptionId, decision
+      FROM gates WHERE status = 'pending' ORDER BY sequence`).all();
   }
 
   subscribe(listener: (events: HelmEvent[]) => void) {

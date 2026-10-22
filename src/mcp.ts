@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { invoke, operations } from './operations.js';
 import type { Actor, TaskStore } from './store.js';
 
-// Stateless transport: the next ticket will supply the actor resolved from a round token.
+// Stateless transport; the HTTP layer resolves and validates the caller's round token.
 export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor) {
   const server = new Server({ name: 'helm', version: '0.1.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
