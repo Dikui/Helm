@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { processTargetExists, signalProcess } from './processes.js';
+import { processStartTime, processTargetExists, signalProcess } from './processes.js';
 
 export interface BrowserCommand { file: string; args: string[] }
 const require = createRequire(import.meta.url);
@@ -71,7 +71,7 @@ export class BrowserProcess {
     // Rejections can arrive while the owner is still recording the process identity.
     void this.endpoint.catch(() => {});
     this.pgid = this.child.pid ?? 0;
-    this.startedAt = new Date().toISOString();
+    this.startedAt = this.pgid ? processStartTime(this.pgid) ?? new Date().toISOString() : '';
   }
 
   async connect() {

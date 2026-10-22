@@ -28,6 +28,30 @@ function stepSummary(event: DriverEvent) {
   return text.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 200) ?? '';
 }
 
+// Both normal shutdown and startup recovery save the same git state and artifacts.
+export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason: EndReason, abortReason?: string | null) {
+  const card = cardDetails(store, dispatch.workId, dispatch.cardId);
+  const workPath = card.workPath!;
+  if (dispatch.purpose === 'verification') {
+    if (dispatch.startCommit) resetVerificationCopy(store, dispatch, workPath, card.cardBranch!, dispatch.startCommit);
+  } else {
+    abortCardGit(store, dispatch, workPath, card.cardBranch!);
+    if (dispatchGit(workPath, 'status', '--porcelain')) {
+      const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+      if (names.length) dispatchGit(workPath, 'add', '--', ...names);
+      dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
+        'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}${abortReason ? ` (${abortReason})` : ''}`);
+    }
+  }
+  const endCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
+  const files = dispatch.startCommit ? dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=ACMRT', '-z', dispatch.startCommit, endCommit).split('\0').filter(Boolean) : [];
+  store.transaction(() => {
+    saveArtifact(store, dispatch, 'branch', card.cardBranch!, card.cardBranch!, endCommit);
+    for (const name of files) saveArtifact(store, dispatch, 'file', name, committedFile(workPath, endCommit, name), endCommit);
+  });
+  return endCommit;
+}
+
 export class ExecutionRunner {
   private tokens = new Map<string, Actor>();
   private running = new Map<string, Promise<void>>();
@@ -71,7 +95,11 @@ export class ExecutionRunner {
     setImmediate(() => {
       this.scheduled = false;
       if (this.stopping) return;
-      const queued = this.store.db.prepare(`SELECT id, work_id AS workId FROM dispatches WHERE status = 'queued' ORDER BY created_at, rowid`).all();
+      const queued = this.store.db.prepare(`SELECT d.id, d.work_id AS workId FROM dispatches d
+        JOIN works w ON w.id = d.work_id JOIN cards c ON c.id = d.card_id
+        WHERE d.status = 'queued' AND w.status IN ('executing', 'awaiting-review')
+        AND c.status NOT IN ('paused', 'completed', 'cancelled')
+        ORDER BY d.created_at, d.rowid`).all();
       const limit = Number(this.store.db.prepare('SELECT concurrency_limit FROM settings WHERE id = 1').get()!.concurrency_limit);
       for (const row of queued) {
         if (this.running.size >= limit) break;
@@ -250,24 +278,8 @@ export class ExecutionRunner {
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        if (dispatch.purpose === 'verification') {
-          if (startCommit) resetVerificationCopy(this.store, dispatch, workPath, card.cardBranch!, startCommit);
-        } else {
-          // Runtime commits are outside the executor's restricted environment.
-          abortCardGit(this.store, dispatch, workPath, card.cardBranch!);
-          const changes = dispatchGit(workPath, 'status', '--porcelain');
-          if (changes) {
-            const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-            if (names.length) dispatchGit(workPath, 'add', '--', ...names);
-            dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}`);
-          }
-        }
-        endCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
-        const files = startCommit ? dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=ACMRT', '-z', startCommit, endCommit).split('\0').filter(Boolean) : [];
-        this.store.transaction(() => {
-          saveArtifact(this.store, dispatch, 'branch', card.cardBranch!, card.cardBranch!, endCommit!);
-          for (const name of files) saveArtifact(this.store, dispatch, 'file', name, committedFile(workPath, endCommit!, name), endCommit!);
-        });
+        endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+          getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
         if (!['aborted', 'timed-out'].includes(reason)) reason = 'error';
@@ -280,7 +292,7 @@ export class ExecutionRunner {
       // Revocation or shutdown can arrive while verification processes are exiting.
       let current = getDispatch(this.store, dispatch.workId, dispatch.id);
       if (this.stopping && !current.abortReason) {
-        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET abort_reason = ? WHERE id = ?').run('运行层停止', dispatch.id); });
+        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET abort_reason = ? WHERE id = ?').run('运行层重启', dispatch.id); });
         current = getDispatch(this.store, dispatch.workId, dispatch.id);
       }
       if (current.abortReason) reason = 'aborted';

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -8,6 +8,38 @@ import { promisify } from 'node:util';
 export interface ManagedProcess { pid: number; pgid: number; startedAt: string }
 interface ProcessDirectory { pid: number; pgid: number; cwd: string }
 const exec = promisify(execFile);
+
+// Use the OS timestamp rather than the time helmd happened to observe a PID.
+export function processStartTime(pid: number): string | null {
+  try {
+    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' },
+    }).trim() || null;
+  } catch (error) {
+    if ((error as { status?: number }).status === 1 || (error as NodeJS.ErrnoException).code === 'EPERM') return null;
+    throw error;
+  }
+}
+
+export async function cleanupRecordedProcessGroup(pgid: number, startedAt: string) {
+  if (pgid <= 1 || processStartTime(pgid) !== startedAt) return false;
+  const entries = await processDirectories();
+  const ownGroup = entries.find(entry => entry.pid === process.pid)?.pgid;
+  if (!ownGroup || ownGroup === pgid) throw new Error('Refusing unsafe process group cleanup');
+  if (!entries.some(entry => entry.pid === pgid && entry.pgid === pgid)) return false;
+  await signalProcess(-pgid, 'SIGTERM');
+  const deadline = Date.now() + 5000;
+  while (await processTargetExists(-pgid) && Date.now() < deadline) await delay(50);
+  if (await processTargetExists(-pgid)) {
+    await signalProcess(-pgid, 'SIGKILL');
+    for (let poll = 0; poll < 40; poll++) {
+      if (!await processTargetExists(-pgid)) return true;
+      await delay(50);
+    }
+    throw new Error(`Process group ${pgid} survived cleanup; refusing git changes`);
+  }
+  return true;
+}
 
 async function processDirectories(): Promise<ProcessDirectory[]> {
   if (process.platform === 'linux') {

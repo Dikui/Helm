@@ -39,7 +39,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
     recentConversation: store.conversation(workId).slice(-20),
-    ...(previous && ['error', 'timed-out', 'context-overflow'].includes(String(previous.reason))
+    ...(previous && ['error', 'timed-out', 'context-overflow', 'aborted'].includes(String(previous.reason))
       ? { interruptionNotice: '上一轮中断，期间已做的操作见任务库' } : {}),
   };
 }
@@ -152,6 +152,7 @@ export class RoundScheduler {
       this.sessions.get(workId)?.cancel();
       this.sessions.delete(workId);
       if (stopReason || this.stopping || abortReason) { reason = this.stopping || abortReason ? 'aborted' : stopReason!; finalAnswer = undefined; }
+      if (this.stopping) abortReason ??= '运行层重启';
       if (brief.work.workPath) {
         try {
           const cleaned = await cleanupWorktreeProcesses(brief.work.workPath, processes);

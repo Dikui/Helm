@@ -10,6 +10,7 @@ import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
+import { reconcileStartup } from './reconcile.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -35,7 +36,9 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
   let userOperations: UserOperations;
+  let ready = false;
   const server = createServer(async (request, response) => {
+    if (!ready) return json(response, 503, { error: { code: 'STARTING', reason: '运行层正在启动对账。', allowedOperations: [] } });
     let name = request.url ?? '/';
     let actor: Actor = { type: 'user', id: 'user' };
     try {
@@ -82,12 +85,20 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
       server.listen(options.port ?? 4242, '127.0.0.1', resolve);
     });
   } catch (error) { store.close(); throw error; }
+  try { await reconcileStartup(store); }
+  catch (error) {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close();
+    throw error;
+  }
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
   executions = new ExecutionRunner(store, options.executorDriver ?? new ClaudeExecutorDriver(), `${url}/mcp`, options.browserCommand);
   userOperations = new UserOperations(store, executions, scheduler);
+  ready = true;
   let closing: Promise<void> | undefined;
   return {
     url,

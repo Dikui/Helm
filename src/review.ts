@@ -121,6 +121,10 @@ function mergeIntoBase(store: TaskStore, workId: string): MergeResult {
     if (checkedOut === baseBranch) {
       const mergeHead = resolve(project, git(project, 'rev-parse', '--git-path', 'MERGE_HEAD').trim());
       const alreadyMerging = existsSync(mergeHead);
+      if (alreadyMerging) throw new Error('项目目录已有未结束的合并。');
+      // This durable intent distinguishes our interrupted merge from a user's merge.
+      store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-started',
+        { baseBranch, baseCommit, workCommit, mergeTree: tree }, { workId }));
       try {
         git(project, ...identity, '-c', 'merge.autoStash=false', 'merge', '--no-ff', '--commit', '--no-edit', workCommit);
       } catch (error) {
@@ -141,10 +145,14 @@ function mergeIntoBase(store: TaskStore, workId: string): MergeResult {
 export function completeReviewedWork(store: TaskStore, workId: string, gateId: string) {
   const work = store.work(workId);
   const project = projectPath(store, workId);
-  const merge = mergeIntoBase(store, workId);
-  store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId, ...merge }, { workId }));
-  let push: { status: 'pushed' | 'failed' | 'skipped'; reason?: string } = { status: 'skipped' };
-  if (merge.status === 'merged' || merge.status === 'already-contained') {
+  const events = store.events({ workId });
+  const savedResult = (action: string) => events.find(event => event.action === action && (event.details as { gateId?: string }).gateId === gateId);
+  const savedMerge = savedResult('base-merge-result');
+  const merge = savedMerge ? savedMerge.details as MergeResult : mergeIntoBase(store, workId);
+  if (!savedMerge) store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId, ...merge }, { workId }));
+  const savedPush = savedResult('base-push-result');
+  let push: { status: 'pushed' | 'failed' | 'skipped'; reason?: string } = savedPush ? savedPush.details as typeof push : { status: 'skipped' };
+  if (!savedPush && (merge.status === 'merged' || merge.status === 'already-contained')) {
     try {
       let remote = 'origin';
       try { remote = git(project, 'config', '--get', `branch.${merge.baseBranch!.slice('refs/heads/'.length)}.remote`).trim() || remote; }
@@ -153,7 +161,7 @@ export function completeReviewedWork(store: TaskStore, workId: string, gateId: s
       push = { status: 'pushed' };
     } catch (error) { push = { status: 'failed', reason: failureReason(error) }; }
   }
-  store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-push-result', { gateId, baseBranch: merge.baseBranch, ...push }, { workId }));
+  if (!savedPush) store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-push-result', { gateId, baseBranch: merge.baseBranch, ...push }, { workId }));
   let cleanupFailure: string | undefined;
   try {
     if (work.workPath && existsSync(work.workPath)) git(project, 'worktree', 'remove', '--force', work.workPath);
@@ -164,14 +172,14 @@ export function completeReviewedWork(store: TaskStore, workId: string, gateId: s
     if (merge.status === 'failed') notices.push(`工作分支 ${work.workBranch} 合进基准分支失败：${merge.reason}`);
     if (push.status === 'failed') notices.push(`基准分支 ${merge.baseBranch} 推送失败：${push.reason}`);
     if (cleanupFailure) notices.push(`删除 _work 失败：${cleanupFailure}`);
-    if (notices.length) {
+    if (notices.length && !store.message(workId, `review-result:${gateId}`)) {
       const id = randomUUID();
       const body = notices.join('\n');
       const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body, gateId }, { workId });
       store.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, workId, 'runtime', body, `review-result:${gateId}`, gateId, event.time, event.id);
     }
     store.db.prepare(`UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?`).run(workId);
-    store.appendEvent(runtime, { type: 'work', id: workId }, 'work-completed', { gateId, merge, push, cleanupFailure }, { workId });
+    if (!savedResult('work-completed')) store.appendEvent(runtime, { type: 'work', id: workId }, 'work-completed', { gateId, merge, push, cleanupFailure }, { workId });
     return store.work(workId);
   });
 }
