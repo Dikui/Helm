@@ -295,7 +295,8 @@ export class TaskStore {
   }
 
   pending() {
-    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE status = 'pending' ORDER BY sequence`).all().map(readGate);
+    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE status = 'pending'
+      AND work_id IN (SELECT id FROM works WHERE status NOT IN ('completed', 'cancelled')) ORDER BY sequence`).all().map(readGate);
   }
 
   subscribe(listener: (events: HelmEvent[]) => void) {

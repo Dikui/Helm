@@ -71,7 +71,9 @@ export class ExecutionRunner {
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, dispatch.id);
-        this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ?`).run(card.id);
+        if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
+          this.store.db.prepare(`UPDATE cards SET status = 'executing' WHERE id = ?`).run(card.id);
+        }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit }, scope);
       });
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
@@ -154,6 +156,21 @@ export class ExecutionRunner {
         this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
       });
     }
+  }
+
+  async settle(workId: string, cardId?: string) {
+    const active = this.store.db.prepare(`SELECT id FROM dispatches WHERE work_id = ? AND (? IS NULL OR card_id = ?)
+      AND status IN ('queued', 'running')`).all(workId, cardId ?? null, cardId ?? null);
+    const pending = active.map(row => {
+      const id = String(row.id);
+      let promise = this.running.get(id);
+      if (!promise) {
+        promise = this.run(getDispatch(this.store, workId, id)).finally(() => { this.running.delete(id); });
+        this.running.set(id, promise);
+      }
+      return promise;
+    });
+    await Promise.all(pending);
   }
 
   async close() {

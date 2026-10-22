@@ -5,9 +5,10 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@model
 import { z } from 'zod';
 import { invoke, operations } from './operations.js';
 import type { Actor, TaskStore } from './store.js';
+import type { UserOperations } from './user-operations.js';
 
 // Stateless transport; the HTTP layer resolves and validates the caller's round token.
-export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor) {
+export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor, userOperations: UserOperations) {
   const server = new Server({ name: 'helm', version: '0.1.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: operations.filter(operation => operation.callers.includes(actor.type)).map(operation => ({
@@ -16,7 +17,7 @@ export async function handleMcp(request: IncomingMessage, response: ServerRespon
     })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
-    const result = invoke(store, actor, request.params.name, request.params.arguments ?? {});
+    const result = await invoke(store, actor, request.params.name, request.params.arguments ?? {}, userOperations);
     return {
       isError: !result.body.ok,
       content: [{ type: 'text' as const, text: JSON.stringify(result.body) }],

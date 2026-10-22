@@ -1,0 +1,106 @@
+import { existsSync } from 'node:fs';
+import { projectPath } from './alignment.js';
+import { cancelCard, cardDetails, cardGraph, refreshCardReadiness, type Card } from './graph.js';
+import { dispatchGit, listDispatches, revokeDispatch } from './dispatch.js';
+import type { ExecutionRunner } from './execution.js';
+import type { RoundScheduler } from './rounds.js';
+import { RuleError, TaskStore, type Actor } from './store.js';
+
+export class UserOperations {
+  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler) {}
+
+  private abortDispatches(actor: Actor, workId: string, reason: string, cardId?: string) {
+    for (const dispatch of listDispatches(this.store, workId, cardId)) {
+      revokeDispatch(this.store, actor, { workId, dispatchId: dispatch.id, reason });
+    }
+  }
+
+  private wake(actor: Actor, type: 'card' | 'work', id: string, action: string, workId: string) {
+    const event = this.store.appendEvent(actor, { type, id }, action, {}, { workId, ...(type === 'card' ? { cardId: id } : {}) });
+    this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
+  }
+
+  async pauseCard(actor: Actor, params: { workId: string; cardId: string }) {
+    const card = cardDetails(this.store, params.workId, params.cardId);
+    if (['completed', 'cancelled'].includes(card.status)) throw new RuleError('TERMINAL_CARD', '完成或已取消的卡片不能再修改。');
+    if (card.status !== 'paused') this.store.transaction(() => {
+      this.store.db.prepare(`UPDATE cards SET status = 'paused' WHERE id = ?`).run(card.id);
+      this.abortDispatches(actor, card.workId, '卡片暂停', card.id);
+      this.wake(actor, 'card', card.id, 'card-paused', card.workId);
+    });
+    await this.executions.settle(card.workId, card.id);
+    return cardDetails(this.store, card.workId, card.id);
+  }
+
+  resumeCard(actor: Actor, params: { workId: string; cardId: string }) {
+    const card = cardDetails(this.store, params.workId, params.cardId);
+    if (['completed', 'cancelled'].includes(card.status)) throw new RuleError('TERMINAL_CARD', '完成或已取消的卡片不能再修改。');
+    if (card.status === 'paused') this.store.transaction(() => {
+      this.store.db.prepare('UPDATE cards SET status = ? WHERE id = ?').run(card.latestDispatchId ? 'executing' : 'ready', card.id);
+      refreshCardReadiness(this.store, card.workId);
+      this.wake(actor, 'card', card.id, 'card-resumed', card.workId);
+    });
+    return cardDetails(this.store, card.workId, card.id);
+  }
+
+  private removeCardCopy(card: Card) {
+    const project = projectPath(this.store, card.workId);
+    if (card.workPath && existsSync(card.workPath)) dispatchGit(project, 'worktree', 'remove', '--force', card.workPath);
+    if (card.cardBranch && dispatchGit(project, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`)) {
+      dispatchGit(project, 'branch', '-D', card.cardBranch);
+    }
+  }
+
+  async cancelCard(actor: Actor, params: { workId: string; cardId: string; reason: string }) {
+    const card = this.store.transaction(() => {
+      const result = cancelCard(this.store, actor, params);
+      this.abortDispatches(actor, result.workId, '卡片取消', result.id);
+      return result;
+    });
+    await this.executions.settle(card.workId, card.id);
+    this.removeCardCopy(card);
+    return cardDetails(this.store, card.workId, card.id);
+  }
+
+  async pauseWork(actor: Actor, workId: string) {
+    const work = this.store.work(workId);
+    if (work.status !== 'paused') this.store.transaction(() => {
+      this.store.db.prepare(`UPDATE works SET status = 'paused' WHERE id = ?`).run(workId);
+      this.abortDispatches(actor, workId, '工作暂停');
+      this.wake(actor, 'work', workId, 'work-paused', workId);
+    });
+    await this.executions.settle(workId);
+    return this.store.work(workId);
+  }
+
+  resumeWork(actor: Actor, workId: string) {
+    const work = this.store.work(workId);
+    if (work.status === 'paused') this.store.transaction(() => {
+      const review = this.store.gates(workId).some(gate => gate.kind === 'review' && gate.status === 'pending');
+      const status = work.activeDescriptionId ? review ? 'awaiting-review' : 'executing' : 'aligning';
+      this.store.db.prepare('UPDATE works SET status = ? WHERE id = ?').run(status, workId);
+      this.wake(actor, 'work', workId, 'work-resumed', workId);
+    });
+    return this.store.work(workId);
+  }
+
+  async interruptRound(actor: Actor, workId: string) {
+    this.store.work(workId);
+    this.store.transaction(() => { this.wake(actor, 'work', workId, 'round-interrupted', workId); });
+    await this.rounds.cancel(workId, '用户打断');
+    return this.store.work(workId);
+  }
+
+  async cancelWork(actor: Actor, workId: string) {
+    const work = this.store.work(workId);
+    if (work.status !== 'cancelled') this.store.transaction(() => {
+      this.store.db.prepare(`UPDATE works SET status = 'cancelled' WHERE id = ?`).run(workId);
+      this.abortDispatches(actor, workId, '工作取消');
+      this.store.appendEvent(actor, { type: 'work', id: workId }, 'work-cancelled', {}, { workId });
+    });
+    await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '工作取消')]);
+    for (const node of cardGraph(this.store, workId)) if (node.type === 'card') this.removeCardCopy(node);
+    if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
+    return this.store.work(workId);
+  }
+}

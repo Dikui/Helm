@@ -31,7 +31,8 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
     coordinatorNotes: String(store.notes(workId).body),
-    newEvents: store.events({ workId, after: Number(lastStart ?? 0) }),
+    newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
+      .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
     recentConversation: store.conversation(workId).slice(-20),
   };
@@ -44,6 +45,7 @@ export class RoundScheduler {
   private running = new Map<string, Promise<void>>();
   private sessions = new Map<string, DriverSession>();
   private failed = new Set<string>();
+  private cancellations = new Map<string, string>();
   private scheduled = false;
   private stopping = false;
   private unsubscribe: () => void;
@@ -51,7 +53,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-ready', 'card-cancelled', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       for (const event of wakes) if (event.workId) this.failed.delete(event.workId);
       if (wakes.length) this.schedule();
     });
@@ -70,8 +72,9 @@ export class RoundScheduler {
     setImmediate(() => {
       this.scheduled = false;
       if (this.stopping) return;
-      const works = this.store.db.prepare(`SELECT DISTINCT q.work_id AS id FROM wake_queue q JOIN works w ON w.id = q.work_id
-        WHERE q.processed_by IS NULL AND w.status IN ('aligning', 'executing')
+      const works = this.store.db.prepare(`SELECT DISTINCT q.work_id AS id FROM wake_queue q JOIN works w ON w.id = q.work_id JOIN events e ON e.id = q.event_id
+        WHERE q.processed_by IS NULL AND (w.status IN ('aligning', 'executing', 'awaiting-review')
+          OR (w.status = 'paused' AND e.action = 'message-sent' AND e.actor_type = 'user'))
         AND NOT EXISTS (SELECT 1 FROM coordinator_rounds r WHERE r.work_id = q.work_id AND r.status = 'running')`).all();
       for (const work of works) {
         const workId = String(work.id);
@@ -85,7 +88,9 @@ export class RoundScheduler {
   private async run(workId: string) {
     const id = randomUUID();
     const token = randomBytes(32).toString('hex');
-    const ids = this.store.db.prepare('SELECT event_id FROM wake_queue WHERE work_id = ? AND processed_by IS NULL ORDER BY event_id').all(workId).map(row => Number(row.event_id));
+    const ids = this.store.db.prepare(`SELECT q.event_id FROM wake_queue q JOIN events e ON e.id = q.event_id JOIN works w ON w.id = q.work_id
+      WHERE q.work_id = ? AND q.processed_by IS NULL
+      AND (w.status <> 'paused' OR (e.action = 'message-sent' AND e.actor_type = 'user')) ORDER BY q.event_id`).all(workId).map(row => Number(row.event_id));
     const brief = startupBrief(this.store, workId, ids);
     const outputPath = join(this.store.dataDir, 'rounds', `${id}.jsonl`);
     mkdirSync(join(this.store.dataDir, 'rounds'), { recursive: true });
@@ -111,7 +116,7 @@ export class RoundScheduler {
       });
       this.sessions.set(workId, session);
       this.store.transaction(() => { this.store.db.prepare('UPDATE coordinator_rounds SET session_id = ? WHERE id = ?').run(session.id, id); });
-      if (this.stopping) session.cancel();
+      if (this.stopping || this.cancellations.has(workId)) session.cancel();
       await session.send(JSON.stringify(brief));
       let previousStep = 0;
       for await (const event of session.events) {
@@ -130,8 +135,10 @@ export class RoundScheduler {
       // Revocation comes before completion is published or another round can start.
       this.tokens.delete(token);
       this.sessions.delete(workId);
-      if (this.stopping) { reason = 'aborted'; finalAnswer = undefined; }
-      if (reason !== 'completed') this.failed.add(workId);
+      const abortReason = this.cancellations.get(workId);
+      this.cancellations.delete(workId);
+      if (this.stopping || abortReason) { reason = 'aborted'; finalAnswer = undefined; }
+      if (reason !== 'completed' && !abortReason) this.failed.add(workId);
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ? WHERE id = ?`)
           .run(new Date().toISOString(), reason, JSON.stringify(usage), id);
@@ -139,10 +146,22 @@ export class RoundScheduler {
           const mark = this.store.db.prepare('UPDATE wake_queue SET processed_by = ? WHERE event_id = ?');
           for (const eventId of ids) mark.run(id, eventId);
         }
-        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, usage, finalAnswer, failure, eventIds: ids, processed: reason === 'completed' }, { workId });
+        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure, eventIds: ids, processed: reason === 'completed' }, { workId });
       });
       if (reason === 'completed') this.schedule();
     }
+  }
+
+  async cancel(workId: string, reason: '用户打断' | '工作取消') {
+    const running = this.running.get(workId);
+    if (running) {
+      this.cancellations.set(workId, reason);
+      for (const [token, actor] of this.tokens) if (actor.workId === workId) this.tokens.delete(token);
+      this.sessions.get(workId)?.cancel();
+      await running;
+    }
+    this.failed.delete(workId);
+    if (reason === '用户打断') this.schedule();
   }
 
   async close() {
