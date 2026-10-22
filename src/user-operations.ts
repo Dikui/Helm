@@ -54,7 +54,7 @@ export class UserOperations {
   async pauseWork(actor: Actor, workId: string) {
     const work = this.store.work(workId);
     if (work.status !== 'paused') this.store.transaction(() => {
-      this.store.db.prepare(`UPDATE works SET status = 'paused' WHERE id = ?`).run(workId);
+      this.store.db.prepare(`UPDATE works SET paused_from_status = status, status = 'paused' WHERE id = ?`).run(workId);
       this.abortDispatches(actor, workId, '工作暂停');
       this.wake(actor, 'work', workId, 'work-paused', workId);
     });
@@ -67,7 +67,8 @@ export class UserOperations {
     if (work.status === 'paused') this.store.transaction(() => {
       const review = this.store.gates(workId).some(gate => gate.kind === 'review' && gate.status === 'pending');
       const status = work.activeDescriptionId ? review ? 'awaiting-review' : 'executing' : 'aligning';
-      this.store.db.prepare('UPDATE works SET status = ? WHERE id = ?').run(status, workId);
+      this.store.db.prepare(`UPDATE works SET status = ?, paused_from_status = NULL,
+        runtime_pause_reason = NULL, consecutive_round_failures = 0 WHERE id = ?`).run(status, workId);
       this.wake(actor, 'work', workId, 'work-resumed', workId);
     });
     return this.store.work(workId);

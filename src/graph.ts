@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import type { TokenUsage } from './driver.js';
 
 export interface Card {
   id: string; workId: string; key: string; content: string; needsVerification: boolean;
@@ -7,6 +8,7 @@ export interface Card {
   templateId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
   repairOfCardId?: string | null;
+  usage: TokenUsage;
 }
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
@@ -15,10 +17,12 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
   work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, template_id AS templateId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
-  (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion`;
+  (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,
+  (SELECT json_object('inputTokens', COALESCE(SUM(json_extract(usage, '$.inputTokens')), 0),
+    'outputTokens', COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0)) FROM dispatches WHERE card_id = cards.id) AS usage`;
 
 function readCard(row: Record<string, unknown>): Card {
-  return { ...row, needsVerification: Boolean(row.needsVerification) } as unknown as Card;
+  return { ...row, needsVerification: Boolean(row.needsVerification), usage: JSON.parse(String(row.usage)) } as unknown as Card;
 }
 
 export function cardDetails(store: TaskStore, workId: string, cardId: string): Card {
@@ -49,7 +53,7 @@ export function createCard(store: TaskStore, actor: Actor, params: {
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
   const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false,
-    status: 'ready', createdAt: new Date().toISOString() };
+    status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: 0, outputTokens: 0 } };
   store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
