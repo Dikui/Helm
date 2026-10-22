@@ -1,7 +1,7 @@
 # 调度者实测：按任务库推进与重启接续
 
 Type: prototype
-Status: open
+Status: resolved
 Labels: wayfinder:prototype
 Blocked by: 02, 06, 07, 22
 Map: [Helm v1 设计](../map.md)
@@ -25,3 +25,11 @@ Map: [Helm v1 设计](../map.md)
 - 2026-10-22 15 张整体复查：加两项验证。① 执行者和调度者都不读本机全局配置：Claude `settingSources: []` 下不加载 `~/.claude/CLAUDE.md`；Codex 能否在不丢登录的前提下不读 `~/.codex/config.toml`、`~/.codex/AGENTS.md`（如单独 `CODEX_HOME` 只链接登录文件）；Grok 能否不加载 `~/.grok/hooks`。做不到的一家，在模板说明里写明会继承哪些全局配置。② 原"调度者只读设置生效"一项细化：Claude 调度者在 `_work` 里用 Bash 写文件也被拦（沙箱不可写，或不给 Bash）；Claude 执行者 `permissionMode: 'default'` 下副本外 Write 由 `canUseTool` 拒绝。
 
 - 2026-10-22 来自 [09](09-acceptance.md)：执行者侧的 HTTP MCP 注入已在 09 实测通过（四家都能加载沙箱外的 HTTP MCP 并调用工具，接入细节见 09 答案的"实测"），本单只需补：① helmd 的派单 MCP 端点真正校验令牌，`提交结论` 和转发的浏览器工具在同一端点工作；② Claude SDK 动态 HTTP MCP 首轮出现过 `needs-auth`、未复现：实测时多跑几轮 Claude 调度者和执行者，再出现就改用 stdio 转发小程序（09 已实测可用）；③ Codex 的 MCP 工具审批（`default_tools_approval_mode: approve`）和 `NO_PROXY` 设置对调度者同样生效。
+
+## Answer
+
+2026-10-22 20 张整体复查，因超出范围而关闭（不计入已解决）。
+
+- 本单原意是验证调度者的能力（假设 A1）：每轮新会话只凭启动简报和调度笔记，会不会重复派单、忘记约定、漏掉结果；拆单和返工是否合理；对齐一问一答、排队加打断的体验。用户打算把这些能力做成调度者技能，和对齐确认、关卡判断、汇总报告一样在 Helm 之外做，做好后再验证，并入地图 Out of scope 的"调度者技能"一条。A1 不成立时仍按地图退回方向 W。
+- 正文"杀掉调度者再开新会话能否接着干（A2）"已过时：06 改为任务型后，每轮都是新会话。
+- 后来加进来的技术配置验证与调度者能力无关，交给 [15](15-v1-slice.md)，作为第一版开发的验收项。

@@ -45,3 +45,5 @@ Map: [Helm v1 设计](../map.md)
 - 浏览器在沙箱外运行，会写 `~/Library/Application Support/Google/Chrome for Testing/Crashpad/`，接受。
 
 已在 05、07、08、14 留评论，GLOSSARY 的"派单结果""验收"已更新。
+
+- 2026-10-22 20 张整体复查：第 2 条的重置之前，helmd 先结束副本里残留的进程（先 `SIGTERM`，5 秒后 `SIGKILL`）；派单开始前检查副本是否干净。见 [11](11-persistence-and-recovery.md) 复查评论。
