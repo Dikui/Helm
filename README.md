@@ -60,7 +60,11 @@ SSE 的 `event` 为动作名，`id` 为事件 id，`data` 是完整结构化事�
 
 `startHelmd({ drivers: { 'claude-sdk': new FakeDriver(scripts) }, ... })` 按驱动名注入脚本，派单和调度轮次按模板的 `driver` 选择驱动；可用 `templateDir` 指定测试模板目录。脚本支持真实 MCP 工具调用、按沙箱限制写文件、步骤输出、压缩通知、指定结束方式、挂住和崩溃。驱动接口同时接受模板快照、cwd、环境变量、沙箱、MCP 服务与可选续跑会话 id；调度轮次始终新开。确认前调度者只读项目目录，确认后只读 `_work`。`helm serve` 默认登记真实 `claude-sdk` 驱动（拉起本机已登录的 `claude`）；设环境变量 `HELM_FAKE_COORDINATOR=1` 时调度者改用空脚本假驱动，供子进程测试使用。可运行的对齐脚本见 `tests/alignment.test.ts`。
 
-Agent 模板以仓库的 `templates/<模板 id>/` 为准，内置 `claude-coordinator`、`claude-executor`。每个目录包含 `config.json`、策略文件 `prompt.md` 和可选的 `skills/`；设置格式见内置模板。`role` 为 `coordinator` / `executor`，`driver` 为 `claude-sdk` / `codex`（Codex 驱动后续接入），`model` 和 `reasoningEffort` 可为 `null`；推理强度支持 `low` / `medium` / `high` / `max`。`fast` 默认 `false`，Claude 开启 fast 会标为不可用，并说明 extra usage 原因。`home` 为 `shared`（订阅）或 `template`（API），`description` 是供调度者派单时参考的职责说明；主目录隔离和 skills 挂载由后续任务接入。
+Agent 模板以仓库的 `templates/<模板 id>/` 为准，内置 `claude-coordinator`、`claude-executor`。每个目录包含 `config.json`、策略文件 `prompt.md` 和可选的 `skills/`；设置格式见内置模板。`role` 为 `coordinator` / `executor`，`driver` 为 `claude-sdk` / `codex`（Codex 驱动后续接入），`model` 和 `reasoningEffort` 可为 `null`；推理强度支持 `low` / `medium` / `high` / `max`。`fast` 默认 `false`，Claude 开启 fast 会标为不可用，并说明 extra usage 原因。`home` 为 `shared`（订阅）或 `template`（API），`description` 是供调度者派单时参考的职责说明。
+
+订阅模板使用 CLI 默认主目录，沿用终端里的登录：Claude 用 `claude auth login`，Codex 用 `codex login`。驱动不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，不创建订阅专用目录或凭据软链接，会话记录写入用户自己的历史；父环境的这两个变量也不会传给 CLI。Claude 仍以 `settingSources: []`、`strictMcpConfig` 和 skills 过滤限制配置来源；Codex 接受读取个人配置、`AGENTS.md`、skills 和插件，Helm 按会话传的参数覆盖同名项，不修改个人 skills 配置。详见 [ADR 0005](docs/adr/0005-subscription-templates-use-default-cli-homes.md)。
+
+API 模板仍各用 `~/.helm/agent-homes/<模板 id>/`，Claude 设置 `CLAUDE_CONFIG_DIR` 并用 `settingSources: ['user']`，Codex 设置 `CODEX_HOME`。用户按 CLI 格式配置 `settings.json` 或 `config.toml`；Helm 只检查目录和文件存在，不打开凭据或配置。订阅可用性分别由默认环境的 `claude auth status --json`、`codex login status` 检查；Codex 只看退出码，支持由 CLI 管理的文件或钥匙串登录。`CODEX_SQLITE_HOME` 仍放在每次派单或调度轮次的数据目录。
 
 修改文件后下一次派单或调度轮次即生效，排队派单在实际启动时重读；已有运行不受影响。`list-agent-templates` 显示配置、计费方式 `billing`（`subscription` / `api`）、是否可用及原因。坏模板独立报错，使用时返回 `TEMPLATE_UNAVAILABLE`；原 `configure-agent-template` 操作已移除。派单详情的 `template` 和 `round-template-loaded` 事件中的 `template` 保留当次解析快照（包含策略原文），用户及调度者均可读取。端口段、提交结论、清理、截图路径、不推送及验收说明快照等运行约定由代码追加在策略之后。
 

@@ -1,7 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runtimeEnvironment } from '../src/environment.js';
 
@@ -9,16 +7,9 @@ type SmokeProcess = (args: string[], options: { cwd: string; env: Record<string,
   status: number | null; signal: NodeJS.Signals | null; error?: Error;
 };
 
-function claudeProjects(home: string) {
-  try { return readdirSync(join(home, '.claude', 'projects'), { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
-}
-
 // The replaceable boundary is the external process; unit tests never run a browser or Claude.
 export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(process.execPath, args, { ...options, stdio: 'inherit' }),
-  parent: NodeJS.ProcessEnv = process.env, projects: (home: string) => string[] = claudeProjects) {
-  const home = parent.HOME ?? homedir();
-  const baseline = new Set(projects(home));
+  parent: NodeJS.ProcessEnv = process.env) {
   const env = runtimeEnvironment(parent);
   // Headed Chromium needs the host display and its authorization/runtime directory on Linux.
   for (const key of ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR']) {
@@ -34,11 +25,6 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
   ] as const) {
     const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
-    const added = projects(home).filter(name => !baseline.has(name));
-    if (added.length) {
-      console.error(`Claude 主目录隔离失败，用户 ~/.claude/projects/ 新增目录：${added.join(', ')}`);
-      return 1;
-    }
     if (result.error || result.signal || result.status !== 0) return result.status || 1;
   }
   return 0;

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,7 @@ async function fixture(t: TestContext, notifications: object[], script: object =
   const template: AgentTemplate = { id: `codex-${role}`, role, driver: 'codex', model: 'test-model',
     reasoningEffort: 'low', fast: true, home: 'shared', description: '执行', prompt: '测试策略', directory, skillsPath: join(directory, 'skills') };
   const options: SessionOptions = { template, cwd: directory, dataDir: join(directory, 'dispatch'),
-    env: { HOME: directory, PATH: process.env.PATH!, NO_PROXY: 'example.test', no_proxy: 'internal.test' },
+    env: { CODEX_HOME: '/caller/must-not-use', HOME: directory, PATH: process.env.PATH!, NO_PROXY: 'example.test', no_proxy: 'internal.test' },
     sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [directory] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };
   const requests = async () => (await readFile(record, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -37,50 +37,6 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
-
-for (const mode of ['executor', 'resume', 'coordinator'] as const) test(`Codex ${mode} 在 thread 前关闭模板外 user skills，按 realpath 恢复本模板且保留 repo/system`, async t => {
-  const ctx = await fixture(t, [], {}, mode === 'coordinator' ? 'coordinator' : 'executor');
-  if (mode === 'resume') ctx.options.resumeSessionId = 'thread-scripted';
-  const skills: { path: string; scope: string; enabled: boolean }[] = [];
-  const skill = async (path: string, scope: string, enabled: boolean) => {
-    await mkdir(join(path, '..'), { recursive: true });
-    await writeFile(path, 'fixture skill');
-    skills.push({ path, scope, enabled });
-    return path;
-  };
-  const external = await skill(join(ctx.directory, '.agents', 'skills', 'poison', 'SKILL.md'), 'user', true);
-  const personal = await skill(join(ctx.directory, '.codex', 'skills', 'personal', 'SKILL.md'), 'user', true);
-  const sibling = await skill(join(ctx.directory, 'skills-other', 'other-template', 'SKILL.md'), 'user', true);
-  await skill(join(ctx.directory, '.agents', 'skills', 'disabled', 'SKILL.md'), 'user', false);
-  await skill(join(ctx.directory, 'skills', 'active', 'SKILL.md'), 'user', true);
-  const disabled = await skill(join(ctx.directory, 'skills', 'disabled', 'SKILL.md'), 'user', false);
-  // Resolve both the template root and skill paths: aliases must not change ownership.
-  const alias = join(ctx.directory, 'skills-alias');
-  await symlink(join(ctx.directory, 'skills'), alias);
-  ctx.options.template = { ...ctx.options.template!, skillsPath: alias };
-  const aliased = await skill(join(alias, 'aliased', 'SKILL.md'), 'user', false);
-  const listedDisabled = process.platform === 'darwin' && disabled.startsWith('/private/var/') ? disabled.replace('/private/var/', '/var/') : disabled;
-  skills.find(s => s.path === disabled)!.path = listedDisabled;
-  // A dangling user skill link must be disabled, not abort the session.
-  const dangling = join(ctx.directory, '.agents', 'skills', 'dangling', 'SKILL.md');
-  skills.push({ path: dangling, scope: 'user', enabled: true });
-  for (const scope of ['repo', 'system']) for (const enabled of [true, false]) {
-    skills.push({ path: join(ctx.directory, scope, String(enabled), 'SKILL.md'), scope, enabled });
-  }
-  const scriptPath = join(ctx.directory, 'script.json');
-  await writeFile(scriptPath, JSON.stringify({ ...JSON.parse(await readFile(scriptPath, 'utf8')), skills }));
-  const session = await ctx.driver.start(ctx.options);
-  t.after(() => session.cancel());
-  const requests = await ctx.requests();
-  const writes = requests.filter(r => r.method === 'skills/config/write');
-  assert.deepEqual(writes.map(r => r.params), [
-    { path: external, enabled: false }, { path: personal, enabled: false }, { path: sibling, enabled: false },
-    { path: listedDisabled, enabled: true }, { path: aliased, enabled: true }, { path: dangling, enabled: false },
-  ]);
-  assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'skills/list',
-    ...Array(6).fill('skills/config/write'), mode === 'resume' ? 'thread/resume' : 'thread/start']);
-  assert.deepEqual(requests[3].params, { cwds: [ctx.directory], forceReload: true });
-});
 
 test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并记录 total token，等 turn/completed 才结束', async t => {
   const ctx = await fixture(t, [
@@ -98,19 +54,20 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.equal(session.sqlitePath, join(ctx.directory, 'dispatch', 'codex-sqlite'));
   assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9 } });
   const requests = await ctx.requests();
-  assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'skills/list', 'thread/start', 'turn/start']);
+  assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'thread/start', 'turn/start']);
   assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.template!.skillsPath] });
-  const thread = requests[4].params;
+  const thread = requests[3].params;
   assert.equal(thread.approvalPolicy, 'never');
   assert.equal(thread.sandbox, 'workspace-write');
   assert.equal(thread.config.service_tier, 'fast');
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
   assert.match(thread.developerInstructions, /测试策略/);
   assert.match(thread.developerInstructions, /submit-conclusion/);
-  assert.deepEqual(requests[5].params.sandboxPolicy, { type: 'workspaceWrite', writableRoots: [ctx.directory], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true });
-  assert.equal(requests[5].params.effort, 'low');
+  assert.deepEqual(requests[4].params.sandboxPolicy, { type: 'workspaceWrite', writableRoots: [ctx.directory], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true });
+  assert.equal(requests[4].params.effort, 'low');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
-  assert.equal(env.CODEX_HOME, join(ctx.directory, '.helm', 'agent-homes', 'codex'));
+  assert.equal(Object.hasOwn(env, 'CODEX_HOME'), false);
+  await assert.rejects(stat(join(ctx.directory, '.helm', 'agent-homes', 'codex')), { code: 'ENOENT' });
   assert.equal(env.CODEX_SQLITE_HOME, session.sqlitePath);
   assert.equal(env.NO_PROXY, 'example.test,internal.test,127.0.0.1,localhost');
   assert.equal(env.no_proxy, env.NO_PROXY);
@@ -155,37 +112,15 @@ test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skil
   await session.send('继续');
   const events = await collect(session.events);
   const requests = await ctx.requests();
-  assert.equal(requests[4].method, 'thread/resume');
-  assert.equal(requests[4].params.threadId, 'thread-scripted');
+  assert.equal(requests[3].method, 'thread/resume');
+  assert.equal(requests[3].params.threadId, 'thread-scripted');
   assert.deepEqual(requests[2].params.extraRoots, []);
-  assert.equal(requests[5].params.effort, 'xhigh');
+  assert.equal(requests[4].params.effort, 'xhigh');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
   assert.equal(env.CODEX_HOME, join(ctx.directory, '.helm', 'agent-homes', 'api-codex'));
-  assert.notEqual(requests[4].params.config.service_tier, 'fast');
-  assert.equal(requests[4].params.serviceTier, 'default');
-  assert.equal(requests[4].params.config.service_tier, undefined);
-});
-
-test('Codex 模板没有 skills 时仍关闭外部 user skill，写入失败不得开始 thread', async t => {
-  for (const rejectOn of [undefined, 'skills/config/write']) await t.test(rejectOn ?? 'disabled', async t => {
-    const ctx = await fixture(t, [], { rejectOn });
-    ctx.options.template = { ...ctx.options.template!, skillsPath: null };
-    const path = join(ctx.directory, '.agents', 'skills', 'poison', 'SKILL.md');
-    await mkdir(join(path, '..'), { recursive: true });
-    await writeFile(path, 'fixture skill');
-    const scriptPath = join(ctx.directory, 'script.json');
-    await writeFile(scriptPath, JSON.stringify({ ...JSON.parse(await readFile(scriptPath, 'utf8')),
-      skills: [{ path, scope: 'user', enabled: true }] }));
-    if (rejectOn) await assert.rejects(ctx.driver.start(ctx.options), /scripted RPC failure/);
-    else {
-      const session = await ctx.driver.start(ctx.options);
-      t.after(() => session.cancel());
-    }
-    const requests = await ctx.requests();
-    assert.deepEqual(requests[2].params, { extraRoots: [] });
-    assert.deepEqual(requests[4].params, { path, enabled: false });
-    assert.equal(requests.some(r => r.method === 'thread/start'), !rejectOn);
-  });
+  assert.notEqual(requests[3].params.config.service_tier, 'fast');
+  assert.equal(requests[3].params.serviceTier, 'default');
+  assert.equal(requests[3].params.config.service_tier, undefined);
 });
 
 for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} 中断、崩溃、RPC 拒绝、取消初始化均能收尾；无 turn/completed 不算成功`, async t => {
@@ -196,7 +131,7 @@ for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} 中
     const end = (await collect(session.events)).at(-1)!;
     assert.equal(end.type === 'end' && end.reason, 'aborted');
   });
-  for (const method of ['initialize', 'skills/extraRoots/set', 'skills/list', 'thread/start']) await t.test(`RPC ${method}`, async t => {
+  for (const method of ['initialize', 'skills/extraRoots/set', 'thread/start']) await t.test(`RPC ${method}`, async t => {
     const ctx = await fixture(t, [], { rejectOn: method }, role);
     await assert.rejects(ctx.driver.start(ctx.options), /scripted RPC failure/);
   });
@@ -232,38 +167,44 @@ test('Codex 拒绝错误的沙箱和多个可写根，启动前不创建 app-ser
   assert.deepEqual(await ctx.requests(), []);
 });
 
-test('Codex 可用性只检查临时 HOME 中的文件元数据，软链接幂等、不复制凭据；API 只查 config.toml', async t => {
+test('Codex 订阅可用性由默认环境的 CLI 退出码决定，不依赖 auth.json；API 只查 config.toml', async t => {
   const ctx = await fixture(t, []);
-  const previousHome = process.env.HOME;
+  const previous = { HOME: process.env.HOME, CODEX_HOME: process.env.CODEX_HOME };
   process.env.HOME = ctx.directory;
-  t.after(() => { if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome; });
+  process.env.CODEX_HOME = '/parent/must-not-use';
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  const executable = join(ctx.directory, 'codex-substitute');
+  const evidence = join(ctx.directory, 'login-probe.json');
+  const driver = new CodexDriver({ command: { file: executable, args: [] } });
   const template = ctx.options.template!;
-  assert.equal((await ctx.driver.checkAvailability(template)).available, false);
-  const source = join(ctx.directory, '.codex', 'auth.json');
-  await mkdir(join(ctx.directory, '.codex'));
-  await writeFile(source, 'not real credentials');
-  const old = new Date('2020-01-01T00:00:00Z');
-  await utimes(source, old, old);
-  const before = await stat(source);
-  assert.equal((await ctx.driver.checkAvailability(template)).available, true);
-  assert.equal((await ctx.driver.checkAvailability(template)).available, true);
-  const target = join(ctx.directory, '.helm', 'agent-homes', 'codex', 'auth.json');
-  assert.equal((await lstat(target)).isSymbolicLink(), true);
-  assert.equal(await readlink(target), source);
-  assert.equal((await stat(source)).atimeMs, before.atimeMs);
-  await rm(source);
-  assert.equal((await ctx.driver.checkAvailability(template)).available, false);
+  for (const exit of [0, 1]) {
+    await writeFile(executable, `#!${process.execPath}\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({args: process.argv.slice(2), env: process.env, cwd: process.cwd()}));\nconsole.error('opaque account information');\nprocess.exit(${exit});\n`);
+    await chmod(executable, 0o755);
+    const availability = await driver.checkAvailability(template);
+    assert.equal(availability.available, exit === 0);
+    if (exit) assert.equal(availability.command, 'codex login');
+    assert.doesNotMatch(JSON.stringify(availability), /opaque account information/);
+    const probe = JSON.parse(await readFile(evidence, 'utf8'));
+    assert.deepEqual(probe.args, ['login', 'status']);
+    assert.equal(Object.hasOwn(probe.env, 'CODEX_HOME'), false);
+    assert.equal(probe.env.HOME, ctx.directory);
+    assert.equal(probe.cwd, ctx.directory);
+    await assert.rejects(stat(join(ctx.directory, '.helm', 'agent-homes', 'codex')), { code: 'ENOENT' });
+    await assert.rejects(stat(join(ctx.directory, '.codex')), { code: 'ENOENT' });
+  }
+  await rm(executable);
+  assert.equal((await driver.checkAvailability(template)).available, false, 'CLI 缺失时不可用');
   const api = { ...template, id: 'codex-api', home: 'template' as const };
   const apiHome = join(ctx.directory, '.helm', 'agent-homes', 'codex-api');
-  await mkdir(apiHome);
-  assert.equal((await ctx.driver.checkAvailability(api)).available, false);
+  assert.equal((await driver.checkAvailability(api)).available, false);
+  await mkdir(apiHome, { recursive: true });
+  assert.equal((await driver.checkAvailability(api)).available, false);
   await writeFile(join(apiHome, 'config.toml'), 'opaque, not parsed by Helm');
-  assert.equal((await ctx.driver.checkAvailability(api)).available, true);
-  await rm(target);
-  await symlink(join(ctx.directory, 'wrong-auth'), target);
-  await writeFile(source, 'not real credentials');
-  assert.equal((await ctx.driver.checkAvailability(template)).available, false);
-  assert.equal(await readlink(target), join(ctx.directory, 'wrong-auth'), '不覆盖非 Helm 链接');
+  assert.equal((await driver.checkAvailability(api)).available, true, 'API 模板不调用登录检查');
 });
 
 test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP 配置生效', async t => {
@@ -284,7 +225,8 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
     assert.equal(end.type === 'end' && end.finalAnswer, '等待派单');
     assert.deepEqual(end.type === 'end' && end.usage, { inputTokens: 13, outputTokens: 4 });
     const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
-    assert.equal(env.CODEX_HOME, join(ctx.directory, '.helm', 'agent-homes', 'codex'));
+    assert.equal(Object.hasOwn(env, 'CODEX_HOME'), false);
+    await assert.rejects(stat(join(ctx.directory, '.helm', 'agent-homes', 'codex')), { code: 'ENOENT' });
     assert.equal(env.CODEX_SQLITE_HOME, join(ctx.directory, `round-${round}`, 'codex-sqlite'));
     assert.equal(env.NO_PROXY, 'example.test,internal.test,127.0.0.1,localhost');
     assert.equal(env.no_proxy, env.NO_PROXY);

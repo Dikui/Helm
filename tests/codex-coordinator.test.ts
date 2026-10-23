@@ -10,7 +10,8 @@ import { until } from './claude-coordinator-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧事件不重投', async t => {
-  const driver = new CodexDriver();
+  const driver = new CodexDriver({ command: { file: process.execPath,
+    args: ['-e', 'process.exit(process.argv.slice(1).join(" ") === "login status" ? 0 : 1)'] } });
   let observed: SessionOptions | undefined;
   let starts = 0;
   const daemon = await coordinatorFixture(t, {

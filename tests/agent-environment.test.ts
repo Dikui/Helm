@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
@@ -7,7 +10,10 @@ import { fixture as coordinatorFixture, until } from './claude-coordinator-fixtu
 
 for (const role of ['coordinator', 'executor'] as const) {
   test(`${role}: 父环境只传运行必需项，实际子进程无桌面会话变量且关闭自动记忆`, async t => {
+    const home = await mkdtemp(join(tmpdir(), 'helm-environment-'));
+    t.after(() => rm(home, { recursive: true, force: true }));
     const injected = {
+      HOME: home, CLAUDE_CONFIG_DIR: '/parent/claude', CODEX_HOME: '/parent/codex',
       CLAUDE_CODE_DESKTOP_SESSION: 'desktop-sentinel', HELM_TEST_ARBITRARY: 'arbitrary-sentinel',
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0', ANTHROPIC_API_KEY: 'credential-sentinel',
       HELM_PORT_START: '9999', NODE_OPTIONS: '--no-warnings',
@@ -48,7 +54,7 @@ for (const role of ['coordinator', 'executor'] as const) {
       await until(daemon.events, events => events.some(event => event.action === 'round-ended' && event.details.finalAnswer === '环境探针完成'));
     }
     assert.ok(childEnv, '必须实际运行 Node 子进程探针');
-    for (const key of ['CLAUDE_CODE_DESKTOP_SESSION', 'HELM_TEST_ARBITRARY', 'ANTHROPIC_API_KEY', 'NODE_OPTIONS']) {
+    for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CLAUDE_CODE_DESKTOP_SESSION', 'HELM_TEST_ARBITRARY', 'ANTHROPIC_API_KEY', 'NODE_OPTIONS']) {
       assert.equal(childEnv[key], undefined, key);
     }
     assert.equal(childEnv.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');

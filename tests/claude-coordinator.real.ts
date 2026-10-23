@@ -1,8 +1,7 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-coordinator.
-// Requires Claude login in ~/.helm/agent-homes/claude. No browser is started.
+// Requires Claude login in its default home. No browser is started.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -38,7 +37,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
   const rounds: Observation[] = [];
   const driver = new ClaudeCoordinatorDriver({ query: args => {
     const sdk = args.options!;
-    assert.equal(sdk.env?.CLAUDE_CONFIG_DIR, join(homedir(), '.helm/agent-homes/claude'));
+    assert.equal(Object.hasOwn(sdk.env!, 'CLAUDE_CONFIG_DIR'), false);
     const brief = JSON.parse(args.prompt as string) as StartupBrief;
     assert.equal(sdk.model, 'haiku');
     assert.equal(sdk.effort, 'low');

@@ -9,7 +9,7 @@ import { startHelmd } from '../src/server.js';
 import { copyTemplates } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
-const unavailable = { available: false, reason: '专用目录未登录', command: 'CLAUDE_CONFIG_DIR=~/.helm/agent-homes/claude claude auth login' };
+const unavailable = { available: false, reason: '默认主目录未登录', command: 'claude auth login' };
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 
 async function fixture(t: TestContext, initial: Record<string, TemplateAvailability> = {}) {
@@ -196,7 +196,7 @@ test('调度者不可用立即暂停且不重试；修复后手动恢复工作�
   const work = await daemon.startWork();
   const paused = (await daemon.call('get-work', { workId: work.id })).result;
   assert.equal(paused.status, 'paused');
-  assert.match(paused.runtimePauseReason, /专用目录未登录/);
+  assert.match(paused.runtimePauseReason, /默认主目录未登录/);
   assert.equal(daemon.started.includes('claude-coordinator'), false);
   assert.equal((await daemon.events()).filter(e => e.action === 'round-started').length, 1);
   assert.ok((await daemon.call('list-pending')).result.some((p: any) => p.kind === 'runtime-pause' && p.workId === work.id));

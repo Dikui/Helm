@@ -1,13 +1,16 @@
-import { lstat, mkdir, readlink, realpath, stat, symlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
 import { CodexRpc, type CodexCommand } from './codex-rpc.js';
+import { runtimeEnvironment } from './environment.js';
 import { templatePrompt } from './prompts.js';
 import { TemplateCatalog, type AgentTemplate } from './templates.js';
 
 function codexHome(template: AgentTemplate, home = homedir()) {
-  return join(home, '.helm', 'agent-homes', template.home === 'shared' ? 'codex' : template.id);
+  return join(home, '.helm', 'agent-homes', template.id);
 }
 
 function quotaExhausted(error: any) {
@@ -29,16 +32,15 @@ export class CodexDriver implements Driver {
       return { available: false, reason: `API 模板需要主目录 ${directory} 和 config.toml；请按 Codex 格式配置接口和 key。`,
         command: `mkdir -p ${quoted} && \${EDITOR:-vi} ${quoted}/config.toml` };
     }
-    const source = join(homedir(), '.codex', 'auth.json');
-    const target = join(directory, 'auth.json');
     try {
-      if (!(await stat(source)).isFile()) throw new Error('Missing Codex login');
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      try { await symlink(source, target); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-      if ((await lstat(target)).isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source) return { available: true };
-    } catch { /* Never open or copy credentials, including while checking login. */ }
-    return { available: false, reason: `Codex 登录文件 ${source} 不存在，或 ${target} 不是指向它的软链接。`, command: 'codex login' };
+      const command = this.config.command ?? { file: 'codex', args: [] };
+      // The CLI owns file/Keychain credentials. Only its exit code matters.
+      await promisify(execFile)(command.file, [...command.args, 'login', 'status'], {
+        cwd: homedir(), env: runtimeEnvironment(), timeout: 10_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
+      });
+      return { available: true };
+    } catch { /* Never store CLI output, which can contain account details. */ }
+    return { available: false, reason: 'Codex 默认主目录未登录或无法检查登录状态；请确认已安装 Codex CLI 并登录。', command: 'codex login' };
   }
 
   async start(options: SessionOptions): Promise<DriverSession> {
@@ -57,9 +59,12 @@ export class CodexDriver implements Driver {
     if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
-    const home = codexHome(template, options.env.HOME);
-    await mkdir(home, { recursive: true, mode: 0o700 });
-    const env: Record<string, string> = { ...options.env, CODEX_HOME: home, CODEX_SQLITE_HOME: sqlitePath };
+    const env: Record<string, string> = { ...options.env, CODEX_SQLITE_HOME: sqlitePath };
+    delete env.CODEX_HOME;
+    if (template.home === 'template') {
+      env.CODEX_HOME = codexHome(template, options.env.HOME);
+      await mkdir(env.CODEX_HOME, { recursive: true, mode: 0o700 });
+    }
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     options.signal?.throwIfAborted();
@@ -78,18 +83,6 @@ export class CodexDriver implements Driver {
       const initializeDurationMs = Math.round(performance.now() - before);
       rpc.notify('initialized', {});
       await rpc.request('skills/extraRoots/set', { extraRoots: template.skillsPath ? [template.skillsPath] : [] });
-      const listed = await rpc.request('skills/list', { cwds: [cwd], forceReload: true });
-      const skillsRoot = template.skillsPath ? await realpath(template.skillsPath) : null;
-      for (const entry of listed.data) for (const skill of entry.skills) {
-        if (skill.scope !== 'user') continue;
-        // CODEX_HOME does not isolate HOME/.agents/skills. Canonicalize aliases
-        // (including /var on macOS) before deciding which template owns a skill.
-        // A dangling user skill link must not block the session; treat it as foreign.
-        const path = await realpath(skill.path).catch(() => null);
-        const enabled = skillsRoot !== null && path !== null && path.startsWith(skillsRoot + sep);
-        // Write the listed path: Codex matches its config entries against that form.
-        if (skill.enabled !== enabled) await rpc.request('skills/config/write', { path: skill.path, enabled });
-      }
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
         ...(template.model ? { model: template.model } : {}), developerInstructions: templatePrompt(template),

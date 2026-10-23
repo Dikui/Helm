@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, lstat, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,7 +13,7 @@ import { templatePrompt } from './prompts.js';
 import { TemplateCatalog, type AgentTemplate } from './templates.js';
 
 function claudeHome(template: AgentTemplate, home = homedir()) {
-  return join(home, '.helm', 'agent-homes', template.home === 'shared' ? 'claude' : template.id);
+  return join(home, '.helm', 'agent-homes', template.id);
 }
 
 async function claudeSkills(template: AgentTemplate): Promise<string[]> {
@@ -139,14 +139,13 @@ export class ClaudeDriver implements Driver {
       } catch { /* Only file metadata is needed; the CLI validates contents. */ }
       return { available: false, reason: `API 模板需要主目录 ${directory} 和 settings.json；请按 Claude 格式配置接口和 key。`, command };
     }
-    const command = `CLAUDE_CONFIG_DIR=${quoted} claude auth login`;
+    const command = 'claude auth login';
     try {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      const env = { ...runtimeEnvironment(), CLAUDE_CONFIG_DIR: directory };
+      const env = runtimeEnvironment();
       const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(env);
-      if (await (this.config.authStatus ?? authStatus)(executable, { cwd: directory, env })) return { available: true };
+      if (await (this.config.authStatus ?? authStatus)(executable, { cwd: homedir(), env })) return { available: true };
     } catch { /* Do not store CLI diagnostics, which may contain account details. */ }
-    return { available: false, reason: `Claude 专用主目录 ${directory} 未登录或无法检查登录状态；请确认已安装 Claude CLI 并登录。`, command };
+    return { available: false, reason: `Claude 默认主目录未登录或无法检查登录状态；请确认已安装 Claude CLI 并登录。`, command };
   }
 
   async start(options: SessionOptions): Promise<DriverSession> {
@@ -182,8 +181,9 @@ export class ClaudeDriver implements Driver {
     options.signal?.addEventListener('abort', cancel, { once: true });
     // Per-session override: never let a caller's force-enable reach Claude.
     // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
-    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-      CLAUDE_CONFIG_DIR: claudeHome(template, options.env.HOME) };
+    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
+    delete env.CLAUDE_CONFIG_DIR;
+    if (template.home === 'template') env.CLAUDE_CONFIG_DIR = claudeHome(template, options.env.HOME);
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {

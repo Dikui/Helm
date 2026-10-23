@@ -17,7 +17,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   const result = message.method === 'thread/start' || message.method === 'thread/resume'
     ? { thread: { id: message.params.threadId ?? 'thread-scripted' } }
     : message.method === 'turn/start' ? { turn: { id: 'turn-scripted' } }
-    : message.method === 'skills/list' ? { data: [{ cwd: message.params.cwds[0], skills: script.skills ?? [], errors: [] }] } : {};
+    : {};
   emit({ id: message.id, result });
   if (message.method === 'initialize') emit({ method: 'fixture/environment', params: { env: process.env, cwd: process.cwd() } });
   if (message.method === 'turn/start') {

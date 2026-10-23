@@ -14,7 +14,7 @@ export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(va
 const denied = /operation not permitted|permission denied|read-only file system|sandbox/i;
 
 // Codex may run shell commands through its nested exec tool, which app-server does not
-// emit as commandExecution items; its own session records under CODEX_HOME still hold the result.
+// emit as commandExecution items; its own session records under the default HOME/.codex still hold the result.
 export async function sandboxDenied(items: any[], codexHome: string, target: string) {
   if (items.some(item => item?.type === 'commandExecution' && String(item.command).includes(target)
     && item.exitCode !== 0 && denied.test(String(item.aggregatedOutput)))) return true;

@@ -17,7 +17,7 @@ async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'execu
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   return {
-    cwd, env: { PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
+    cwd, env: { HOME: cwd, PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
     template: { ...new TemplateCatalog().get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
     sandbox: role === 'executor' ? { mode: 'workspace-write', writableRoots: [cwd] } : { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
@@ -109,7 +109,7 @@ test('Claude 没有 skills 目录时不挂插件，空目录也显式禁用所�
   }
 });
 
-test('Claude 订阅和 API 模板使用 Helm 主目录，只有 API 加载用户设置', async t => {
+test('Claude 订阅模板沿用默认主目录，API 使用模板主目录并加载用户设置', async t => {
   const options = await fixture(t);
   options.env.HOME = options.cwd;
   options.env.CLAUDE_CONFIG_DIR = '/caller/must-not-use';
@@ -117,8 +117,9 @@ test('Claude 订阅和 API 模板使用 Helm 主目录，只有 API 加载用户
     const template = { ...options.template!, id: 'api-executor', home };
     await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
       query: fakeQuery([result()], args => {
-        assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
-          join(options.cwd, '.helm', 'agent-homes', home === 'shared' ? 'claude' : 'api-executor'));
+        assert.equal(Object.hasOwn(args.options!.env!, 'CLAUDE_CONFIG_DIR'), home === 'template');
+        if (home === 'template') assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
+          join(options.cwd, '.helm', 'agent-homes', 'api-executor'));
         assert.deepEqual(args.options!.settingSources, home === 'shared' ? [] : ['user']);
       }) }), { ...options, template });
   }
@@ -135,21 +136,22 @@ test('Claude 可用性只让 CLI 查订阅登录；API 仅检查目录和设置�
     authStatus: async (executable, probe) => {
       probes++;
       assert.equal(executable, '/test/bin/claude');
-      assert.equal(probe.env.CLAUDE_CONFIG_DIR, join(options.cwd, '.helm/agent-homes/claude'));
+      assert.equal(Object.hasOwn(probe.env, 'CLAUDE_CONFIG_DIR'), false);
       assert.equal(probe.env.ANTHROPIC_API_KEY, undefined);
-      assert.equal(probe.cwd, probe.env.CLAUDE_CONFIG_DIR);
+      assert.equal(probe.cwd, options.cwd);
       return loggedIn;
     } });
   const unavailable = await driver.checkAvailability(options.template!);
   assert.equal(unavailable.available, false);
   assert.match(unavailable.reason!, /登录/);
-  assert.match(unavailable.command!, /CLAUDE_CONFIG_DIR=.*claude auth login/);
+  assert.equal(unavailable.command, 'claude auth login');
+  await assert.rejects(realpath(join(options.cwd, '.helm/agent-homes/claude')), { code: 'ENOENT' });
   loggedIn = true;
   assert.equal((await driver.checkAvailability(options.template!)).available, true);
   const api = { ...options.template!, id: 'api-example', home: 'template' as const };
   assert.equal((await driver.checkAvailability(api)).available, false);
   const directory = join(options.cwd, '.helm/agent-homes/api-example');
-  await mkdir(directory);
+  await mkdir(directory, { recursive: true });
   assert.equal((await driver.checkAvailability(api)).available, false);
   // Malformed contents deliberately pass: Helm must never parse this file.
   await writeFile(join(directory, 'settings.json'), 'not JSON; user-owned credentials');
@@ -159,6 +161,9 @@ test('Claude 可用性只让 CLI 查订阅登录；API 仅检查目录和设置�
 
 test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环境，拒绝失败或非订阅登录', async t => {
   const options = await fixture(t);
+  const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = '/parent/must-not-use';
+  t.after(() => { if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previousConfig; });
   const previousHome = process.env.HOME;
   process.env.HOME = options.cwd;
   t.after(() => { if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome; });
@@ -178,8 +183,8 @@ test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环�
     assert.equal(availability.available, typeof status !== 'string' && status.loggedIn && status.authMethod === 'claude.ai' && exit === 0);
     const probe = JSON.parse(await readFile(evidence, 'utf8'));
     assert.deepEqual(probe.args, ['auth', 'status', '--json']);
-    assert.equal(probe.env.CLAUDE_CONFIG_DIR, join(options.cwd, '.helm/agent-homes/claude'));
-    assert.equal(probe.cwd, probe.env.CLAUDE_CONFIG_DIR);
+    assert.equal(Object.hasOwn(probe.env, 'CLAUDE_CONFIG_DIR'), false);
+    assert.equal(probe.cwd, options.cwd);
     assert.equal(probe.env.ANTHROPIC_API_KEY, undefined);
     assert.equal(probe.env.CLAUDE_CODE_DESKTOP_SESSION, undefined);
   }

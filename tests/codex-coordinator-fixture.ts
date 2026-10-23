@@ -10,7 +10,7 @@ import { copyTemplates, configureTestTemplate } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 // All Codex metadata and credentials live in a temporary HOME. A real smoke may
-// link only to an explicitly staged, independently logged-in temporary HOME.
+// link the real login into this temporary default CLI home without writing to the real home.
 export async function coordinatorFixture(t: TestContext, driver: Driver, config: { rounds?: number; stagedAuth?: string } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-coordinator-')));
   const home = join(directory, 'home');

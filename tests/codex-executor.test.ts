@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstat, readFile, readlink } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
@@ -7,9 +7,10 @@ import { FakeDriver, type FakeContext, type FakeStep } from '../src/driver.js';
 import { codexFixture, ok } from './codex-executor-fixture.js';
 import { until } from './browser-fixture.js';
 
-test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并保存改动；临时 HOME 建登录软链接', async t => {
+test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并保存改动；临时 HOME 不建订阅主目录或登录软链接', async t => {
   let quotaWake = false;
-  const real = new CodexExecutorDriver();
+  const real = new CodexExecutorDriver({ command: { file: process.execPath,
+    args: ['-e', 'process.exit(process.argv.slice(1).join(" ") === "login status" ? 0 : 1)'] } });
   const fake = new FakeDriver([[{ type: 'end', reason: 'quota-exhausted', usage: { inputTokens: 18, outputTokens: 2 } }]], template => real.checkAvailability(template));
   const reassign = (ctx: FakeContext): FakeStep[] => {
     const brief = JSON.parse(ctx.input);
@@ -23,8 +24,7 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
   const daemon = await codexFixture(t, fake, { after: reassign });
   const source = join(daemon.home, '.codex', 'auth.json');
   const link = join(daemon.home, '.helm', 'agent-homes', 'codex', 'auth.json');
-  assert.equal((await lstat(link)).isSymbolicLink(), true);
-  assert.equal(await readlink(link), source);
+  await assert.rejects(stat(link), { code: 'ENOENT' });
   await daemon.confirm();
   const dispatches = await daemon.ended(2);
   assert.ok(quotaWake);

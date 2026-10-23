@@ -28,13 +28,3 @@ test('真实冒烟入口按顺序在干净环境运行六套测试，失败时�
   assert.equal(runRealSmoke(() => ({ status: null, signal: 'SIGTERM' }), parent), 1);
   assert.equal(runRealSmoke(() => ({ status: null, signal: null, error: new Error('spawn failed') }), parent), 1);
 });
-
-test('真实冒烟核对用户 Claude projects 没有新增目录（只用进程和目录替身）', () => {
-  let snapshots = 0;
-  let runs = 0;
-  assert.equal(runRealSmoke(() => { runs++; return { status: 0, signal: null }; }, { HOME: '/home/test' }, home => {
-    assert.equal(home, '/home/test');
-    return snapshots++ === 0 ? ['existing-project'] : ['existing-project', 'leaked-helm-project'];
-  }), 1);
-  assert.equal(runs, 1, '隔离失败后停止冒烟');
-});
