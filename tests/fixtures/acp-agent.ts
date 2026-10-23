@@ -30,7 +30,9 @@ const request = (method: string, params: object) => new Promise(resolve => {
   pending.set(id, resolve);
   emit({ id, method, params });
 });
-appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/spawn', args: process.argv.slice(3), env: process.env, cwd: process.cwd(), pid: process.pid })}\n`);
+const patches = process.argv.flatMap((arg, index) => arg === '--patch'
+  ? [{ path: process.argv[index + 1], content: JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8')) }] : []);
+appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/spawn', args: process.argv.slice(3), patches, env: process.env, cwd: process.cwd(), pid: process.pid })}\n`);
 createInterface({ input: process.stdin }).on('line', line => { void handle(line).catch(error => { console.error(error); process.exit(2); }); });
 async function handle(line: string) {
   const message = JSON.parse(line);

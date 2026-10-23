@@ -18,6 +18,7 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   agent?: 'grok' | 'deepseek';
   content?: string; secondContent?: string; needsBrowser?: boolean; realBrowser?: boolean;
   stagedAuth?: string; model?: string; purpose?: 'execution' | 'verification';
+  skills?: Record<string, string>;
 } = {}) {
   const agent = config.agent ?? 'grok';
   const templateId = `${agent}-executor`;
@@ -45,6 +46,11 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const templateDir = await copyTemplates(directory);
   await configureTestTemplate(templateDir, templateId, { model: config.model ?? (agent === 'grok' ? 'grok-4.7' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
+  for (const [name, content] of Object.entries(config.skills ?? {})) {
+    const skill = join(templateDir, templateId, 'skills', name);
+    await mkdir(skill, { recursive: true });
+    await writeFile(join(skill, 'SKILL.md'), `---\nname: ${name}\ndescription: Helm smoke skill; use when asked to verify template skills.\n---\n${content}\n`);
+  }
   let created = false;
   const actions: FakeScript[] = [];
   const coordinator = new FakeDriver(Array(40).fill((ctx: FakeContext): FakeStep[] => {

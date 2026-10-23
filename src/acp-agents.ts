@@ -1,4 +1,7 @@
 import type { InitializeResponse, PromptResponse } from '@agentclientprotocol/sdk';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { deepseekUsage } from './deepseek-usage.js';
 import type { TokenUsage } from './driver.js';
@@ -9,6 +12,7 @@ interface AcpAgentProfile {
   name: string;
   command: string;
   arguments(template: AgentTemplate): string[];
+  prepare?(template: AgentTemplate): Promise<{ args: string[]; cleanup(): Promise<void> } | undefined>;
   authentication?: string;
   environment: { set: Record<string, string>; unset: string[] };
   homeVariable?: string;
@@ -37,6 +41,21 @@ const deepseekRoutes: Record<string, string> = {
 export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   deepseek: {
     name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
+    async prepare(template) {
+      if (!template.skillsPath) return;
+      const directory = await mkdtemp(join(tmpdir(), 'helm-dsh-skills-'));
+      const cleanup = () => rm(directory, { recursive: true, force: true });
+      try {
+        const path = join(directory, 'skills.json');
+        // --patch accepts a JSON patch list. Add a separate provider so user
+        // skill-filesystem settings, default roots and bundled skills survive.
+        await writeFile(path, JSON.stringify([{ insert: [{ id: 'helm-template-skills',
+          name: '@deepseek-ai/dsh-skill-filesystem', config: {
+            providerName: 'helm-template', includeDefaultRoots: false, customSkillDirs: [resolve(template.skillsPath)],
+          } }] }]), { mode: 0o600 });
+        return { args: ['--patch', path], cleanup };
+      } catch (error) { await cleanup(); throw error; }
+    },
     environment: { set: { DSH_PERMISSION_MODE: 'workspace-write' }, unset: ['DEEPSEEK_API_KEY', 'DSH_HOME'] },
     homeVariable: 'DSH_HOME',
     homeConfigFiles: ['.credentials.yaml', '.env', 'cordis.patch.yml'],
@@ -52,7 +71,6 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       if (!template.reasoningEffort || !['low', 'high', 'max'].includes(template.reasoningEffort)) return `DeepSeek 不支持推理强度 ${template.reasoningEffort ?? '未指定'}；请选 low、high 或 max。`;
       if ((template.home === 'template') !== (deepseekRoutes[template.model] === 'deepseek-official')) return 'DeepSeek 账号模型须用 home: shared；API 模型 deepseek-v4-flash 须用 home: template 专用主目录。';
       if (template.fast) return 'DeepSeek 不支持模板 fast 档，请设为 false。';
-      if (template.skillsPath) return 'DeepSeek 模板 skills 尚未接入，请移除 skills 目录后重试（任务单 04）。';
     },
     initializationUnavailable() { return undefined; },
     sessionSettings: template => [
@@ -72,7 +90,10 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   },
   grok: {
     name: 'Grok', command: 'grok', authentication: 'cached_token',
-    arguments: template => ['agent', '--effort', efforts[template.reasoningEffort!]!, 'stdio'],
+    // Process plugins are ignored by a shared leader, so explicitly use the
+    // native process when adding template skills (grok agent --help).
+    arguments: template => ['agent', '--effort', efforts[template.reasoningEffort!]!,
+      ...(template.skillsPath ? ['--no-leader', '--plugin-dir', resolve(template.skillsPath, '..')] : []), 'stdio'],
     environment: { set: { GROK_SANDBOX: 'workspace' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
     unavailable(template) {
       if (template.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
@@ -80,7 +101,6 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       if (!template.reasoningEffort || !Object.hasOwn(efforts, template.reasoningEffort)) return `Grok 不支持推理强度 ${template.reasoningEffort ?? '未指定'}；请选 low、medium、high 或 max（xhigh）。`;
       if (template.home !== 'shared') return 'Grok 本阶段只支持本机登录，请将 home 设为 shared 并运行 grok login。';
       if (template.fast) return 'Grok 不支持模板 fast 档，请设为 false。';
-      if (template.skillsPath) return 'Grok 模板 skills 尚未接入，请移除 skills 目录后重试（任务单 04）。';
     },
     initializationUnavailable(template, response) {
       const state = modelState.safeParse(response._meta?.modelState);

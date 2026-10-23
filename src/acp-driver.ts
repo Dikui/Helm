@@ -26,9 +26,16 @@ export class AcpDriver implements Driver {
     return env;
   }
 
-  private command(template: AgentTemplate) {
+  private async launch(template: AgentTemplate, options: Pick<SessionOptions, 'cwd' | 'onProcess'>,
+    env: Record<string, string>, handlers: ConstructorParameters<typeof AcpClient>[3]) {
     const command = this.config.command ?? { file: this.profile.command, args: [] };
-    return { file: command.file, args: [...command.args, ...this.profile.arguments(template)] };
+    const prepared = await this.profile.prepare?.(template);
+    try {
+      const acp = new AcpClient({ file: command.file,
+        args: [...command.args, ...this.profile.arguments(template), ...(prepared?.args ?? [])] }, options, env, handlers);
+      let closing: Promise<void> | undefined;
+      return { acp, close: () => closing ??= acp.close().finally(() => prepared?.cleanup()) };
+    } catch (error) { await prepared?.cleanup(); throw error; }
   }
 
   private async initialize(acp: AcpClient, template: AgentTemplate): Promise<InitializeResponse> {
@@ -83,17 +90,16 @@ export class AcpDriver implements Driver {
           command: `mkdir -p ${quoted} && DSH_HOME=${quoted} dsh web` };
       }
     }
-    const command = this.command(template);
-    const acp = new AcpClient(command, { cwd: homedir() }, env,
+    const { acp, close } = await this.launch(template, { cwd: homedir() }, env,
       { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
-    const timer = setTimeout(() => { void acp.close(); }, this.config.timeoutMs ?? 10_000);
+    const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 10_000);
     try {
       await this.initialize(acp, template);
       return { available: true };
     } catch (error) {
       return { available: false, reason: `${this.profile.name} 无法完成 ACP initialize 或缺少${this.profile.authentication ? ` ${this.profile.authentication} /` : ''} HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`,
         command: `${this.profile.installCommand} && ${this.profile.loginCommand}` };
-    } finally { clearTimeout(timer); await acp.close(); }
+    } finally { clearTimeout(timer); await close(); }
   }
 
   async start(options: SessionOptions): Promise<DriverSession> {
@@ -136,7 +142,7 @@ export class AcpDriver implements Driver {
     };
     const env = this.environment(options.env, template);
     if (this.profile.homeVariable && template.home === 'template') await mkdir(env[this.profile.homeVariable]!, { recursive: true, mode: 0o700 });
-    const acp = new AcpClient(this.command(template), { ...options, cwd }, env, {
+    const { acp, close: closeAgent } = await this.launch(template, { ...options, cwd }, env, {
       notifications: profile.compactionNotification ? [profile.compactionNotification.method] : [],
       output(message) {
         output(message);
@@ -190,12 +196,12 @@ export class AcpDriver implements Driver {
     };
     const close = () => {
       options.signal?.removeEventListener('abort', cancel);
-      return cancellation ?? acp.close();
+      return cancellation ?? closeAgent();
     };
     const cancel = () => {
       if (finished || settling || cancelled) return;
       cancelled = true;
-      cancellation = ended.then(() => acp.close());
+      cancellation = ended.then(() => closeAgent());
       const aborted = () => { void settle({ type: 'end', reason: 'aborted', usage: { inputTokens: 0, outputTokens: 0 } }); };
       // Give a cooperative agent a bounded chance to persist the turn and its
       // usage. Process/cwd cleanup is still performed by the execution layer.

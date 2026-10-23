@@ -145,12 +145,12 @@ test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录�
   await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' });
 });
 
-test('Grok 模板拒绝调度者、未指定模型、不支持的推理档位、fast、API 主目录和未接入的 skills', async t => {
+test('Grok 模板拒绝调度者、未指定模型、不支持的推理档位、fast 和 API 主目录', async t => {
   const ctx = await acpFixture(t);
   const cases: [Partial<AgentTemplate>, RegExp][] = [
     [{ role: 'coordinator' }, /本阶段只支持执行者/], [{ model: null }, /模型 id/],
     [{ reasoningEffort: null }, /推理强度/], [{ reasoningEffort: 'minimal' as AgentTemplate['reasoningEffort'] }, /不支持推理强度/],
-    [{ fast: true }, /fast/], [{ home: 'template' }, /本机登录/], [{ skillsPath: join(ctx.directory, 'skills') }, /skills/],
+    [{ fast: true }, /fast/], [{ home: 'template' }, /本机登录/],
   ];
   for (const [settings, reason] of cases) {
     const template = { ...ctx.template, ...settings };

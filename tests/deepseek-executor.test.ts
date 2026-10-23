@@ -148,12 +148,12 @@ test('DeepSeek API 模板使用各自专用 DSH_HOME，凭据只由 CLI 读取�
   assert.deepEqual(settings, ['["deepseek-official","deepseek-v4-flash"]', 'max', '["deepseek-official","deepseek-v4-flash"]', 'max']);
 });
 
-test('DeepSeek 拒绝调度者、未知模型、medium、fast、未接入 skills 和计费路线与 home 不一致', async t => {
+test('DeepSeek 拒绝调度者、未知模型、medium、fast 和计费路线与 home 不一致', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   const cases: [Partial<AgentTemplate>, RegExp][] = [
     [{ role: 'coordinator' }, /只支持执行者/], [{ model: null }, /模型 id/], [{ model: 'unknown' }, /unknown/],
     [{ reasoningEffort: 'medium' }, /不支持推理强度 medium/], [{ reasoningEffort: null }, /推理强度/],
-    [{ fast: true }, /fast/], [{ skillsPath: join(ctx.directory, 'skills') }, /skills/],
+    [{ fast: true }, /fast/],
     [{ home: 'template' }, /账号模型/], [{ model: 'deepseek-v4-flash' }, /专用主目录/],
   ];
   for (const [settings, reason] of cases) {

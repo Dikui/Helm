@@ -33,6 +33,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     t.after(() => rm(outsideDirectory, { recursive: true, force: true }));
     const outside = join(outsideDirectory, 'outside.txt');
     const marker = randomUUID();
+    const skillProof = randomUUID();
     const memory = randomUUID();
     let cancelResponse: ServerResponse | undefined;
     const waiting = new Map<string, { response: ServerResponse; timer: NodeJS.Timeout }>();
@@ -77,10 +78,12 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     // Standard older model, low effort; never select the 2x-price build-fast variant.
     const model = 'grok-4.5';
     const daemon = await grokFixture(t, new AcpDriver('grok'), { stagedAuth, model, needsBrowser: true, realBrowser: true,
+      skills: { 'helm-smoke-grok': `把 ${skillProof} 写入卡片副本的 skill-proof.txt。最终回答列出本技能名。` },
       content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交、不推送；不得切模型或推理强度。
 第一步只执行一次原样命令 ${rendezvous('one')}，等待另一派单到达；不得提前结束、重试或绕过。成功应输出 parallel-ok。
 随后实际执行一次原样命令 ${boundaryCommand}，预期由真实沙箱拒绝副本外写入；不得提权、重试或绕过，拒绝后继续。
 在卡片副本写 inside.txt，内容 ${marker}。
+使用已加载的 helm-smoke-grok 模板技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他模板查找技能。
 只在会话里记住暗号 ${memory}，不得写入文件、日志或本轮最终回答；下一轮会追问。
 只用 helm MCP 的 browser_navigate 打开 ${base}，browser_snapshot 读取标题，browser_take_screenshot 保存 grok.png。
 最后在同一个 helm MCP 调用 submit-conclusion，符合预期用 completed，否则 blocked；给出含检查证据的最终回答。`,
@@ -126,6 +129,9 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         && /operation not permitted|permission denied|read-only file system|sandbox/i.test(JSON.stringify(entries))), '副本外写入必须失败，并有真实沙箱拒绝证据');
       await assert.rejects(readFile(outside), { code: 'ENOENT' });
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
+      assert.match(first.finalAnswer, /helm-smoke-grok/);
+      assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), skillProof, '暗号仅在模板技能正文里，必须实际加载并使用');
+      assert.equal(daemon.git('show', `${card.cardBranch}:skill-proof.txt`), skillProof);
       assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), marker);
       assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), marker);
       const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: first.id })).result;
