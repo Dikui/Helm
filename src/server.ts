@@ -46,6 +46,11 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
       try { path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname; }
       catch { throw new RuleError('INVALID_PATH', '请求路径无效。', 400); }
       name = path.startsWith('/api/') ? path.slice('/api/'.length) : path;
+      if (path === '/mcp' && request.method !== 'POST') {
+        // MCP transport probes are not business operations; no standalone GET stream is offered.
+        response.setHeader('allow', 'POST');
+        return json(response, 405, { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null });
+      }
       if (request.headers.authorization !== undefined) actor = executions.authenticate(request.headers.authorization) ?? scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
       const input = await readBody(request);
