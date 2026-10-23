@@ -32,6 +32,12 @@ npm start -- --help
 
 客户端默认连接 `http://127.0.0.1:4242`，可通过 `HELM_URL` 或各子命令的 `--url` 指定。也可用 `node dist/src/cli.js` 直接运行；通过 npm 链接这个包后可使用 `helm` 命令。
 
+在已配置好 `claude`、`codex` 和代理的终端中运行 `helm service install`（或 `node dist/src/cli.js service install`），将 `helmd` 安装为用户服务并立即启动。安装是本地命令，不需要先启动 HTTP 服务。请先停止手动运行的 `helm serve`，避免占用同一个端口。
+
+macOS 配置在 `~/Library/LaunchAgents/io.helm.helmd.plist`，随用户登录加载，进程退出后自动重启。Linux 写入 `${XDG_CONFIG_HOME:-~/.config}/systemd/user/helmd.service`，执行 `systemctl --user daemon-reload`、`enable` 和 `restart`；还需运行 `loginctl enable-linger "$USER"`（必要时加 `sudo`），让用户服务在开机时启动、登出后继续运行。**Linux 未实测**，普通测试使用服务管理器替身。
+
+配置保存安装时的 `PATH`、`HOME`、`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及其小写形式，标准输出和错误分别追加到 `~/.helm/logs/helmd.stdout.log`、`helmd.stderr.log`。环境改变后重新运行 install，会覆盖配置并重启服务。服务使用安装时 Node 和编译后 Helm 的绝对路径；请保留安装目录，移动或重新安装 Node/Helm 后也需再次 install。
+
 HTTP 操作统一为 `POST /api/<操作名称>`，参数为 JSON。成功返回 `{ "ok": true, "result": ... }`；约束失败返回 `{ "ok": false, "error": { "code": ..., "reason": ..., "allowedOperations": [...] } }`，并记录 `operation-rejected` 事件。执行者派单的全局并发上限默认为 10，满了按创建顺序排队，调度轮次不占名额。`get-settings` 返回 `concurrencyLimit`、`runningDispatches` 和 `queuedDispatches`；调低上限不打断已启动的派单，调高立即补位。
 
 每次派单通过 `HELM_PORT_START`、`HELM_PORT_END` 得到 20 个连续本机端口（两端包含），从 20000 起分配，清理结束后回收。`set-dispatch-watchdog --wallTimeoutMs 1800000 --idleTimeoutMs 600000` 设置后续派单的墙钟与无输出阈值，默认分别为 30 分钟和 10 分钟；超时记 `timed-out`。进程驱动须用独立进程组，并在启动时通过 `SessionOptions.onProcess` 上报 `pid`、`pgid` 和 `startedAt`；派单详情和 `process-started` 事件保留进程记录。

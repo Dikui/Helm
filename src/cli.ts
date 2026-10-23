@@ -7,9 +7,16 @@ async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === '--help' || command === 'help') {
     console.log('helm serve [--port 4242] [--data-dir ~/.helm/]');
+    console.log('helm service install');
     for (const operation of operations.filter(item => item.callers.includes('user'))) {
       console.log(`helm ${operation.name} ${Object.keys(operation.schema.shape).map(key => `--${key} <value>`).join(' ')}  ${operation.description}`);
     }
+    return;
+  }
+  if (command === 'service') {
+    if (args.length !== 1 || args[0] !== 'install') throw new Error('Usage: helm service install');
+    const { installUserService } = await import('./service.js');
+    console.log(await installUserService());
     return;
   }
   if (command === 'serve') {
