@@ -29,6 +29,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['browser', 'HELM_BROWSER_REAL'],
     ['claude-executor', 'HELM_CLAUDE_EXECUTOR_REAL'],
     ['claude-coordinator', 'HELM_CLAUDE_COORDINATOR_REAL'],
+    ['claude-skills', 'HELM_CLAUDE_SKILLS_REAL'],
   ] as const) {
     const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
     const added = projects(home).filter(name => !baseline.has(name));

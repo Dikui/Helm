@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, lstat, mkdir, realpath, stat } from 'node:fs/promises';
+import { access, lstat, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { parse as parseYaml } from 'yaml';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
 import { runtimeEnvironment } from './environment.js';
@@ -13,6 +14,25 @@ import { TemplateCatalog, type AgentTemplate } from './templates.js';
 
 function claudeHome(template: AgentTemplate, home = homedir()) {
   return join(home, '.helm', 'agent-homes', template.home === 'shared' ? 'claude' : template.id);
+}
+
+async function claudeSkills(template: AgentTemplate): Promise<string[]> {
+  if (!template.skillsPath) return [];
+  const entries = await readdir(template.skillsPath, { withFileTypes: true });
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const path = join(template.skillsPath, entry.name, 'SKILL.md');
+      if (!(await stat(path)).isFile()) continue;
+      const content = await readFile(path, 'utf8');
+      const frontmatter = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+      const metadata = frontmatter ? parseYaml(frontmatter[1]!) : null;
+      const name = typeof metadata?.name === 'string' && metadata.name.trim() ? metadata.name.trim() : entry.name;
+      names.push(name.startsWith(`${template.id}:`) ? name : `${template.id}:${name}`);
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  return [...new Set(names)].sort();
 }
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
@@ -67,10 +87,11 @@ async function writablePath(cwd: string, path: unknown): Promise<boolean> {
   }
 }
 
-function executorPermission(cwd: string): CanUseTool {
+function executorPermission(cwd: string, skills: string[]): CanUseTool {
   return async (tool, input, context) => {
     const deny = { behavior: 'deny' as const, message: 'Helm executor may write only inside its card copy and must keep Bash sandboxed.' };
     if (context.signal.aborted) return deny;
+    if (tool === 'Skill' && !skills.includes(String(input.skill))) return deny;
     if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
       if (!await writablePath(cwd, tool === 'NotebookEdit' ? input.notebook_path : input.file_path)) return deny;
     }
@@ -82,9 +103,10 @@ function executorPermission(cwd: string): CanUseTool {
   };
 }
 
-function coordinatorPermission(servers: string[]): CanUseTool {
+function coordinatorPermission(servers: string[], skills: string[]): CanUseTool {
   return async (tool, input, context) => {
     const allowed = ['Bash', 'Read', 'Grep', 'Glob'].includes(tool)
+      || (tool === 'Skill' && skills.includes(String(input.skill)))
       || servers.some(name => tool.startsWith(`mcp__${name}__`));
     if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
       return { behavior: 'deny', message: 'Helm coordinator may only read project code and use the injected Helm tools; Bash must stay sandboxed.' };
@@ -142,6 +164,8 @@ export class ClaudeDriver implements Driver {
       throw new Error('Claude executor writable roots must contain only its card copy');
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
+    const template = options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor');
+    const skills = await claudeSkills(template);
     options.signal?.throwIfAborted();
     const id = options.resumeSessionId ?? randomUUID();
     const controller = new AbortController();
@@ -158,7 +182,6 @@ export class ClaudeDriver implements Driver {
     options.signal?.addEventListener('abort', cancel, { once: true });
     // Per-session override: never let a caller's force-enable reach Claude.
     // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
-    const template = options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor');
     const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
       CLAUDE_CONFIG_DIR: claudeHome(template, options.env.HOME) };
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
@@ -166,9 +189,13 @@ export class ClaudeDriver implements Driver {
     const sdkOptions: Options = {
       cwd, env, pathToClaudeCodeExecutable: executable, settingSources: template.home === 'template' ? ['user'] : [], strictMcpConfig: true,
       settings: { autoMemoryEnabled: false },
+      // The template directory is the plugin root; Claude discovers its skills/.
+      // Qualified names also hide CLI built-ins and skills from other sources.
+      ...(template.skillsPath ? { plugins: [{ type: 'local', path: resolve(template.directory), skipMcpDiscovery: true }] } : {}),
+      skills,
       systemPrompt: templatePrompt(template),
       permissionMode: 'default', abortController: controller,
-      canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
+      canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers), skills) : executorPermission(cwd, skills),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
       tools: coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
         : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'],
