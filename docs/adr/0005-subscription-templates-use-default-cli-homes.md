@@ -1,13 +1,15 @@
-# 订阅模板直接用 agent CLI 的默认主目录
+# 订阅模板用 agent CLI 默认主目录，全局配置正常进入
 
-[ADR 0004](0004-agent-homes-and-cli-owned-credentials.md) 让订阅模板改用 `~/.helm/agent-homes/<cli>/` 专用主目录，只为一件事：Helm 拉起的会话记录不混进用户自己的历史。做下来发现专用目录只隔离各家 CLI 放在配置目录里的东西，CLI 还会顺着真实 `HOME` 和工作目录去读别的位置（Codex 读 `~/.agents/skills`，Claude 读 `~/.claude/skills`，Grok 读 `~/.claude` 的规则），每接一家就要逐家补漏；Claude 在 macOS 上还得在专用目录另登录一次，因为钥匙串条目按配置目录区分。用户 2026-10-23 决定化繁为简，和 Orca、Conductor、vibe-kanban 等编排器一样：订阅模板不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，直接用用户本机默认位置和已有登录，会话记录混进用户历史可以接受。
+[ADR 0004](0004-agent-homes-and-cli-owned-credentials.md) 让订阅模板改用 `~/.helm/agent-homes/<cli>/` 专用主目录，只为一件事：Helm 拉起的会话记录不混进用户自己的历史。做下来发现专用目录只隔离各家 CLI 放在配置目录里的东西，CLI 还会顺着真实 `HOME` 和工作目录去读别的位置（Codex 读 `~/.agents/skills`，Claude 读 `~/.claude/skills`，Grok 读 `~/.claude` 的规则），每接一家就要逐个来源补漏；Claude 在 macOS 上还得在专用目录另登录一次，因为钥匙串条目按配置目录区分。用户 2026-10-23 决定第一版彻底开放，和 Orca、Conductor、vibe-kanban 等编排器一样：订阅模板不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，用本机默认位置和已有登录；用户的全局配置（设置、`CLAUDE.md` / `AGENTS.md`、hooks、插件、MCP、skills）正常进入 Helm 拉起的会话；会话记录混进用户历史可以接受。这推翻了第一版"执行者也不读全局配置"的决定。
 
-角色、模型、推理强度、提示词、skills、沙箱、MCP 仍由 Helm 按会话传给 CLI，和主目录无关，调度者和执行者照样区分。Claude 继续用 `settingSources: []` 不读用户设置、用 `skills` 过滤只给模板自己的 skills、用 `strictMcpConfig` 不加载用户的 MCP。Codex 没有按会话忽略用户配置的开关，接受它读用户的 `~/.codex/config.toml`、`~/.codex/AGENTS.md`、个人 skills 和插件，Helm 按会话传的参数覆盖同名项。
+模板在全局配置之上按职责叠加：提示词、skills（只叠加，不藏用户和 CLI 自带的）、模型、推理强度。工具按角色走运行层（调度者用 Helm 调度工具、对代码只读；执行者只有"提交结论"，需要时加浏览器工具），用户的 MCP 两种角色都能用。
 
-API 模板不变：每个模板一个 `~/.helm/agent-homes/<模板 id>/`，接口和 key 由用户按 CLI 自己的格式写在里面，Helm 不读。这和 Orca 给第二个账号另开目录是同一种做法。Helm 仍然不打开、不复制、不转发凭据，订阅模板连软链接也不用建了。
+运行层仍按会话显式传、压过全局配置的只有这些：硬约束（执行者只写卡片副本、调度者对代码只读、不推送、Helm MCP 带令牌，权限检查和沙箱）、fast 按模板（Claude 用 SDK `settings.fastMode`，Codex 用 `serviceTier`）、关掉 Claude 自动记忆（不往用户记忆目录写卡片副本的内容）。用户全局规则里的调度指令开发期间保留，Helm 不另加限制，以后由用户删掉。
+
+API 模板不变：每个模板一个 `~/.helm/agent-homes/<模板 id>/`，接口和 key 由用户按 CLI 自己的格式写在里面，Helm 不读。Helm 仍然不打开、不复制、不转发凭据。
 
 ## Considered Options
 
-- **保留专用目录，逐家补漏**（ADR 0004）：会话记录分开，但每家 CLI 顺着 `HOME` 读的东西都要单独处理，Claude 要另登录一次，后面接 Grok、dsh 问题只会更多。
+- **保留专用目录，逐个来源补漏**（ADR 0004）：会话记录分开，但每家 CLI 顺着 `HOME` 读的东西都要单独处理，Claude 要另登录一次，后面接 Grok、dsh 问题只会更多。
+- **Claude 默认目录加 SDK 隔离模式，Codex 用 Helm 空目录加软链接登录**：两家都可控、模板即全部定义，但 `~/.agents/skills` 这类来源照样漏，以后仍要决定补不补；用户选择第一版先彻底开放。
 - **给 agent 进程换一个假 `HOME`**：能一刀切隔离，但执行者要用用户的 git 配置、ssh key、`gh` 登录和各种包缓存，换掉 `HOME` 这些都会失效。
-- **Claude 用默认目录、Codex 保留专用目录加软链接**：Codex 的隔离已做好并验证过，但两家做法不一致，`~/.agents/skills` 这类顺着 `HOME` 的来源照样挡不住。
