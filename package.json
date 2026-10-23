@@ -15,6 +15,7 @@
     "test:browser": "npm run build && HELM_BROWSER_REAL=1 node --test dist/tests/browser.real.js",
     "test:claude-executor": "npm run build && HELM_CLAUDE_EXECUTOR_REAL=1 node --test dist/tests/claude-executor.real.js",
     "test:claude-coordinator": "npm run build && HELM_CLAUDE_COORDINATOR_REAL=1 node --test dist/tests/claude-coordinator.real.js",
+    "test:codex-executor": "npm run build && HELM_CODEX_EXECUTOR_REAL=1 node --test dist/tests/codex-executor.real.js",
     "start": "node dist/src/cli.js"
   },
   "dependencies": {

@@ -1,0 +1,9 @@
+{
+  "role": "executor",
+  "driver": "codex",
+  "model": null,
+  "reasoningEffort": null,
+  "fast": false,
+  "home": "shared",
+  "description": "在卡片副本中使用 Codex 执行或验收派单，报告检查过程和证据"
+}

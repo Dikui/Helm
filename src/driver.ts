@@ -12,6 +12,8 @@ export interface SessionOptions {
   template?: AgentTemplate;
   cwd: string;
   env: Record<string, string>;
+  // Per-dispatch storage outside the writable card copy (CLI state, not code).
+  dataDir?: string;
   sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
   mcpServers: Record<string, { url: string; headers: Record<string, string> }>;
   resumeSessionId?: string;
@@ -26,6 +28,7 @@ export type DriverEvent =
   | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage };
 export interface DriverSession {
   id: string;
+  sqlitePath?: string;
   send(content: string): Promise<void>;
   cancel(): void;
   events: AsyncIterable<DriverEvent>;
