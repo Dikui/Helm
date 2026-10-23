@@ -54,7 +54,7 @@ Helm 增加一个通用 ACP 客户端，每家 agent 在代码里登记一份薄
 
 **模型与推理强度**
 - 模板格式不变，不加"会话选项"字段。档案把模板的 `model`、`reasoningEffort` 翻译成各家设置：
-  - Grok：启动参数 `-m <model>`、`--effort <强度>`；`max` 同义映射为 `xhigh`。
+  - Grok：推理强度用启动参数 `--effort <强度>`，`max` 同义映射为 `xhigh`；模型在 `session/new`（续跑时 `session/resume`）之后用 `session/set_config_option` 设 `model`（2026-10-23 冒烟实测 `-m` 在 ACP 会话里不生效，会话仍是默认模型）。设完核对会话当前模型和强度，对不上记为出错退出，不带错模型跑。
   - DeepSeek：`session/set_config_option` 设 `model` 和 `reasoning_effort`。计费路线由模型 id 决定（`deepseek-flash`、`deepseek-v4-pro` 走 `deepseek-account`，`deepseek-v4-flash` 走 `deepseek-official` 要 API key），档案按 id 在 `configOptions` 里找到对应取值。
 - 推理强度只做同义映射。对方没有的档位（DeepSeek 无 `medium`）或找不到的模型 id，模板不可用并写明原因，不就近换档。模板要钉死模型 id，不依赖各家默认值（实测 Grok 默认模型会变）。
 
@@ -91,7 +91,7 @@ Helm 增加一个通用 ACP 客户端，每家 agent 在代码里登记一份薄
 **边界 2：同一驱动接口 + 真实 CLI**（沙箱外，接进 `npm run test:real`）
 - 先例：`codex-executor.real`。新增 `grok-executor.real`、`deepseek-executor.real`，各有环境变量开关，加入 real-smoke-runner。
 - 每家覆盖：跑完一轮；记录 token；"提交结论"和浏览器工具在同一端点调通（同时验证令牌请求头经 ACP 送达）；写卡片副本以外的文件被拦；取消结束本轮；打回续跑答对上一轮内容。
-- 顺带验证并写进测试断言：Grok `-m`、`--effort` 生效（会话元数据里的当前模型和强度对得上）；两个 Grok 派单同时跑时真并行（共用 `~/.grok/leader.sock`），排队就算推翻、回头改设计。
+- 顺带验证并写进测试断言：Grok `session/set_config_option` 设置模型、`--effort` 设置强度生效（配置后的会话元数据里的当前模型和强度对得上）；两个 Grok 派单同时跑时真并行（排队就算推翻、回头改设计）。实测 `GROK_SANDBOX=workspace` 会关掉 leader，每个派单在自己进程里执行工具，不共用 `~/.grok/leader.sock`；冒烟只验两派单同时到达会合点。
 
 **边界 3：helmd + `helm` 命令行**（手动，一次）
 - 混合端到端：Claude 调度者，一个小需求（不必是 2048），卡片分给 Grok 和 DeepSeek 执行者，跑到审核。看对话、派单结果和截图，不写成自动测试。

@@ -31,3 +31,9 @@
 范围：取消、续跑、额度识别和压缩留给任务单 02；模板 skills 接入留给 04，本轮带 skills 的 Grok 模板明确不可用。本轮未派生子代理，未运行浏览器或真实 claude/codex/grok 会话。
 
 提交阻塞：当前环境禁止写入项目 `.git`；逐文件暂存的第一步 `git add -- package.json` 因无法创建 `.git/index.lock`（Operation not permitted）失败，且不允许提权，因此尚未提交 main。改动保留在工作区；未暂存或提交 `todos-research.html`。待在允许写入 `.git` 的环境逐文件暂存后使用中文提交信息，并以 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` 结尾。完整执行及工作区自审记录仅写入 `.scratch/tasks/p3-01/report.md`。
+
+2026-10-23 真实冒烟后修复：依据 `.scratch/tasks/p3-01-real/report.md` 及 `evidence/coverage-evidence.json`，两派单虽以 `end_turn` 完成本轮，但自报结论均为 blocked，整体验收未通过。模板为 `grok-4.5 / low`，实际会话与 prompt 用的是 `grok-4.7 / low`，说明 ACP 会话不能依赖启动参数 `-m`；macOS TMPDIR 中的副本外文件实际写入成功，但该路径本属 workspace 沙箱允许的临时目录；两派单到达会合点相差 1701 ms，HTTP 500 来自不存在的 leader socket，不能据此认定排队。stderr 明确说明 `GROK_SANDBOX=workspace` 会关闭 leader。
+
+本次将 `session/new` 和 `session/resume` 后的配置下发及核对统一放进 `AcpDriver`：按 `configOptions` 的取值 id 设置模板模型，删除启动参数 `-m`，设置完成后核对当前模型与推理强度，缺失、设置失败或不一致都拒绝发送 prompt，由运行层保存为出错退出及具体原因。档案只声明差异，共用配置流程允许后续 DeepSeek 同样下发模型和强度。真实冒烟的越界目标改为家目录下 `.helm-grok-smoke-*` 临时目录，结束删除，同时要求真实拒绝证据、写入失败及文件不存在；并行只验证两派单同时等待，不再设置、检查或清理 leader，超时提示另一派单未到达（可能排队或提前失败）。spec 的模型设置及 Testing Decisions 同步修正；本条替代上文关于 `-m` 和共用 leader 的验收说明。
+
+验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；假 ACP 驱动及运行层定向测试 67/67 通过，覆盖设置模型、模型/强度不一致拒绝、错误原因落库、续跑后重新设置及配置期间中止；`npm test --cache /private/tmp/helm-npm-cache` 全量 389/389 通过。本轮遵照用户要求未运行真实冒烟、未启动浏览器或真实 Claude/Codex/Grok 会话，也未派生子代理；真实环境修复后的结果仍待另次验证。执行报告仅写入 `.scratch/tasks/p3-01-fix/report.md`。

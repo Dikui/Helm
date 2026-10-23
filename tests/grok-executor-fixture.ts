@@ -24,7 +24,7 @@ export async function grokFixture(t: TestContext, executor: Driver, config: {
   await mkdir(join(home, '.grok'), { recursive: true });
   if (config.stagedAuth) {
     await symlink(config.stagedAuth, join(home, '.grok', 'auth.json'));
-    await writeFile(join(home, '.grok', 'config.toml'), '[cli]\nuse_leader = true\n[ui]\npermission_mode = "always-approve"\n');
+    await writeFile(join(home, '.grok', 'config.toml'), '[ui]\npermission_mode = "always-approve"\n');
   }
   process.env.HOME = home;
   let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;

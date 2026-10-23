@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { acpAgents } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
@@ -41,6 +41,25 @@ export class AcpDriver implements Driver {
     const reason = this.profile.initializationUnavailable(template, result);
     if (reason) throw new Error(reason);
     return result;
+  }
+
+  private async configureSession(acp: AcpClient, template: AgentTemplate, sessionId: string,
+    configOptions: SessionConfigOption[] | null | undefined, output: (message: unknown) => void) {
+    const settings = this.profile.sessionSettings(template);
+    for (const setting of settings.filter(setting => setting.apply)) {
+      const option = configOptions?.find(option => option.id === setting.id);
+      const values = option?.type === 'select' ? option.options.flatMap(value => 'group' in value ? value.options : [value]) : [];
+      const selected = values.find(value => value.value === setting.value);
+      if (!selected) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 没有公布取值 ${setting.value}，不能使用模板指定的设置。`);
+      const response = await acp.connection.agent.request('session/set_config_option', { sessionId, configId: setting.id, value: selected.value });
+      output({ method: 'session/set_config_option', configId: setting.id, result: response });
+      configOptions = response.configOptions;
+    }
+    // A model change can reset reasoning effort; verify the final full state.
+    for (const setting of settings) {
+      const current = configOptions?.find(option => option.id === setting.id)?.currentValue;
+      if (current !== setting.value) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与模板不一致：期望 ${setting.value}，实际 ${current ?? '未公布'}。`);
+    }
   }
 
   async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
@@ -149,16 +168,21 @@ export class AcpDriver implements Driver {
       const request: NewSessionRequest = { cwd,
         mcpServers: Object.entries(options.mcpServers).map(([name, server]) => ({ type: 'http' as const, name, url: server.url,
           headers: Object.entries(server.headers).map(([name, value]) => ({ name, value })) })) };
+      let configOptions: SessionConfigOption[] | null | undefined;
       if (options.resumeSessionId !== undefined) {
         id = options.resumeSessionId;
         const session = await acp.connection.agent.request('session/resume', { ...request, sessionId: id });
         output({ method: 'session/resume', result: session });
+        configOptions = session.configOptions;
       } else {
         const session = await acp.connection.agent.request('session/new', request);
         if (!session.sessionId) throw new Error('ACP agent did not return a session id');
         id = session.sessionId;
         output({ method: 'session/new', result: session });
+        configOptions = session.configOptions;
       }
+      if (cancelled) throw new Error('ACP session cancelled during startup');
+      await this.configureSession(acp, template, id, configOptions, output);
       if (cancelled) throw new Error('ACP session cancelled during startup');
       clearTimeout(timer);
       return {

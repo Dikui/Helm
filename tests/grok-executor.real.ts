@@ -1,23 +1,20 @@
 // Outside the sandbox only; opt in with HELM_GROK_EXECUTOR_REAL=1.
 // This file is compiled by npm test but is never executed by that command.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { promisify } from 'node:util';
 import { AcpDriver } from '../src/acp-driver.js';
-import { runtimeEnvironment } from '../src/environment.js';
 import { grokFixture, ok } from './grok-executor-fixture.js';
 import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_GROK_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱、token、模型/推理强度、共用 leader 真并行、续跑与取消',
+test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱、token、模型/推理强度、两派单同时会合、续跑与取消',
   { skip: !enabled, timeout: 720_000 }, async t => {
     const realHome = homedir();
     const stagedAuth = join(realHome, '.grok', 'auth.json');
@@ -31,14 +28,17 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有界面的 Chromium');
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-grok-smoke-evidence-')));
     console.log(`Grok 冒烟证据目录：${evidence}`);
-    const outside = join(evidence, 'outside.txt');
+    // The protected destination must be outside the sandbox's writable temp roots.
+    const outsideDirectory = await realpath(await mkdtemp(join(homedir(), '.helm-grok-smoke-')));
+    t.after(() => rm(outsideDirectory, { recursive: true, force: true }));
+    const outside = join(outsideDirectory, 'outside.txt');
     const marker = randomUUID();
     const memory = randomUUID();
     let cancelResponse: ServerResponse | undefined;
     const waiting = new Map<string, { response: ServerResponse; timer: NodeJS.Timeout }>();
     const arrivals: Record<string, number> = {};
     let paired = false;
-    let cliHome = '';
+    let rendezvousFailure: string | undefined;
     const site = createServer((request, response) => {
       if (request.url === '/cancel-in-flight') { cancelResponse = response; return; }
       const slot = request.url?.match(/^\/rendezvous\/(one|two)$/)?.[1];
@@ -46,24 +46,20 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       if (waiting.has(slot) || paired) { response.writeHead(409).end('Do not retry'); return; }
       arrivals[slot] = Date.now();
       const timer = setTimeout(() => {
-        response.writeHead(504).end('Other dispatch did not arrive: possible leader serialization');
+        rendezvousFailure = `另一派单未到达 ${slot} 的会合等待点（可能排队或提前失败）`;
+        response.writeHead(504).end('Other dispatch did not arrive: possible queuing or early failure');
         waiting.delete(slot);
       }, 90_000);
       waiting.set(slot, { response, timer });
       if (waiting.size === 2) {
         // Neither request has returned, proving both model turns reached their
         // shell tool concurrently, rather than merely overlapping CLI lifetimes.
-        void stat(join(cliHome, '.grok', 'leader.sock')).then(socket => {
-          paired = socket.isSocket();
-          for (const entry of waiting.values()) {
-            clearTimeout(entry.timer);
-            entry.response.writeHead(paired ? 200 : 500).end(paired ? 'parallel-ok' : 'Missing shared leader socket');
-          }
-          waiting.clear();
-        }, error => {
-          for (const entry of waiting.values()) { clearTimeout(entry.timer); entry.response.writeHead(500).end(String(error)); }
-          waiting.clear();
-        });
+        paired = true;
+        for (const entry of waiting.values()) {
+          clearTimeout(entry.timer);
+          entry.response.writeHead(200).end('parallel-ok');
+        }
+        waiting.clear();
       }
     });
     await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
@@ -92,20 +88,11 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
 第一步只执行一次原样命令 ${rendezvous('two')}，等待另一派单到达；不得提前结束、重试或绕过。成功应输出 parallel-ok。
 然后最后调用 helm MCP 的 submit-conclusion completed，否则 blocked，并给出最终回答。`,
     });
-    cliHome = daemon.home;
-    // The helper registered its cleanup first. Stop the temporary shared leader
-    // before its HOME is removed; never target the user's real default socket.
-    const stopLeader = async () => {
-      await daemon.close();
-      await promisify(execFile)('grok', ['leader', 'kill', '--leader-socket', join(cliHome, '.grok', 'leader.sock')], {
-        env: { ...runtimeEnvironment(), HOME: cliHome }, timeout: 10_000,
-      });
-    };
     try {
       await daemon.confirm();
       const dispatches = await daemon.ended(2, 300_000);
-      await writeFile(join(evidence, 'parallel.json'), JSON.stringify({ paired, arrivals, dispatches }, null, 2));
-      assert.ok(paired, '两个派单必须同时到达 rendezvous；若排队，回到 spec 修订设计，不能放宽断言');
+      await writeFile(join(evidence, 'parallel.json'), JSON.stringify({ paired, arrivals, rendezvousFailure, dispatches }, null, 2));
+      assert.ok(paired, `${rendezvousFailure ?? '派单未到达会合点'}；必须两个派单同时等待，若排队则回到 spec 修订设计。到达记录：${JSON.stringify(arrivals)}`);
       const outputs = new Map<string, any[]>();
       for (const dispatch of dispatches) {
         const output = await daemon.output(dispatch.id);
@@ -116,8 +103,8 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         assert.ok(dispatch.usage.inputTokens > 0 && dispatch.usage.outputTokens > 0);
         const messages = output.filter(e => e.type === 'output').map(e => { try { return JSON.parse(e.text); } catch { return {}; } });
         outputs.set(dispatch.key, messages);
-        const session = messages.find(m => m.method === 'session/new').result;
-        assert.equal(session.configOptions.find((o: any) => o.id === 'model').currentValue, model, '-m 必须在会话元数据生效');
+        const session = messages.findLast(m => m.method === 'session/set_config_option').result;
+        assert.equal(session.configOptions.find((o: any) => o.id === 'model').currentValue, model, 'session/set_config_option 必须设为模板模型');
         assert.equal(session.configOptions.find((o: any) => o.id === 'reasoning_effort').currentValue, 'low', '--effort 必须生效');
       }
       assert.notEqual(dispatches[0].sessionId, dispatches[1].sessionId);
@@ -134,8 +121,9 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(tool)
           && JSON.stringify(entries).includes('helm') && entries.some(e => e.status === 'completed')), `必须实际调用 helm/${tool}`);
       }
-      assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(outside)
-        && /operation not permitted|permission denied|read-only file system|sandbox/i.test(JSON.stringify(entries))), '必须有真实沙箱拒绝证据');
+      assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(boundaryCommand)
+        && entries.some(entry => entry.status === 'failed' || (typeof entry.rawOutput?.exit_code === 'number' && entry.rawOutput.exit_code !== 0))
+        && /operation not permitted|permission denied|read-only file system|sandbox/i.test(JSON.stringify(entries))), '副本外写入必须失败，并有真实沙箱拒绝证据');
       await assert.rejects(readFile(outside), { code: 'ENOENT' });
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
       assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), marker);
@@ -181,5 +169,5 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       assert.equal(cancelled.abortReason, '卡片暂停');
       assert.equal(cancelled.finalAnswer, null);
       await until(async () => cancelResponse!.destroyed, closed => closed, 10_000);
-    } finally { await stopLeader(); }
+    } finally { await daemon.close(); }
   });

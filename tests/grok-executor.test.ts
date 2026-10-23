@@ -112,6 +112,11 @@ for (const [operation, abortReason] of [
 });
 
 for (const [script, reason, failure] of [
+  [{ configuredOptions: [] }, 'error', /model.*grok-4\.7.*未公布/],
+  [{ configuredOptions: [
+    { id: 'model', name: 'Model', type: 'select', currentValue: 'grok-4.7', options: [] },
+    { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: 'high', options: [] },
+  ] }, 'error', /reasoning_effort.*low.*high/],
   [{ rejectOn: 'session/prompt', error: { code: -32003, message: 'Rate limited', data: 'subscription:free-usage-exhausted' } }, 'quota-exhausted', /free-usage-exhausted/],
   [{ rejectOn: 'session/prompt', error: { code: -32603, message: 'Internal error', data: 'connection reset' } }, 'error', /connection reset/],
   [{ exitOn: 'session/prompt' }, 'error', /ACP/],

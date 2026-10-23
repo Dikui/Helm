@@ -12,6 +12,13 @@ const modelState = { currentModelId: 'grok-4.7', availableModels: [
   { modelId: 'grok-4.7', _meta: { reasoningEfforts: ['low', 'medium', 'high', 'xhigh'].map(value => ({ value })) } },
   { modelId: 'grok-4.5', _meta: { reasoningEfforts: ['low', 'medium', 'high'].map(value => ({ value })) } },
 ] };
+const effortIndex = process.argv.indexOf('--effort');
+let configOptions = script.configOptions ?? [
+  { id: 'model', name: 'Model', type: 'select', currentValue: 'grok-4.7',
+    options: [{ value: 'grok-4.7', name: 'Grok 4.7' }, { value: 'grok-4.5', name: 'Grok 4.5' }] },
+  { id: 'reasoning_effort', name: 'Reasoning Effort', type: 'select', currentValue: process.argv[effortIndex + 1],
+    options: ['low', 'medium', 'high', 'xhigh'].map(value => ({ value, name: value })) },
+];
 const pending = new Map<string, (result: unknown) => void>();
 let sequence = 0;
 let servers: any[] = [];
@@ -43,8 +50,15 @@ async function handle(line: string) {
   if (message.method === 'initialize') result = script.initialize ?? { protocolVersion: 1,
     authMethods: [{ id: 'cached_token', name: 'Local login' }], agentCapabilities: { mcpCapabilities: { http: true },
       sessionCapabilities: script.resume === false ? {} : { resume: {} } }, _meta: { modelState: script.modelState ?? modelState } };
-  if (message.method === 'session/new') { servers = message.params.mcpServers; result = { sessionId }; }
-  if (message.method === 'session/resume') { sessionId = message.params.sessionId; servers = message.params.mcpServers; }
+  if (message.method === 'session/new') { servers = message.params.mcpServers; result = { sessionId, configOptions }; }
+  if (message.method === 'session/resume') {
+    sessionId = message.params.sessionId; servers = message.params.mcpServers; result = { configOptions };
+  }
+  if (message.method === 'session/set_config_option') {
+    const { configId, value } = message.params;
+    configOptions = script.configuredOptions ?? configOptions.map((option: any) => option.id === configId ? { ...option, currentValue: value } : option);
+    result = { configOptions };
+  }
   if (message.method === 'session/prompt') {
     promptId = message.id;
     if (script.spawnChild) {

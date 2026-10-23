@@ -7,6 +7,52 @@ import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
 
+test('Grok 在 session/new 后从配置选项设置模板模型，核对模型和推理强度后才发送派单', async t => {
+  const ctx = await acpFixture(t);
+  const session = await ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'grok-4.5' } });
+  t.after(() => session.cancel());
+  await session.send('使用模板指定模型');
+  const events = await collect(session.events);
+  const requests = (await ctx.requests()).filter(r => r.method !== 'fixture/spawn');
+  assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/set_config_option', 'session/prompt']);
+  assert.deepEqual(requests[3].params, { sessionId: session.id, configId: 'model', value: 'grok-4.5' });
+  const messages = events.filter(e => e.type === 'output').map(e => JSON.parse(e.text));
+  assert.equal(messages.find(m => m.method === 'session/new').result.configOptions[0].currentValue, 'grok-4.7');
+  assert.equal(messages.find(m => m.method === 'session/set_config_option').result.configOptions[0].currentValue, 'grok-4.5');
+  assert.equal(events.at(-1)?.type === 'end' && (events.at(-1) as any).reason, 'completed');
+});
+
+for (const [model, effort, reason] of [
+  ['grok-4.7', 'low', /model.*grok-4\.5.*grok-4\.7/],
+  ['grok-4.5', 'high', /reasoning_effort.*low.*high/],
+] as const) test(`Grok 设置后核对不一致即拒绝派单：${model} / ${effort}`, async t => {
+  const ctx = await acpFixture(t, { configuredOptions: [
+    { id: 'model', name: 'Model', type: 'select', currentValue: model, options: [{ value: 'grok-4.5', name: 'Grok 4.5' }] },
+    { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: effort, options: [{ value: 'low', name: 'Low' }] },
+  ] });
+  const starting = ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'grok-4.5' } })
+    .then(session => { t.after(() => session.cancel()); return session; });
+  await assert.rejects(starting, reason);
+  const requests = await ctx.requests();
+  assert.equal(requests.some(r => r.method === 'session/prompt'), false);
+  assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
+});
+
+for (const [script, reason] of [
+  [{ configOptions: [] }, /model.*grok-4\.7/],
+  [{ configOptions: [{ id: 'model', name: 'Model', type: 'select', currentValue: 'other',
+    options: [{ value: 'other', name: 'grok-4.7' }] }] }, /model.*grok-4\.7/],
+  [{ configuredOptions: [] }, /model.*grok-4\.7.*未公布/],
+  [{ rejectOn: 'session/set_config_option' }, /scripted ACP failure/],
+] as const) test(`Grok 未公布模板模型或配置失败时拒绝启动，不按显示名猜模型：${JSON.stringify(script)}`, async t => {
+  const ctx = await acpFixture(t, script);
+  const starting = ctx.driver.start(ctx.options).then(session => { t.after(() => session.cancel()); return session; });
+  await assert.rejects(starting, reason);
+  const requests = await ctx.requests();
+  assert.equal(requests.some(r => r.method === 'session/prompt'), false);
+  assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
+});
+
 test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及卡片沙箱运行，返回最终回答和本轮 token', async t => {
   const ctx = await acpFixture(t);
   const processes: number[] = [];
@@ -18,21 +64,21 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及�
   assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9 } });
   const [spawn, ...requests] = await ctx.requests();
   assert.deepEqual(processes, [spawn.pid]);
-  assert.deepEqual(spawn.args, ['agent', '-m', 'grok-4.7', '--effort', 'low', 'stdio']);
+  assert.deepEqual(spawn.args, ['agent', '--effort', 'low', 'stdio']);
   assert.equal(spawn.env.HOME, ctx.home);
   assert.equal(spawn.env.GROK_SANDBOX, 'workspace');
   assert.equal(spawn.env.XAI_API_KEY, undefined);
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
   assert.ok(Number(spawn.env.GIT_CONFIG_COUNT) > 0);
   assert.equal(spawn.cwd, ctx.cwd);
-  assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/prompt']);
+  assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/set_config_option', 'session/prompt']);
   assert.equal(requests[0].params.protocolVersion, 1);
   assert.equal(requests[0].params.clientCapabilities.terminal, false);
   assert.equal(requests[0].params.clientCapabilities.fs.writeTextFile, false);
   assert.deepEqual(requests[1].params, { methodId: 'cached_token' });
   assert.deepEqual(requests[2].params, { cwd: ctx.cwd, mcpServers: [{ type: 'http', name: 'helm',
     url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: 'Bearer dispatch-token' }] }] });
-  const prompt = requests[3].params.prompt;
+  const prompt = requests[4].params.prompt;
   assert.equal(prompt[0].type, 'text');
   assert.match(prompt[0].text, /^测试策略/);
   assert.match(prompt[0].text, /submit-conclusion/);
@@ -91,7 +137,7 @@ test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录�
   const spawns = (await ctx.requests()).filter(r => r.method === 'fixture/spawn');
   assert.equal(new Set(spawns.map(r => r.pid)).size, 2);
   for (const spawn of spawns) {
-    assert.deepEqual(spawn.args, ['agent', '-m', 'grok-4.7', '--effort', 'xhigh', 'stdio']);
+    assert.deepEqual(spawn.args, ['agent', '--effort', 'xhigh', 'stdio']);
     assert.equal(spawn.env.GROK_HOME, undefined);
     assert.equal(spawn.env.HOME, ctx.home);
   }
@@ -172,6 +218,7 @@ test('Grok 沙箱根必须恰为卡片副本，拒绝只读或额外根', async 
 
 test('Grok 续跑在新进程用 session/resume，保持会话 id 并更新本次派单的 HTTP MCP 令牌', async t => {
   const ctx = await acpFixture(t, { uniqueSession: true });
+  ctx.options.template = { ...ctx.template, model: 'grok-4.5' };
   const first = await ctx.driver.start(ctx.options);
   await first.send('第一轮');
   await collect(first.events);
@@ -186,6 +233,10 @@ test('Grok 续跑在新进程用 session/resume，保持会话 id 并更新本�
   assert.notEqual(spawns[0].pid, spawns[1].pid);
   assert.equal(requests.filter(r => r.method === 'session/new').length, 1);
   assert.equal(requests.some(r => r.method === 'session/load'), false);
+  const resumeIndex = requests.findIndex(r => r.method === 'session/resume');
+  assert.equal(requests[resumeIndex + 1].method, 'session/set_config_option');
+  assert.deepEqual(requests[resumeIndex + 1].params, { sessionId: first.id, configId: 'model', value: 'grok-4.5' });
+  assert.equal(requests[resumeIndex + 2].method, 'session/prompt');
   assert.deepEqual(requests.find(r => r.method === 'session/resume').params, {
     sessionId: first.id, cwd: ctx.cwd, mcpServers: [{ type: 'http', name: 'helm',
       url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: headers.Authorization }] }],
@@ -223,7 +274,7 @@ for (const mode of ['cancel', 'signal', 'ignores-cancel', 'racing-completion'] a
   assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
 });
 
-for (const method of ['initialize', 'authenticate', 'session/new', 'session/resume']) test(`ACP 在 ${method} 启动中被中止也关闭已登记进程，不发送 prompt`, async t => {
+for (const method of ['initialize', 'authenticate', 'session/new', 'session/resume', 'session/set_config_option']) test(`ACP 在 ${method} 启动中被中止也关闭已登记进程，不发送 prompt`, async t => {
   const ctx = await acpFixture(t, { hangOn: method });
   const controller = new AbortController();
   const starting = ctx.driver.start({ ...ctx.options, signal: controller.signal,

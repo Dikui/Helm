@@ -12,6 +12,7 @@ interface AcpAgentProfile {
   environment: { set: Record<string, string>; unset: string[] };
   unavailable(template: AgentTemplate): string | undefined;
   initializationUnavailable(template: AgentTemplate, response: InitializeResponse): string | undefined;
+  sessionSettings(template: AgentTemplate): { id: string; value: string; apply: boolean }[];
   usage(response: PromptResponse): TokenUsage;
   quotaErrors: { codes: number[]; pattern: RegExp };
   compactionNotification?: { method: string; sessionUpdate: string };
@@ -27,7 +28,7 @@ const modelState = z.object({ availableModels: z.array(z.object({ modelId: z.str
 export const acpAgents: Record<'grok', AcpAgentProfile> = {
   grok: {
     name: 'Grok', command: 'grok', authentication: 'cached_token',
-    arguments: template => ['agent', '-m', template.model!, '--effort', efforts[template.reasoningEffort!]!, 'stdio'],
+    arguments: template => ['agent', '--effort', efforts[template.reasoningEffort!]!, 'stdio'],
     environment: { set: { GROK_SANDBOX: 'workspace' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
     unavailable(template) {
       if (template.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
@@ -44,6 +45,10 @@ export const acpAgents: Record<'grok', AcpAgentProfile> = {
       const effort = efforts[template.reasoningEffort!];
       if (!model._meta?.reasoningEfforts.some(option => option.value === effort)) return `Grok 模型 ${template.model} 不支持推理强度 ${effort}。`;
     },
+    sessionSettings: template => [
+      { id: 'model', value: template.model!, apply: true },
+      { id: 'reasoning_effort', value: efforts[template.reasoningEffort!]!, apply: false },
+    ],
     usage(response) {
       const usage = response._meta?.usage as Record<string, unknown> | undefined;
       const tokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
