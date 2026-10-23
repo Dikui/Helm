@@ -4,13 +4,13 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-human
+**Status:** resolved
 
-- [ ] Claude Code：用 `CLAUDE_CONFIG_DIR` 指向专用目录后，会话记录只写在该目录；macOS 钥匙串里的订阅登录是否仍可用，不可用时用户在该目录登录一次后是否正常；Agent SDK 的续跑（按会话 id）是否正常
+- [x] Claude Code：用 `CLAUDE_CONFIG_DIR` 指向专用目录后，会话记录只写在该目录；macOS 钥匙串里的订阅登录是否仍可用，不可用时用户在该目录登录一次后是否正常；Agent SDK 的续跑（按会话 id）是否正常
 - [x] Codex：`CODEX_HOME` 指向专用目录后，app-server 的会话记录、`history.jsonl` 只写在该目录；在该目录登录一次后订阅计费正常；续跑正常
 - [x] Grok、DeepSeek（dsh）：查明主目录位置和改法（环境变量或参数），能否隔离会话记录与登录
 - [x] 每家确认用户自己的主目录在 Helm 运行前后没有新增会话记录，且 Helm 不读取、不复制凭据文件
-- [ ] 结论写明每家的做法、需要用户做的一次性登录步骤和不可行项；在沙箱外实测，使用消耗小的模型
+- [x] 结论写明每家的做法、需要用户做的一次性登录步骤和不可行项；在沙箱外实测，使用消耗小的模型
 
 ## Answer
 
@@ -18,7 +18,7 @@
 
 | CLI | 主目录变量 | 会话记录 | 登录 | 续跑 |
 |---|---|---|---|---|
-| Claude Code | `CLAUDE_CONFIG_DIR` | `projects/<编码 cwd>/<id>.jsonl`、`.claude.json` 都只写在专用目录 | 钥匙串里的订阅登录不沿用，报 `Not logged in · Please run /login`。官方文档写明钥匙串条目按配置目录区分，没有共享开关 | 未测，需用户先在专用目录登录 |
+| Claude Code | `CLAUDE_CONFIG_DIR` | `projects/<编码 cwd>/<id>.jsonl`、`.claude.json` 都只写在专用目录 | 钥匙串里的订阅登录不沿用，报 `Not logged in · Please run /login`。官方文档写明钥匙串条目按配置目录区分，没有共享开关 | 用户在专用目录 `claude auth login` 一次后，SDK 跑一轮 `apiKeySource: none`；新进程 `resume` 按会话 id 答对暗号。专用目录里没有 `.credentials.json`，登录在钥匙串的独立条目 |
 | Codex | `CODEX_HOME` | sqlite、`sessions/`、skills 都只写在专用目录 | 空目录 `requiresOpenaiAuth`。把 `auth.json` 软链接到 `~/.codex/auth.json` 后 `account/read` 为 `chatgpt` / `promax` | 新进程 `thread/resume` 后答对暗号 |
 | Grok | `GROK_HOME` | config、`sessions/`、logs 都只写在专用目录 | 空目录时 `authenticate cached_token` 一直不返回，且进程不理 SIGTERM，要 `kill -9`。把 `auth.json` 软链接到 `~/.grok/auth.json` 后认证成功 | 新进程 `session/resume` 后答对暗号 |
 | dsh | `DSH_HOME` | 自动生成 `profiles/acp`，会话在 `sessions/<编码 cwd>/` | 空目录时没有账号路线、也没有 API key，第一轮报错。把 `.credentials.yaml` 软链接到 `~/.dsh/.credentials.yaml` 后可选 `deepseek-account` 路线 | 新进程 `session/resume` 后答对暗号 |
@@ -28,6 +28,6 @@
 - **用户主目录**：两轮实测前后，`~/.claude`、`~/.claude.json`、`~/.codex`（含 sqlite）、`~/.grok`、`~/.dsh` 里改动过的文件都不含工作目录路径、暗号或会话 id，`sessions/` 下没有新增条目；唯一命中的是调度者本会话自己的记录。默认目录的 `codex login status` 仍为 `Logged in using ChatGPT`。
 - **关掉落盘不可行**：`persistSession: false`、`--no-session-persistence`、`codex exec --ephemeral` 等都会让按会话 id 续跑失效。
 
-**用户一次性步骤**：Codex、Grok、dsh 不用登录，Helm 首次使用时在专用目录建凭据软链接即可。Claude 只能二选一：在专用目录登录一次（`CLAUDE_CONFIG_DIR=~/.helm/agent-homes/claude claude auth login`），或不设 `CLAUDE_CONFIG_DIR`、继续用默认目录、接受记录混进历史。据 [cmux #4255](https://github.com/manaflow-ai/cmux/issues/4255)，不设和设成 `~/.claude` 不一样，后者也会换钥匙串条目（未实测）。
+**用户一次性步骤**：Codex、Grok、dsh 不用登录，Helm 首次使用时在专用目录建凭据软链接，指向用户原来的凭据文件。Claude 在专用目录登录一次：`CLAUDE_CONFIG_DIR=~/.helm/agent-homes/claude claude auth login`（用户选定，2026-10-23 已登录）。成熟产品对 Claude 也只有"沿用默认目录"和"专用目录另登录"两种做法。
 
-**未完成**：Claude 一项待用户选定；若选登录，补测登录后跑一轮和 SDK 按会话 id 续跑。选定后改 spec 第二阶段"会话记录隔离"一条（现写"用户在这些主目录里自行登录一次"）。
+Claude 登录后补测时，用户 `~/.claude/projects/` 仍为 97 个目录，`~/.claude`、`~/.claude.json` 改动过的文件不含工作目录路径、暗号或会话 id。spec 第二阶段"会话记录隔离"一条已按本结论改写。
