@@ -58,7 +58,11 @@ SSE 的 `event` 为动作名，`id` 为事件 id，`data` 是完整结构化事�
 
 用户消息和关卡决定持久入队，同一工作同时最多一个调度轮次。每轮都是新会话，启动简报包括工作说明（草稿标“未确认”）、卡片图摘要（任务单 03 接入前为空）、未决关卡、调度笔记、新事件和最近 20 条对话。当前轮次运行时收到的消息留到下一轮；只有正常结束才标记这批事件已处理。轮次输出逐步写入数据目录的 `rounds/<轮次id>.jsonl`，`round-started` 事件提供路径，`round-ended` 提供结束方式和 token 用量。
 
-`startHelmd({ driver: new FakeDriver(scripts), ... })` 可注入按轮次排列的脚本；脚本支持真实 MCP 工具调用、按沙箱限制写文件、步骤输出、压缩通知、指定结束方式、挂住和崩溃。驱动接口同时接受 cwd、环境变量、沙箱、MCP 服务与可选续跑会话 id；调度轮次始终新开。确认前调度者只读项目目录，确认后只读 `_work`。`helm serve` 默认使用真实 Claude 调度者和执行者驱动（拉起本机已登录的 `claude`）；设环境变量 `HELM_FAKE_COORDINATOR=1` 时调度者改用空脚本假驱动，供子进程测试使用。可运行的对齐脚本见 `tests/alignment.test.ts`。
+`startHelmd({ drivers: { 'claude-sdk': new FakeDriver(scripts) }, ... })` 按驱动名注入脚本，派单和调度轮次按模板的 `driver` 选择驱动；可用 `templateDir` 指定测试模板目录。脚本支持真实 MCP 工具调用、按沙箱限制写文件、步骤输出、压缩通知、指定结束方式、挂住和崩溃。驱动接口同时接受模板快照、cwd、环境变量、沙箱、MCP 服务与可选续跑会话 id；调度轮次始终新开。确认前调度者只读项目目录，确认后只读 `_work`。`helm serve` 默认登记真实 `claude-sdk` 驱动（拉起本机已登录的 `claude`）；设环境变量 `HELM_FAKE_COORDINATOR=1` 时调度者改用空脚本假驱动，供子进程测试使用。可运行的对齐脚本见 `tests/alignment.test.ts`。
+
+Agent 模板以仓库的 `templates/<模板 id>/` 为准，内置 `claude-coordinator`、`claude-executor`。每个目录包含 `config.json`、策略文件 `prompt.md` 和可选的 `skills/`；设置格式见内置模板。`role` 为 `coordinator` / `executor`，`driver` 为 `claude-sdk` / `codex`（Codex 驱动后续接入），`model` 和 `reasoningEffort` 可为 `null`；推理强度支持 `low` / `medium` / `high` / `max`。`fast` 默认 `false`，Claude 开启 fast 会标为不可用，并说明 extra usage 原因。`home` 为 `shared`（订阅）或 `template`（API），`description` 是供调度者派单时参考的职责说明；主目录隔离和 skills 挂载由后续任务接入。
+
+修改文件后下一次派单或调度轮次即生效，排队派单在实际启动时重读；已有运行不受影响。`list-agent-templates` 显示配置、计费方式 `billing`（`subscription` / `api`）、是否可用及原因。坏模板独立报错，使用时返回 `TEMPLATE_UNAVAILABLE`；原 `configure-agent-template` 操作已移除。派单详情的 `template` 和 `round-template-loaded` 事件中的 `template` 保留当次解析快照（包含策略原文），用户及调度者均可读取。端口段、提交结论、清理、截图路径、不推送及验收说明快照等运行约定由代码追加在策略之后。
 
 调度轮次失败会新开会话重投未处理事件，连续失败三次或调度者额度用完时暂停工作。`list-pending`、`list-works` 和 SSE `needs-user-attention` 展示运行层暂停原因，用户以 `helm resume-work --workId <工作id>` 手动恢复。每轮默认总时长 30 分钟、无输出 10 分钟；`helm set-round-watchdog --totalTimeoutMs 1800000 --idleTimeoutMs 600000` 调整后从下一轮生效，`get-settings` 可读取设置。轮次与派单共用进程清理：按工作目录查找 `_work` 内的残留进程并清理进程组，macOS 需安装 `lsof`，Linux 使用 `/proc`。`get-card`、`get-card-graph` 的 `usage` 汇总卡片全部派单，`get-work`、`list-works` 的 `usage` 另加全部调度轮次；输入和输出 token 分别累计，异常结束同样计入。
 

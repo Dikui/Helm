@@ -7,7 +7,7 @@ import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import type { HelmEvent } from '../src/store.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
 
 type TestEvent = Omit<HelmEvent, 'details'> & { details: Record<string, any> };
 
@@ -38,7 +38,9 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
   ]]);
   const drain = new FakeDriver();
   let started = 0;
-  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'),
+  const templateDir = await copyTemplates(directory);
+  await configureTestTemplate(templateDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
+  const daemon = await startHelmd({ templateDir, port: 0, dataDir: join(directory, 'data'),
     driver: { start(options) {
       const round = started++;
       return (round === 0 ? setup : round <= rounds ? driver : drain).start(options);
@@ -54,7 +56,6 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
     assert.equal(body.ok, true, JSON.stringify(body));
     return body.result;
   };
-  await call('configure-agent-template', { templateId: 'claude-coordinator', model: 'haiku', reasoningEffort: 'low' });
   const project = await call('register-project', { path: repo });
   const initial = (await call('send-message', { projectId: project.id, key: 'start', body: '调度者驱动冒烟' })).work;
   const params = { workId: initial.id };

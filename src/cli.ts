@@ -24,10 +24,15 @@ async function main() {
     const port = Number(values.port ?? 4242);
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port must be an integer between 0 and 65535');
     const { startHelmd } = await import('./server.js');
-    const { ClaudeCoordinatorDriver } = await import('./claude-driver.js');
+    const { ClaudeDriver } = await import('./claude-driver.js');
+    const { FakeDriver } = await import('./driver.js');
     // HELM_FAKE_COORDINATOR lets subprocess tests start helmd without launching claude.
-    const driver = process.env.HELM_FAKE_COORDINATOR === '1' ? undefined : new ClaudeCoordinatorDriver();
-    const daemon = await startHelmd({ port, dataDir: values['data-dir'], driver });
+    const claude = new ClaudeDriver();
+    const fake = new FakeDriver();
+    const drivers = { 'claude-sdk': process.env.HELM_FAKE_COORDINATOR === '1'
+      ? { start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
+      : claude };
+    const daemon = await startHelmd({ port, dataDir: values['data-dir'], drivers });
     console.log(JSON.stringify({ url: daemon.url }));
     const stop = () => { daemon.close().catch(error => { console.error(error); process.exitCode = 1; }); };
     process.once('SIGTERM', stop);

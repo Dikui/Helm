@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { invoke, rejectOperation } from './operations.js';
 import { RuleError, TaskStore, type Actor, type EventFilter } from './store.js';
 import { handleMcp } from './mcp.js';
-import { FakeDriver, type Driver } from './driver.js';
-import { ClaudeExecutorDriver } from './claude-driver.js';
+import type { DriverRegistry } from './driver.js';
+import { ClaudeDriver } from './claude-driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
+import { TemplateCatalog } from './templates.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -31,8 +32,9 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; driver?: Driver; executorDriver?: Driver; browserCommand?: BrowserCommand } = {}) {
-  const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'));
+export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
+  const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver() };
+  const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'), new TemplateCatalog(options.templateDir, Object.keys(drivers)));
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
   let userOperations: UserOperations;
@@ -100,8 +102,8 @@ export async function startHelmd(options: { port?: number; dataDir?: string; dri
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
   const url = `http://127.0.0.1:${address.port}`;
-  scheduler = new RoundScheduler(store, options.driver ?? new FakeDriver(), `${url}/mcp`);
-  executions = new ExecutionRunner(store, options.executorDriver ?? new ClaudeExecutorDriver(), `${url}/mcp`, options.browserCommand);
+  scheduler = new RoundScheduler(store, drivers, `${url}/mcp`);
+  executions = new ExecutionRunner(store, drivers, `${url}/mcp`, options.browserCommand);
   userOperations = new UserOperations(store, executions, scheduler);
   ready = true;
   let closing: Promise<void> | undefined;

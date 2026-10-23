@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { TokenUsage } from './driver.js';
 import { migrations } from './migrations.js';
+import type { TemplateCatalog } from './templates.js';
 
 export type ActorType = 'user' | 'coordinator-round' | 'dispatch' | 'runtime';
 export interface Actor { type: ActorType; id: string; workId?: string }
@@ -62,7 +63,7 @@ export class TaskStore {
   private pendingEvents: HelmEvent[] = [];
   private listeners = new Set<(events: HelmEvent[]) => void>();
 
-  constructor(readonly dataDir: string) {
+  constructor(readonly dataDir: string, readonly templates: TemplateCatalog) {
     mkdirSync(dataDir, { recursive: true });
     this.dataDir = realpathSync(dataDir);
     this.db = new DatabaseSync(join(this.dataDir, 'helm.db'));

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 import type { StartupBrief } from '../src/rounds.js';
 
 type AlignmentScript = FakeStep[] | ((context: FakeContext & { brief: StartupBrief }) => FakeStep[]);

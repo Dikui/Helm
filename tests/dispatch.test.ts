@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep, type SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -27,7 +27,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean, ti
 }
 
 async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript[], config: {
-  after?: FakeScript; additionalRounds?: FakeScript[]; alignment?: FakeStep[]; executorDriver?: Driver; beforeConfirm?: (call: ApiCall) => Promise<void>;
+  after?: FakeScript; additionalRounds?: FakeScript[]; alignment?: FakeStep[]; executorDriver?: Driver; beforeConfirm?: (call: ApiCall, templateDir: string) => Promise<void>;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-dispatch-')));
   const repo = join(directory, 'project');
@@ -38,7 +38,8 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const dataDir = join(directory, 'data');
   // Separate drivers keep executor scripts independent of coordinator wake timing.
-  const options = { port: 0, dataDir, executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: new FakeDriver([[
+  const templateDir = await copyTemplates(directory);
+  const options = { templateDir, port: 0, dataDir, executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '执行派单', boundary: '本机', criteria: '成果可读' }), check: ok },
     ...(config.alignment ?? []),
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'dispatch-script-finished' }], ...(config.after ? [config.after] : []), ...(config.additionalRounds ?? [])]) };
@@ -54,13 +55,13 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
   const events = async () => (await call('get-events', { workId: work.id })).result as any[];
   await until(events, events => events.some(event => event.action === 'round-ended'));
   const gate = (await call('list-pending')).result[0];
-  await config.beforeConfirm?.(call);
+  await config.beforeConfirm?.(call, templateDir);
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const finished = async () => {
     const values = await until(events, events => events.filter(event => event.action === 'round-ended').length >= 2);
     assert.equal(values.filter(event => event.action === 'round-ended')[1].details.finalAnswer, 'dispatch-script-finished', JSON.stringify(values));
   };
-  return { ...daemon, call, work, events, finished, dataDir, repo, git, directory };
+  return { ...daemon, call, work, events, finished, dataDir, repo, git, directory, templateDir };
 }
 
 const create: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '写实现并报告结果' }), saveAs: 'card', check: ok };
@@ -425,6 +426,7 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
   }, ctx => {
     assert.equal(ctx.options.cwd, original!.cwd);
     assert.equal(ctx.options.template?.id, original!.template?.id);
+    assert.equal(ctx.options.template?.model, 'resume-updated-model');
     assert.ok(ctx.options.resumeSessionId);
     resumeToken = ctx.options.mcpServers.helm!.headers.Authorization!;
     return [{ type: 'write', path: 'resumed.txt', content: '续跑进度\n' }, { type: 'hang' }];
@@ -435,6 +437,7 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
   await writeFile(join(workPath, 'new-upstream.txt'), '后来的工作分支进度\n');
   execFileSync('git', ['-C', workPath, 'add', 'new-upstream.txt']);
   execFileSync('git', ['-C', workPath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'advance work branch'], { stdio: 'ignore' });
+  await configureTestTemplate(daemon.templateDir, 'claude-executor', { model: 'resume-updated-model' });
   firstDone();
   await until(daemon.events, events => events.some(event => event.action === 'dispatch-step' && event.dispatchId !== first.id));
   secondReady();
@@ -489,7 +492,7 @@ test('曾派单卡片在空闲时新增未决前置会阻塞；运行中新增�
   assert.equal((await daemon.call('get-card', { workId: daemon.work.id, cardId: second.cardId })).result.status, 'waiting');
 });
 
-test('内置模板只允许设置模型与推理强度，清理订阅冲突环境；本地远端推送被执行者环境拦截', async t => {
+test('文件模板设置模型与推理强度，清理订阅冲突环境；本地远端推送被执行者环境拦截', async t => {
   const keys = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GH_TOKEN'];
   const previous = keys.map(key => process.env[key]);
   for (const key of keys) process.env[key] = 'helm-test-must-not-inherit';
@@ -499,21 +502,19 @@ test('内置模板只允许设置模型与推理强度，清理订阅冲突环�
   process.env.GIT_CONFIG_VALUE_0 = 'Parent User';
   t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
   let options: SessionOptions | undefined;
-  let token = '';
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
   const daemon = await fixture(t, [create, dispatch()], [ctx => {
     options = ctx.options;
-    token = ctx.options.mcpServers.helm!.headers.Authorization!;
     for (const key of keys.slice(0, 5)) assert.equal(ctx.options.env[key], undefined, key);
     assert.equal(ctx.options.env.GH_TOKEN, 'helm-push-disabled');
     assert.ok(ctx.options.env.NO_PROXY!.includes('127.0.0.1'));
     assert.equal(ctx.options.template?.model, 'small-test-model');
     assert.equal(ctx.options.template?.reasoningEffort, 'low');
     return [{ type: 'hang', until: hold }];
-  }], { beforeConfirm: async call => {
-    ok(await call('configure-agent-template', { templateId: 'claude-executor', model: 'small-test-model', reasoningEffort: 'low' }));
+  }], { beforeConfirm: async (call, templateDir) => {
+    await configureTestTemplate(templateDir, 'claude-executor', { model: 'small-test-model', reasoningEffort: 'low' });
     const repo = (await call('list-projects')).result[0].path;
     const remote = join(dirname(repo), 'remote.git');
     execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
@@ -524,10 +525,6 @@ test('内置模板只允许设置模型与推理强度，清理订阅冲突环�
   await until(async () => options, value => value !== undefined);
   const templates = (await daemon.call('list-agent-templates')).result;
   assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor']);
-  ok(await daemon.call('configure-agent-template', { templateId: 'claude-executor', model: 'small-test-model', reasoningEffort: 'low' }));
-  assert.equal((await daemon.call('configure-agent-template', { templateId: 'claude-executor', env: { ANTHROPIC_API_KEY: 'not-supported' } })).error.code, 'INVALID_PARAMS');
-  assert.equal((await daemon.call('configure-agent-template', { templateId: 'unknown', model: 'no' })).error.code, 'INVALID_TEMPLATE');
-  assert.equal((await daemon.call('configure-agent-template', { templateId: 'claude-executor', model: 'no' }, token)).error.code, 'FORBIDDEN');
   const remote = join(daemon.directory, 'remote.git');
   execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/control'], { stdio: 'ignore' });
   assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/forbidden'], { env: options!.env, stdio: 'pipe' }));
@@ -542,7 +539,7 @@ test('内置模板只允许设置模型与推理强度，清理订阅冲突环�
   release();
 });
 
-test('按实际步骤号读输出，步骤不连续仍可读取；重启后派单、成果和模板配置保留', async t => {
+test('按实际步骤号读输出，步骤不连续仍可读取；重启后派单、成果和模板快照保留', async t => {
   const fake = new FakeDriver([[
     { type: 'write', path: 'kept.txt', content: '持久保存\n' },
     { type: 'output', text: '第二个实际步骤' },
@@ -559,9 +556,9 @@ test('按实际步骤号读输出，步骤不连续仍可读取；重启后派�
   assert.deepEqual((await daemon.call('get-dispatch-output', params)).result.map((event: any) => event.step), [2, 4, 6]);
   assert.deepEqual((await daemon.call('get-dispatch-output', { ...params, fromStep: 3, toStep: 5 })).result, [{ type: 'output', step: 4, text: '第二个实际步骤' }]);
   const artifacts = (await daemon.call('get-dispatch-artifacts', params)).result;
-  ok(await daemon.call('configure-agent-template', { templateId: 'claude-executor', model: 'persisted-model', reasoningEffort: 'low' }));
   await daemon.close();
-  const reopened = await startHelmd({ port: 0, dataDir: daemon.dataDir });
+  await configureTestTemplate(daemon.templateDir, 'claude-executor', { model: 'persisted-model', reasoningEffort: 'low' });
+  const reopened = await startHelmd({ port: 0, dataDir: daemon.dataDir, templateDir: daemon.templateDir });
   t.after(() => reopened.close());
   const call = async (name: string, params: object) => (await (await fetch(`${reopened.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any).result;
   assert.deepEqual(await call('get-dispatch', params), result);
@@ -578,8 +575,8 @@ test('派单按 key 去重，拒绝等待前置、取消、已有派单的卡片
   const params = (ctx: FakeContext, key: string, extra: object = {}) => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, templateId: 'claude-executor', key, ...extra });
   const daemon = await fixture(t, [
     create,
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-template', { templateId: 'unknown' }), check: reject('INVALID_TEMPLATE') },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'coordinator-template', { templateId: 'claude-coordinator' }), check: reject('INVALID_TEMPLATE') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-template', { templateId: 'unknown' }), check: reject('TEMPLATE_UNAVAILABLE') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'coordinator-template', { templateId: 'claude-coordinator' }), check: reject('TEMPLATE_UNAVAILABLE') },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-resume', { resumeSessionId: 'no-such-session' }), check: reject('INVALID_RESUME') },
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'gate', question: '等待决定' }), saveAs: 'gate', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'gate').id }, downstream: { type: 'card', id: saved(ctx, 'card').id } }), check: ok },

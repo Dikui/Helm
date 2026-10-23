@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Driver, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
+import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
-import { templateEnvironment } from './templates.js';
+import { agentTemplate, templateEnvironment } from './templates.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
-import { TaskStore, type Actor } from './store.js';
+import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { refreshVerificationCopy, resetVerificationCopy } from './verification.js';
@@ -64,7 +64,7 @@ export class ExecutionRunner {
   private stopping = false;
   private unsubscribe: () => void;
 
-  constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string, private browserCommand: BrowserCommand = playwrightCommand) {
+  constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string, private browserCommand: BrowserCommand = playwrightCommand) {
     this.unsubscribe = store.subscribe(events => {
       for (const event of events) {
         if (event.action === 'dispatch-revoked' && event.dispatchId) {
@@ -135,6 +135,7 @@ export class ExecutionRunner {
     let finalAnswer: string | null = null;
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
     let failure: string | null = null;
+    let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
     let browserFailed = false;
     let startCommit: string | null = null;
     let endCommit: string | null = null;
@@ -156,12 +157,17 @@ export class ExecutionRunner {
     const wallTimer = setTimeout(() => timeout('wall'), Number(watchdog.dispatch_wall_timeout_ms));
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
+      const template = agentTemplate(this.store, dispatch.templateId, 'executor');
+      if (dispatch.resumeSessionId && (dispatch.template.driver ?? 'claude-sdk') !== template.driver) {
+        throw new RuleError('INVALID_RESUME', '模板的驱动已更改，不能续跑原驱动会话。');
+      }
+      dispatch = { ...dispatch, template };
       prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
       refreshVerificationCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
-        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ? WHERE id = ?`)
-          .run(new Date().toISOString(), startCommit, ports.start, ports.end, dispatch.id);
+        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, template_snapshot = ? WHERE id = ?`)
+          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(template), dispatch.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
           this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }
@@ -185,7 +191,7 @@ export class ExecutionRunner {
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
-        const starting = this.driver.start({
+        const starting = this.drivers[dispatch.template.driver]!.start({
           template: dispatch.template, cwd: workPath, env: { ...templateEnvironment(dispatch.template, pushUrls),
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
@@ -237,7 +243,10 @@ export class ExecutionRunner {
           }
         }
       }
-    } catch (error) { failure = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+      if (error instanceof RuleError) ruleFailure = { code: error.code, reason: error.message, details: error.details };
+    }
     finally {
       clearTimeout(wallTimer);
       clearTimeout(idleTimer);
@@ -280,7 +289,7 @@ export class ExecutionRunner {
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+        if (!ruleFailure || startCommit) endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
           getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
@@ -306,7 +315,7 @@ export class ExecutionRunner {
           .run(new Date().toISOString(), reason, finalAnswer, JSON.stringify(usage), failure, endCommit, reason, reason, dispatch.id);
         const result = getDispatch(this.store, dispatch.workId, dispatch.id);
         refreshCardReadiness(this.store, dispatch.workId);
-        const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', result, scope);
+        const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', { ...result, ...(ruleFailure ? { error: ruleFailure } : {}) }, scope);
         this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
         checkOutputUsage(this.store);
       });

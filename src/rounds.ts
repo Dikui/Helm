@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Driver, DriverSession, EndReason, TokenUsage } from './driver.js';
+import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardGraph } from './graph.js';
 import { agentTemplate, templateEnvironment } from './templates.js';
@@ -55,7 +55,7 @@ export class RoundScheduler {
   private stopping = false;
   private unsubscribe: () => void;
 
-  constructor(private store: TaskStore, private driver: Driver, private mcpUrl: string) {
+  constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
         || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
@@ -113,6 +113,7 @@ export class RoundScheduler {
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
     let finalAnswer: string | undefined;
     let failure: string | undefined;
+    let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
     let accepting = true;
     let stopReason: 'aborted' | 'timed-out' | undefined;
     let abortReason: string | undefined;
@@ -140,7 +141,10 @@ export class RoundScheduler {
     try {
       const result = await Promise.race([consume.call(this), cancellation]);
       if (result) { reason = result.reason; usage = result.usage; finalAnswer = result.finalAnswer; }
-    } catch (error) { reason = 'error'; finalAnswer = undefined; failure = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      reason = 'error'; finalAnswer = undefined; failure = error instanceof Error ? error.message : String(error);
+      if (error instanceof RuleError) ruleFailure = { code: error.code, reason: error.message, details: error.details };
+    }
     finally {
       accepting = false;
       controller.abort();
@@ -171,7 +175,8 @@ export class RoundScheduler {
           const mark = this.store.db.prepare('UPDATE wake_queue SET processed_by = ? WHERE event_id = ?');
           for (const eventId of ids) mark.run(id, eventId);
         }
-        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure, eventIds: ids, processed: reason === 'completed' }, { workId });
+        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure,
+          ...(ruleFailure ? { error: ruleFailure } : {}), eventIds: ids, processed: reason === 'completed' }, { workId });
         if (reason === 'completed') this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
         else if (['error', 'timed-out', 'context-overflow'].includes(reason)) {
           const row = this.store.db.prepare(`UPDATE works SET consecutive_round_failures = consecutive_round_failures + 1 WHERE id = ? RETURNING consecutive_round_failures`).get(workId)!;
@@ -182,7 +187,11 @@ export class RoundScheduler {
 
     async function consume(this: RoundScheduler) {
       const template = agentTemplate(this.store, 'claude-coordinator', 'coordinator');
-      const session = await this.driver.start({
+      this.store.transaction(() => {
+        this.store.db.prepare('UPDATE coordinator_rounds SET template_snapshot = ? WHERE id = ?').run(JSON.stringify(template), id);
+        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-template-loaded', { template }, { workId });
+      });
+      const session = await this.drivers[template.driver]!.start({
         template,
         cwd: brief.work.workPath ?? projectPath(this.store, workId),
         env: templateEnvironment(template),

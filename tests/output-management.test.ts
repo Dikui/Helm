@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript } from '../src/driver.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id as string;
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));

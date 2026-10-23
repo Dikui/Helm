@@ -5,7 +5,8 @@ import { access, lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TokenUsage } from './driver.js';
-import { coordinatorPrompt, executorPrompt } from './prompts.js';
+import { templatePrompt } from './prompts.js';
+import { TemplateCatalog } from './templates.js';
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
 export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void };
@@ -87,12 +88,12 @@ function coordinatorPermission(servers: string[]): CanUseTool {
 
 interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery }
 
-class ClaudeDriver implements Driver {
-  constructor(private config: ClaudeDriverConfig, private role: 'coordinator' | 'executor') {}
+export class ClaudeDriver implements Driver {
+  constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    const coordinator = this.role === 'coordinator';
+    const coordinator = (this.role ?? options.template?.role) === 'coordinator';
     if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
       || options.template?.role === 'executor' || options.resumeSessionId !== undefined)) {
       throw new Error('ClaudeCoordinatorDriver requires a fresh read-only coordinator round');
@@ -127,7 +128,7 @@ class ClaudeDriver implements Driver {
     const sdkOptions: Options = {
       cwd, env, pathToClaudeCodeExecutable: executable, settingSources: [], strictMcpConfig: true,
       settings: { autoMemoryEnabled: false },
-      systemPrompt: coordinator ? coordinatorPrompt : executorPrompt,
+      systemPrompt: templatePrompt(options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor')),
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.

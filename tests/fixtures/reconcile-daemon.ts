@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeDriver, type FakeScript } from '../../src/driver.js';
-import { startHelmd } from '../../src/server.js';
+import { startTestHelmd as startHelmd } from '../helmd-fixture.js';
 
 const [dataDir, purpose] = process.argv.slice(2);
 let executingRounds = 0;
