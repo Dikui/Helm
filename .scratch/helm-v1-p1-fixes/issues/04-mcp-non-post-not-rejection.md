@@ -4,8 +4,12 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `/mcp` 的非 POST 请求返回 405，响应符合 MCP Streamable HTTP 对"服务端不提供 GET 流"的约定，不追加事件
-- [ ] 其他路径的非 POST 请求仍返回结构化拒绝并记事件
-- [ ] 测试覆盖：用真实 MCP 客户端完成一次会话后，没有因此出现"操作被拒绝"事件
+- [x] `/mcp` 的非 POST 请求返回 405，响应符合 MCP Streamable HTTP 对"服务端不提供 GET 流"的约定，不追加事件
+- [x] 其他路径的非 POST 请求仍返回结构化拒绝并记事件
+- [x] 测试覆盖：用真实 MCP 客户端完成一次会话后，没有因此出现"操作被拒绝"事件
+
+## Comments
+
+- 为 `/mcp` 的非 POST 请求直接返回带 `Allow: POST` 的 JSON-RPC 405，不追加事件；补充真实 MCP 会话、其他 HTTP 方法与路径及业务拒绝仍记账的回归覆盖。

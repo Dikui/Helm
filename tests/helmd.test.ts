@@ -224,6 +224,68 @@ test('HTTP 输入错误同样返回结构化拒绝，服务继续处理请求', 
   assert.equal((await daemon.call('get-settings')).body.result.concurrencyLimit, 10);
 });
 
+test('MCP 非 POST 请求返回协议级 405，不追加事件', async t => {
+  const daemon = await fixture(t);
+  for (const method of ['GET', 'DELETE', 'PUT', 'PATCH', 'OPTIONS', 'HEAD']) {
+    const response = await fetch(`${daemon.url}/mcp?probe=1`, {
+      method, headers: { accept: 'text/event-stream', authorization: 'Bearer expired-token' },
+    });
+    assert.equal(response.status, 405, method);
+    assert.equal(response.headers.get('allow'), 'POST');
+    assert.match(response.headers.get('content-type')!, /application\/json/);
+    if (method === 'HEAD') assert.equal(await response.text(), '');
+    else {
+      const body = await response.json() as any;
+      assert.equal(body.jsonrpc, '2.0');
+      assert.equal(body.id, null);
+      assert.equal(body.error.code, -32000);
+      assert.ok(body.error.message);
+    }
+  }
+  assert.deepEqual((await daemon.call('get-events')).body.result, []);
+});
+
+test('其他路径的非 POST 请求仍返回结构化拒绝并记录事件', async t => {
+  const daemon = await fixture(t);
+  for (const [method, path] of [
+    ['GET', '/api/get-settings'], ['DELETE', '/api/set-concurrency'], ['GET', '/events'], ['OPTIONS', '/mcp/'],
+  ]) {
+    const response = await fetch(`${daemon.url}${path}`, { method });
+    assert.equal(response.status, 405);
+    const body = await response.json() as any;
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'METHOD_NOT_ALLOWED');
+    assert.ok(body.error.reason);
+    assert.ok(body.error.allowedOperations.includes('get-settings'));
+  }
+  const events = (await daemon.call('get-events')).body.result;
+  assert.deepEqual(events.map((event: any) => event.object.id), ['get-settings', 'set-concurrency', '/events', '/mcp/']);
+  assert.ok(events.every((event: any) => event.action === 'operation-rejected' && event.details.code === 'METHOD_NOT_ALLOWED'));
+});
+
+test('真实 MCP 客户端完成会话，GET 探测不产生操作被拒绝事件', { timeout: 10_000 }, async t => {
+  const daemon = await fixture(t);
+  const client = new Client({ name: 'helm-test', version: '1.0.0' });
+  t.after(() => client.close());
+  let receivedProbe!: (response: Response) => void;
+  const probe = new Promise<Response>(resolve => { receivedProbe = resolve; });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${daemon.url}/mcp`), {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === 'GET') receivedProbe(response);
+      return response;
+    },
+  }));
+  assert.ok((await client.listTools()).tools.some(tool => tool.name === 'get-settings'));
+  const settings = await client.callTool({ name: 'get-settings' });
+  assert.equal(settings.isError, false);
+  assert.equal((settings.structuredContent as any).result.concurrencyLimit, 10);
+  const response = await probe;
+  assert.equal(response.status, 405);
+  await client.close();
+  assert.deepEqual((await daemon.call('get-events')).body.result, []);
+});
+
 test('真实 MCP 端点由操作定义生成工具，复用 HTTP 的校验和去重', async t => {
   const daemon = await fixture(t);
   const client = new Client({ name: 'helm-test', version: '1.0.0' });
@@ -240,7 +302,8 @@ test('真实 MCP 端点由操作定义生成工具，复用 HTTP 的校验和去
   const params = { projectId: project.id, body: 'MCP 发消息', key: 'mcp' };
   const message = await client.callTool({ name: 'send-message', arguments: params });
   assert.deepEqual((await daemon.call('send-message', params)).body, message.structuredContent);
-  assert.equal((await daemon.call('get-events')).body.result[0].action, 'operation-rejected');
+  const events = (await daemon.call('get-events')).body.result;
+  assert.deepEqual(events.filter((event: any) => event.action === 'operation-rejected').map((event: any) => event.details.code), ['INVALID_PARAMS']);
 });
 
 test('helm 命令行冒烟：生成帮助、登记项目、发消息并读回对话', async t => {

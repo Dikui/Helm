@@ -94,8 +94,8 @@ test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留
   const pending = (await daemon.call('list-pending')).result.find((item: any) => item.id === gate.id);
   assert.equal(pending.review.diff, '');
   assert.deepEqual(pending.review.overallVerification, []);
-  // The two MCP clients also attempted the unsupported GET transport.
-  assert.equal(pending.review.rejectedOperationCount, 6);
+  // Only the four business rejections count; MCP transport probes do not.
+  assert.equal(pending.review.rejectedOperationCount, 4);
   assert.equal(pending.review.undeclaredDispatchCount, 0);
   assert.ok((await daemon.events()).some(event => event.action === 'needs-user-attention' && event.details.kind === 'review'));
   code('INVALID_PARAMS')(await daemon.call('decide-gate', { workId: daemon.work.id, gateId: gate.id, decision: '自由回答' }));
