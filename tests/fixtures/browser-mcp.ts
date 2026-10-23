@@ -70,6 +70,10 @@ else {
       }
       if (request.params.name === 'browser_snapshot' && request.params.arguments?.filename) {
         writeFileSync(outputFile(request.params.arguments.filename, 'page.yml'), page);
+      } else if (request.params.name === 'browser_snapshot') {
+        // Like Playwright MCP, link the saved snapshot relative to the server's cwd.
+        writeFileSync(outputFile(undefined, 'page.yml'), page);
+        return { content: [{ type: 'text', text: `${page}\n- [Snapshot](./page.yml)` }], structuredContent: { url: navigatedUrl, page } };
       }
       return { content: [{ type: 'text', text: page }], structuredContent: { url: navigatedUrl, page } };
     });

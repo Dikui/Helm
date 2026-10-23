@@ -146,7 +146,10 @@ test('需要浏览器的派单只获得检查工具，截图的图像与结构�
         const nav = await client.callTool({ name: 'browser_navigate', arguments: { url } });
         assert.deepEqual(nav.structuredContent, { url, page: '<h1>Helm browser dispatch</h1>' });
         const snapshot = await client.callTool({ name: 'browser_snapshot', arguments: {} });
-        assert.deepEqual(snapshot.content, [{ type: 'text', text: '<h1>Helm browser dispatch</h1>' }]);
+        const [snapshotText] = snapshot.content as { type: string; text: string }[];
+        const linked = /^<h1>Helm browser dispatch<\/h1>\n- \[Snapshot\]\((\/.+\/browser\/page\.yml)\)$/.exec(snapshotText!.text);
+        assert.ok(linked, snapshotText!.text);
+        assert.equal(await readFile(linked[1]!, 'utf8'), '<h1>Helm browser dispatch</h1>');
         const screenshot = await client.callTool({ name: 'browser_take_screenshot', arguments: {} });
         const blocks = screenshot.content as { type: string; data: string; mimeType: string }[];
         assert.equal(blocks[0]!.type, 'image');

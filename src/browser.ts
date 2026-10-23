@@ -88,7 +88,10 @@ export class BrowserProcess {
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     this.controller.signal.throwIfAborted();
-    return await this.client.callTool({ name, arguments: args }, undefined, { signal: this.controller.signal }) as CallToolResult;
+    const result = await this.client.callTool({ name, arguments: args }, undefined, { signal: this.controller.signal }) as CallToolResult;
+    // Playwright links saved files relative to its cwd (outputDir), which the executor never sees.
+    for (const block of result.content ?? []) if (block.type === 'text') block.text = block.text.replaceAll('](./', `](${this.outputDir}/`);
+    return result;
   }
 
   close() {
