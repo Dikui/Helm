@@ -76,14 +76,14 @@ test('执行派单附上并保存派单时卡片说明快照，之后改卡不�
         key: 'execute', templateId: 'claude-executor', content }) },
       { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '派单后修改的说明' }), check: ok },
     ], [ctx => {
-      assert.equal(JSON.parse(ctx.input).content, `卡片说明快照：\n按卡片标准验收\n\n${content ?? '按卡片标准验收'}`);
+      assert.equal(JSON.parse(ctx.input).content, `卡片说明快照：\n按卡片标准验收${content ? `\n\n${content}` : ''}`);
       return [];
     }]);
     await daemon.finished();
     const [execution] = await until(daemon.dispatches, values => values.length === 1 && values[0].status === 'ended');
     assert.equal(execution.endReason, 'completed', JSON.stringify(execution));
     assert.equal(execution.cardContentSnapshot, '按卡片标准验收');
-    assert.equal(execution.content, `卡片说明快照：\n按卡片标准验收\n\n${content ?? '按卡片标准验收'}`);
+    assert.equal(execution.content, `卡片说明快照：\n按卡片标准验收${content ? `\n\n${content}` : ''}`);
     assert.equal((await daemon.cards())[0].content, '派单后修改的说明');
   });
 });

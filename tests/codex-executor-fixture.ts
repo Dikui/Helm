@@ -70,9 +70,10 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
     if (!created) {
       created = true;
       return [
-        { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: config.content ?? '实现卡片' }, saveAs: 'card', check: ok },
+        // Keep the card short: every later dispatch on it gets the card snapshot.
+        { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: 'Codex 执行者冒烟卡片' }, saveAs: 'card', check: ok },
         { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, cardId: result(ctx, 'card').id, templateId: 'codex-executor',
-          key: 'first', needsBrowser: config.needsBrowser ?? false }), check: ok },
+          key: 'first', content: config.content ?? '实现卡片', needsBrowser: config.needsBrowser ?? false }), check: ok },
       ];
     }
     const action = actions.shift() ?? [];

@@ -156,7 +156,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
       throw new RuleError('SESSION_ACTIVE', '同一会话不能同时被两次派单续跑。');
     }
   }
-  let content = params.content ?? card.content;
+  // The card snapshot is always prefixed below; omitted content must not repeat it.
+  let content = params.content ?? '';
   if (card.repairOfCardId && purpose === 'execution') {
     const original = cardDetails(store, work.id, card.repairOfCardId);
     if (!original.cardBranch || ['completed', 'cancelled'].includes(original.status)) throw new RuleError('REPAIR_SOURCE_UNAVAILABLE', '修复自卡片的分支已不可用。');
@@ -164,7 +165,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   }
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
   const cardContentSnapshot = card.content;
-  content = `卡片说明快照：\n${cardContentSnapshot}\n\n${content}`;
+  content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
   const copy = cardCopy(store, work.id, card.id);
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
