@@ -9,7 +9,7 @@ import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
-import { resetVerificationCopy } from './verification.js';
+import { refreshVerificationCopy, resetVerificationCopy } from './verification.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -156,6 +156,7 @@ export class ExecutionRunner {
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
       prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
+      refreshVerificationCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ? WHERE id = ?`)
