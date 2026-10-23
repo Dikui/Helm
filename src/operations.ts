@@ -7,7 +7,7 @@ import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
-import { agentTemplates, configureTemplate } from './templates.js';
+import { agentTemplates } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
@@ -74,13 +74,8 @@ export const operations: readonly Operation[] = [
     execute: ({ actor, userOperations }, { workId }) => userOperations.interruptRound(actor, workId),
   }),
   operation({
-    name: 'list-agent-templates', description: '读取内置 Agent 模板', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'list-agent-templates', description: '读取文件中的 Agent 模板、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => agentTemplates(store),
-  }),
-  operation({
-    name: 'configure-agent-template', description: '设置内置 Agent 模板的模型和推理强度', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ templateId: z.string().min(1), model: z.string().trim().min(1).optional(), reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).optional() }).strict(),
-    execute: ({ store, actor }, params) => configureTemplate(store, actor, params),
   }),
   operation({
     name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑，验收一律新开对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,

@@ -136,14 +136,15 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '卡片已有运行中或排队中的派单。');
   const purpose = params.purpose ?? 'execution';
   if (purpose === 'verification' && params.resumeSessionId) throw new RuleError('INVALID_RESUME', '验收派单一律新开对话，不能续跑。');
-  let template = agentTemplate(store, params.templateId, 'executor');
+  const template = agentTemplate(store, params.templateId, 'executor');
   if (params.resumeSessionId) {
     const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended' && item.purpose === 'execution');
-    if (!previous || previous.templateId !== params.templateId) throw new RuleError('INVALID_RESUME', '只能用原模板续跑本卡片以前的执行者对话。');
+    if (!previous || previous.templateId !== params.templateId || (previous.template.driver ?? 'claude-sdk') !== template.driver) {
+      throw new RuleError('INVALID_RESUME', '只能用原模板和驱动续跑本卡片以前的执行者对话。');
+    }
     if (store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND status IN ('queued', 'running')`).get(params.resumeSessionId)) {
       throw new RuleError('SESSION_ACTIVE', '同一会话不能同时被两次派单续跑。');
     }
-    template = previous.template;
   }
   let content = params.content ?? card.content;
   if (card.repairOfCardId && purpose === 'execution') {

@@ -1,33 +1,72 @@
-import { RuleError, TaskStore, type Actor } from './store.js';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
 
-export interface AgentTemplate {
-  id: string; role: 'coordinator' | 'executor'; model: string | null;
-  reasoningEffort: 'low' | 'medium' | 'high' | 'max' | null;
+const settings = z.object({
+  role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex']),
+  model: z.string().trim().min(1).nullable(),
+  reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable(),
+  fast: z.boolean().default(false), home: z.enum(['shared', 'template']),
+  description: z.string().trim().min(1),
+}).strict();
+
+export interface AgentTemplate extends z.infer<typeof settings> {
+  id: string; prompt: string; directory: string; skillsPath: string | null;
 }
 
-export function agentTemplates(store: TaskStore): AgentTemplate[] {
-  return store.db.prepare('SELECT id, role, model, reasoning_effort AS reasoningEffort FROM agent_templates ORDER BY id').all() as unknown as AgentTemplate[];
-}
+export const defaultTemplateDir = fileURLToPath(new URL('../../templates/', import.meta.url));
 
-export function agentTemplate(store: TaskStore, id: string, role?: AgentTemplate['role']) {
-  const template = agentTemplates(store).find(item => item.id === id);
-  if (!template || (role && template.role !== role)) throw new RuleError('INVALID_TEMPLATE', '只能选择已登记且角色匹配的 Agent 模板。');
-  return template;
-}
+// No cache: each use reads settings and strategy together into its own snapshot.
+export class TemplateCatalog {
+  constructor(readonly directory = defaultTemplateDir, private drivers: readonly string[] = ['claude-sdk']) {}
 
-export function configureTemplate(store: TaskStore, actor: Actor, params: {
-  templateId: string; model?: string; reasoningEffort?: NonNullable<AgentTemplate['reasoningEffort']>;
-}) {
-  const current = agentTemplate(store, params.templateId);
-  const model = params.model ?? current.model;
-  const effort = params.reasoningEffort ?? current.reasoningEffort;
-  if (model !== current.model || effort !== current.reasoningEffort) {
-    store.db.prepare('UPDATE agent_templates SET model = ?, reasoning_effort = ? WHERE id = ?').run(model, effort, current.id);
-    store.appendEvent(actor, { type: 'agent-template', id: current.id }, 'agent-template-configured', { model, reasoningEffort: effort });
+  private read(id: string): AgentTemplate {
+    if (!id || id === '.' || id === '..' || /[/\\\0]/.test(id)) throw new Error('模板 id 必须是目录名。');
+    const directory = join(this.directory, id);
+    const config = settings.parse(JSON.parse(readFileSync(join(directory, 'config.json'), 'utf8')));
+    const prompt = readFileSync(join(directory, 'prompt.md'), 'utf8');
+    if (!prompt.trim()) throw new Error('prompt.md 不能为空。');
+    const skillsPath = join(directory, 'skills');
+    return { id, ...config, prompt, directory, skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
   }
-  return agentTemplate(store, current.id);
+
+  private unavailable(template: AgentTemplate) {
+    if (template.driver === 'claude-sdk' && template.fast) return 'Claude fast 在订阅下要开 extra usage 并计入 extra usage';
+    if (!this.drivers.includes(template.driver)) return `驱动 ${template.driver} 未登记。`;
+    return null;
+  }
+
+  get(id: string, role?: AgentTemplate['role']): AgentTemplate {
+    let template: AgentTemplate;
+    try { template = this.read(id); }
+    catch (error) {
+      throw new RuleError('TEMPLATE_UNAVAILABLE', `模板 ${id} 不可用（config.json / prompt.md）：${error instanceof Error ? error.message : String(error)}`, 409, { templateId: id });
+    }
+    const reason = this.unavailable(template) ?? (role && template.role !== role ? `模板角色必须为 ${role}。` : null);
+    if (reason) throw new RuleError('TEMPLATE_UNAVAILABLE', reason, 409, { templateId: id });
+    return template;
+  }
+
+  list() {
+    if (!existsSync(this.directory)) return [];
+    return readdirSync(this.directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().map(id => {
+      try {
+        const template = this.read(id);
+        const reason = this.unavailable(template);
+        return { ...template, billing: template.home === 'shared' ? 'subscription' : 'api', available: reason === null, reason };
+      } catch (error) {
+        return { id, role: null, driver: null, model: null, description: null, billing: null, available: false,
+          reason: `config.json / prompt.md：${error instanceof Error ? error.message : String(error)}` };
+      }
+    });
+  }
 }
+
+export const agentTemplates = (store: TaskStore) => store.templates.list();
+export const agentTemplate = (store: TaskStore, id: string, role?: AgentTemplate['role']) => store.templates.get(id, role);
 
 // Add only Helm-owned values after selecting the host runtime allowlist.
 export function templateEnvironment(template: AgentTemplate, pushUrls: string[] = []): Record<string, string> {

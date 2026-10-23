@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const identity = ['-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid'];

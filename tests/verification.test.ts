@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;

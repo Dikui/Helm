@@ -31,6 +31,7 @@ export interface DriverSession {
   events: AsyncIterable<DriverEvent>;
 }
 export interface Driver { start(options: SessionOptions): Promise<DriverSession> }
+export type DriverRegistry = Record<string, Driver>;
 
 export interface FakeContext {
   input: string;

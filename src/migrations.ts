@@ -145,4 +145,18 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE gates ADD COLUMN comment TEXT;
   `,
+  `
+  CREATE TEMP TABLE card_template_ids AS SELECT id, template_id FROM cards;
+  ALTER TABLE cards DROP COLUMN template_id;
+  ALTER TABLE cards ADD COLUMN template_id TEXT;
+  UPDATE cards SET template_id = (SELECT template_id FROM card_template_ids WHERE id = cards.id);
+  DROP TABLE card_template_ids;
+  CREATE TEMP TABLE dispatch_template_ids AS SELECT id, template_id FROM dispatches;
+  ALTER TABLE dispatches DROP COLUMN template_id;
+  ALTER TABLE dispatches ADD COLUMN template_id TEXT NOT NULL DEFAULT '';
+  UPDATE dispatches SET template_id = (SELECT template_id FROM dispatch_template_ids WHERE id = dispatches.id);
+  DROP TABLE dispatch_template_ids;
+  DROP TABLE agent_templates;
+  ALTER TABLE coordinator_rounds ADD COLUMN template_snapshot TEXT;
+  `,
 ];

@@ -7,8 +7,9 @@ import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CanUseTool, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
+import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
+import { TemplateCatalog } from '../src/templates.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 
 async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'executor'): Promise<SessionOptions> {
@@ -16,7 +17,7 @@ async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'execu
   t.after(() => rm(cwd, { recursive: true, force: true }));
   return {
     cwd, env: { PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
-    template: { id: `claude-${role}`, role, model: 'haiku', reasoningEffort: 'low' },
+    template: { ...new TemplateCatalog().get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
     sandbox: role === 'executor' ? { mode: 'workspace-write', writableRoots: [cwd] } : { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
   };
@@ -115,12 +116,32 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
   }
 });
 
+test('同一个 Claude 驱动按模板角色选择会话权限，并在文件策略后追加运行约定', async t => {
+  for (const role of ['coordinator', 'executor'] as const) {
+    const options = await fixture(t, role);
+    options.template = { ...options.template!, prompt: '测试自定义策略' };
+    const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: fakeQuery([result()], args => {
+        assert.ok((args.options!.systemPrompt as string).startsWith('测试自定义策略\n\n'));
+        assert.match(args.options!.systemPrompt as string, /不推送、不部署/);
+        if (role === 'executor') {
+          assert.match(args.options!.systemPrompt as string, /HELM_PORT_START.*HELM_PORT_END/);
+          assert.match(args.options!.systemPrompt as string, /submit-conclusion/);
+          assert.match(args.options!.systemPrompt as string, /卡片说明快照/);
+          assert.match(args.options!.systemPrompt as string, /browser\/<文件名>/);
+          assert.ok((args.options!.tools as string[]).includes('Write'));
+        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob']);
+      }) });
+    assert.equal((await collect(driver, options)).end?.reason, 'completed');
+  }
+});
+
 test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP 与单次读取权限', async t => {
   const base = await fixture(t);
   const cwd = join(base.cwd, '_work');
   await mkdir(cwd);
   const options: SessionOptions = { ...base, cwd,
-    template: { id: 'claude-coordinator', role: 'coordinator', model: 'haiku', reasoningEffort: 'low' },
+    template: { ...new TemplateCatalog().get('claude-coordinator'), model: 'haiku', reasoningEffort: 'low' },
     sandbox: { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-token' } } },
   };

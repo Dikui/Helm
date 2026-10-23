@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript } from '../src/driver.js';
-import { startHelmd } from '../src/server.js';
+import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
@@ -34,7 +34,9 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' });
   git('add', 'index.html');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-  const options = {
+  const templateDir = await copyTemplates(directory);
+  if (config.model) await configureTestTemplate(templateDir, 'claude-executor', { model: config.model, reasoningEffort: 'low' });
+  const options = { templateDir,
     port: 0, dataDir: join(directory, 'data'), executorDriver: config.executorDriver ?? new FakeDriver(executors),
     browserCommand: config.realBrowser ? undefined : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), ...(config.browserArgs ?? [])] },
     driver: new FakeDriver([[
@@ -55,7 +57,6 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   const work = (await call('send-message', { projectId: project.id, key: 'start', body: '检查页面' })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
-  if (config.model) ok(await call('configure-agent-template', { templateId: 'claude-executor', model: config.model, reasoningEffort: 'low' }));
   const gate = (await call('list-pending')).result[0];
   if (config.watchdog) ok(await call('set-dispatch-watchdog', config.watchdog));
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
