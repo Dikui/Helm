@@ -46,6 +46,7 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
     assert.equal(settings.concurrencyLimit, 3);
     assert.equal(settings.dispatchWallTimeoutMs, 1_800_000);
     assert.equal(settings.roundIdleTimeoutMs, 600_000);
+    assert.equal(settings.outputThresholdBytes, 10_000_000_000);
     await call('send-message', { workId: 'work', body: '升级后的消息', key: 'new' });
     await daemon.close();
     daemon = await startHelmd({ dataDir, port: 0, driver: new FakeDriver(), executorDriver: new FakeDriver() });

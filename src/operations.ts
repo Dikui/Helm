@@ -11,6 +11,7 @@ import { agentTemplates, configureTemplate } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
+import { checkOutputUsage, pendingOutputWarning } from './outputs.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -155,9 +156,23 @@ export const operations: readonly Operation[] = [
       dispatchIdleTimeoutMs: store.db.prepare('SELECT dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!.dispatch_idle_timeout_ms,
       roundTotalTimeoutMs: store.db.prepare('SELECT round_total_timeout_ms FROM settings WHERE id = 1').get()!.round_total_timeout_ms,
       roundIdleTimeoutMs: store.db.prepare('SELECT round_idle_timeout_ms FROM settings WHERE id = 1').get()!.round_idle_timeout_ms,
+      outputThresholdBytes: store.db.prepare('SELECT output_threshold_bytes FROM settings WHERE id = 1').get()!.output_threshold_bytes,
       runningDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'running'`).get()!.count,
       queuedDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'queued'`).get()!.count,
     }),
+  }),
+  operation({
+    name: 'set-output-threshold', description: '设置输出提示阈值（字节，默认 10 GB）并立即检查输出总量', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ thresholdBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict(),
+    execute({ store, actor }, { thresholdBytes }) {
+      const current = store.db.prepare('SELECT output_threshold_bytes FROM settings WHERE id = 1').get()!;
+      if (current.output_threshold_bytes !== thresholdBytes) {
+        store.db.prepare('UPDATE settings SET output_threshold_bytes = ? WHERE id = 1').run(thresholdBytes);
+        store.appendEvent(actor, { type: 'settings', id: 'global' }, 'output-threshold-set', { thresholdBytes });
+      }
+      checkOutputUsage(store);
+      return { outputThresholdBytes: thresholdBytes };
+    },
   }),
   operation({
     name: 'set-dispatch-watchdog', description: '设置派单墙钟总时长和无输出超时（毫秒），对后续派单生效', callers: ['user'], keyed: false, mutates: true,
@@ -270,6 +285,7 @@ export const operations: readonly Operation[] = [
       ...store.db.prepare(`SELECT id, id AS workId, status, runtime_pause_reason AS runtimePauseReason
         FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
         .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
+      ...pendingOutputWarning(store),
     ],
   }),
   operation({

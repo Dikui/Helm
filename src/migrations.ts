@@ -145,4 +145,9 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE gates ADD COLUMN comment TEXT;
   `,
+  `
+  ALTER TABLE settings ADD COLUMN output_threshold_bytes INTEGER NOT NULL DEFAULT 10000000000 CHECK(output_threshold_bytes >= 0);
+  ALTER TABLE settings ADD COLUMN output_total_bytes INTEGER NOT NULL DEFAULT 0 CHECK(output_total_bytes >= 0);
+  ALTER TABLE settings ADD COLUMN output_threshold_exceeded INTEGER NOT NULL DEFAULT 0 CHECK(output_threshold_exceeded IN (0, 1));
+  `,
 ];
