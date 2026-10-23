@@ -170,7 +170,8 @@ test('冒烟③执行者：副本外 Write 被权限拒绝，副本外 Bash 写�
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal((await readFile(join(card.workPath, 'inside-write.txt'), 'utf8')).trim(), 'inside');
     assert.equal(await readFile(join(card.workPath, 'inside-bash.txt'), 'utf8'), 'inside');
-    const binding = toolCalls(observed.messages).find(call => call.name === 'Bash' && (call.input as Record<string, unknown>).command === insideCommand);
+    // The model may requote the command; match on its marker instead of the exact string.
+    const binding = toolCalls(observed.messages).find(call => call.name === 'Bash' && String((call.input as Record<string, unknown>).command).includes('local-binding-ok'));
     assert.ok(binding);
     const bound = toolResult(observed.messages, binding.id);
     assert.ok(bound && !bound.is_error);

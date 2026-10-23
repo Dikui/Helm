@@ -197,8 +197,9 @@ export class ClaudeDriver implements Driver {
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers), skills) : executorPermission(cwd, skills),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
-      tools: coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
-        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'],
+      // An explicit tools list hides Skill unless it is listed, even with `skills` set.
+      tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
+        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], ...skills.length ? ['Skill'] : []],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
         const child = spawn(processOptions.command, processOptions.args, {

@@ -79,6 +79,7 @@ test('Claude 模板只挂自己的 skills 插件，两个角色均可调用自�
         const sdk = args.options!;
         assert.deepEqual(sdk.plugins, [{ type: 'local', path: directory, skipMcpDiscovery: true }]);
         assert.deepEqual(sdk.skills, [`${id}:fallback`, `${id}:passphrase`]);
+        assert.ok((sdk.tools as string[]).includes('Skill'));
         assert.equal((await sdk.canUseTool!('Skill', { skill: `${id}:passphrase` }, context))?.behavior, 'allow');
         assert.equal((await sdk.canUseTool!('Skill', { skill: 'other-template:secret' }, context))?.behavior, 'deny');
         yield result();
