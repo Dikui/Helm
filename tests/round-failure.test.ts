@@ -182,7 +182,7 @@ test('看门狗能结束驱动启动、发送或事件流挂住的轮次，过�
     let lateStart: (() => void) | undefined;
     let headers: Record<string, string> = {};
     const fallback = new FakeDriver();
-    const driver: Driver = { async start(options) {
+    const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
       if (++attempts > 1) return fallback.start(options);
       headers = options.mcpServers.helm!.headers;
       const session = {
@@ -210,7 +210,7 @@ test('看门狗能结束驱动启动、发送或事件流挂住的轮次，过�
 test('持续输出刷新无输出期限，但不会刷新轮次总时长期限', async t => {
   let attempts = 0;
   const fallback = new FakeDriver();
-  const driver: Driver = { async start(options) {
+  const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
     if (++attempts > 1) return fallback.start(options);
     let cancelled = false;
     return { id: 'streaming-session', async send() {}, cancel() { cancelled = true; },
@@ -236,7 +236,7 @@ test('持续输出刷新无输出期限，但不会刷新轮次总时长期限',
 test('驱动报告结束后卡在关闭事件流时，看门狗仍保留已报告的 token 用量', async t => {
   let attempts = 0;
   const fallback = new FakeDriver();
-  const driver: Driver = { async start(options) {
+  const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
     if (++attempts > 1) return fallback.start(options);
     return { id: 'hung-close', async send() {}, cancel() {},
       events: (async function* () {

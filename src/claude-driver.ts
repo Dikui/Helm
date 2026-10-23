@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, lstat, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { access, lstat, mkdir, realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, TokenUsage } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
+import { runtimeEnvironment } from './environment.js';
 import { templatePrompt } from './prompts.js';
-import { TemplateCatalog } from './templates.js';
+import { TemplateCatalog, type AgentTemplate } from './templates.js';
+
+function claudeHome(template: AgentTemplate, home = homedir()) {
+  return join(home, '.helm', 'agent-homes', template.home === 'shared' ? 'claude' : template.id);
+}
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
 export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void };
@@ -86,10 +93,39 @@ function coordinatorPermission(servers: string[]): CanUseTool {
   };
 }
 
-interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery }
+type AuthStatus = (executable: string, options: { cwd: string; env: Record<string, string> }) => Promise<boolean>;
+const authStatus: AuthStatus = async (executable, options) => {
+  // Ask the CLI, which owns Keychain/file credentials. Never read its files.
+  const { stdout } = await promisify(execFile)(executable, ['auth', 'status', '--json', '--setting-sources', ''],
+    { ...options, timeout: 10_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 });
+  const status = JSON.parse(stdout);
+  return status.loggedIn === true && status.authMethod === 'claude.ai';
+};
+
+interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery; authStatus?: AuthStatus }
 
 export class ClaudeDriver implements Driver {
   constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
+
+  async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
+    const directory = claudeHome(template);
+    const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
+    if (template.home === 'template') {
+      const command = `mkdir -p ${quoted} && \${EDITOR:-vi} ${quoted}/settings.json`;
+      try {
+        if ((await stat(directory)).isDirectory() && (await stat(join(directory, 'settings.json'))).isFile()) return { available: true };
+      } catch { /* Only file metadata is needed; the CLI validates contents. */ }
+      return { available: false, reason: `API 模板需要主目录 ${directory} 和 settings.json；请按 Claude 格式配置接口和 key。`, command };
+    }
+    const command = `CLAUDE_CONFIG_DIR=${quoted} claude auth login`;
+    try {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const env = { ...runtimeEnvironment(), CLAUDE_CONFIG_DIR: directory };
+      const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(env);
+      if (await (this.config.authStatus ?? authStatus)(executable, { cwd: directory, env })) return { available: true };
+    } catch { /* Do not store CLI diagnostics, which may contain account details. */ }
+    return { available: false, reason: `Claude 专用主目录 ${directory} 未登录或无法检查登录状态；请确认已安装 Claude CLI 并登录。`, command };
+  }
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
@@ -122,13 +158,15 @@ export class ClaudeDriver implements Driver {
     options.signal?.addEventListener('abort', cancel, { once: true });
     // Per-session override: never let a caller's force-enable reach Claude.
     // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
-    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
+    const template = options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor');
+    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      CLAUDE_CONFIG_DIR: claudeHome(template, options.env.HOME) };
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
-      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: [], strictMcpConfig: true,
+      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: template.home === 'template' ? ['user'] : [], strictMcpConfig: true,
       settings: { autoMemoryEnabled: false },
-      systemPrompt: templatePrompt(options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor')),
+      systemPrompt: templatePrompt(template),
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.

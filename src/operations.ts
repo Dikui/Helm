@@ -12,6 +12,7 @@ import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
 import { checkOutputUsage, pendingOutputWarning } from './outputs.js';
+import { pendingTemplates } from './availability.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -275,12 +276,13 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'list-pending', description: '列出所有待用户处理的事项', callers: ['user'], keyed: false, mutates: false,
-    schema: z.object({}).strict(), execute: ({ store }) => [
+    schema: z.object({}).strict(), execute: async ({ store }) => [
       ...store.pending().map(gate => reviewDetails(store, confirmationDetails(store, gate))),
       ...store.db.prepare(`SELECT id, id AS workId, status, runtime_pause_reason AS runtimePauseReason
         FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
         .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
       ...pendingOutputWarning(store),
+      ...await pendingTemplates(store),
     ],
   }),
   operation({

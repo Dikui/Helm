@@ -30,7 +30,11 @@ export interface DriverSession {
   cancel(): void;
   events: AsyncIterable<DriverEvent>;
 }
-export interface Driver { start(options: SessionOptions): Promise<DriverSession> }
+export interface TemplateAvailability { available: boolean; reason?: string; command?: string }
+export interface Driver {
+  checkAvailability(template: AgentTemplate): Promise<TemplateAvailability>;
+  start(options: SessionOptions): Promise<DriverSession>;
+}
 export type DriverRegistry = Record<string, Driver>;
 
 export interface FakeContext {
@@ -51,7 +55,10 @@ export type FakeScript = FakeStep[] | ((context: FakeContext) => FakeStep[]);
 
 // Uses the same HTTP MCP transport as a real agent; scripts never access the task store.
 export class FakeDriver implements Driver {
-  constructor(private scripts: FakeScript[] = []) {}
+  constructor(private scripts: FakeScript[] = [],
+    private availability: (template: AgentTemplate) => TemplateAvailability | Promise<TemplateAvailability> = () => ({ available: true })) {}
+
+  async checkAvailability(template: AgentTemplate) { return this.availability(template); }
 
   async start(options: SessionOptions): Promise<DriverSession> {
     const script = this.scripts.shift() ?? [];

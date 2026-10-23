@@ -266,7 +266,7 @@ test('取消发生在驱动启动期间时，迟到的派单和轮次会话也�
   let starts = 0;
   const executor = new FakeDriver([[{ type: 'write', path: 'too-late.txt', content: '取消后不能写入' }]]);
   const daemon = await fixture(t, [create('card'), dispatch('card')], [], [[create('too-late')]], {
-    executorDriver: { async start(options) {
+    executorDriver: { checkAvailability: async () => ({ available: true }), async start(options) {
       executorOptions = options;
       await executorHold;
       return executor.start(options);

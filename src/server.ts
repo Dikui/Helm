@@ -12,6 +12,7 @@ import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
 import { TemplateCatalog } from './templates.js';
+import { monitorTemplateAvailability } from './availability.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -92,7 +93,11 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
       server.listen(options.port ?? 4242, '127.0.0.1', resolve);
     });
   } catch (error) { store.close(); throw error; }
-  try { await reconcileStartup(store); }
+  try {
+    await reconcileStartup(store);
+    monitorTemplateAvailability(store, drivers);
+    await store.templates.refresh();
+  }
   catch (error) {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
@@ -110,8 +115,11 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
   return {
     url,
     close() {
+      ready = false;
       closing ??= Promise.all([scheduler.close(), executions.close()]).then(() => new Promise<void>((resolve, reject) => {
-        server.close(error => { store.close(); error ? reject(error) : resolve(); });
+        server.close(error => {
+          void store.templates.settleChecks().then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
+        });
         server.closeAllConnections();
       }));
       return closing;

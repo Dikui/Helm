@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
-import { agentTemplate, templateEnvironment } from './templates.js';
+import { templateEnvironment } from './templates.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
@@ -157,7 +157,8 @@ export class ExecutionRunner {
     const wallTimer = setTimeout(() => timeout('wall'), Number(watchdog.dispatch_wall_timeout_ms));
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
-      const template = agentTemplate(this.store, dispatch.templateId, 'executor');
+      const template = await abortable(this.store.templates.check(dispatch.templateId, 'executor'), stop.signal);
+      if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
       if (dispatch.resumeSessionId && (dispatch.template.driver ?? 'claude-sdk') !== template.driver) {
         throw new RuleError('INVALID_RESUME', '模板的驱动已更改，不能续跑原驱动会话。');
       }

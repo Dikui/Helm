@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardDetails } from './graph.js';
-import { agentTemplate, type AgentTemplate } from './templates.js';
+import type { AgentTemplate } from './templates.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 
@@ -125,11 +125,19 @@ function cardCopy(store: TaskStore, workId: string, cardId: string) {
   return { workPath, cardBranch };
 }
 
-export function createDispatch(store: TaskStore, actor: Actor, params: {
+export async function createDispatch(store: TaskStore, actor: Actor, params: {
   workId: string; cardId: string; key: string; templateId: string; purpose?: Dispatch['purpose']; content?: string; resumeSessionId?: string; needsBrowser?: boolean;
 }) {
   const existing = listDispatches(store, params.workId).find(item => item.key === params.key);
   if (existing) return existing;
+  const template = await store.templates.check(params.templateId, 'executor');
+  // The probe yields to other requests. Recheck idempotency, actor and work/card
+  // state before any filesystem action or dispatch publication.
+  const repeated = listDispatches(store, params.workId).find(item => item.key === params.key);
+  if (repeated) return repeated;
+  if (actor.type === 'coordinator-round' && !store.db.prepare(`SELECT id FROM coordinator_rounds WHERE id = ? AND status = 'running'`).get(actor.id)) {
+    throw new RuleError('INVALID_TOKEN', '轮次令牌已失效。', 401);
+  }
   const work = store.work(params.workId);
   if (!['executing', 'awaiting-review'].includes(work.status)) throw new RuleError('WORK_NOT_EXECUTING', '对齐中、暂停或终态工作不能派单。');
   const card = cardDetails(store, work.id, params.cardId);
@@ -137,7 +145,6 @@ export function createDispatch(store: TaskStore, actor: Actor, params: {
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '卡片已有运行中或排队中的派单。');
   const purpose = params.purpose ?? 'execution';
   if (purpose === 'verification' && params.resumeSessionId) throw new RuleError('INVALID_RESUME', '验收派单一律新开对话，不能续跑。');
-  const template = agentTemplate(store, params.templateId, 'executor');
   if (params.resumeSessionId) {
     const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended' && item.purpose === 'execution');
     if (!previous || previous.templateId !== params.templateId || (previous.template.driver ?? 'claude-sdk') !== template.driver) {

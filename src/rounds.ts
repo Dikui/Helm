@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardGraph } from './graph.js';
-import { agentTemplate, templateEnvironment } from './templates.js';
+import { templateEnvironment } from './templates.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
@@ -177,7 +177,8 @@ export class RoundScheduler {
         }
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure,
           ...(ruleFailure ? { error: ruleFailure } : {}), eventIds: ids, processed: reason === 'completed' }, { workId });
-        if (reason === 'completed') this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
+        if (reason === 'error' && ruleFailure?.code === 'TEMPLATE_UNAVAILABLE') pauseWorkFromRuntime(this.store, workId, id, `调度者模板不可用：${ruleFailure.reason}`);
+        else if (reason === 'completed') this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
         else if (['error', 'timed-out', 'context-overflow'].includes(reason)) {
           const row = this.store.db.prepare(`UPDATE works SET consecutive_round_failures = consecutive_round_failures + 1 WHERE id = ? RETURNING consecutive_round_failures`).get(workId)!;
           if (Number(row.consecutive_round_failures) >= 3) pauseWorkFromRuntime(this.store, workId, id, '调度者连续失败 3 次');
@@ -186,7 +187,8 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const template = agentTemplate(this.store, 'claude-coordinator', 'coordinator');
+      const template = await this.store.templates.check('claude-coordinator', 'coordinator');
+      if (!accepting || stopReason || abortReason) return;
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET template_snapshot = ? WHERE id = ?').run(JSON.stringify(template), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-template-loaded', { template }, { workId });

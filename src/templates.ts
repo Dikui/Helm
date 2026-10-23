@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
+import type { TemplateAvailability } from './driver.js';
 
 const settings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex']),
@@ -21,7 +22,60 @@ export const defaultTemplateDir = fileURLToPath(new URL('../../templates/', impo
 
 // No cache: each use reads settings and strategy together into its own snapshot.
 export class TemplateCatalog {
+  private availability = new Map<string, TemplateAvailability>();
+  private checks = new Set<Promise<AgentTemplate>>();
+  private checker?: (template: AgentTemplate) => Promise<TemplateAvailability>;
+  private report?: (id: string, result: TemplateAvailability) => void;
+
   constructor(readonly directory = defaultTemplateDir, private drivers: readonly string[] = ['claude-sdk']) {}
+
+  monitor(checker: (template: AgentTemplate) => Promise<TemplateAvailability>, report: (id: string, result: TemplateAvailability) => void) {
+    this.checker = checker;
+    this.report = report;
+  }
+
+  async check(id: string, role?: AgentTemplate['role']): Promise<AgentTemplate> {
+    const check = this.checkTemplate(id, role);
+    this.checks.add(check);
+    try { return await check; }
+    finally { this.checks.delete(check); }
+  }
+
+  async settleChecks() { await Promise.allSettled([...this.checks]); }
+
+  private async checkTemplate(id: string, role?: AgentTemplate['role']): Promise<AgentTemplate> {
+    let template: AgentTemplate;
+    let result: TemplateAvailability;
+    try { template = this.get(id); }
+    catch (error) {
+      if (error instanceof RuleError) this.record(id, { available: false, reason: error.message });
+      throw error;
+    }
+    if (role && template.role !== role) throw new RuleError('TEMPLATE_UNAVAILABLE', `模板角色必须为 ${role}。`, 409, { templateId: id });
+    try { result = await this.checker?.(template) ?? { available: true }; }
+    catch { result = { available: false, reason: '驱动无法检查模板可用性，请检查 CLI 安装和主目录。' }; }
+    this.record(id, result);
+    if (!result.available) throw new RuleError('TEMPLATE_UNAVAILABLE', result.reason ?? '模板不可用。', 409,
+      { templateId: id, ...(result.command ? { command: result.command } : {}) });
+    return template;
+  }
+
+  private record(id: string, result: TemplateAvailability) {
+    this.availability.set(id, result);
+    this.report?.(id, result);
+  }
+
+  async refresh() {
+    const entries = this.list();
+    for (const id of this.availability.keys()) if (!entries.some(entry => entry.id === id)) {
+      this.record(id, { available: true });
+      this.availability.delete(id);
+    }
+    await Promise.all(entries.map(entry => this.check(entry.id).catch(error => {
+      if (!(error instanceof RuleError)) throw error;
+    })));
+    return this.list();
+  }
 
   private read(id: string): AgentTemplate {
     if (!id || id === '.' || id === '..' || /[/\\\0]/.test(id)) throw new Error('模板 id 必须是目录名。');
@@ -56,7 +110,10 @@ export class TemplateCatalog {
       try {
         const template = this.read(id);
         const reason = this.unavailable(template);
-        return { ...template, billing: template.home === 'shared' ? 'subscription' : 'api', available: reason === null, reason };
+        const availability = this.availability.get(id);
+        return { ...template, billing: template.home === 'shared' ? 'subscription' : 'api',
+          available: reason === null && availability?.available !== false, reason: reason ?? availability?.reason ?? null,
+          ...(availability?.command ? { command: availability.command } : {}) };
       } catch (error) {
         return { id, role: null, driver: null, model: null, description: null, billing: null, available: false,
           reason: `config.json / prompt.md：${error instanceof Error ? error.message : String(error)}` };
@@ -65,7 +122,7 @@ export class TemplateCatalog {
   }
 }
 
-export const agentTemplates = (store: TaskStore) => store.templates.list();
+export const agentTemplates = (store: TaskStore) => store.templates.refresh();
 export const agentTemplate = (store: TaskStore, id: string, role?: AgentTemplate['role']) => store.templates.get(id, role);
 
 // Add only Helm-owned values after selecting the host runtime allowlist.

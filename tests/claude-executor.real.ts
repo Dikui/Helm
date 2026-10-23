@@ -1,5 +1,5 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-executor.
-// Requires a locally logged-in claude CLI and the bundled, headed Chromium.
+// Requires Claude login in ~/.helm/agent-homes/claude and the bundled, headed Chromium.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
@@ -9,11 +9,17 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeExecutorDriver } from '../src/claude-driver.js';
+import { TemplateCatalog } from '../src/templates.js';
 import { fixture } from './browser-fixture.js';
 import { assertIsolatedInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+test('Claude 订阅模板在 Helm 专用主目录已登录', { skip: !enabled, timeout: 20_000 }, async () => {
+  const availability = await new ClaudeExecutorDriver().checkAvailability(new TemplateCatalog().get('claude-executor'));
+  assert.equal(availability.available, true, `${availability.reason}\n${availability.command}`);
+});
 
 // Observe the real SDK boundary without replacing its CLI, tools or messages.
 function observedDriver() {
@@ -22,6 +28,7 @@ function observedDriver() {
   const endpoints: string[] = [];
   const helmTools: string[] = [];
   const driver = new ClaudeExecutorDriver({ query: args => {
+    assert.equal(args.options?.env?.CLAUDE_CONFIG_DIR, join(homedir(), '.helm/agent-homes/claude'));
     assert.equal(args.options?.model, 'haiku');
     assert.equal(args.options.effort, 'low');
     assert.deepEqual(Object.keys(args.options.mcpServers ?? {}), ['helm']);
