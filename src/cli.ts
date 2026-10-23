@@ -25,7 +25,7 @@ async function main() {
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port must be an integer between 0 and 65535');
     const { startHelmd } = await import('./server.js');
     const { ClaudeDriver } = await import('./claude-driver.js');
-    const { CodexExecutorDriver } = await import('./codex-driver.js');
+    const { CodexDriver } = await import('./codex-driver.js');
     const { FakeDriver } = await import('./driver.js');
     // HELM_FAKE_COORDINATOR lets subprocess tests start helmd without launching claude.
     const claude = new ClaudeDriver();
@@ -33,7 +33,7 @@ async function main() {
     const drivers = { 'claude-sdk': process.env.HELM_FAKE_COORDINATOR === '1'
       ? { checkAvailability: (template: Parameters<typeof claude.checkAvailability>[0]) => fake.checkAvailability(template),
         start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
-      : claude, codex: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new CodexExecutorDriver() };
+      : claude, codex: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new CodexDriver() };
     const daemon = await startHelmd({ port, dataDir: values['data-dir'], drivers });
     console.log(JSON.stringify({ url: daemon.url }));
     const stop = () => { daemon.close().catch(error => { console.error(error); process.exitCode = 1; }); };
