@@ -16,8 +16,8 @@ function quotaExhausted(error: any) {
   return /usage_limit_reached|insufficient_quota|invalid_api_key|quota exceeded|(?:usage|credit) limit (?:reached|exceeded)|you['’]ve hit your usage limit|you exceeded your current quota|(?:insufficient|exhausted) (?:credits|balance)|(?:credit|account) balance (?:is )?(?:too low|insufficient)|incorrect api key provided|invalid (?:api key|authentication token)|api key (?:is )?(?:invalid|expired|revoked)/i.test(text);
 }
 
-export class CodexExecutorDriver implements Driver {
-  constructor(private config: { command?: CodexCommand } = {}) {}
+export class CodexDriver implements Driver {
+  constructor(private config: { command?: CodexCommand } = {}, private role?: 'coordinator' | 'executor') {}
 
   async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
     const directory = codexHome(template);
@@ -43,13 +43,18 @@ export class CodexExecutorDriver implements Driver {
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    const template = options.template ?? new TemplateCatalog(undefined, ['codex']).get('codex-executor');
-    if (template.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1) {
+    const coordinator = (this.role ?? options.template?.role) === 'coordinator';
+    const template = options.template ?? new TemplateCatalog(undefined, ['codex']).get(coordinator ? 'codex-coordinator' : 'codex-executor');
+    if (coordinator && (template.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
+      || options.sandbox.writableRoots.length || options.resumeSessionId !== undefined)) {
+      throw new Error('CodexCoordinatorDriver requires a fresh read-only coordinator round');
+    }
+    if (!coordinator && (template.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
       throw new Error('CodexExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
-    if (!options.dataDir) throw new Error('Codex executor requires a dispatch data directory');
+    if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
+    if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
     const home = codexHome(template, options.env.HOME);
@@ -74,12 +79,12 @@ export class CodexExecutorDriver implements Driver {
       rpc.notify('initialized', {});
       await rpc.request('skills/extraRoots/set', { extraRoots: template.skillsPath ? [template.skillsPath] : [] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
-        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: 'workspace-write', approvalPolicy: 'never',
+        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
         ...(template.model ? { model: template.model } : {}), developerInstructions: templatePrompt(template),
         serviceTier: template.fast ? 'fast' : 'default',
         config: {
           ...(template.fast ? { service_tier: 'fast' } : {}),
-          sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true },
+          ...(!coordinator ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             url: server.url, http_headers: server.headers, default_tools_approval_mode: 'approve',
           }])),
@@ -95,7 +100,7 @@ export class CodexExecutorDriver implements Driver {
           if (sent || cancelled) throw new Error('Codex session already received input or was cancelled');
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
-            approvalPolicy: 'never', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
+            approvalPolicy: 'never', sandboxPolicy: coordinator ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
             ...(template.reasoningEffort ? { effort: template.reasoningEffort === 'max' ? 'xhigh' : template.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },
@@ -138,4 +143,12 @@ export class CodexExecutorDriver implements Driver {
       };
     } catch (error) { cancel(); throw error; }
   }
+}
+
+export class CodexExecutorDriver extends CodexDriver {
+  constructor(config: { command?: CodexCommand } = {}) { super(config, 'executor'); }
+}
+
+export class CodexCoordinatorDriver extends CodexDriver {
+  constructor(config: { command?: CodexCommand } = {}) { super(config, 'coordinator'); }
 }

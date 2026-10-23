@@ -1,0 +1,9 @@
+{
+  "role": "coordinator",
+  "driver": "codex",
+  "model": null,
+  "reasoningEffort": null,
+  "fast": false,
+  "home": "shared",
+  "description": "对齐工作说明，拆卡、派单、安排验收并发起审核"
+}
