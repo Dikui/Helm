@@ -23,3 +23,5 @@
 - **其他**：服务配置记的是带版本号的 node 路径，`brew upgrade node` 后要重新 install。
 
 2026-10-23 修复：MCP 调用由调度轮次或派单令牌确定工作并隐藏 workId，执行派单同样附上并保存卡片说明快照；同步两家调度者的派单、浏览器、ID 与整体验收规则，以及执行者的提交、浏览器和验收证据约定，补充 MCP、HTTP 与实际驱动提示词回归测试，真实冒烟按本次要求未运行。
+
+2026-10-23 修复剩余问题：③ 输入超限的原因是启动简报 `newEvents` 带上了执行者逐步进度——失败轮 389de85c 的新事件里有 1,722 条 `dispatch-step`，约占满上限，其余事件约 1 万字符；简报不再带 `dispatch-step`，调度者需要时用 `get-dispatch-output` 读（a1e05b9）。不加通用体积上限，等简报其他部分真的变大再加。④ Playwright 把文件链接写成相对其 cwd（派单 `browser/` 目录）的 `./…`，转发时改成绝对路径（532da84），只经替身验证，真实冒烟未运行。服务配置改记 PATH 中的 node（如 `/opt/homebrew/bin/node`），找不到才回退 `process.execPath`（fef643d）；本机 LaunchAgent 已重装，helmd 读接口正常。
