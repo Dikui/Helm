@@ -219,6 +219,15 @@ test('真实 Claude 驱动把默认调度规则注入 SDK 提示词，保留启�
         /优先.*不同模板.*交叉验收.*只有一家.*同家/s,
         /验收.*卡片说明.*本卡.*边界和标准/s,
         /整体验收卡片.*工作说明.*标准/s,
+        /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
+        /不要只写“按卡片说明实现”/,
+        /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,
+        /执行派单.*真实浏览器自查页面.*needsBrowser=true/,
+        /不要让执行者自己安装或启动浏览器/,
+        /cardId、dispatchId、gateId.*工具返回结果原样复制.*不要手打或拼接/,
+        /工具因 ID 被拒.*重新读取卡片图核对 ID.*再重试/,
+        /两家或多家验收派单.*同一张整体验收卡片.*全部通过后才用 complete-card/,
+        /不要提前完成后另开卡片/,
         /额度用完.*改派.*无处可派.*关卡/s,
         /决策关卡尽量少提/,
         /中途修改冲突太大/,
@@ -248,6 +257,13 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
         for (const requirement of [
           /不推送、不部署/,
           /派单前附卡片说明快照/,
+          /不要自己 git commit、不要改 git 配置/,
+          /执行派单结束后由运行层提交/,
+          /不要自己安装或启动浏览器/,
+          /需要浏览器时只用注入的浏览器工具.*没有.*结论里说明/,
+          /验收判定不通过前.*复核现象是否真的违反标准.*排除符合规则的边界行为/,
+          /已经贴边时再往同方向操作没有变化/,
+          /至少一条直接证据支撑不通过结论/,
           /开发服务.*分配的端口.*HELM_PORT_START.*HELM_PORT_END/s,
           /开发服务不必自己停.*派单结束时由运行层清理卡片副本里的进程/,
           /截图.*相对文件名.*成果 browser\/<文件名>.*最终回答/,
@@ -277,6 +293,8 @@ test('同一个 Claude 驱动按模板角色选择会话权限，并在文件策
           assert.match(args.options!.systemPrompt as string, /submit-conclusion/);
           assert.match(args.options!.systemPrompt as string, /卡片说明快照/);
           assert.match(args.options!.systemPrompt as string, /browser\/<文件名>/);
+          assert.match(args.options!.systemPrompt as string, /不要自己 git commit、不要改 git 配置/);
+          assert.match(args.options!.systemPrompt as string, /不要自己安装或启动浏览器/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
         } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
       }) });

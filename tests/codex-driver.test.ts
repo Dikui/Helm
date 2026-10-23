@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { CodexDriver, CodexCoordinatorDriver, CodexExecutorDriver } from '../src/codex-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
-import type { AgentTemplate } from '../src/templates.js';
+import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 async function fixture(t: TestContext, notifications: object[], script: object = {}, role: 'executor' | 'coordinator' = 'executor') {
@@ -64,6 +64,8 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
   assert.match(thread.developerInstructions, /测试策略/);
   assert.match(thread.developerInstructions, /submit-conclusion/);
+  assert.match(thread.developerInstructions, /不要自己 git commit、不要改 git 配置/);
+  assert.match(thread.developerInstructions, /不要自己安装或启动浏览器/);
   assert.deepEqual(requests[4].params.sandboxPolicy, { type: 'workspaceWrite', writableRoots: [ctx.directory], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true });
   assert.equal(requests[4].params.effort, 'low');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
@@ -73,6 +75,43 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.equal(env.NO_PROXY, 'example.test,internal.test,127.0.0.1,localhost');
   assert.equal(env.no_proxy, env.NO_PROXY);
   assert.ok(events.filter(e => e.type === 'output').some(e => e.text.includes('initializeDurationMs')));
+});
+
+for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默认策略与运行约定进入实际 RPC 提示词`, async t => {
+  const ctx = await fixture(t, [completed()], {}, role);
+  ctx.options.template = { ...ctx.options.template!, prompt: new TemplateCatalog(undefined, ['codex']).get(`codex-${role}`).prompt };
+  for (const resumeSessionId of role === 'executor' ? [undefined, 'thread-scripted'] : [undefined]) {
+    const session = await ctx.driver.start({ ...ctx.options, resumeSessionId });
+    t.after(() => session.cancel());
+    await session.send('保留输入原文');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type === 'end' && end.reason, 'completed');
+    const requests = await ctx.requests();
+    assert.deepEqual(requests.filter(r => r.method === 'turn/start').at(-1).params.input, [{ type: 'text', text: '保留输入原文' }]);
+    const prompt = requests.filter(r => r.method === 'thread/start' || r.method === 'thread/resume').at(-1).params.developerInstructions;
+    const requirements = role === 'coordinator' ? [
+      /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
+      /不要只写“按卡片说明实现”/,
+      /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,
+      /执行派单.*真实浏览器自查页面.*needsBrowser=true/,
+      /不要让执行者自己安装或启动浏览器/,
+      /cardId、dispatchId、gateId.*工具返回结果原样复制.*不要手打或拼接/,
+      /工具因 ID 被拒.*重新读取卡片图核对 ID.*再重试/,
+      /两家或多家验收派单.*同一张整体验收卡片.*全部通过后才用 complete-card/,
+      /不要提前完成后另开卡片/,
+    ] : [
+      /派单前附卡片说明快照/,
+      /不要自己 git commit、不要改 git 配置/,
+      /执行派单结束后由运行层提交/,
+      /不要自己安装或启动浏览器/,
+      /需要浏览器时只用注入的浏览器工具.*没有.*结论里说明/,
+      /验收判定不通过前.*复核现象是否真的违反标准.*排除符合规则的边界行为/,
+      /已经贴边时再往同方向操作没有变化/,
+      /至少一条直接证据支撑不通过结论/,
+      /submit-conclusion/,
+    ];
+    for (const requirement of requirements) assert.match(prompt, requirement);
+  }
 });
 
 for (const role of ['executor', 'coordinator'] as const) for (const sample of codexErrors) test(`Codex ${role} 结束分类：${sample.name}`, async t => {
