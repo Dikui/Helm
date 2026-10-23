@@ -172,4 +172,7 @@ export const migrations: readonly string[] = [
   ALTER TABLE projects ADD COLUMN default_coordinator_template_id TEXT NOT NULL DEFAULT 'claude-coordinator';
   ALTER TABLE works ADD COLUMN coordinator_template_id TEXT NOT NULL DEFAULT 'claude-coordinator';
   `,
+  `
+  ALTER TABLE dispatches ADD COLUMN sqlite_path TEXT;
+  `,
 ];

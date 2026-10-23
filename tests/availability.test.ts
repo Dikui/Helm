@@ -29,7 +29,7 @@ async function fixture(t: TestContext, initial: Record<string, TemplateAvailabil
     }, check: ok }];
     return actions.shift()?.(ctx) ?? [];
   }), template => probes.get(template.id)?.() ?? states.get(template.id) ?? { available: true });
-  const options = { port: 0, dataDir: join(directory, 'data'), templateDir, drivers: { 'claude-sdk': driver } };
+  const options = { port: 0, dataDir: join(directory, 'data'), templateDir, drivers: { 'claude-sdk': driver, codex: new FakeDriver() } };
   let daemon = await startHelmd(options);
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> => {

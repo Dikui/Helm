@@ -193,6 +193,7 @@ export class ExecutionRunner {
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
         const starting = this.drivers[dispatch.template.driver]!.start({
+          dataDir: join(dispatch.outputPath, '..'),
           template: dispatch.template, cwd: workPath, env: { ...templateEnvironment(dispatch.template, pushUrls),
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
@@ -214,7 +215,7 @@ export class ExecutionRunner {
         if (this.store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND id <> ? AND status IN ('queued', 'running')`).get(session.id, dispatch.id)) {
           throw new Error('Driver returned a session already used by an active dispatch');
         }
-        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ? WHERE id = ?').run(session.id, dispatch.id); });
+        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
         await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, content: dispatch.content })), stop.signal);
         let previousStep = 0;

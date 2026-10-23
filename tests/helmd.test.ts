@@ -14,8 +14,10 @@ const exec = promisify(execFile);
 const cliPath = fileURLToPath(new URL('../src/cli.js', import.meta.url));
 
 async function startDaemon(t: TestContext, dataDir: string) {
+  const home = join(dataDir, '..', 'home');
+  await mkdir(home, { recursive: true });
   const child = spawn(process.execPath, [cliPath, 'serve', '--port', '0', '--data-dir', dataDir], {
-    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HELM_FAKE_COORDINATOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: home, HELM_FAKE_COORDINATOR: '1' },
   });
   let stderr = '';
   child.stderr!.on('data', chunk => { stderr += chunk; });

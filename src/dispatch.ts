@@ -14,6 +14,7 @@ export interface Dispatch {
   template: AgentTemplate; content: string; status: 'queued' | 'running' | 'ended';
   needsBrowser: boolean; browserPgid: number | null; browserStartedAt: string | null;
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
+  sqlitePath: string | null;
   startCommit: string | null; endCommit: string | null; outputPath: string;
   outputStatus: 'available' | 'deleted';
   portStart: number | null; portEnd: number | null; pgid: number | null; processStartedAt: string | null;
@@ -23,7 +24,7 @@ export interface Dispatch {
 }
 
 const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, template_id AS templateId,
-  template_snapshot AS template, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId,
+  template_snapshot AS template, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId, sqlite_path AS sqlitePath,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
   conclusion, conclusion_reason AS conclusionReason, usage, failure,
