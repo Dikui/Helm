@@ -12,11 +12,16 @@ import type { UserOperations } from './user-operations.js';
 export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor,
   userOperations: UserOperations, browserFor: () => BrowserProcess | undefined = () => undefined) {
   const server = new Server({ name: 'helm', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const workId = actor.type === 'coordinator-round' || actor.type === 'dispatch' ? actor.workId : undefined;
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: operations.filter(operation => operation.callers.includes(actor.type)).map<Tool>(operation => ({
-      name: operation.name, description: operation.description,
-      inputSchema: z.toJSONSchema(operation.schema) as Tool['inputSchema'],
-    })).concat(browserFor()?.listTools() ?? []),
+    tools: operations.filter(operation => operation.callers.includes(actor.type)).map<Tool>(operation => {
+      const inputSchema = z.toJSONSchema(operation.schema) as Tool['inputSchema'];
+      if (workId) {
+        delete inputSchema.properties?.workId;
+        if (inputSchema.required) inputSchema.required = inputSchema.required.filter(name => name !== 'workId');
+      }
+      return { name: operation.name, description: operation.description, inputSchema };
+    }).concat(browserFor()?.listTools() ?? []),
   }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
     if (request.params.name.startsWith('browser_')) {
@@ -32,7 +37,13 @@ export async function handleMcp(request: IncomingMessage, response: ServerRespon
         return { isError: true, content: [{ type: 'text', text: JSON.stringify(result.body) }], structuredContent: result.body };
       }
     }
-    const result = await invoke(store, actor, request.params.name, request.params.arguments ?? {}, userOperations);
+    const args = { ...request.params.arguments };
+    if (workId) {
+      delete args.workId;
+      const operation = operations.find(operation => operation.name === request.params.name);
+      if (operation?.schema.shape.workId) args.workId = workId;
+    }
+    const result = await invoke(store, actor, request.params.name, args, userOperations);
     return {
       isError: !result.body.ok,
       content: [{ type: 'text' as const, text: JSON.stringify(result.body) }],

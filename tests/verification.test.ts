@@ -69,6 +69,25 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   return { ...daemon, call, work, repo, events, finished, cards, dispatches, description: gate.description };
 }
 
+test('执行派单附上并保存派单时卡片说明快照，之后改卡不影响快照', async t => {
+  for (const content of ['本次实现并提供测试证据', undefined]) await t.test(content ?? '默认派单内容', async t => {
+    const daemon = await fixture(t, [card(),
+      { ...dispatch('execute', 'execution'), arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
+        key: 'execute', templateId: 'claude-executor', content }) },
+      { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '派单后修改的说明' }), check: ok },
+    ], [ctx => {
+      assert.equal(JSON.parse(ctx.input).content, `卡片说明快照：\n按卡片标准验收\n\n${content ?? '按卡片标准验收'}`);
+      return [];
+    }]);
+    await daemon.finished();
+    const [execution] = await until(daemon.dispatches, values => values.length === 1 && values[0].status === 'ended');
+    assert.equal(execution.endReason, 'completed', JSON.stringify(execution));
+    assert.equal(execution.cardContentSnapshot, '按卡片标准验收');
+    assert.equal(execution.content, `卡片说明快照：\n按卡片标准验收\n\n${content ?? '按卡片标准验收'}`);
+    assert.equal((await daemon.cards())[0].content, '派单后修改的说明');
+  });
+});
+
 test('验收新开对话并保存派单时快照，结论按用途校验且最后一次生效', async t => {
   const executed = hold();
   const verified = hold();

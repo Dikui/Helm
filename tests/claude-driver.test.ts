@@ -247,6 +247,7 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
         assert.equal(typeof prompt, 'string');
         for (const requirement of [
           /不推送、不部署/,
+          /派单前附卡片说明快照/,
           /开发服务.*分配的端口.*HELM_PORT_START.*HELM_PORT_END/s,
           /开发服务不必自己停.*派单结束时由运行层清理卡片副本里的进程/,
           /截图.*相对文件名.*成果 browser\/<文件名>.*最终回答/,
@@ -689,7 +690,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
       close() {},
       async *[Symbol.asyncIterator]() {
         assert.equal(args.options!.resume, undefined);
-        if (purpose === 'verification') assert.ok(JSON.parse(String(args.prompt)).content.startsWith('卡片说明快照：'));
+        assert.ok(JSON.parse(String(args.prompt)).content.startsWith('卡片说明快照：'));
         await writeFile(join(args.options!.cwd!, 'index.html'), 'temporary SDK edit');
         const endpoint = args.options!.mcpServers!.helm;
         assert.ok(endpoint && 'url' in endpoint && endpoint.type === 'http');

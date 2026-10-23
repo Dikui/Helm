@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 import type { StartupBrief } from '../src/rounds.js';
@@ -125,7 +127,7 @@ test('同一工作串行调度，当前轮次中的消息合并到下一轮，�
   assert.equal(nextBrief.recentConversation.at(-1)!.body, '补充 25');
 });
 
-test('轮次令牌隔离工作、限制用户操作，并在轮次结束时失效；新建工具按 key 去重', async t => {
+test('MCP 从轮次令牌确定工作，HTTP 保留范围检查，令牌限制操作并在结束时失效；新建工具按 key 去重', async t => {
   let release!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; });
   let headers: Record<string, string> | undefined;
@@ -160,18 +162,39 @@ test('轮次令牌隔离工作、限制用户操作，并在轮次结束时失�
   const crossRead = await fetch(`${daemon.url}/api/get-work`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ workId: otherWorkId }) });
   assert.equal(crossRead.status, 403);
   assert.equal((await crossRead.json() as any).error.code, 'WORK_SCOPE');
+  const client = new Client({ name: 'round-work-scope', version: '1.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${daemon.url}/mcp`), { requestInit: { headers } }));
+  try {
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      assert.equal(Object.hasOwn(tool.inputSchema.properties ?? {}, 'workId'), false, tool.name);
+      assert.ok(!tool.inputSchema.required?.includes('workId'), tool.name);
+    }
+    for (const args of [{}, { workId: otherWorkId }]) {
+      const result = await client.callTool({ name: 'get-work', arguments: args });
+      assert.equal((result.structuredContent as any).result.id, work.id);
+    }
+    const write = await client.callTool({ name: 'write-coordinator-notes', arguments: { workId: otherWorkId, body: '令牌所属工作' } });
+    assert.equal((write.structuredContent as any).ok, true);
+    assert.equal((await daemon.call('get-coordinator-notes', { workId: work.id })).result.body, '令牌所属工作');
+    assert.equal((await daemon.call('get-coordinator-notes', { workId: otherWorkId })).result.body, '');
+  } finally { await client.close(); }
+  const missingWork = await daemon.call('get-work');
+  assert.equal(missingWork.status, 400);
+  assert.equal(missingWork.error.code, 'INVALID_PARAMS');
   release();
   const events = await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
   assert.equal(events.find(event => event.action === 'round-ended').details.reason, 'completed');
   assert.equal(ownWorkId, work.id);
   assert.equal(results[0].result.id, work.id);
-  assert.equal(results[1].error.code, 'WORK_SCOPE');
-  assert.equal(results[2].error.code, 'WORK_SCOPE');
+  assert.equal(results[1].result.work.id, work.id);
+  assert.equal(results[2].ok, true);
+  assert.ok(results[2].result.every((event: any) => event.workId === work.id));
   assert.equal(results[3].error.code, 'FORBIDDEN');
   assert.ok(!results[3].error.allowedOperations.includes('set-concurrency'));
   assert.equal((await daemon.call('get-settings')).result.concurrencyLimit, 10);
   assert.equal((await daemon.call('get-work-descriptions', { workId: work.id })).result.length, 1);
-  assert.equal(events.filter(event => event.action === 'message-sent' && event.actor.type === 'coordinator-round').length, 1);
+  assert.equal(events.filter(event => event.action === 'message-sent' && event.actor.type === 'coordinator-round').length, 2);
   assert.equal(events.filter(event => event.action === 'work-description-drafted').length, 1);
   assert.equal(events.filter(event => event.action === 'round-started').length, 1);
   const expired = await fetch(`${daemon.url}/mcp`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}' });

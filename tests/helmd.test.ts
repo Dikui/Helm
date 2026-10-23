@@ -296,6 +296,9 @@ test('真实 MCP 端点由操作定义生成工具，复用 HTTP 的校验和去
   const { tools } = await client.listTools();
   assert.ok(tools.some(tool => tool.name === 'register-project'));
   assert.ok(tools.find(tool => tool.name === 'send-message')!.inputSchema.required!.includes('key'));
+  const workSchema = tools.find(tool => tool.name === 'get-work')!.inputSchema;
+  assert.ok(Object.hasOwn(workSchema.properties!, 'workId'));
+  assert.ok(workSchema.required!.includes('workId'));
   const rejected = await client.callTool({ name: 'set-concurrency', arguments: { limit: -1 } });
   assert.equal(rejected.isError, true);
   assert.equal((rejected.structuredContent as any).error.code, 'INVALID_PARAMS');

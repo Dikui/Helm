@@ -118,7 +118,7 @@ test('冒烟①⑤：三轮真实调度者在 _work 经带令牌 HTTP MCP 建卡
     const sessions: string[] = [];
     const tokens: string[] = [];
     for (const index of [1, 2, 3]) await t.test(`新会话 ${index}`, async subtest => {
-      const observed = observedDriver(brief => `这是调度者驱动冒烟，workId 为 ${brief.work.id}。${restrictions}
+      const observed = observedDriver(() => `这是调度者驱动冒烟，工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 按顺序调用：
 1. create-card，key=smoke-upstream，content=上游卡片。
 2. create-card，key=smoke-downstream，content=下游卡片。
@@ -159,7 +159,7 @@ test('冒烟①⑤：三轮真实调度者在 _work 经带令牌 HTTP MCP 建卡
 
 test('冒烟②：真实调度者操作后被用户打断，新轮次重投同批事件，用原 key 不重复建卡和派单',
   { skip: !enabled, timeout: 420_000 }, async t => {
-    const observed = observedDriver(brief => `这是事件重投冒烟，workId 为 ${brief.work.id}。${restrictions}
+    const observed = observedDriver(() => `这是事件重投冒烟，工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 无论启动简报中是否已经存在对象，都必须实际按顺序重放以下两个工具调用：
 1. create-card，key=replay-card，content=重投卡片。
 2. create-dispatch，key=replay-dispatch，cardId 用上一步返回的卡片 id，templateId=claude-executor，purpose=execution，needsBrowser=false。

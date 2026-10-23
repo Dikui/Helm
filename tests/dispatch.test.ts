@@ -635,6 +635,16 @@ test('派单令牌只暴露提交结论，SSE 实时给出当前步骤和一行�
   await client.connect(new StreamableHTTPClientTransport(new URL(`${daemon.url}/mcp`), { requestInit: { headers: { Authorization: token } } }));
   try {
     assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['submit-conclusion']);
+    const schema = (await client.listTools()).tools[0]!.inputSchema;
+    assert.equal(Object.hasOwn(schema.properties ?? {}, 'workId'), false);
+    assert.ok(!schema.required?.includes('workId'));
+    for (const scope of [{}, { workId: 'wrong-work' }]) {
+      const submitted = await client.callTool({ name: 'submit-conclusion', arguments: { ...scope, conclusion: 'completed', reason: '令牌所属派单' } });
+      assert.equal((submitted.structuredContent as any).ok, true);
+    }
+    const updated = (await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: dispatchRecord.id })).result;
+    assert.equal(updated.conclusion, 'completed');
+    assert.equal(updated.conclusionReason, '令牌所属派单');
     const rejected = await client.callTool({ name: 'get-work', arguments: { workId: daemon.work.id } });
     assert.equal((rejected.structuredContent as any).error.code, 'FORBIDDEN');
     const invalid = await client.callTool({ name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '执行派单不能报通过' } });

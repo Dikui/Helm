@@ -163,8 +163,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
     content = `修复自卡片 ${original.id}。请把原卡片分支 ${original.cardBranch} 合进当前卡片分支并解决冲突，保留合并关系。\n\n${content}`;
   }
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
-  const cardContentSnapshot = purpose === 'verification' ? card.content : null;
-  if (cardContentSnapshot !== null) content = `卡片说明快照：\n${cardContentSnapshot}\n\n${content}`;
+  const cardContentSnapshot = card.content;
+  content = `卡片说明快照：\n${cardContentSnapshot}\n\n${content}`;
   const copy = cardCopy(store, work.id, card.id);
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
