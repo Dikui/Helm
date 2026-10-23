@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Grok 执行者跑通一轮
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 取消发 `session/cancel`，派单结束方式为被中止；收尾和按 cwd 清残留沿用现有做法，不假设取消会杀掉子进程
 - [x] 续跑按 `sessionCapabilities.resume` 用 `session/resume`，会话 id 不变；验收派单仍一律新开
@@ -21,3 +21,5 @@
 验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 全部 379 项通过。假 ACP agent 覆盖取消、忽略取消、竞态、启动中止、新进程续跑、验收新开与打回、额度/普通报错、崩溃、畸形协议、压缩落库，以及卡片/工作暂停和取消后按 cwd 清理独立子进程。测试均使用临时 HOME，浏览器使用工具替身。
 
 等待沙箱外验证：本轮按用户要求没有运行任何真实冒烟、浏览器或真实模型会话。`tests/grok-executor.real.ts` 已补写新 ACP 进程续跑后回答上一轮随机暗号（本轮不提供暗号且禁止读文件），以及前台工具实际等待期间暂停卡片、派单返回被中止、工具连接随清理关闭；只编译，尚未运行。需在沙箱外运行 `HELM_GROK_EXECUTOR_REAL=1 npm run test:real --cache /private/tmp/helm-npm-cache`，核对 `resume.json`、`cancel.json` 和原有 `grok.png` 等证据。保留任务单 01 原有一轮、沙箱、令牌、用量、模型档位及并行验收。状态为 `ready-for-human`，等待真实冒烟。
+
+- 2026-10-23 沙箱外第二轮真实冒烟（d3ea35c）`grok-executor.real` 全部通过：单轮、同端点结论与浏览器、家目录越界写入被拦、token、模型 grok-4.5/low 经 set_config_option 生效、两派单真并行、进行中取消返回被中止、新进程续跑答对暗号。关闭。

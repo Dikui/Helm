@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 共用 ACP 驱动模块实现现有 `Driver` 接口，客户端用 `@agentclientprotocol/sdk`，锁定确切版本、用 v1 入口；每次派单一个进程：`initialize` → `authenticate` → `session/new` → 一轮 `session/prompt` → 收尾关进程，结束看 `stopReason`
 - [x] agent 档案在代码里登记，描述启动命令、认证、环境变量、模型和推理强度下发、用量来源；协议流程不进档案
@@ -37,3 +37,5 @@
 本次将 `session/new` 和 `session/resume` 后的配置下发及核对统一放进 `AcpDriver`：按 `configOptions` 的取值 id 设置模板模型，删除启动参数 `-m`，设置完成后核对当前模型与推理强度，缺失、设置失败或不一致都拒绝发送 prompt，由运行层保存为出错退出及具体原因。档案只声明差异，共用配置流程允许后续 DeepSeek 同样下发模型和强度。真实冒烟的越界目标改为家目录下 `.helm-grok-smoke-*` 临时目录，结束删除，同时要求真实拒绝证据、写入失败及文件不存在；并行只验证两派单同时等待，不再设置、检查或清理 leader，超时提示另一派单未到达（可能排队或提前失败）。spec 的模型设置及 Testing Decisions 同步修正；本条替代上文关于 `-m` 和共用 leader 的验收说明。
 
 验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；假 ACP 驱动及运行层定向测试 67/67 通过，覆盖设置模型、模型/强度不一致拒绝、错误原因落库、续跑后重新设置及配置期间中止；`npm test --cache /private/tmp/helm-npm-cache` 全量 389/389 通过。本轮遵照用户要求未运行真实冒烟、未启动浏览器或真实 Claude/Codex/Grok 会话，也未派生子代理；真实环境修复后的结果仍待另次验证。执行报告仅写入 `.scratch/tasks/p3-01-fix/report.md`。
+
+- 2026-10-23 沙箱外第二轮真实冒烟（d3ea35c）`grok-executor.real` 全部通过：单轮、同端点结论与浏览器、家目录越界写入被拦、token、模型 grok-4.5/low 经 set_config_option 生效、两派单真并行、进行中取消返回被中止、新进程续跑答对暗号。关闭。
