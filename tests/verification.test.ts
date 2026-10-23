@@ -279,6 +279,118 @@ test('整体验收用普通卡片依赖所有成果，只派验收单且完成�
   assert.equal(artifacts.find((value: any) => value.kind === 'branch').commitSha, checkedHead);
 });
 
+test('只派验收单的卡片新增上游成果后复验刷新副本，完成时跳过合并', async t => {
+  const firstVerified = hold();
+  const upstreamEnded = hold();
+  const reverified = hold();
+  t.after(() => { firstVerified.release(); upstreamEnded.release(); reverified.release(); });
+  let overallPath = '';
+  const passed: FakeStep = { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '成果符合标准' }, check: ok };
+  const daemon = await fixture(t, [
+    card('overall'), dispatch('first', 'verification', 'overall'), { type: 'hang', until: firstVerified.promise },
+    card('upstream', false),
+    { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'upstream').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
+    dispatch('upstream', 'execution', 'upstream'), { type: 'hang', until: upstreamEnded.promise }, complete(ok, 'upstream'),
+    dispatch('again', 'verification', 'overall'), { type: 'hang', until: reverified.promise }, complete(ok, 'overall'),
+  ], [ctx => {
+    overallPath = ctx.options.cwd;
+    assert.equal(git(overallPath, 'rev-parse', 'HEAD'), git(overallPath, 'rev-parse', 'main'));
+    return [passed];
+  }, [{ type: 'write', path: 'upstream.txt', content: 'new upstream result\n' }], ctx => {
+    assert.equal(ctx.options.cwd, overallPath);
+    assert.equal(git(overallPath, 'show', 'HEAD:upstream.txt'), 'new upstream result');
+    return [passed];
+  }]);
+  await until(daemon.dispatches, values => values[0]?.status === 'ended');
+  firstVerified.release();
+  await until(daemon.dispatches, values => values[1]?.status === 'ended');
+  upstreamEnded.release();
+  const records = await until(daemon.dispatches, values => values[2]?.status === 'ended');
+  const verification = records[2];
+  assert.equal(verification.endReason, 'completed', JSON.stringify(verification));
+  assert.equal(verification.conclusion, 'passed');
+  assert.notEqual(verification.startCommit, records[0].startCommit);
+  const workTip = git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`);
+  assert.equal(verification.startCommit, workTip);
+  assert.equal(verification.endCommit, workTip);
+  assert.equal(git(overallPath, 'rev-parse', (await daemon.cards()).find(value => value.key === 'overall').cardBranch), workTip);
+  const events = await daemon.events();
+  const refreshes = events.filter(event => event.action === 'verification-copy-refreshed');
+  assert.equal(refreshes.length, 2);
+  assert.deepEqual(refreshes.map(event => event.dispatchId), [records[0].id, verification.id]);
+  assert.equal(refreshes[1].details.previousCommit, records[0].startCommit);
+  assert.equal(refreshes[1].details.startCommit, workTip);
+  assert.ok(events.indexOf(refreshes[1]) < events.findIndex(event => event.action === 'dispatch-started' && event.dispatchId === verification.id));
+  reverified.release();
+  await daemon.finished();
+  assert.equal((await daemon.cards()).find(value => value.key === 'overall').status, 'completed');
+  assert.equal(git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`), workTip);
+});
+
+test('派过执行单的卡片多次验收始终检查自己的成果，不随工作分支刷新', async t => {
+  const executed = hold();
+  const verified = hold();
+  const upstreamEnded = hold();
+  t.after(() => { executed.release(); verified.release(); upstreamEnded.release(); });
+  let executionCommit = '';
+  const verify: FakeScript = ctx => {
+    assert.equal(git(ctx.options.cwd, 'rev-parse', 'HEAD'), executionCommit);
+    assert.equal(git(ctx.options.cwd, 'show', 'HEAD:result.txt'), 'card implementation');
+    assert.throws(() => git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'));
+    return [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '本卡片成果通过' }, check: ok }];
+  };
+  const daemon = await fixture(t, [
+    card(), dispatch('execute', 'execution'), { type: 'hang', until: executed.promise },
+    dispatch('first'), { type: 'hang', until: verified.promise },
+    card('upstream', false), dispatch('upstream', 'execution', 'upstream'), { type: 'hang', until: upstreamEnded.promise },
+    complete(ok, 'upstream'), dispatch('again'),
+  ], [[{ type: 'write', path: 'result.txt', content: 'card implementation\n' }], verify,
+    [{ type: 'write', path: 'upstream.txt', content: 'other card result\n' }], verify]);
+  executionCommit = (await until(daemon.dispatches, values => values[0]?.status === 'ended'))[0].endCommit;
+  executed.release();
+  await until(daemon.dispatches, values => values[1]?.status === 'ended');
+  verified.release();
+  await until(daemon.dispatches, values => values[2]?.status === 'ended');
+  upstreamEnded.release();
+  await daemon.finished();
+  const records = await until(daemon.dispatches, values => values[3]?.status === 'ended');
+  for (const verification of records.filter(value => value.purpose === 'verification')) {
+    assert.equal(verification.endReason, 'completed', JSON.stringify(verification));
+    assert.equal(verification.conclusion, 'passed');
+    assert.equal(verification.startCommit, executionCommit);
+    assert.equal(verification.endCommit, executionCommit);
+  }
+  assert.notEqual(git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`), executionCommit);
+  assert.ok(!(await daemon.events()).some(event => event.action === 'verification-copy-refreshed'));
+});
+
+test('只验收卡片排队期间上游合入，实际启动时才对齐工作分支', async t => {
+  const upstreamEnded = hold();
+  const unblock = hold();
+  t.after(() => { upstreamEnded.release(); unblock.release(); });
+  const daemon = await fixture(t, [
+    card('upstream', false), card('blocker', false), card('overall'),
+    dispatch('upstream', 'execution', 'upstream'), { type: 'hang', until: upstreamEnded.promise },
+    dispatch('blocker', 'execution', 'blocker'), dispatch('overall', 'verification', 'overall'), complete(ok, 'upstream'),
+  ], [[{ type: 'write', path: 'upstream.txt', content: 'merged while queued\n' }], [{ type: 'hang', until: unblock.promise }], ctx => {
+    assert.equal(git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'), 'merged while queued');
+    return [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '含排队期间的新成果' }, check: ok }];
+  }], { beforeConfirm: async call => { ok(await call('set-concurrency', { limit: 1 })); } });
+  await until(daemon.dispatches, values => values[0]?.status === 'ended');
+  upstreamEnded.release();
+  await daemon.finished();
+  const queued = (await daemon.dispatches())[2];
+  assert.equal(queued.status, 'queued');
+  assert.equal(queued.startCommit, null);
+  assert.ok(!(await daemon.events()).some(event => event.action === 'verification-copy-refreshed'));
+  const workTip = git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`);
+  unblock.release();
+  const verification = (await until(daemon.dispatches, values => values[2]?.status === 'ended'))[2];
+  assert.equal(verification.endReason, 'completed', JSON.stringify(verification));
+  assert.equal(verification.conclusion, 'passed');
+  assert.equal(verification.startCommit, workTip);
+});
+
 test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之后才重置', async t => {
   const end = hold();
   const revoke = hold();
