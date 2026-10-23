@@ -18,3 +18,5 @@
 已复用 Codex app-server 驱动实现调度者角色、每轮独立进程和 thread、只读沙箱、轮次 MCP 与 sqlite 目录，新增 codex-coordinator 模板、额度暂停通知测试及真实冒烟入口；真实冒烟已并入 test:real，遵照本轮约束未运行，最后一项留待调度者在临时 HOME 的沙箱外环境验收。
 
 2026-10-23 沙箱外 Codex 真实冒烟通过（gpt-6-luna、low）：两轮各建卡 2、加依赖 2、删依赖 1、派单 1，均 ok；打断后新 session 重投同 key 只留 2 张卡 1 张派单；read-only 写入被拒、旧轮次令牌 401、NO_PROXY、token；initialize 31–39 ms。
+
+2026-10-23 按修订后的 ADR 0005 改为全局配置正常进入：Codex 调度轮次继续加载默认主目录配置，并显式传 serviceTier，保持每轮新开和 read-only 沙箱。

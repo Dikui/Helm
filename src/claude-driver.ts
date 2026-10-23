@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { access, lstat, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { parse as parseYaml } from 'yaml';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
 import { runtimeEnvironment } from './environment.js';
@@ -14,25 +13,6 @@ import { TemplateCatalog, type AgentTemplate } from './templates.js';
 
 function claudeHome(template: AgentTemplate, home = homedir()) {
   return join(home, '.helm', 'agent-homes', template.id);
-}
-
-async function claudeSkills(template: AgentTemplate): Promise<string[]> {
-  if (!template.skillsPath) return [];
-  const entries = await readdir(template.skillsPath, { withFileTypes: true });
-  const names: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    try {
-      const path = join(template.skillsPath, entry.name, 'SKILL.md');
-      if (!(await stat(path)).isFile()) continue;
-      const content = await readFile(path, 'utf8');
-      const frontmatter = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-      const metadata = frontmatter ? parseYaml(frontmatter[1]!) : null;
-      const name = typeof metadata?.name === 'string' && metadata.name.trim() ? metadata.name.trim() : entry.name;
-      names.push(name.startsWith(`${template.id}:`) ? name : `${template.id}:${name}`);
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  }
-  return [...new Set(names)].sort();
 }
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
@@ -87,11 +67,10 @@ async function writablePath(cwd: string, path: unknown): Promise<boolean> {
   }
 }
 
-function executorPermission(cwd: string, skills: string[]): CanUseTool {
+function executorPermission(cwd: string): CanUseTool {
   return async (tool, input, context) => {
     const deny = { behavior: 'deny' as const, message: 'Helm executor may write only inside its card copy and must keep Bash sandboxed.' };
     if (context.signal.aborted) return deny;
-    if (tool === 'Skill' && !skills.includes(String(input.skill))) return deny;
     if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
       if (!await writablePath(cwd, tool === 'NotebookEdit' ? input.notebook_path : input.file_path)) return deny;
     }
@@ -103,13 +82,11 @@ function executorPermission(cwd: string, skills: string[]): CanUseTool {
   };
 }
 
-function coordinatorPermission(servers: string[], skills: string[]): CanUseTool {
+function coordinatorPermission(): CanUseTool {
   return async (tool, input, context) => {
-    const allowed = ['Bash', 'Read', 'Grep', 'Glob'].includes(tool)
-      || (tool === 'Skill' && skills.includes(String(input.skill)))
-      || servers.some(name => tool.startsWith(`mcp__${name}__`));
+    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'Skill'].includes(tool) || tool.startsWith('mcp__');
     if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
-      return { behavior: 'deny', message: 'Helm coordinator may only read project code and use the injected Helm tools; Bash must stay sandboxed.' };
+      return { behavior: 'deny', message: 'Helm coordinator may only read project code and use Skill or MCP tools; Bash must stay sandboxed.' };
     }
     return { behavior: 'allow', updatedInput: input };
   };
@@ -164,7 +141,6 @@ export class ClaudeDriver implements Driver {
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
     const template = options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor');
-    const skills = await claudeSkills(template);
     options.signal?.throwIfAborted();
     const id = options.resumeSessionId ?? randomUUID();
     const controller = new AbortController();
@@ -187,19 +163,23 @@ export class ClaudeDriver implements Driver {
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
-      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: template.home === 'template' ? ['user'] : [], strictMcpConfig: true,
-      settings: { autoMemoryEnabled: false },
+      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: template.home === 'template' ? ['user'] : ['user', 'project', 'local'],
+      settings: { autoMemoryEnabled: false, fastMode: false,
+        // Ask rules precede settings allow rules; otherwise they can skip our
+        // path and sandbox checks in canUseTool, even in default mode.
+        // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
+        permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] },
+      },
       // The template directory is the plugin root; Claude discovers its skills/.
-      // Qualified names also hide CLI built-ins and skills from other sources.
       ...(template.skillsPath ? { plugins: [{ type: 'local', path: resolve(template.directory), skipMcpDiscovery: true }] } : {}),
-      skills,
+      skills: 'all',
       systemPrompt: templatePrompt(template),
       permissionMode: 'default', abortController: controller,
-      canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers), skills) : executorPermission(cwd, skills),
+      canUseTool: coordinator ? coordinatorPermission() : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
       // An explicit tools list hides Skill unless it is listed, even with `skills` set.
       tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
-        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], ...skills.length ? ['Skill'] : []],
+        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], 'Skill'],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
         const child = spawn(processOptions.command, processOptions.args, {
@@ -212,9 +192,11 @@ export class ClaudeDriver implements Driver {
       },
       sandbox: {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
+        // The CLI still merges user-scope excludedCommands and allowWrite;
+        // these session settings cannot remove those user sandbox exceptions.
         // Claude grants cwd writes by default; an empty allowWrite alone does
         // not make it read-only. Explicitly deny cwd, including temp worktrees.
-        filesystem: coordinator ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] },
+        filesystem: coordinator ? { disabled: false, allowWrite: [], denyWrite: [cwd] } : { disabled: false, allowWrite: [cwd] },
         network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, { type: 'http', ...server }])),

@@ -59,6 +59,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   const thread = requests[3].params;
   assert.equal(thread.approvalPolicy, 'never');
   assert.equal(thread.sandbox, 'workspace-write');
+  assert.equal(thread.serviceTier, 'fast');
   assert.equal(thread.config.service_tier, 'fast');
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
   assert.match(thread.developerInstructions, /测试策略/);
@@ -236,6 +237,7 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
   assert.equal(requests.filter(r => r.method === 'thread/start').length, 2);
   assert.equal(requests.some(r => r.method === 'thread/resume'), false);
   for (const [round, thread] of requests.filter(r => r.method === 'thread/start').entries()) {
+    assert.equal(thread.params.serviceTier, 'fast');
     assert.equal(thread.params.sandbox, 'read-only');
     assert.equal(thread.params.approvalPolicy, 'never');
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);

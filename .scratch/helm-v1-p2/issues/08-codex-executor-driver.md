@@ -25,3 +25,5 @@
 2026-10-23 沙箱外 Codex 真实冒烟通过（gpt-6-luna、low）：同端点浏览器与提交结论、副本外写入被沙箱拒绝、副本内写入、专用主目录不读个人配置、token、续跑同 session、两模板 skills 隔离、`~/.agents/skills` 干扰 skill 未出现；initialize 30–56 ms。登录软链接跑前跑后不变。冒烟改为软链接本机 `~/.codex/auth.json`、复用已装浏览器；ChatGPT 账号下 Codex 不支持 gpt-5.4-mini；Codex 经嵌套 exec 执行的命令不进 app-server 事件流，沙箱拒绝改从 `CODEX_HOME/sessions` 会话记录取证。
 
 2026-10-23 按 ADR 0005 改为默认主目录：Codex 订阅模板不再设置 CODEX_HOME、创建专用目录或凭据软链接，改由 codex login status 的退出码检查登录，并移除启动时关闭模板外 user skills 的配置写入，保留模板 extraRoots、API 主目录和派单/轮次 sqlite 目录。
+
+2026-10-23 按修订后的 ADR 0005 改为全局配置正常进入：核对 Codex 默认主目录和全局配置入口，serviceTier 每次会话显式传 fast 或 default，驱动实现无需修改。

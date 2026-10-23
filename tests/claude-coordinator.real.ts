@@ -1,16 +1,20 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-coordinator.
-// Requires Claude login in its default home. No browser is started.
+// Requires Claude login in a disposable HOME. No browser is started.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { before, test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver } from '../src/claude-driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { fixture, until } from './claude-coordinator-fixture.js';
-import { assertIsolatedInitialization, helmToolNames } from './claude-init.js';
+import { assertInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_COORDINATOR_REAL === '1';
+before(async () => {
+  if (enabled) assert.notEqual(await realpath(homedir()), await realpath(userInfo().homedir), '请先设置并登录临时 HOME，禁止使用用户真实主目录');
+});
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 function toolCalls(messages: SDKMessage[]) {
@@ -43,8 +47,8 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
     assert.equal(sdk.effort, 'low');
     assert.equal(sdk.cwd, brief.work.workPath);
     assert.ok(sdk.cwd!.endsWith('/_work'));
-    assert.deepEqual(sdk.settingSources, []);
-    assert.deepEqual(sdk.sandbox?.filesystem, { allowWrite: [], denyWrite: [sdk.cwd] });
+    assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
+    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [sdk.cwd] });
     assert.deepEqual(Object.keys(sdk.mcpServers ?? {}), ['helm']);
     const endpoint = sdk.mcpServers!.helm!;
     assert.ok('url' in endpoint && endpoint.type === 'http');
@@ -91,9 +95,9 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
 }
 
 function connected(round: Observation) {
-  assertIsolatedInitialization(round.messages, 'coordinator', round.helmTools);
+  assertInitialization(round.messages, 'coordinator', round.helmTools);
   const servers = round.messages.flatMap(message => message.type === 'system' && message.subtype === 'init' ? message.mcp_servers : []);
-  assert.ok(!servers.some(server => server.status === 'needs-auth'),
+  assert.ok(!servers.some(server => server.name === 'helm' && server.status === 'needs-auth'),
     'needs-auth reproduced: replace per-round HTTP injection with the specified token-preserving stdio forwarder before accepting this smoke');
   assert.ok(servers.some(server => server.name === 'helm' && server.status === 'connected'), JSON.stringify(servers));
 }

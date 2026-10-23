@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   needsBrowser?: boolean; purpose?: 'execution' | 'verification'; browserArgs?: string[]; realBrowser?: boolean; after?: FakeScript;
   watchdog?: { wallTimeoutMs: number; idleTimeoutMs: number };
   executorDriver?: Driver; content?: string; model?: string;
+  projectSettings?: object;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-browser-')));
   const repo = join(directory, 'project');
@@ -33,6 +34,11 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   await writeFile(join(repo, 'index.html'), '<h1>Helm browser dispatch</h1>');
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' });
   git('add', 'index.html');
+  if (config.projectSettings) {
+    await mkdir(join(repo, '.claude'));
+    await writeFile(join(repo, '.claude', 'settings.json'), JSON.stringify(config.projectSettings));
+    git('add', '.claude/settings.json');
+  }
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const templateDir = await copyTemplates(directory);
   if (config.model) await configureTestTemplate(templateDir, 'claude-executor', { model: config.model, reasoningEffort: 'low' });

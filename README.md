@@ -62,7 +62,7 @@ SSE 的 `event` 为动作名，`id` 为事件 id，`data` 是完整结构化事�
 
 Agent 模板以仓库的 `templates/<模板 id>/` 为准，内置 `claude-coordinator`、`claude-executor`。每个目录包含 `config.json`、策略文件 `prompt.md` 和可选的 `skills/`；设置格式见内置模板。`role` 为 `coordinator` / `executor`，`driver` 为 `claude-sdk` / `codex`（Codex 驱动后续接入），`model` 和 `reasoningEffort` 可为 `null`；推理强度支持 `low` / `medium` / `high` / `max`。`fast` 默认 `false`，Claude 开启 fast 会标为不可用，并说明 extra usage 原因。`home` 为 `shared`（订阅）或 `template`（API），`description` 是供调度者派单时参考的职责说明。
 
-订阅模板使用 CLI 默认主目录，沿用终端里的登录：Claude 用 `claude auth login`，Codex 用 `codex login`。驱动不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，不创建订阅专用目录或凭据软链接，会话记录写入用户自己的历史；父环境的这两个变量也不会传给 CLI。Claude 仍以 `settingSources: []`、`strictMcpConfig` 和 skills 过滤限制配置来源；Codex 接受读取个人配置、`AGENTS.md`、skills 和插件，Helm 按会话传的参数覆盖同名项，不修改个人 skills 配置。详见 [ADR 0005](docs/adr/0005-subscription-templates-use-default-cli-homes.md)。
+订阅模板使用 CLI 默认主目录，沿用终端里的登录：Claude 用 `claude auth login`，Codex 用 `codex login`。驱动不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，不创建订阅专用目录或凭据软链接，会话记录写入用户自己的历史；父环境的这两个变量也不会传给 CLI。Claude 通过 `settingSources: ['user', 'project', 'local']` 加载用户、项目和本地设置，用户的规则、hooks、插件、MCP 和 skills 正常进入；模板 `skills/` 以本地插件叠加，`skills: 'all'` 保留用户和 CLI 自带技能。Codex 同样读取个人配置、`AGENTS.md`、hooks、skills 和插件。两种角色都能使用用户 MCP。Helm 按会话覆盖模型、推理强度、fast 和角色权限，不修改个人配置。详见 [ADR 0005](docs/adr/0005-subscription-templates-use-default-cli-homes.md)。
 
 API 模板仍各用 `~/.helm/agent-homes/<模板 id>/`，Claude 设置 `CLAUDE_CONFIG_DIR` 并用 `settingSources: ['user']`，Codex 设置 `CODEX_HOME`。用户按 CLI 格式配置 `settings.json` 或 `config.toml`；Helm 只检查目录和文件存在，不打开凭据或配置。订阅可用性分别由默认环境的 `claude auth status --json`、`codex login status` 检查；Codex 只看退出码，支持由 CLI 管理的文件或钥匙串登录。`CODEX_SQLITE_HOME` 仍放在每次派单或调度轮次的数据目录。
 
@@ -87,11 +87,13 @@ npm test
 npm run test:real --cache /private/tmp/helm-npm-cache
 ```
 
-入口按顺序运行浏览器、Claude 执行者、Claude 调度者三套测试，任一失败就停止。需要本机已登录的 `claude`、已安装的有界面 Chromium；Linux 还需显示服务。入口固定在仓库根目录启动各套测试，子进程环境从空对象按白名单构造，仅保留运行必需变量，额外保留 `DISPLAY`、`XAUTHORITY`、`WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR` 供 Linux 浏览器连接显示服务。不会传入调用方的 Claude 桌面会话、任意变量、Node 注入参数或 Helm 假驱动开关。测试输出的截图须在沙箱外打开核对。沙箱内运行普通测试，浏览器使用工具替身。
+入口按顺序运行浏览器、Claude 执行者、Claude 调度者、Claude skills、Codex 执行者、Codex 调度者，任一失败就停止。Claude 冒烟须先在临时 `HOME` 下登录并以该 `HOME` 运行，测试拒绝用户真实主目录；临时主目录应放在 CLI 默认可写临时目录之外，供副本外沙箱拒绝检查使用。需要已安装的有界面 Chromium；Linux 还需显示服务。入口固定在仓库根目录启动各套测试，子进程环境从空对象按白名单构造，仅保留运行必需变量，额外保留 `DISPLAY`、`XAUTHORITY`、`WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR` 供 Linux 浏览器连接显示服务。不会传入调用方的 Claude 桌面会话、任意变量、Node 注入参数或 Helm 假驱动开关。测试输出的截图须在沙箱外打开核对。沙箱内运行普通测试，浏览器使用工具替身。
 
 调度者和执行者的环境白名单及逐项用途见 [`src/environment.ts`](src/environment.ts)：PATH 查找 CLI 和开发工具，HOME 供 CLI 自行读取本地登录，USER/LOGNAME 提供用户身份，SHELL 选择命令解释器，LANG/LANGUAGE 和列出的 LC 类别保留语言与编码，TMPDIR/TMP/TEMP 指定临时目录，大小写代理变量维持网络访问。其余父环境不传入；运行层随后注入端口段、禁推送的 git 配置和无效 GH_TOKEN，并为本机 MCP 合并大小写 NO_PROXY。Helm 不读取登录凭据。Claude 会话固定设置 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` 和 `autoMemoryEnabled: false`，禁用自动记忆（[官方说明](https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory)）。
 
-Claude 调度者的内置工具为 Bash/Read/Grep/Glob；执行者再加 Write/Edit/NotebookEdit/WebFetch/WebSearch/TodoWrite，避免随 CLI 默认工具集合变化。真实冒烟核对初始化记录：工具只来自该角色的内置白名单和当前带令牌端点实际提供的 Helm 工具。
+Claude 调度者的内置工具为 Bash/Read/Grep/Glob/Skill；执行者再加 Write/Edit/NotebookEdit/WebFetch/WebSearch/TodoWrite，避免随 CLI 默认工具集合变化。权限检查允许任意 Skill 和用户 MCP；执行者的写工具仍检查目标必须在卡片副本内（含真实路径），Bash 禁止请求退出沙箱。会话显式传 `permissionMode: default`、`settings.fastMode: false`，Codex 每次新开或续跑会话显式传 `serviceTier`（关闭 fast 时为 `default`）。真实冒烟核对角色内置工具、实际注入的 Helm 工具及用户 MCP。
+
+Claude 会话对写工具和 Bash 设置 `permissions.ask`，优先于加载的 allow 规则进入现有权限回调；沙箱显式开启、不可用即失败、禁止无沙箱重试，并保持文件系统隔离。严格沙箱会忽略项目设置中扩大访问范围的例外，但用户级 `excludedCommands`、`filesystem.allowWrite` 及 `Edit(...)` 放行路径仍按 CLI 规则合并，会话空数组无法清除；目前不能保证带这些用户级例外的 Bash 只写卡片副本或调度者只读，参见 [官方沙箱说明](https://code.claude.com/docs/en/sandboxing#repository-settings-under-an-admin-required-sandbox)。
 
 调度者调用 `create-dispatch` 时可加 `needsBrowser: true`。运行层为这次派单在执行者沙箱外启动独立的 Playwright HTTP MCP，执行者通过同一个派单 MCP 端点使用导航、快照、点击、输入、截图等检查工具和 `submit-conclusion`。浏览器工具使用明确的白名单，包含执行代码的工具不会转发；未标记派单、用户和调度轮次都拿不到浏览器工具。运行层记录浏览器的 pgid 和启动时间；派单结束、撤销或服务停止时，先 TERM 整组，5 秒后仍存活则 KILL，再处理副本。
 

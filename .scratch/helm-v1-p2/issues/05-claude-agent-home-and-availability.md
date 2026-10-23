@@ -21,3 +21,5 @@
 2026-10-23 沙箱外真实冒烟：browser、claude-executor、claude-coordinator、claude-skills 在专用主目录下全部通过（`test:real` 里的 Codex 两项归 08、09），`~/.claude/projects/` 前后 97 个目录一致。冒烟中发现并修复 `claude auth status` 不认 `--setting-sources`。
 
 2026-10-23 按 ADR 0005 改为默认主目录：Claude 订阅模板不再设置 CLAUDE_CONFIG_DIR 或创建专用目录，以默认环境检查登录并提示 claude auth login，API 模板及会话过滤保持原有行为。
+
+2026-10-23 按修订后的 ADR 0005 改为全局配置正常进入：Claude 订阅模板加载 user/project/local 设置及用户 MCP，继续沿用默认登录，API 专用目录与 user 设置来源不变。

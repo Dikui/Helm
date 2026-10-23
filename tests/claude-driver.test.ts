@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { CanUseTool, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { CanUseTool, Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
 import { TemplateCatalog } from '../src/templates.js';
@@ -55,7 +55,7 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
-test('Claude 模板只挂自己的 skills 插件，两个角色均可调用自己的 skill', async t => {
+test('Claude 模板叠加本地 skills 插件，两个角色均可调用模板、用户和内置 skill', async t => {
   const base = await fixture(t);
   const context = { signal: new AbortController().signal, toolUseID: 'skill', requestId: 'skill' };
   await Promise.all((['coordinator', 'executor'] as const).map(async role => {
@@ -78,10 +78,12 @@ test('Claude 模板只挂自己的 skills 插件，两个角色均可调用自�
         inspected = true;
         const sdk = args.options!;
         assert.deepEqual(sdk.plugins, [{ type: 'local', path: directory, skipMcpDiscovery: true }]);
-        assert.deepEqual(sdk.skills, [`${id}:fallback`, `${id}:passphrase`]);
+        assert.equal(sdk.skills, 'all');
         assert.ok((sdk.tools as string[]).includes('Skill'));
         assert.equal((await sdk.canUseTool!('Skill', { skill: `${id}:passphrase` }, context))?.behavior, 'allow');
-        assert.equal((await sdk.canUseTool!('Skill', { skill: 'other-template:secret' }, context))?.behavior, 'deny');
+        for (const skill of ['user-skill', 'loop']) {
+          assert.equal((await sdk.canUseTool!('Skill', { skill }, context))?.behavior, 'allow');
+        }
         yield result();
       } }) });
     await collect(driver, { ...base, template,
@@ -90,7 +92,7 @@ test('Claude 模板只挂自己的 skills 插件，两个角色均可调用自�
   }));
 });
 
-test('Claude 没有 skills 目录时不挂插件，空目录也显式禁用所有 skills', async t => {
+test('Claude 没有 skills 目录或目录为空时仍开放用户和内置 skills', async t => {
   const options = await fixture(t);
   const empty = join(options.cwd, 'skills');
   await mkdir(empty);
@@ -100,7 +102,8 @@ test('Claude 没有 skills 目录时不挂插件，空目录也显式禁用所�
       await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
         query: fakeQuery([result()], args => {
           inspected = true;
-          assert.deepEqual(args.options!.skills, []);
+          assert.equal(args.options!.skills, 'all');
+          assert.ok((args.options!.tools as string[]).includes('Skill'));
           assert.deepEqual(args.options!.plugins, skillsPath === null ? undefined
             : [{ type: 'local', path: options.cwd, skipMcpDiscovery: true }]);
         }) }), { ...options, template: { ...options.template!, directory: options.cwd, skillsPath, home } });
@@ -120,7 +123,15 @@ test('Claude 订阅模板沿用默认主目录，API 使用模板主目录并加
         assert.equal(Object.hasOwn(args.options!.env!, 'CLAUDE_CONFIG_DIR'), home === 'template');
         if (home === 'template') assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
           join(options.cwd, '.helm', 'agent-homes', 'api-executor'));
-        assert.deepEqual(args.options!.settingSources, home === 'shared' ? [] : ['user']);
+        assert.deepEqual(args.options!.settingSources, home === 'shared' ? ['user', 'project', 'local'] : ['user']);
+        assert.equal(Object.hasOwn(args.options!, 'strictMcpConfig'), false);
+        assert.equal(typeof args.options!.settings, 'object');
+        const settings = args.options!.settings as Exclude<NonNullable<Options['settings']>, string>;
+        assert.equal(settings.fastMode, false);
+        assert.equal(settings.autoMemoryEnabled, false);
+        // Ask rules precede loaded allow rules, keeping the path checks reachable.
+        assert.deepEqual(settings.permissions?.ask, ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
+        assert.equal(args.options!.permissionMode, 'default');
       }) }), { ...options, template });
   }
 });
@@ -266,7 +277,7 @@ test('同一个 Claude 驱动按模板角色选择会话权限，并在文件策
           assert.match(args.options!.systemPrompt as string, /卡片说明快照/);
           assert.match(args.options!.systemPrompt as string, /browser\/<文件名>/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
-        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob']);
+        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
       }) });
     assert.equal((await collect(driver, options)).end?.reason, 'completed');
   }
@@ -286,14 +297,14 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
       assert.equal(sdk.cwd, cwd);
-      assert.deepEqual(sdk.settingSources, []);
+      assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
       assert.equal(sdk.permissionMode, 'default');
-      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob']);
+      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
       assert.deepEqual(sdk.sandbox, {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        filesystem: { allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
+        filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
       });
-      assert.equal(sdk.strictMcpConfig, true);
+      assert.equal(Object.hasOwn(sdk, 'strictMcpConfig'), false);
       assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
       assert.equal(sdk.env?.NO_PROXY, 'example.test,127.0.0.1,localhost');
       assert.equal(sdk.model, 'haiku');
@@ -308,11 +319,11 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
   assert.ok(permission);
   const context: Parameters<CanUseTool>[2] = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
     suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' }] };
-  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency']) {
+  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency', 'mcp__user__query', 'mcp__other__write', 'Skill']) {
     const input = { command: 'cat README.md' };
     assert.deepEqual(await permission(tool, input, context), { behavior: 'allow', updatedInput: input });
   }
-  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'Skill', 'AskUserQuestion', 'ExitPlanMode', 'mcp__other__write']) {
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'AskUserQuestion', 'ExitPlanMode']) {
     assert.equal((await permission(tool, { file_path: join(cwd, 'file') }, context))?.behavior, 'deny', tool);
   }
   assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
@@ -336,16 +347,17 @@ test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新
         const sdk = args.options!;
         assert.equal(sdk.pathToClaudeCodeExecutable, '/test/bin/claude');
         assert.equal(sdk.cwd, options.cwd);
-        assert.deepEqual(sdk.settingSources, []);
-        assert.deepEqual(sdk.settings, { autoMemoryEnabled: false });
-        assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite']);
+        assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
+        assert.deepEqual(sdk.settings, { autoMemoryEnabled: false, fastMode: false,
+          permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] } });
+        assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
         assert.equal(sdk.permissionMode, 'default');
         assert.deepEqual(sdk.sandbox, {
           enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-          filesystem: { allowWrite: [options.cwd] }, network: { allowLocalBinding: true },
+          filesystem: { disabled: false, allowWrite: [options.cwd] }, network: { allowLocalBinding: true },
         });
         assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
-        assert.equal(sdk.strictMcpConfig, true);
+        assert.equal(Object.hasOwn(sdk, 'strictMcpConfig'), false);
         assert.equal(sdk.model, 'haiku');
         assert.equal(sdk.effort, 'low');
         assert.equal(sdk.env?.HELM_PORT_START, '4500');

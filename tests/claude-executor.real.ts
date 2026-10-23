@@ -1,22 +1,25 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-executor.
-// Requires Claude login in its default home and the bundled, headed Chromium.
+// Requires Claude login in a disposable HOME and the bundled, headed Chromium.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
-import { test } from 'node:test';
+import { before, test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeExecutorDriver } from '../src/claude-driver.js';
 import { TemplateCatalog } from '../src/templates.js';
 import { fixture } from './browser-fixture.js';
-import { assertIsolatedInitialization, helmToolNames } from './claude-init.js';
+import { assertInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_EXECUTOR_REAL === '1';
+before(async () => {
+  if (enabled) assert.notEqual(await realpath(homedir()), await realpath(userInfo().homedir), '请先设置并登录临时 HOME，禁止使用用户真实主目录');
+});
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-test('Claude 订阅模板在默认主目录已登录', { skip: !enabled, timeout: 20_000 }, async () => {
+test('Claude 订阅模板在临时 HOME 的默认主目录已登录', { skip: !enabled, timeout: 20_000 }, async () => {
   const availability = await new ClaudeExecutorDriver().checkAvailability(new TemplateCatalog().get('claude-executor'));
   assert.equal(availability.available, true, `${availability.reason}\n${availability.command}`);
 });
@@ -73,9 +76,9 @@ function toolResult(messages: SDKMessage[], id: string) {
 }
 
 function connected(observed: ReturnType<typeof observedDriver>) {
-  assertIsolatedInitialization(observed.messages, 'executor', observed.helmTools);
+  assertInitialization(observed.messages, 'executor', observed.helmTools);
   const servers = observed.messages.flatMap(message => message.type === 'system' && message.subtype === 'init' ? message.mcp_servers : []);
-  assert.ok(!servers.some(server => server.status === 'needs-auth'),
+  assert.ok(!servers.some(server => server.name === 'helm' && server.status === 'needs-auth'),
     'needs-auth reproduced: replace per-dispatch HTTP injection with the specified token-preserving stdio forwarder before accepting this smoke');
   assert.ok(servers.some(server => server.name === 'helm' && server.status === 'connected'), JSON.stringify(servers));
   assert.equal(observed.endpoints.length, 1);
@@ -134,18 +137,23 @@ test('冒烟①⑤：三次真实派单在同端点使用结论与浏览器工�
     }
   });
 
-test('冒烟③执行者：副本外 Write 被权限拒绝，副本外 Bash 写被沙箱拒绝，副本内写入和本机绑定成功',
+test('冒烟③执行者：宽松项目设置不能放行副本外 Write 或 Bash 写，副本内写入和本机绑定成功',
   { skip: !enabled, timeout: 240_000 }, async t => {
-    // /tmp is intentionally writable in Claude's sandbox. Use a new, empty home
-    // directory to test a genuinely protected destination without touching user data.
+    // The disposable HOME must sit outside Claude's writable temp roots.
+    // Never create the protected destination in the user's actual home.
     const outside = await realpath(await mkdtemp(join(homedir(), '.helm-executor-smoke-')));
     t.after(() => rm(outside, { recursive: true, force: true }));
     const outsideWrite = join(outside, 'write-outside.txt');
     const outsideBash = join(outside, 'bash-outside.txt');
-    const outsideCommand = `printf outside > ${shellQuote(outsideBash)}`;
+    const outsideCommand = `node -e ${shellQuote(`require("fs").writeFileSync(${JSON.stringify(outsideBash)},"outside")`)}`;
     const insideCommand = `node -e ${shellQuote('require("fs").writeFileSync("inside-bash.txt","inside"); const s=require("http").createServer(); s.listen(0,"127.0.0.1",()=>s.close(()=>console.log("local-binding-ok")));')}`;
     const observed = observedDriver();
     const daemon = await fixture(t, [], { executorDriver: observed.driver, model: 'haiku',
+      projectSettings: {
+        permissions: { defaultMode: 'acceptEdits', allow: ['Write', `Write(${outside}/**)`, `Edit(${outside}/**)`, 'Bash(*)'] },
+        sandbox: { enabled: false, allowUnsandboxedCommands: true, excludedCommands: ['printf *', 'node *'], filesystem: { allowWrite: [outside] } },
+        fastMode: true,
+      },
       content: `这是隔离冒烟，只对下面的全新临时文件操作，不读凭据、不安装、不派生子代理、不提交、不推送、不部署。
 按顺序各尝试一次：
 1. 用 Write 向 ${outsideWrite} 写 outside，预期被 canUseTool 拒绝。
@@ -168,6 +176,8 @@ test('冒烟③执行者：副本外 Write 被权限拒绝，副本外 Bash 写�
     await assert.rejects(readFile(outsideWrite), { code: 'ENOENT' });
     await assert.rejects(readFile(outsideBash), { code: 'ENOENT' });
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
+    assert.match(execFileSync('git', ['-C', card.workPath, 'show', `${dispatch.startCommit}:.claude/settings.json`], { encoding: 'utf8' }), /excludedCommands/,
+      '宽松设置必须已提交并随卡片副本加载');
     assert.equal((await readFile(join(card.workPath, 'inside-write.txt'), 'utf8')).trim(), 'inside');
     assert.equal(await readFile(join(card.workPath, 'inside-bash.txt'), 'utf8'), 'inside');
     // The model may requote the command; match on its marker instead of the exact string.
