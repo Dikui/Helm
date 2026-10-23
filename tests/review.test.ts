@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { startHelmd } from '../src/server.js';
@@ -320,9 +321,25 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   assert.equal(gate.review.overallVerification[0].dispatchId, dispatches[1].id);
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), daemon.baseline);
   const work = await daemon.getWork();
+  const outputParams = dispatches.map((dispatch: any) => ({ workId: work.id, dispatchId: dispatch.id }));
+  const originalOutputs = await Promise.all(outputParams.map((params: any) => daemon.call('get-dispatch-output', params)));
+  const roundPaths = (await daemon.events()).filter(event => event.action === 'round-started').map(event => event.details.outputPath as string);
+  const originalRounds = await Promise.all(roundPaths.map(path => readFile(path)));
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
   assert.equal(existsSync(work.workPath), false);
   assert.equal((await daemon.getWork()).status, 'completed');
+  for (const [index, dispatch] of dispatches.entries()) {
+    assert.deepEqual(await daemon.call('get-dispatch-output', outputParams[index]), originalOutputs[index]);
+    for (const step of originalOutputs[index].result) {
+      const path = join(dispatch.outputPath, `${step.step}.json`);
+      assert.equal(existsSync(path), false);
+      assert.deepEqual(JSON.parse(gunzipSync(await readFile(`${path}.gz`)).toString()), step);
+    }
+  }
+  for (const [index, path] of roundPaths.entries()) {
+    assert.equal(existsSync(path), false);
+    assert.deepEqual(gunzipSync(await readFile(`${path}.gz`)), originalRounds[index]);
+  }
   assert.equal(git(daemon.remote, 'show', 'main:result.txt'), '实际成果');
   assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);
   const end = (await daemon.events()).filter(event => event.action === 'round-ended').at(-1);

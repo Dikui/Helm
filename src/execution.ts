@@ -10,6 +10,7 @@ import { TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { refreshVerificationCopy, resetVerificationCopy } from './verification.js';
+import { checkOutputUsage } from './outputs.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -307,6 +308,7 @@ export class ExecutionRunner {
         refreshCardReadiness(this.store, dispatch.workId);
         const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', result, scope);
         this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
+        checkOutputUsage(this.store);
       });
     }
   }

@@ -8,6 +8,7 @@ import { cardGraph, refreshCardReadiness } from './graph.js';
 import { cleanupRecordedProcessGroup, cleanupWorktreeProcesses } from './processes.js';
 import { completeReviewedWork } from './review.js';
 import type { TaskStore } from './store.js';
+import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -101,5 +102,7 @@ export async function reconcileStartup(store: TaskStore) {
     if (['completed', 'cancelled'].includes(store.work(work.id).status) && existsSync(workPath)) {
       dispatchGit(projectPath(store, work.id), 'worktree', 'remove', '--force', workPath);
     }
+    await compressWorkOutputs(store, work.id);
   }
+  store.transaction(() => checkOutputUsage(store));
 }

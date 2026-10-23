@@ -7,6 +7,7 @@ import { projectPath } from './alignment.js';
 import { cardDetails } from './graph.js';
 import { agentTemplate, type AgentTemplate } from './templates.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import { readOutput } from './outputs.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; templateId: string;
@@ -207,9 +208,10 @@ export function dispatchOutput(store: TaskStore, params: { workId: string; dispa
   const from = params.fromStep ?? 1;
   const to = params.toStep ?? Number.MAX_SAFE_INTEGER;
   if (to < from) throw new RuleError('INVALID_PARAMS', '结束步骤不能小于开始步骤。', 400);
-  return readdirSync(dispatch.outputPath).filter(name => /^\d+\.json$/.test(name))
-    .map(name => Number(name.slice(0, -5))).filter(step => step >= from && step <= to).sort((a, b) => a - b)
-    .map(step => JSON.parse(readFileSync(join(dispatch.outputPath, `${step}.json`), 'utf8')) as unknown);
+  const steps = new Set(readdirSync(dispatch.outputPath).filter(name => /^\d+\.json(?:\.gz)?$/.test(name))
+    .map(name => Number(name.split('.')[0])));
+  return [...steps].filter(step => step >= from && step <= to).sort((a, b) => a - b)
+    .map(step => JSON.parse(readOutput(join(dispatch.outputPath, `${step}.json`)).toString('utf8')) as unknown);
 }
 
 export function dispatchArtifacts(store: TaskStore, workId: string, dispatchId: string) {

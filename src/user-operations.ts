@@ -7,6 +7,7 @@ import type { ExecutionRunner } from './execution.js';
 import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { completeReviewedWork, decideReview } from './review.js';
+import { compressWorkOutputs } from './outputs.js';
 
 export class UserOperations {
   private reviewCompletions = new Map<string, Promise<unknown>>();
@@ -22,6 +23,7 @@ export class UserOperations {
       }
       await completion;
     }
+    if (gate.decision === 'accept') await compressWorkOutputs(this.store, params.workId);
     return this.store.gate(params.workId, gate.id);
   }
 
@@ -112,6 +114,7 @@ export class UserOperations {
     await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '工作取消')]);
     for (const node of cardGraph(this.store, workId)) if (node.type === 'card') removeCardCopy(this.store, node);
     if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
+    await compressWorkOutputs(this.store, workId);
     return this.store.work(workId);
   }
 }
