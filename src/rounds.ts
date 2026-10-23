@@ -197,6 +197,7 @@ export class RoundScheduler {
         template,
         cwd: brief.work.workPath ?? projectPath(this.store, workId),
         env: templateEnvironment(template),
+        dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
         mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
         signal: controller.signal,

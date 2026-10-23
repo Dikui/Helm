@@ -524,7 +524,7 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   await daemon.finished();
   await until(async () => options, value => value !== undefined);
   const templates = (await daemon.call('list-agent-templates')).result;
-  assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-executor']);
+  assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor']);
   const remote = join(daemon.directory, 'remote.git');
   execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/control'], { stdio: 'ignore' });
   assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/forbidden'], { env: options!.env, stdio: 'pipe' }));
