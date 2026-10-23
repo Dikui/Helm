@@ -1,8 +1,8 @@
 {
   "role": "coordinator",
   "driver": "claude-sdk",
-  "model": null,
-  "reasoningEffort": null,
+  "model": "haiku",
+  "reasoningEffort": "low",
   "fast": false,
   "home": "shared",
   "description": "对齐工作说明，拆卡、派单、安排验收并发起审核"
