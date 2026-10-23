@@ -7,6 +7,7 @@ import { handleMcp } from './mcp.js';
 import type { DriverRegistry } from './driver.js';
 import { ClaudeDriver } from './claude-driver.js';
 import { CodexDriver } from './codex-driver.js';
+import { AcpDriver } from './acp-driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
@@ -35,7 +36,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 }
 
 export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
-  const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver() };
+  const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok') };
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'), new TemplateCatalog(options.templateDir, Object.keys(drivers)));
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;

@@ -5,9 +5,10 @@ import { z } from 'zod';
 import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
 import type { TemplateAvailability } from './driver.js';
+import { acpAgents } from './acp-agents.js';
 
 const settings = z.object({
-  role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex']),
+  role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok']),
   model: z.string().trim().min(1).nullable(),
   reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable(),
   fast: z.boolean().default(false), home: z.enum(['shared', 'template']),
@@ -90,7 +91,7 @@ export class TemplateCatalog {
   private unavailable(template: AgentTemplate) {
     if (template.driver === 'claude-sdk' && template.fast) return 'Claude fast 在订阅下要开 extra usage 并计入 extra usage';
     if (!this.drivers.includes(template.driver)) return `驱动 ${template.driver} 未登记。`;
-    return null;
+    return acpAgents[template.driver as keyof typeof acpAgents]?.unavailable(template) ?? null;
   }
 
   get(id: string, role?: AgentTemplate['role']): AgentTemplate {

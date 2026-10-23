@@ -14,7 +14,7 @@ export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof start
     // These fixtures exercise sessions; availability scenarios register their own driver.
     checkAvailability: async () => ({ available: true }),
     start: session => (session.template?.role === 'coordinator' ? driver : executorDriver).start(session),
-  }, codex: new FakeDriver() } });
+  }, codex: new FakeDriver(), grok: new FakeDriver() } });
 }
 
 export async function copyTemplates(directory: string) {

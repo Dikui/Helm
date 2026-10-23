@@ -26,6 +26,7 @@ async function main() {
     const { startHelmd } = await import('./server.js');
     const { ClaudeDriver } = await import('./claude-driver.js');
     const { CodexDriver } = await import('./codex-driver.js');
+    const { AcpDriver } = await import('./acp-driver.js');
     const { FakeDriver } = await import('./driver.js');
     // HELM_FAKE_COORDINATOR lets subprocess tests start helmd without launching claude.
     const claude = new ClaudeDriver();
@@ -33,7 +34,8 @@ async function main() {
     const drivers = { 'claude-sdk': process.env.HELM_FAKE_COORDINATOR === '1'
       ? { checkAvailability: (template: Parameters<typeof claude.checkAvailability>[0]) => fake.checkAvailability(template),
         start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
-      : claude, codex: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new CodexDriver() };
+      : claude, codex: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new CodexDriver(),
+      grok: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new AcpDriver('grok') };
     const daemon = await startHelmd({ port, dataDir: values['data-dir'], drivers });
     console.log(JSON.stringify({ url: daemon.url }));
     const stop = () => { daemon.close().catch(error => { console.error(error); process.exitCode = 1; }); };

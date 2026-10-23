@@ -1,0 +1,9 @@
+{
+  "role": "executor",
+  "driver": "grok",
+  "model": "grok-4.7",
+  "reasoningEffort": "low",
+  "fast": false,
+  "home": "shared",
+  "description": "在卡片副本中使用 Grok 本机登录执行或验收派单，报告检查过程和证据"
+}
