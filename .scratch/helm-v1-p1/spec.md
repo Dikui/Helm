@@ -242,7 +242,7 @@ Map: [Helm v1 设计](../helm-v1/map.md)
 ## Out of Scope
 
 - **第二阶段**：Codex 驱动（含原 14 技术验证④⑥、token 记录、额度用完）、用户级服务自启动（`helm service install`）、输出管理（工作结束后 gzip、10 GB 提示、导出和删除输出）、换调度者模板、新增或修改 Agent 模板。模板配置：调度者、执行者各一份，包括提示词（即策略）、skill、工具调整，放在 Helm 仓库里的配置目录，每个调度轮次、每次派单开始时读取，改了不用改代码或重启；Helm 自己的 MCP 工具、沙箱、凭据过滤和运行层约定（端口、提交结论、进程清理、截图路径、不推送）留在代码里，不进配置。会话记录隔离：Helm 拉起的所有 agent CLI（Claude Code、Codex，以及第三阶段的 Grok、DeepSeek）用 Helm 专用主目录 `~/.helm/agent-homes/<cli>/`（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`DSH_HOME`），会话记录和配置与用户在 Helm 之外的使用分开。登录：Codex、Grok、dsh 由 Helm 在专用目录建软链接指向用户原来的凭据文件，沿用用户的登录；Claude 的登录在钥匙串里、按配置目录区分，用户在专用目录 `claude auth login` 一次。Helm 只建链接，不打开、不复制、不转发凭据。实测见 [第二阶段待办](../helm-v1-p2/issues/01-agent-home-isolation.md)。
-- **第三阶段**：界面（前置条件是用户的前端设计）、Grok 和 DeepSeek 的 ACP 驱动、界面做完后再跑一次 2048。
+- **第三阶段**：界面（前置条件是用户的前端设计）、Grok 和 DeepSeek 的 ACP 驱动、界面做完后再跑一次 2048。Grok 驱动关掉 `~/.claude/`、`~/.cursor/` 规则来源，与 Claude 驱动 `settingSources: []` 一样不读本机全局配置；关法届时实测，来由见 [第二阶段待办 01](../helm-v1-p2/issues/01-agent-home-isolation.md)。
 - 调度者能力（A1、A2）的验证，以及对齐确认、关卡判断、汇总报告、拆单派单返工等调度者技能：用户在 Helm 之外另做。
 - 执行者外层隔离（Seatbelt 外壳、独立系统用户、容器、VM）。
 - 用户接口认证、跨站请求和 DNS 重绑定防护：v1 已接受的风险。
