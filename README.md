@@ -77,7 +77,7 @@ npm run test:real --cache /private/tmp/helm-npm-cache
 
 调度者和执行者的环境白名单及逐项用途见 [`src/environment.ts`](src/environment.ts)：PATH 查找 CLI 和开发工具，HOME 供 CLI 自行读取本地登录，USER/LOGNAME 提供用户身份，SHELL 选择命令解释器，LANG/LANGUAGE 和列出的 LC 类别保留语言与编码，TMPDIR/TMP/TEMP 指定临时目录，大小写代理变量维持网络访问。其余父环境不传入；运行层随后注入端口段、禁推送的 git 配置和无效 GH_TOKEN，并为本机 MCP 合并大小写 NO_PROXY。Helm 不读取登录凭据。Claude 会话固定设置 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` 和 `autoMemoryEnabled: false`，禁用自动记忆（[官方说明](https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory)）。
 
-Claude 调度者的内置工具为 Bash/Read/Grep/Glob；执行者再加 Write/Edit/NotebookEdit/WebFetch/WebSearch/TodoWrite，避免随 CLI 默认工具集合变化。真实冒烟核对初始化记录：不含 `messaging_socket_path`，工具只来自该角色的内置白名单和当前带令牌端点实际提供的 Helm 工具。
+Claude 调度者的内置工具为 Bash/Read/Grep/Glob；执行者再加 Write/Edit/NotebookEdit/WebFetch/WebSearch/TodoWrite，避免随 CLI 默认工具集合变化。真实冒烟核对初始化记录：工具只来自该角色的内置白名单和当前带令牌端点实际提供的 Helm 工具。
 
 调度者调用 `create-dispatch` 时可加 `needsBrowser: true`。运行层为这次派单在执行者沙箱外启动独立的 Playwright HTTP MCP，执行者通过同一个派单 MCP 端点使用导航、快照、点击、输入、截图等检查工具和 `submit-conclusion`。浏览器工具使用明确的白名单，包含执行代码的工具不会转发；未标记派单、用户和调度轮次都拿不到浏览器工具。运行层记录浏览器的 pgid 和启动时间；派单结束、撤销或服务停止时，先 TERM 整组，5 秒后仍存活则 KILL，再处理副本。
 

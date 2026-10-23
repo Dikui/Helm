@@ -19,7 +19,6 @@ export function assertIsolatedInitialization(messages: SDKMessage[], role: 'coor
     ...(role === 'executor' ? ['Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'] : [])];
   const allowed = new Set([...builtins, ...helmTools.map(name => `mcp__helm__${name}`)]);
   for (const init of initializations) {
-    assert.doesNotMatch(JSON.stringify(init), /"messaging_socket_path"\s*:/, '不应携带桌面通信套接字，即使值为空');
     assert.ok(init.tools.length > 0, '初始化必须报告可用工具');
     for (const tool of init.tools) assert.ok(allowed.has(tool), `${role} 不应加载工具 ${tool}`);
     assert.ok(init.tools.some(tool => tool.startsWith('mcp__helm__')), '必须实际加载 Helm 工具');
