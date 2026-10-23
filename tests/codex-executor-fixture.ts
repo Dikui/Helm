@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
@@ -10,6 +10,23 @@ import { copyTemplates, configureTestTemplate } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
+
+const denied = /operation not permitted|permission denied|read-only file system|sandbox/i;
+
+// Codex may run shell commands through its nested exec tool, which app-server does not
+// emit as commandExecution items; its own session records under CODEX_HOME still hold the result.
+export async function sandboxDenied(items: any[], codexHome: string, target: string) {
+  if (items.some(item => item?.type === 'commandExecution' && String(item.command).includes(target)
+    && item.exitCode !== 0 && denied.test(String(item.aggregatedOutput)))) return true;
+  const files = (await readdir(join(codexHome, 'sessions'), { recursive: true }).catch(() => [] as string[]))
+    .filter(name => name.endsWith('.jsonl'));
+  for (const name of files) {
+    for (const line of (await readFile(join(codexHome, 'sessions', name), 'utf8')).split('\n')) {
+      if (line.includes(target) && denied.test(line) && line.includes('output')) return true;
+    }
+  }
+  return false;
+}
 export const result = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
 
 // Both CLI homes, the project and all daemon state live under this temporary root.

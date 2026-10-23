@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
-import { codexFixture, ok } from './codex-executor-fixture.js';
+import { codexFixture, ok, sandboxDenied } from './codex-executor-fixture.js';
 import { configureTestTemplate } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
@@ -89,8 +89,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、专用主目�
     for (const tool of ['browser_navigate', 'browser_snapshot', 'browser_take_screenshot', 'submit-conclusion']) {
       assert.ok(items.some((item: any) => item.type === 'mcpToolCall' && item.server === 'helm' && item.tool === tool && item.status === 'completed'), `必须实际调用 helm/${tool}`);
     }
-    assert.ok(items.some((item: any) => item.type === 'commandExecution' && item.command.includes(command) && item.exitCode !== 0
-      && /operation not permitted|permission denied|read-only file system|sandbox/i.test(item.aggregatedOutput)), '必须由真实沙箱拒绝副本外 shell 写入');
+    assert.ok(await sandboxDenied(items, join(daemon.home, '.helm', 'agent-homes', 'codex'), outside), '必须由真实沙箱拒绝副本外 shell 写入');
     await assert.rejects(readFile(outside), { code: 'ENOENT' });
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');

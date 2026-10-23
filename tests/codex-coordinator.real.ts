@@ -11,6 +11,7 @@ import { CodexCoordinatorDriver } from '../src/codex-driver.js';
 import type { Driver, SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { coordinatorFixture } from './codex-coordinator-fixture.js';
+import { sandboxDenied } from './codex-executor-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 const enabled = process.env.HELM_CODEX_COORDINATOR_REAL === '1';
@@ -156,8 +157,8 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
     assert.equal((await daemon.call('list-dispatches', daemon.params)).length, 1);
     assert.equal(events.filter(e => e.action === 'card-created').length, 2);
     assert.equal(events.filter(e => e.action === 'dispatch-created').length, 1);
-    assert.ok(items(first).some(item => item.type === 'commandExecution' && item.command.includes(first.command) && item.exitCode !== 0
-      && /operation not permitted|permission denied|read-only file system|sandbox/i.test(item.aggregatedOutput)), '必须实际尝试写入并被真实沙箱拒绝');
+    assert.ok(await sandboxDenied(items(first), join(daemon.home, '.helm', 'agent-homes', 'codex'), join(first.options.cwd, 'coordinator-write.txt')),
+      '必须实际尝试写入并被真实沙箱拒绝');
     await assert.rejects(readFile(join(first.options.cwd, 'coordinator-write.txt')), { code: 'ENOENT' });
     assert.equal(await readFile(join(first.options.cwd, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
     assert.equal(daemon.git('-C', first.options.cwd, 'status', '--porcelain'), '');
