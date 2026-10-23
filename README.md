@@ -56,12 +56,14 @@ SSE 的 `event` 为动作名，`id` 为事件 id，`data` 是完整结构化事�
 
 调度轮次失败会新开会话重投未处理事件，连续失败三次或调度者额度用完时暂停工作。`list-pending`、`list-works` 和 SSE `needs-user-attention` 展示运行层暂停原因，用户以 `helm resume-work --workId <工作id>` 手动恢复。每轮默认总时长 30 分钟、无输出 10 分钟；`helm set-round-watchdog --totalTimeoutMs 1800000 --idleTimeoutMs 600000` 调整后从下一轮生效，`get-settings` 可读取设置。轮次与派单共用进程清理：按工作目录查找 `_work` 内的残留进程并清理进程组，macOS 需安装 `lsof`，Linux 使用 `/proc`。`get-card`、`get-card-graph` 的 `usage` 汇总卡片全部派单，`get-work`、`list-works` 的 `usage` 另加全部调度轮次；输入和输出 token 分别累计，异常结束同样计入。
 
-代码分为任务库与事务（`store.ts`）、操作定义（`operations.ts`）、工作说明与 git 确认（`alignment.ts`）、调度轮次（`rounds.ts`）、驱动接口与假驱动（`driver.ts`）、HTTP/SSE（`server.ts`）、MCP 适配（`mcp.ts`）和 CLI 薄客户端（`cli.ts`）。新增业务操作时在操作表中登记，无需分别增加 HTTP 路由、MCP 工具和 CLI 分支。任务库通过 `PRAGMA user_version` 标识 schema 版本，当前为版本 8，支持已有版本 1–7 顺序升级。
+代码分为任务库与事务（`store.ts`）、操作定义（`operations.ts`）、工作说明与 git 确认（`alignment.ts`）、调度轮次（`rounds.ts`）、驱动接口与假驱动（`driver.ts`）、HTTP/SSE（`server.ts`）、MCP 适配（`mcp.ts`）和 CLI 薄客户端（`cli.ts`）。新增业务操作时在操作表中登记，无需分别增加 HTTP 路由、MCP 工具和 CLI 分支。任务库通过 `PRAGMA user_version` 标识 schema 版本，按 `src/migrations.ts` 的列表位置顺序升级；新增迁移只追加到末尾，不修改或重排已发布的迁移。支持已有版本 1–10，遇到比当前迁移列表更新的任务库时拒绝启动。
 
 ```sh
 npm run check
 npm test
 ```
+
+`npm install` 和 `npm ci` 会通过 `prepare` 自动将 `core.hooksPath` 设为 `.githooks`，每次提交前运行 `npm run check`。GitHub Actions 在 push 和 PR 时使用 Node 22.13.0 运行依赖安装、类型检查和普通测试，不运行真实冒烟。
 
 测试启动真实 `helmd`（含 CLI 子进程），使用临时任务库和 git 项目，经 HTTP、SSE、真实 MCP、CLI 和文件系统验证行为，不读取内部数据表；另有假驱动公共接口的契约测试。
 

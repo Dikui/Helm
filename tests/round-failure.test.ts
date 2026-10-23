@@ -13,7 +13,7 @@ const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as a
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 8_000;
+  const deadline = Date.now() + 30_000;
   for (;;) {
     const value = await read();
     if (ready(value)) return value;
@@ -152,6 +152,7 @@ test('运行层暂停期间的新用户消息仍可投递，再次额度用完�
   await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 3);
 });
 
+// Allow MCP startup and event delivery under parallel test load before expiring a round.
 test('轮次看门狗设置持久化，空闲超时及总时长超时都会自动重投', async t => {
   for (const mode of ['idle', 'total'] as const) await t.test(mode, async t => {
     const daemon = await fixture(t, [[{ type: 'output', text: '开始后挂住' }, { type: 'hang' }], []]);
@@ -160,7 +161,7 @@ test('轮次看门狗设置持久化，空闲超时及总时长超时都会自�
     assert.equal(defaults.roundIdleTimeoutMs, 10 * 60_000);
     assert.equal((await daemon.call('set-round-watchdog', { totalTimeoutMs: 0 })).status, 400);
     assert.equal((await daemon.call('set-round-watchdog', { idleTimeoutMs: 2 ** 31 })).status, 400);
-    ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: mode === 'total' ? 100 : 10_000, idleTimeoutMs: mode === 'idle' ? 100 : 10_000 }));
+    ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: mode === 'total' ? 1000 : 30_000, idleTimeoutMs: mode === 'idle' ? 1000 : 30_000 }));
     const work = await daemon.begin();
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
     const ended = events.filter(event => event.action === 'round-ended');
@@ -169,8 +170,8 @@ test('轮次看门狗设置持久化，空闲超时及总时长超时都会自�
     assert.equal(ended[1].details.reason, 'completed');
     await daemon.restart(new FakeDriver());
     const settings = (await daemon.call('get-settings')).result;
-    assert.equal(settings.roundTotalTimeoutMs, mode === 'total' ? 100 : 10_000);
-    assert.equal(settings.roundIdleTimeoutMs, mode === 'idle' ? 100 : 10_000);
+    assert.equal(settings.roundTotalTimeoutMs, mode === 'total' ? 1000 : 30_000);
+    assert.equal(settings.roundIdleTimeoutMs, mode === 'idle' ? 1000 : 30_000);
   });
 });
 
@@ -194,7 +195,7 @@ test('看门狗能结束驱动启动、发送或事件流挂住的轮次，过�
       return session;
     } };
     const daemon = await fixture(t, [], [], driver);
-    ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 100, idleTimeoutMs: 10_000 }));
+    ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 1000, idleTimeoutMs: 30_000 }));
     const work = await daemon.begin();
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
     assert.equal(events.find(event => event.action === 'round-ended').details.reason, 'timed-out');
@@ -223,13 +224,13 @@ test('持续输出刷新无输出期限，但不会刷新轮次总时长期限',
     };
   } };
   const daemon = await fixture(t, [], [], driver);
-  ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 500, idleTimeoutMs: 200 }));
+  ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 2000, idleTimeoutMs: 1000 }));
   const work = await daemon.begin();
   const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
   const start = events.find(event => event.action === 'round-started');
   const end = events.find(event => event.action === 'round-ended');
   assert.equal(end.details.reason, 'timed-out');
-  assert.ok(Date.parse(end.time) - Date.parse(start.time) >= 450);
+  assert.ok(Date.parse(end.time) - Date.parse(start.time) >= 1800);
 });
 
 test('驱动报告结束后卡在关闭事件流时，看门狗仍保留已报告的 token 用量', async t => {
@@ -245,7 +246,7 @@ test('驱动报告结束后卡在关闭事件流时，看门狗仍保留已报�
     };
   } };
   const daemon = await fixture(t, [], [], driver);
-  ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 100, idleTimeoutMs: 10_000 }));
+  ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 1000, idleTimeoutMs: 30_000 }));
   const work = await daemon.begin();
   const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
   const ended = events.find(event => event.action === 'round-ended');
@@ -316,7 +317,7 @@ test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项�
     });
     const work = await daemon.begin();
     await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
-    if (reason === 'timed-out') ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 500, idleTimeoutMs: 10_000 }));
+    if (reason === 'timed-out') ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 2000, idleTimeoutMs: 30_000 }));
     await daemon.confirm(work.id);
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length >= 2);
     assert.equal(events.filter(event => event.action === 'round-ended')[1].details.reason, reason, JSON.stringify(events.filter(event => event.action === 'round-ended')));

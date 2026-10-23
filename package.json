@@ -6,6 +6,7 @@
   "engines": { "node": ">=22.13.0" },
   "bin": { "helm": "dist/src/cli.js" },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "tsc",
     "check": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
