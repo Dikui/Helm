@@ -122,7 +122,7 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 
 - 订阅模板直接用 CLI 默认主目录：驱动不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`（也不能显式设成默认路径，Claude 会走"自定义配置目录"分支、钥匙串对不上），登录沿用用户在终端里的登录，会话记录写进用户自己的历史。
 - 用户的全局配置正常进入：Claude 订阅模板加载用户、项目、本地设置（含 `CLAUDE.md`、hooks、插件、MCP、skills）；Codex 读用户的 `config.toml`、`AGENTS.md`、hooks、skills 和插件。用户的 MCP 调度者和执行者都能用。
-- Helm 按会话显式传、压过全局配置的只有：硬约束（执行者只写卡片副本、调度者对代码只读、不推送、Helm MCP 令牌，由权限检查和沙箱保证）、fast 按模板（Claude `settings.fastMode`，Codex `serviceTier`）、关掉 Claude 自动记忆。用户设置里的放行规则或沙箱例外不能让执行者写出卡片副本，冒烟要验证。
+- Helm 按会话显式传、压过全局配置的只有：硬约束（执行者只写卡片副本、调度者对代码只读、不推送、Helm MCP 令牌，由权限检查和沙箱保证）、fast 按模板（Claude `settings.fastMode`，Codex `serviceTier`）、关掉 Claude 自动记忆。项目设置和本地设置里的放行规则或沙箱例外不能让执行者写出卡片副本，冒烟要验证；用户级沙箱例外照常生效（见 Further Notes）。
 - API 模板用 `~/.helm/agent-homes/<模板 id>/`，驱动按 CLI 设 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`。用户自己写 CLI 的配置：Claude 写 `settings.json` 的 `env`（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`），该模板的 `settingSources` 只读主目录里的用户设置；Codex 写 `config.toml` 的自定义 provider（`base_url`、`experimental_bearer_token`）。Helm 不打开这些文件。
 - 计费方式由模板的主目录决定，不看 `apiKeySource`（实测 API 模板也报 `none`）。
 - API 模板下的结束方式：余额不足或 key 失效记"额度用完"；429 限流由 CLI 自己重试，仍失败记"出错退出"。
@@ -179,7 +179,7 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 
 - 所有实测都在 macOS 上做；Linux 的 systemd user unit 照写但未实测。
 - Codex 的 `experimental_bearer_token` 名字带 experimental，升级后可能失效；失效时 API 模板派单会"出错退出"。
-- 已接受的风险：执行者能在沙箱里 `echo` 出环境变量，API 模板的 key 可能出现在派单输出和导出的 `.tar.gz` 里；Codex 订阅模板读用户的个人配置、`AGENTS.md`、skills 和插件（ADR 0005）。
+- 已接受的风险：执行者能在沙箱里 `echo` 出环境变量，API 模板的 key 可能出现在派单输出和导出的 `.tar.gz` 里；Codex 订阅模板读用户的个人配置、`AGENTS.md`、skills 和插件（ADR 0005）；用户级 Claude 设置里的 `sandbox.filesystem.allowWrite` 和 `sandbox.excludedCommands` 对执行者同样生效，CLI 不支持按会话覆盖（ADR 0005）。
 - Codex 发往本机的请求在没有代理变量时也被拦，原因（系统代理设置还是测试会话的沙箱）未分辨；以 `NO_PROXY` 为准。
 - 开发测试用真实驱动时一律用消耗小的模型、调低推理强度、不开 fast。
 - 开发任务单放在 [issues/](issues/)，从 03 起编号（01、02 是实测单）。

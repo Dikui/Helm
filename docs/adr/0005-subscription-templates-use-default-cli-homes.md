@@ -6,6 +6,8 @@
 
 运行层仍按会话显式传、压过全局配置的只有这些：硬约束（执行者只写卡片副本、调度者对代码只读、不推送、Helm MCP 带令牌，权限检查和沙箱）、fast 按模板（Claude 用 SDK `settings.fastMode`，Codex 用 `serviceTier`）、关掉 Claude 自动记忆（不往用户记忆目录写卡片副本的内容）。用户全局规则里的调度指令开发期间保留，Helm 不另加限制，以后由用户删掉。
 
+"执行者只写卡片副本"对项目设置和本地设置成立：仓库带进来的放行规则和沙箱例外都拦得住。用户级设置里的沙箱例外（Claude `sandbox.filesystem.allowWrite`、`sandbox.excludedCommands`）是例外：CLI 总会把它们合并进来，会话设置清不掉，因此作为用户自己的全局配置照常生效，执行者的 Bash 可以写到其中列出的位置。agent 自己改不了用户级设置，所以这不算 agent 能绕过的约束；Helm 不解析 Bash 命令，也不读用户的设置文件。
+
 API 模板不变：每个模板一个 `~/.helm/agent-homes/<模板 id>/`，接口和 key 由用户按 CLI 自己的格式写在里面，Helm 不读。Helm 仍然不打开、不复制、不转发凭据。
 
 ## Considered Options
