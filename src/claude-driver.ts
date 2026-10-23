@@ -118,15 +118,20 @@ class ClaudeDriver implements Driver {
       stream?.close();
     };
     options.signal?.addEventListener('abort', cancel, { once: true });
-    const env = { ...options.env };
+    // Per-session override: never let a caller's force-enable reach Claude.
+    // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
+    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
       cwd, env, pathToClaudeCodeExecutable: executable, settingSources: [], strictMcpConfig: true,
+      settings: { autoMemoryEnabled: false },
       systemPrompt: coordinator ? coordinatorPrompt : executorPrompt,
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission(Object.keys(options.mcpServers)) : executorPermission(cwd),
-      ...(coordinator ? { tools: ['Bash', 'Read', 'Grep', 'Glob'] } : {}),
+      // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
+      tools: coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
+        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
         const child = spawn(processOptions.command, processOptions.args, {

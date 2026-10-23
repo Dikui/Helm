@@ -180,6 +180,8 @@ test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新
         assert.equal(sdk.pathToClaudeCodeExecutable, '/test/bin/claude');
         assert.equal(sdk.cwd, options.cwd);
         assert.deepEqual(sdk.settingSources, []);
+        assert.deepEqual(sdk.settings, { autoMemoryEnabled: false });
+        assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite']);
         assert.equal(sdk.permissionMode, 'default');
         assert.deepEqual(sdk.sandbox, {
           enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,

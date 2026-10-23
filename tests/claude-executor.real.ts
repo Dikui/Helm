@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeExecutorDriver } from '../src/claude-driver.js';
 import { fixture } from './browser-fixture.js';
+import { assertIsolatedInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -19,6 +20,7 @@ function observedDriver() {
   const messages: SDKMessage[] = [];
   const permissions: { tool: string; input: Record<string, unknown>; behavior: PermissionResult['behavior'] }[] = [];
   const endpoints: string[] = [];
+  const helmTools: string[] = [];
   const driver = new ClaudeExecutorDriver({ query: args => {
     assert.equal(args.options?.model, 'haiku');
     assert.equal(args.options.effort, 'low');
@@ -41,12 +43,15 @@ function observedDriver() {
     return {
       close() { clearTimeout(deadline); stream.close(); },
       async *[Symbol.asyncIterator]() {
-        try { for await (const message of stream) { messages.push(message); yield message; } }
+        try {
+          helmTools.push(...await helmToolNames(endpoint));
+          for await (const message of stream) { messages.push(message); yield message; }
+        }
         finally { clearTimeout(deadline); stream.close(); }
       },
     };
   } });
-  return { driver, messages, permissions, endpoints };
+  return { driver, messages, permissions, endpoints, helmTools };
 }
 
 function toolCalls(messages: SDKMessage[]) {
@@ -61,6 +66,7 @@ function toolResult(messages: SDKMessage[], id: string) {
 }
 
 function connected(observed: ReturnType<typeof observedDriver>) {
+  assertIsolatedInitialization(observed.messages, 'executor', observed.helmTools);
   const servers = observed.messages.flatMap(message => message.type === 'system' && message.subtype === 'init' ? message.mcp_servers : []);
   assert.ok(!servers.some(server => server.status === 'needs-auth'),
     'needs-auth reproduced: replace per-dispatch HTTP injection with the specified token-preserving stdio forwarder before accepting this smoke');

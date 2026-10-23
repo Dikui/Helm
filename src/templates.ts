@@ -1,4 +1,5 @@
 import { RuleError, TaskStore, type Actor } from './store.js';
+import { runtimeEnvironment } from './environment.js';
 
 export interface AgentTemplate {
   id: string; role: 'coordinator' | 'executor'; model: string | null;
@@ -28,16 +29,10 @@ export function configureTemplate(store: TaskStore, actor: Actor, params: {
   return agentTemplate(store, current.id);
 }
 
-// Templates use the locally logged-in subscription. Filter names before reading values;
-// OAuth credentials are never forwarded to either role.
+// Add only Helm-owned values after selecting the host runtime allowlist.
 export function templateEnvironment(template: AgentTemplate, pushUrls: string[] = []): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of Object.keys(process.env)) {
-    if (/OAUTH|^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|CUSTOM_HEADERS)|^CLAUDE_CODE_(API_KEY|USE_|EXPERIMENTAL_AGENT_TEAMS)|^AWS_BEARER_TOKEN_BEDROCK$|^GIT_CONFIG_|^GH_TOKEN$|^GITHUB_TOKEN$/i.test(key)) continue;
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? env.no_proxy ?? '').split(',').filter(Boolean), '127.0.0.1', 'localhost'])].join(',');
+  const env = runtimeEnvironment();
+  env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
   env.no_proxy = env.NO_PROXY;
   if (template.role === 'executor') {
     const prefixes = [...new Set(['git@', 'https://', 'ssh://', 'http://', 'git://', 'file://', '/', './', '../', ...pushUrls])];

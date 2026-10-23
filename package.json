@@ -9,6 +9,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:real": "npm run build && node dist/tests/real-smoke-runner.js",
     "browser:install": "node node_modules/@playwright/mcp/cli.js install-browser chromium --no-shell",
     "test:browser": "npm run build && HELM_BROWSER_REAL=1 node --test dist/tests/browser.real.js",
     "test:claude-executor": "npm run build && HELM_CLAUDE_EXECUTOR_REAL=1 node --test dist/tests/claude-executor.real.js",

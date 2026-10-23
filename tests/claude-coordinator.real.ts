@@ -8,6 +8,7 @@ import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/cla
 import { ClaudeCoordinatorDriver } from '../src/claude-driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { fixture, until } from './claude-coordinator-fixture.js';
+import { assertIsolatedInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_COORDINATOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -25,7 +26,7 @@ function toolResult(messages: SDKMessage[], id: string) {
 
 interface Observation {
   brief: StartupBrief; sessionId: string; token: string; endpoint: string; holding: boolean;
-  messages: SDKMessage[];
+  messages: SDKMessage[]; helmTools: string[];
   permissions: { tool: string; input: Record<string, unknown>; behavior: PermissionResult['behavior'] }[];
 }
 
@@ -48,7 +49,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
     assert.ok('url' in endpoint && endpoint.type === 'http');
     assert.match(endpoint.headers?.Authorization ?? '', /^Bearer .+/);
     const record: Observation = { brief, sessionId: sdk.sessionId!, token: endpoint.headers!.Authorization!,
-      endpoint: endpoint.url, holding: false, messages: [], permissions: [] };
+      endpoint: endpoint.url, holding: false, messages: [], helmTools: [], permissions: [] };
     const attempt = rounds.push(record);
     const canUseTool = sdk.canUseTool!;
     const stream = query({ ...args, prompt: `${instructions(brief, attempt)}\n\n启动简报：\n${args.prompt}`, options: { ...sdk, maxTurns: 16,
@@ -66,6 +67,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
       close() { clearTimeout(deadline); stream.close(); },
       async *[Symbol.asyncIterator]() {
         try {
+          record.helmTools = await helmToolNames(endpoint);
           for await (const message of stream) {
             record.messages.push(message);
             yield message;
@@ -88,6 +90,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
 }
 
 function connected(round: Observation) {
+  assertIsolatedInitialization(round.messages, 'coordinator', round.helmTools);
   const servers = round.messages.flatMap(message => message.type === 'system' && message.subtype === 'init' ? message.mcp_servers : []);
   assert.ok(!servers.some(server => server.status === 'needs-auth'),
     'needs-auth reproduced: replace per-round HTTP injection with the specified token-preserving stdio forwarder before accepting this smoke');
