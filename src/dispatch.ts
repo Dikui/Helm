@@ -15,6 +15,7 @@ export interface Dispatch {
   needsBrowser: boolean; browserPgid: number | null; browserStartedAt: string | null;
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
   startCommit: string | null; endCommit: string | null; outputPath: string;
+  outputStatus: 'available' | 'deleted';
   portStart: number | null; portEnd: number | null; pgid: number | null; processStartedAt: string | null;
   cardContentSnapshot: string | null; workDescriptionId: string | null; workDescriptionVersion: number | null;
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
@@ -30,22 +31,22 @@ const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose,
   port_start AS portStart, port_end AS portEnd, pgid, process_started_at AS processStartedAt,
   card_content_snapshot AS cardContentSnapshot, work_description_id AS workDescriptionId, work_description_version AS workDescriptionVersion`;
 
-function readDispatch(row: Record<string, unknown>): Dispatch {
-  return { ...row, needsBrowser: Boolean(row.needsBrowser), template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
+function readDispatch(row: Record<string, unknown>, outputsDeleted: boolean): Dispatch {
+  return { ...row, outputStatus: outputsDeleted ? 'deleted' : 'available', needsBrowser: Boolean(row.needsBrowser), template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
 }
 
 export function getDispatch(store: TaskStore, workId: string, dispatchId: string) {
-  store.work(workId);
+  const work = store.work(workId);
   const row = store.db.prepare(`SELECT ${dispatchColumns} FROM dispatches WHERE id = ? AND work_id = ?`).get(dispatchId, workId);
   if (!row) throw new RuleError('INVALID_DISPATCH', '派单必须属于这项工作。', 400);
-  return readDispatch(row);
+  return readDispatch(row, Boolean(work.outputsDeletedAt));
 }
 
 export function listDispatches(store: TaskStore, workId: string, cardId?: string) {
-  store.work(workId);
+  const work = store.work(workId);
   if (cardId) cardDetails(store, workId, cardId);
   return store.db.prepare(`SELECT ${dispatchColumns} FROM dispatches WHERE work_id = ? AND (? IS NULL OR card_id = ?) ORDER BY created_at, rowid`)
-    .all(workId, cardId ?? null, cardId ?? null).map(readDispatch);
+    .all(workId, cardId ?? null, cardId ?? null).map(row => readDispatch(row, Boolean(work.outputsDeletedAt)));
 }
 
 export function dispatchGit(path: string, ...args: string[]) {
@@ -209,6 +210,7 @@ export function dispatchOutput(store: TaskStore, params: { workId: string; dispa
   const from = params.fromStep ?? 1;
   const to = params.toStep ?? Number.MAX_SAFE_INTEGER;
   if (to < from) throw new RuleError('INVALID_PARAMS', '结束步骤不能小于开始步骤。', 400);
+  if (dispatch.outputStatus === 'deleted') return { status: 'deleted', message: '已删除' };
   const steps = new Set(readdirSync(dispatch.outputPath).filter(name => /^\d+\.json(?:\.gz)?$/.test(name))
     .map(name => Number(name.split('.')[0])));
   return [...steps].filter(step => step >= from && step <= to).sort((a, b) => a - b)

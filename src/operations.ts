@@ -11,7 +11,7 @@ import { agentTemplates } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
-import { checkOutputUsage, pendingOutputWarning } from './outputs.js';
+import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -44,6 +44,16 @@ const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 
 export const operations: readonly Operation[] = [
+  operation({
+    name: 'export-outputs', description: '导出已结束工作的全部输出、成果文件和任务库记录为 .tar.gz', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), targetPath: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, { workId, targetPath }) => exportWorkOutputs(store, actor, workId, targetPath),
+  }),
+  operation({
+    name: 'delete-outputs', description: '删除已结束工作的原始事件流；未导出时先提示，confirm: true 确认删除', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), confirm: z.boolean().optional() }).strict(),
+    execute: ({ store, actor }, { workId, confirm }) => deleteWorkOutputs(store, actor, workId, confirm),
+  }),
   operation({
     name: 'pause-card', description: '暂停卡片并中止派单', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1) }).strict(),
@@ -407,7 +417,8 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
       const work = store.work(parsed.data.workId);
       const acceptedReview = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
       const repeatReview = name === 'decide-gate' && parsed.data.gateId === acceptedReview?.id;
-      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !(name === 'cancel-work' && work.status === 'cancelled')) {
+      const managesOutputs = name === 'export-outputs' || name === 'delete-outputs';
+      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
         throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       }
     }

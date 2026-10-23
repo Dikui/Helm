@@ -164,4 +164,8 @@ export const migrations: readonly string[] = [
   DROP TABLE agent_templates;
   ALTER TABLE coordinator_rounds ADD COLUMN template_snapshot TEXT;
   `,
+  `
+  ALTER TABLE works ADD COLUMN outputs_exported_at TEXT;
+  ALTER TABLE works ADD COLUMN outputs_deleted_at TEXT;
+  `,
 ];
