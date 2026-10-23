@@ -30,7 +30,8 @@ async function main() {
     const claude = new ClaudeDriver();
     const fake = new FakeDriver();
     const drivers = { 'claude-sdk': process.env.HELM_FAKE_COORDINATOR === '1'
-      ? { start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
+      ? { checkAvailability: (template: Parameters<typeof claude.checkAvailability>[0]) => fake.checkAvailability(template),
+        start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
       : claude };
     const daemon = await startHelmd({ port, dataDir: values['data-dir'], drivers });
     console.log(JSON.stringify({ url: daemon.url }));

@@ -184,7 +184,7 @@ test('驱动启动、发送或输出挂住时看门狗仍结束派单，后续�
     const fake = new FakeDriver();
     const daemon = await fixture(t, [create, dispatch('hang'),
       { ...create, arguments: ctx => ({ workId: workIdOf(ctx), key: 'other', content: '后续卡片' }) }, dispatch('next'),
-    ], [], { executorDriver: { async start(options) {
+    ], [], { executorDriver: { checkAvailability: async () => ({ available: true }), async start(options) {
       if (++starts !== 1) return fake.start(options);
       if (phase === 'start') return new Promise(() => {});
       const session = await fake.start(options);
@@ -315,7 +315,7 @@ test('看门狗记录执行者 pgid 和启动时间，SIGTERM 后等 5 秒再杀
   let startedAt = '';
   let path = '';
   t.after(() => { if (pid > 1) try { process.kill(-pid, 'SIGKILL'); } catch {} });
-  const driver: Driver = { async start(options) {
+  const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
     path = options.cwd;
     startedAt = new Date().toISOString();
     // The group member leaves the copy, but must still be killed with its group.
@@ -544,7 +544,7 @@ test('按实际步骤号读输出，步骤不连续仍可读取；重启后派�
     { type: 'write', path: 'kept.txt', content: '持久保存\n' },
     { type: 'output', text: '第二个实际步骤' },
   ]]);
-  const driver: Driver = { async start(options) {
+  const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
     const session = await fake.start(options);
     return { ...session, events: (async function* () { for await (const event of session.events) yield { ...event, step: event.step * 2 }; })() };
   } };

@@ -55,6 +55,82 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
+test('Claude 订阅和 API 模板使用 Helm 主目录，只有 API 加载用户设置', async t => {
+  const options = await fixture(t);
+  options.env.HOME = options.cwd;
+  options.env.CLAUDE_CONFIG_DIR = '/caller/must-not-use';
+  for (const home of ['shared', 'template'] as const) {
+    const template = { ...options.template!, id: 'api-executor', home };
+    await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: fakeQuery([result()], args => {
+        assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
+          join(options.cwd, '.helm', 'agent-homes', home === 'shared' ? 'claude' : 'api-executor'));
+        assert.deepEqual(args.options!.settingSources, home === 'shared' ? [] : ['user']);
+      }) }), { ...options, template });
+  }
+});
+
+test('Claude 可用性只让 CLI 查订阅登录；API 仅检查目录和设置文件存在', async t => {
+  const options = await fixture(t);
+  const previousHome = process.env.HOME;
+  process.env.HOME = options.cwd;
+  t.after(() => { if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome; });
+  let loggedIn = false;
+  let probes = 0;
+  const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    authStatus: async (executable, probe) => {
+      probes++;
+      assert.equal(executable, '/test/bin/claude');
+      assert.equal(probe.env.CLAUDE_CONFIG_DIR, join(options.cwd, '.helm/agent-homes/claude'));
+      assert.equal(probe.env.ANTHROPIC_API_KEY, undefined);
+      assert.equal(probe.cwd, probe.env.CLAUDE_CONFIG_DIR);
+      return loggedIn;
+    } });
+  const unavailable = await driver.checkAvailability(options.template!);
+  assert.equal(unavailable.available, false);
+  assert.match(unavailable.reason!, /登录/);
+  assert.match(unavailable.command!, /CLAUDE_CONFIG_DIR=.*claude auth login/);
+  loggedIn = true;
+  assert.equal((await driver.checkAvailability(options.template!)).available, true);
+  const api = { ...options.template!, id: 'api-example', home: 'template' as const };
+  assert.equal((await driver.checkAvailability(api)).available, false);
+  const directory = join(options.cwd, '.helm/agent-homes/api-example');
+  await mkdir(directory);
+  assert.equal((await driver.checkAvailability(api)).available, false);
+  // Malformed contents deliberately pass: Helm must never parse this file.
+  await writeFile(join(directory, 'settings.json'), 'not JSON; user-owned credentials');
+  assert.equal((await driver.checkAvailability(api)).available, true);
+  assert.equal(probes, 2, 'API 模板不调用登录检查');
+});
+
+test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环境，拒绝失败或非订阅登录', async t => {
+  const options = await fixture(t);
+  const previousHome = process.env.HOME;
+  process.env.HOME = options.cwd;
+  t.after(() => { if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome; });
+  const executable = join(options.cwd, 'claude-substitute');
+  const evidence = join(options.cwd, 'probe.json');
+  const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: executable });
+  for (const [status, exit] of [
+    [{ loggedIn: true, authMethod: 'claude.ai' }, 0],
+    [{ loggedIn: false, authMethod: 'none' }, 0],
+    [{ loggedIn: true, authMethod: 'api_key' }, 0],
+    [{ loggedIn: true, authMethod: 'claude.ai' }, 1],
+    ['invalid-json', 0],
+  ] as const) {
+    await writeFile(executable, `#!${process.execPath}\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({args: process.argv.slice(2), env: process.env, cwd: process.cwd()}));\nconsole.log(${JSON.stringify(typeof status === 'string' ? status : JSON.stringify(status))});\nprocess.exit(${exit});\n`);
+    await chmod(executable, 0o755);
+    const availability = await driver.checkAvailability(options.template!);
+    assert.equal(availability.available, typeof status !== 'string' && status.loggedIn && status.authMethod === 'claude.ai' && exit === 0);
+    const probe = JSON.parse(await readFile(evidence, 'utf8'));
+    assert.deepEqual(probe.args, ['auth', 'status', '--json', '--setting-sources', '']);
+    assert.equal(probe.env.CLAUDE_CONFIG_DIR, join(options.cwd, '.helm/agent-homes/claude'));
+    assert.equal(probe.cwd, probe.env.CLAUDE_CONFIG_DIR);
+    assert.equal(probe.env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(probe.env.CLAUDE_CODE_DESKTOP_SESSION, undefined);
+  }
+});
+
 test('真实 Claude 驱动把默认调度规则注入 SDK 提示词，保留启动简报原文', async t => {
   const options = await fixture(t, 'coordinator');
   let inspected = false;

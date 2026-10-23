@@ -174,7 +174,7 @@ test('换调度者模板只影响下一轮，当前运行或启动中的轮次�
       return [];
     };
     const replacements = new FakeDriver([record, record]);
-    const daemon = await fixture(t, { 'claude-sdk': { async start(options) {
+    const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), async start(options) {
       firstOptions = options;
       if (phase === 'starting') await starting;
       return original.start(options);
@@ -309,8 +309,8 @@ test('排队派单在实际启动时重读模板，已经运行的派单保留�
       ]),
     ]]);
     const routed: string[] = [];
-    const daemon = await fixture(t, { 'claude-sdk': { start: options => options.template?.role === 'coordinator' ? rounds.start(options) : executors.start(options) },
-      codex: { start: options => { routed.push(options.template!.model!); return new FakeDriver().start(options); } },
+    const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => options.template?.role === 'coordinator' ? rounds.start(options) : executors.start(options) },
+      codex: { checkAvailability: async () => ({ available: true }), start: options => { routed.push(options.template!.model!); return new FakeDriver().start(options); } },
     });
     await daemon.writeTemplate('claude-coordinator', { role: 'coordinator' });
     await daemon.writeTemplate('file-executor', { model: 'before-queue' });
@@ -345,7 +345,7 @@ test('排队派单在实际启动时重读模板，已经运行的派单保留�
 });
 
 test('坏的调度者模板用结构化错误结束轮次，不拉起驱动', async t => {
-  const daemon = await fixture(t, { 'claude-sdk': { start() { throw new Error('不应启动驱动'); } } });
+  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start() { throw new Error('不应启动驱动'); } } });
   await daemon.writeTemplate('claude-coordinator', { role: 'coordinator', fast: true });
   const { events } = await startWork(daemon);
   const ended = (await events()).find(value => value.action === 'round-ended');
@@ -367,7 +367,7 @@ test('派给坏模板、缺失模板和 Claude fast 模板返回结构化错误�
     })),
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'healthy', templateId: 'healthy' }), check: ok },
   ]]);
-  const daemon = await fixture(t, { 'claude-sdk': { start: options => (options.template?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) } });
+  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => (options.template?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) } });
   await daemon.writeTemplate('claude-coordinator', { role: 'coordinator' });
   await daemon.writeTemplate('healthy');
   await daemon.writeTemplate('fast', { fast: true });
