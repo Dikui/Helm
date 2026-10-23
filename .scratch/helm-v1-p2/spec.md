@@ -3,7 +3,7 @@
 Status: ready-for-agent
 Map: [Helm v1 设计](../helm-v1/map.md)
 
-本文覆盖 [15](../helm-v1/issues/15-v1-slice.md) 定的第二阶段：Codex 驱动、模板配置（含换调度者模板）、agent CLI 专用主目录、用户级服务自启动、输出管理，最后用 2048 跑一次 Codex 调度者加两家执行者的端到端。第一版见 [第一版 spec](../helm-v1-p1/spec.md)，本文只写第二阶段的增量。术语以 [GLOSSARY.md](../../GLOSSARY.md) 为准，主目录与凭据的取舍见 [ADR 0004](../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)。决策来自 2026-10-23 的 grilling，实测见 [实测单 01](issues/01-agent-home-isolation.md)、[02](issues/02-templates-skills-and-api-homes.md)。
+本文覆盖 [15](../helm-v1/issues/15-v1-slice.md) 定的第二阶段：Codex 驱动、模板配置（含换调度者模板）、agent CLI 主目录（订阅用默认、API 用专用）、用户级服务自启动、输出管理，最后用 2048 跑一次 Codex 调度者加两家执行者的端到端。第一版见 [第一版 spec](../helm-v1-p1/spec.md)，本文只写第二阶段的增量。术语以 [GLOSSARY.md](../../GLOSSARY.md) 为准，主目录与凭据的取舍见 [ADR 0004](../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)，订阅模板部分已由 [ADR 0005](../../docs/adr/0005-subscription-templates-use-default-cli-homes.md) 改为用默认主目录。决策来自 2026-10-23 的 grilling，实测见 [实测单 01](issues/01-agent-home-isolation.md)、[02](issues/02-templates-skills-and-api-homes.md)。
 
 ## Problem Statement
 
@@ -13,7 +13,7 @@ Map: [Helm v1 设计](../helm-v1/map.md)
 
 Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目录，写明角色、驱动、模型、推理强度、fast、主目录、提示词、skills 和职责说明；改了文件，下一次派单或调度轮次就用新内容，不用改代码或重启。内置四个模板：Claude、Codex 各一个调度者、一个执行者。用户在创建工作时选调度者模板，之后随时可换。
 
-新增 Codex 驱动，每个派单、每个调度轮次各起一个 `codex app-server`。所有 agent CLI 都用 `~/.helm/agent-homes/` 下的专用主目录：订阅模板共用该 CLI 的目录、沿用用户的登录；API 模板各用自己的目录，用户按 CLI 自己的格式把接口和 key 写在里面，Helm 不读。`helmd` 启动时检查各模板是否可用，不可用的告诉调度者和用户原因。
+新增 Codex 驱动，每个派单、每个调度轮次各起一个 `codex app-server`。订阅模板直接用 agent CLI 的默认主目录和用户已有的登录；API 模板各用 `~/.helm/agent-homes/<模板 id>/`，用户按 CLI 自己的格式把接口和 key 写在里面，Helm 不读。`helmd` 启动时检查各模板是否可用，不可用的告诉调度者和用户原因。
 
 `helm service install` 把 `helmd` 装成开机自动启动、崩溃自动重启的用户级服务。工作结束后输出自动压缩；总量超过阈值时提示一次；用户可以导出或删除已结束工作的原始输出。
 
@@ -28,7 +28,7 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 5. As a 用户, I want 设了 fast 的 Claude 模板被拒绝加载并说明原因, so that Helm 不会在订阅之外悄悄计入 extra usage
 6. As a 用户, I want 模板写明职责说明, so that 调度者在 `list-agent-templates` 里知道该把什么卡片派给谁
 7. As a 用户, I want 每个模板挂自己的 skills, so that 执行者只用我为这个模板准备的 skills
-8. As a 用户, I want 模板之间、模板与我自己日常用的 skills 互相看不到, so that 执行者的行为可预期
+8. As a 用户, I want 模板之间的 skills 互相看不到；Claude 模板还看不到我自己的 skills（Codex 会看到，见 ADR 0005）, so that 执行者的行为可预期
 9. As a 用户, I want Helm 内置 Claude、Codex 各一个调度者和执行者模板, so that 不写任何配置也能用两家
 10. As a 用户, I want 模板文件写错时该模板标为不可用并说明哪里错, so that 一个坏模板不会拖垮整个 `helmd`
 
@@ -46,16 +46,16 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 17. As a 用户, I want Codex 派单记录驱动报告的 token 用量, so that 我知道每张卡片花了多少
 18. As a 用户, I want Codex 撞上限额时派单记为"额度用完"、由调度者改派, so that 一家额度用完工作不会停
 19. As a 用户, I want Codex 调度轮次撞上限额时运行层暂停工作并通知我, so that 和 Claude 调度者的处理一致
-20. As a 用户, I want Codex 执行者不读我的 `~/.codex/config.toml` 和 `~/.codex/AGENTS.md`, so that 我个人的设置不影响 Helm 派单
+20. As a 用户, I want 接受 Codex 读我的 `~/.codex/config.toml` 和 `~/.codex/AGENTS.md`，由 Helm 按会话传的参数覆盖同名项, so that 不用为隔离维护专用目录（ADR 0005）
 
 **主目录与登录**
 
-21. As a 用户, I want Helm 拉起的所有 agent CLI 都用 Helm 专用主目录, so that 它们的会话记录不混进我自己的历史
-22. As a 用户, I want Codex 订阅模板沿用我原来的登录、不用另登录, so that 首次使用不用多做一步
-23. As a 用户, I want Claude 订阅模板在专用目录登录一次后一直可用, so that 我只做一次性的准备
+21. As a 用户, I want 订阅模板直接用我本机 agent CLI 的默认主目录，会话记录混进我的历史也可以, so that 不用另登录、不用维护专用目录
+22. As a 用户, I want Codex 订阅模板沿用我原来的登录, so that 首次使用不用多做一步
+23. As a 用户, I want Claude 订阅模板沿用我原来的登录, so that 不用另登录
 24. As a 用户, I want 走第三方接口的 API 模板各用一个专用主目录、接口和 key 由我按 CLI 自己的格式写在里面, so that 订阅和 API 能同时用，Helm 也不经手我的 key
 25. As a 用户, I want 订阅模板和 API 模板能同时跑、互不串用登录, so that 调度者可以把不同卡片派到不同计费方式
-26. As a 用户, I want Helm 只建软链接、不打开不复制我的凭据文件, so that 我的登录不会因为副本失效
+26. As a 用户, I want Helm 不打开、不复制我的凭据文件, so that 我的登录不会因为副本失效
 
 **可用性**
 
@@ -99,7 +99,7 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 **skills 按模板挂载**
 
 - Claude：每个模板的 `skills/` 作为一个本地插件，通过 Agent SDK 的 `plugins` 选项挂上；`skills` 选项只列这个模板自己的 skill 名，藏起 Claude Code 自带的 skills。
-- Codex：每个 app-server 进程启动后调用 `skills/extraRoots/set`，指向这个模板的 `skills/`。Codex 自带的系统 skills 和 OpenAI 精选插件保留。
+- Codex：每个 app-server 进程启动后调用 `skills/extraRoots/set`，指向这个模板的 `skills/`。Codex 自带的系统 skills、OpenAI 精选插件和用户自己的 skills（`~/.codex/skills`、`~/.agents/skills`）保留，Codex 没有按会话过滤的参数。
 
 **调度者模板**
 
@@ -113,23 +113,23 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 
 **Codex 驱动**
 
-- 每个派单、每个调度轮次一个 `codex app-server` 进程（[04](../helm-v1/issues/04-tech-stack.md) Q15），`CODEX_HOME` 用专用主目录，`CODEX_SQLITE_HOME` 放在该派单或调度轮次的数据目录下。推翻条件：新 sqlite 目录的 backfill 让 `initialize` 超过约 15 秒时，改为共用进程或共用 sqlite 目录。
+- 每个派单、每个调度轮次一个 `codex app-server` 进程（[04](../helm-v1/issues/04-tech-stack.md) Q15），订阅模板不设 `CODEX_HOME`，`CODEX_SQLITE_HOME` 放在该派单或调度轮次的数据目录下。推翻条件：新 sqlite 目录的 backfill 让 `initialize` 超过约 15 秒时，改为共用进程或共用 sqlite 目录。
 - 执行者 `workspace-write`，可写根为卡片副本，开网络；调度者 `read-only`。`approvalPolicy: never`。Helm MCP（带令牌的 HTTP）和转发的浏览器工具按会话配置，工具审批 `default_tools_approval_mode: approve`。环境里的 `NO_PROXY` 必须含 `127.0.0.1,localhost`：实测在没有任何代理变量时，Codex 发往本机的请求也会被拦。
 - 结束判定看 `turn/completed`；token 用 `thread/tokenUsage/updated` 的 `total`；撞上限额识别为"额度用完"，按真实错误消息样本识别。执行派单结束后由 `helmd` 提交（Codex 沙箱里不能提交）。
 - 续跑用 `thread/resume`，派单记下 thread id 和 sqlite 目录。
 
-**主目录与凭据**（[ADR 0004](../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)）
+**主目录与凭据**（[ADR 0004](../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)、[ADR 0005](../../docs/adr/0005-subscription-templates-use-default-cli-homes.md)）
 
-- 订阅模板共用 `~/.helm/agent-homes/<cli>/`；API 模板用 `~/.helm/agent-homes/<模板 id>/`。驱动按 CLI 设 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`。
-- Codex 订阅目录：`helmd` 首次使用时建 `auth.json` 软链接指向 `~/.codex/auth.json`；源文件不存在时模板不可用。Claude 订阅目录：用户运行 `CLAUDE_CONFIG_DIR=~/.helm/agent-homes/claude claude auth login` 一次，登录存在钥匙串里该目录对应的条目。
-- API 模板目录：用户自己写 CLI 的配置。Claude 写 `settings.json` 的 `env`（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`），该模板的 `settingSources` 只读主目录里的用户设置；Codex 写 `config.toml` 的自定义 provider（`base_url`、`experimental_bearer_token`）。Helm 不打开这些文件。
+- 订阅模板直接用 CLI 默认主目录：驱动不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`（也不能显式设成默认路径，Claude 会走"自定义配置目录"分支、钥匙串对不上），登录沿用用户在终端里的登录，会话记录写进用户自己的历史。
+- Claude 订阅模板仍用 `settingSources: []`、`strictMcpConfig`、`skills` 过滤，不读用户的设置、MCP 和 skills。Codex 订阅模板接受读用户的 `config.toml`、`AGENTS.md`、skills 和插件，Helm 按会话传的参数覆盖同名项。
+- API 模板用 `~/.helm/agent-homes/<模板 id>/`，驱动按 CLI 设 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`。用户自己写 CLI 的配置：Claude 写 `settings.json` 的 `env`（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`），该模板的 `settingSources` 只读主目录里的用户设置；Codex 写 `config.toml` 的自定义 provider（`base_url`、`experimental_bearer_token`）。Helm 不打开这些文件。
 - 计费方式由模板的主目录决定，不看 `apiKeySource`（实测 API 模板也报 `none`）。
 - API 模板下的结束方式：余额不足或 key 失效记"额度用完"；429 限流由 CLI 自己重试，仍失败记"出错退出"。
-- 子进程环境仍按第一版的白名单，只多出主目录变量。
+- 子进程环境仍按第一版的白名单，API 模板多出主目录变量。
 
 **可用性检查**
 
-- `helmd` 启动时、每次派单和调度轮次用某个模板之前检查。订阅模板：Claude 查专用目录的登录状态，Codex 查凭据软链接的目标存在。API 模板：只查主目录和配置文件（`settings.json` 或 `config.toml`）存在。
+- `helmd` 启动时、每次派单和调度轮次用某个模板之前检查。订阅模板：由 CLI 自己报告登录状态（`claude auth status`、`codex login status`），Helm 不读凭据文件。API 模板：只查主目录和配置文件（`settings.json` 或 `config.toml`）存在。
 - 不可用的模板在 `list-agent-templates` 标出原因；列进待处理事项（附登录命令）并推送"需要用户处理"事件，同一原因只推一次。派给不可用模板的派单被拒绝，返回结构化错误；调度轮次的调度者模板不可用时，运行层暂停工作并通知用户，和调度者额度用完一样处理。
 
 **用户级服务**
@@ -152,12 +152,12 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
   - 驱动分派：派单和调度轮次进了模板驱动字段对应的假驱动
   - 调度者模板：项目默认、创建时指定、中途更换从下一个调度轮次生效并记事件、正在跑的轮次不受影响
   - 可用性：假驱动按脚本报不可用时，模板标原因、进待处理事项、推一次事件、派单被拒；调度者模板不可用时工作被暂停；补好后不用重启即恢复
-  - 主目录：临时 `HOME` 下放假的 `~/.codex/auth.json`，检查建的是软链接且目标正确；会话选项里的主目录变量按订阅 / API 模板指向正确目录；Helm 没有打开凭据文件（假凭据文件的 atime 或内容不变，按能断言的方式）
+  - 主目录：订阅模板的会话环境里没有 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`；API 模板指向 `~/.helm/agent-homes/<模板 id>/`
   - 额度用完：Codex 执行派单以"额度用完"结束时调度者被唤醒改派；Codex 调度轮次额度用完时工作暂停
   - 输出管理：工作结束后输出变为 gzip 且 `get-dispatch-output` 读到原内容；阈值调小后只提示一次、降回再超过时再提示；导出的 `.tar.gz` 内容完整；未导出时删除返回提示；删除后成果仍可读、输出处为"已删除"；未结束的工作不能导出或删除
 - **副边界**（沿用第一版）：驱动接口。
   - 单元测试：仿照现有 Claude 驱动测试注入假 `query` 的做法，给 Codex 驱动注入一个按脚本回放 JSON-RPC 的假 app-server，测结束方式、token、额度用完识别（真实错误消息样本作固定输入）、`skills/extraRoots/set` 调用、沙箱和 MCP 配置、`NO_PROXY`、fast 映射。Claude 驱动补测：主目录变量、skills 插件挂载和 `skills` 列表、API 模板的 `settingSources`、额度用完识别的错误消息样本。
-  - 真 CLI 冒烟：并入沙箱外的 `npm run test:real`，用消耗小的模型、低推理强度。Codex 的验收项为原 14 技术验证：① 按会话加载带令牌的 HTTP MCP，调度者能建卡、派单、改依赖，"提交结论"和转发的浏览器工具在同一端点工作；② 重投时靠 `key` 不重复；③ Codex 调度者 `read-only` 生效，执行者副本外写入被拦；④ 专用主目录下不读 `~/.codex/config.toml`、`~/.codex/AGENTS.md`；⑥ MCP 工具审批和 `NO_PROXY` 对调度者同样生效。另测 token 记录、结束方式、skills 隔离、续跑。Claude 在专用主目录下重跑第一版的冒烟。API 模板不做真实接口冒烟。
+  - 真 CLI 冒烟：并入沙箱外的 `npm run test:real`，用消耗小的模型、低推理强度。Codex 的验收项为原 14 技术验证：① 按会话加载带令牌的 HTTP MCP，调度者能建卡、派单、改依赖，"提交结论"和转发的浏览器工具在同一端点工作；② 重投时靠 `key` 不重复；③ Codex 调度者 `read-only` 生效，执行者副本外写入被拦；⑥ MCP 工具审批和 `NO_PROXY` 对调度者同样生效。另测 token 记录、结束方式、模板之间 skills 隔离、续跑。Claude 用默认主目录重跑第一版的冒烟。API 模板不做真实接口冒烟。
 - **新边界**：`helm` 命令行进程，只测 `helm service install`。在临时 `HOME` 下运行编好的 `helm`，`PATH` 里放 `launchctl`、`systemctl` 的替身，断言生成的 plist 或 unit 内容（`PATH` 和代理变量、开机启动、崩溃重启、日志路径）和替身收到的参数。真正装进系统在 2048 端到端前手动做一次。
 - **浏览器**：同第一版，起真实浏览器的测试不在沙箱里跑，用 Playwright 自带的 Chrome for Testing 有界面模式，验收时看截图。
 - **端到端验收**（不是测试边界）：网页版 2048，Codex 调度者，执行者 Claude 和 Codex 都有、两家交叉验收，含浏览器验收，用真实驱动跑一次完整流程；用 `helm service install` 起的服务跑；消耗小的模型、低推理强度、不开 fast。
@@ -178,7 +178,7 @@ Agent 模板改为 Helm 仓库模板目录里的文件，每个模板一个目�
 
 - 所有实测都在 macOS 上做；Linux 的 systemd user unit 照写但未实测。
 - Codex 的 `experimental_bearer_token` 名字带 experimental，升级后可能失效；失效时 API 模板派单会"出错退出"。
-- 已接受的风险：执行者能在沙箱里 `echo` 出环境变量，API 模板的 key 可能出现在派单输出和导出的 `.tar.gz` 里；Codex 精选插件占用专用主目录的空间未量。
+- 已接受的风险：执行者能在沙箱里 `echo` 出环境变量，API 模板的 key 可能出现在派单输出和导出的 `.tar.gz` 里；Codex 订阅模板读用户的个人配置、`AGENTS.md`、skills 和插件（ADR 0005）。
 - Codex 发往本机的请求在没有代理变量时也被拦，原因（系统代理设置还是测试会话的沙箱）未分辨；以 `NO_PROXY` 为准。
 - 开发测试用真实驱动时一律用消耗小的模型、调低推理强度、不开 fast。
 - 开发任务单放在 [issues/](issues/)，从 03 起编号（01、02 是实测单）。
