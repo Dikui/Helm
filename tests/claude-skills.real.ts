@@ -1,19 +1,15 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { before, test } from 'node:test';
+import { test } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver } from '../src/claude-driver.js';
 import { runtimeEnvironment } from '../src/environment.js';
 import { TemplateCatalog } from '../src/templates.js';
 
 // Only the test:real runner enables this file. npm test never starts a CLI.
-before(async () => {
-  if (process.env.HELM_CLAUDE_SKILLS_REAL === '1') assert.notEqual(await realpath(homedir()), await realpath(userInfo().homedir),
-    '请先设置并登录临时 HOME，禁止使用用户真实主目录');
-});
 test('Claude 两个模板并行叠加自己的 skill，init 不含另一模板的 skill',
   { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-skills-')));

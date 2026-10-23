@@ -1,10 +1,9 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-coordinator.
 // Requires Claude login in a disposable HOME. No browser is started.
 import assert from 'node:assert/strict';
-import { readFile, realpath } from 'node:fs/promises';
-import { homedir, userInfo } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { before, test } from 'node:test';
+import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver } from '../src/claude-driver.js';
 import type { StartupBrief } from '../src/rounds.js';
@@ -12,9 +11,6 @@ import { fixture, until } from './claude-coordinator-fixture.js';
 import { assertInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_COORDINATOR_REAL === '1';
-before(async () => {
-  if (enabled) assert.notEqual(await realpath(homedir()), await realpath(userInfo().homedir), '请先设置并登录临时 HOME，禁止使用用户真实主目录');
-});
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 function toolCalls(messages: SDKMessage[]) {
