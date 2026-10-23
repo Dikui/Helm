@@ -1,6 +1,6 @@
 # 02 — 实测：订阅与 API 模板并存、skills 按模板隔离、Claude fast
 
-**What to build:** 第二阶段 grilling（2026-10-23）定下模板以文件为准、API 模板用模板专用主目录、skills 按模板挂载，实测这些做法在 Claude、Codex 上是否成立。见 [spec](../../helm-v1-p1/spec.md) Out of Scope 第二阶段、[ADR 0004](../../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)。
+**What to build:** 第二阶段 grilling（2026-10-23）定下模板以文件为准、API 模板用模板专用主目录、skills 按模板挂载，实测这些做法在 Claude、Codex 上是否成立。见 [第二阶段 spec](../spec.md)、[ADR 0004](../../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)。
 
 **Blocked by:** 01
 
