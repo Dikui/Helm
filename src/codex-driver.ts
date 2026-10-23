@@ -84,9 +84,11 @@ export class CodexDriver implements Driver {
         if (skill.scope !== 'user') continue;
         // CODEX_HOME does not isolate HOME/.agents/skills. Canonicalize aliases
         // (including /var on macOS) before deciding which template owns a skill.
-        const path = await realpath(skill.path);
-        const enabled = skillsRoot !== null && path.startsWith(skillsRoot + sep);
-        if (skill.enabled !== enabled) await rpc.request('skills/config/write', { path, enabled });
+        // A dangling user skill link must not block the session; treat it as foreign.
+        const path = await realpath(skill.path).catch(() => null);
+        const enabled = skillsRoot !== null && path !== null && path.startsWith(skillsRoot + sep);
+        // Write the listed path: Codex matches its config entries against that form.
+        if (skill.enabled !== enabled) await rpc.request('skills/config/write', { path: skill.path, enabled });
       }
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',

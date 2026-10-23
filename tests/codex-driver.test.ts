@@ -59,9 +59,11 @@ for (const mode of ['executor', 'resume', 'coordinator'] as const) test(`Codex $
   await symlink(join(ctx.directory, 'skills'), alias);
   ctx.options.template = { ...ctx.options.template!, skillsPath: alias };
   const aliased = await skill(join(alias, 'aliased', 'SKILL.md'), 'user', false);
-  if (process.platform === 'darwin' && disabled.startsWith('/private/var/')) {
-    skills.find(s => s.path === disabled)!.path = disabled.replace('/private/var/', '/var/');
-  }
+  const listedDisabled = process.platform === 'darwin' && disabled.startsWith('/private/var/') ? disabled.replace('/private/var/', '/var/') : disabled;
+  skills.find(s => s.path === disabled)!.path = listedDisabled;
+  // A dangling user skill link must be disabled, not abort the session.
+  const dangling = join(ctx.directory, '.agents', 'skills', 'dangling', 'SKILL.md');
+  skills.push({ path: dangling, scope: 'user', enabled: true });
   for (const scope of ['repo', 'system']) for (const enabled of [true, false]) {
     skills.push({ path: join(ctx.directory, scope, String(enabled), 'SKILL.md'), scope, enabled });
   }
@@ -73,10 +75,10 @@ for (const mode of ['executor', 'resume', 'coordinator'] as const) test(`Codex $
   const writes = requests.filter(r => r.method === 'skills/config/write');
   assert.deepEqual(writes.map(r => r.params), [
     { path: external, enabled: false }, { path: personal, enabled: false }, { path: sibling, enabled: false },
-    { path: disabled, enabled: true }, { path: await realpath(aliased), enabled: true },
+    { path: listedDisabled, enabled: true }, { path: aliased, enabled: true }, { path: dangling, enabled: false },
   ]);
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'skills/list',
-    ...Array(5).fill('skills/config/write'), mode === 'resume' ? 'thread/resume' : 'thread/start']);
+    ...Array(6).fill('skills/config/write'), mode === 'resume' ? 'thread/resume' : 'thread/start']);
   assert.deepEqual(requests[3].params, { cwds: [ctx.directory], forceReload: true });
 });
 
