@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AcpDriver } from '../src/acp-driver.js';
 import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
 import { acpFixture, collect } from './acp-fixture.js';
+import { until } from './browser-fixture.js';
 
 test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及卡片沙箱运行，返回最终回答和本轮 token', async t => {
   const ctx = await acpFixture(t);
@@ -159,15 +160,81 @@ test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第
   });
 });
 
-test('Grok 沙箱根必须恰为卡片副本，拒绝只读或额外根；续跑留给任务单 02', async t => {
+test('Grok 沙箱根必须恰为卡片副本，拒绝只读或额外根', async t => {
   const ctx = await acpFixture(t);
   for (const sandbox of [
     { mode: 'read-only' as const, writableRoots: [] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, ctx.home] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.home] },
   ]) await assert.rejects(ctx.driver.start({ ...ctx.options, sandbox }), /card copy/);
-  await assert.rejects(ctx.driver.start({ ...ctx.options, resumeSessionId: 'old' }), /任务单 02/);
   assert.deepEqual(await ctx.requests(), []);
+});
+
+test('Grok 续跑在新进程用 session/resume，保持会话 id 并更新本次派单的 HTTP MCP 令牌', async t => {
+  const ctx = await acpFixture(t, { uniqueSession: true });
+  const first = await ctx.driver.start(ctx.options);
+  await first.send('第一轮');
+  await collect(first.events);
+  const headers = { Authorization: 'Bearer resumed-dispatch-token' };
+  const resumed = await ctx.driver.start({ ...ctx.options, resumeSessionId: first.id,
+    mcpServers: { helm: { ...ctx.options.mcpServers.helm!, headers } } });
+  assert.equal(resumed.id, first.id);
+  await resumed.send('打回修改');
+  assert.equal((await collect(resumed.events)).at(-1)?.type, 'end');
+  const requests = await ctx.requests();
+  const spawns = requests.filter(r => r.method === 'fixture/spawn');
+  assert.notEqual(spawns[0].pid, spawns[1].pid);
+  assert.equal(requests.filter(r => r.method === 'session/new').length, 1);
+  assert.equal(requests.some(r => r.method === 'session/load'), false);
+  assert.deepEqual(requests.find(r => r.method === 'session/resume').params, {
+    sessionId: first.id, cwd: ctx.cwd, mcpServers: [{ type: 'http', name: 'helm',
+      url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: headers.Authorization }] }],
+  });
+});
+
+test('ACP 未声明 resume 能力时明确拒绝续跑，不悄悄新开或回退到 session/load', async t => {
+  const ctx = await acpFixture(t, { resume: false });
+  await assert.rejects(ctx.driver.start({ ...ctx.options, resumeSessionId: 'previous' }), /session\/resume/);
+  assert.equal((await ctx.requests()).some(r => r.method.startsWith('session/')), false);
+});
+
+for (const mode of ['cancel', 'signal', 'ignores-cancel', 'racing-completion'] as const) test(`Grok 进行中中止 ${mode} 只发一次 session/cancel，返回被中止并收尾进程`, { timeout: 10_000 }, async t => {
+  const ctx = await acpFixture(t, { holdPrompt: true, ignoreCancel: mode === 'ignores-cancel',
+    ...(mode === 'racing-completion' ? { cancelResponse: { stopReason: 'end_turn' } } : {}) });
+  const controller = new AbortController();
+  const session = await ctx.driver.start({ ...ctx.options, signal: controller.signal });
+  t.after(() => session.cancel());
+  await session.send('执行中等待取消');
+  const collecting = collect(session.events);
+  await until(ctx.requests, requests => requests.some(r => r.method === 'session/prompt'));
+  if (mode === 'signal') controller.abort(); else session.cancel();
+  session.cancel();
+  const events = await collecting;
+  const end = events.at(-1)!;
+  assert.equal(events.filter(e => e.type === 'end').length, 1);
+  assert.equal(end.type === 'end' && end.reason, 'aborted');
+  assert.equal(end.type === 'end' && end.finalAnswer, undefined);
+  if (mode === 'cancel' || mode === 'signal') assert.deepEqual(end.type === 'end' && end.usage, { inputTokens: 12, outputTokens: 3 });
+  const requests = await ctx.requests();
+  const cancels = requests.filter(r => r.method === 'session/cancel');
+  assert.equal(cancels.length, 1);
+  assert.equal(cancels[0].id, undefined, '取消是通知，不等待 RPC 响应');
+  assert.deepEqual(cancels[0].params, { sessionId: session.id });
+  assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
+});
+
+for (const method of ['initialize', 'authenticate', 'session/new', 'session/resume']) test(`ACP 在 ${method} 启动中被中止也关闭已登记进程，不发送 prompt`, async t => {
+  const ctx = await acpFixture(t, { hangOn: method });
+  const controller = new AbortController();
+  const starting = ctx.driver.start({ ...ctx.options, signal: controller.signal,
+    ...(method === 'session/resume' ? { resumeSessionId: 'old-session' } : {}) });
+  const rejected = assert.rejects(starting);
+  await until(ctx.requests, requests => requests.some(r => r.method === method));
+  controller.abort();
+  await rejected;
+  const requests = await ctx.requests();
+  assert.equal(requests.some(r => r.method === 'session/prompt'), false);
+  assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
 });
 
 for (const script of [{ rejectOn: 'session/prompt' }, { exitOn: 'session/prompt' }]) test(`Grok 缺少成功的 prompt 响应不会误报完成：${JSON.stringify(script)}`, async t => {
@@ -177,6 +244,59 @@ for (const script of [{ rejectOn: 'session/prompt' }, { exitOn: 'session/prompt'
   const end = (await collect(session.events)).at(-1)!;
   assert.equal(end.type === 'end' && end.reason, 'error');
   assert.equal(end.type === 'end' && end.finalAnswer, undefined);
+});
+
+for (const error of [
+  { code: -32003, message: 'Rate limited' },
+  { code: -32603, message: 'Internal error', data: 'subscription:free-usage-exhausted' },
+  { code: -32603, message: 'Internal error', data: { message: 'You’ve hit the rate limit for your plan.' } },
+  { code: -32603, message: 'quota exceeded' },
+  { code: -32603, message: 'Internal error', data: 'connection reset' },
+  { code: -32000, message: 'Authentication required', data: 'run grok login' },
+]) test(`Grok 只从 ACP 错误匹配额度，保留报错原因：${JSON.stringify(error)}`, async t => {
+  const ctx = await acpFixture(t, { rejectOn: 'session/prompt', error });
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('执行');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type === 'end' && end.reason, error.message === 'Authentication required' || error.data === 'connection reset' ? 'error' : 'quota-exhausted');
+  assert.equal(end.type === 'end' && end.finalAnswer, undefined);
+  assert.match(end.type === 'end' && 'failure' in end ? String(end.failure) : '', new RegExp(error.message));
+  if (error.data) assert.ok(JSON.stringify(end).includes(typeof error.data === 'string' ? error.data : error.data.message));
+});
+
+for (const script of [{ exitOn: 'session/prompt' }, { response: { stopReason: 42 } }, { response: { stopReason: 'refusal' } }]) test(`ACP 崩溃、协议或异常结束均给出原因：${JSON.stringify(script)}`, async t => {
+  const ctx = await acpFixture(t, script);
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('执行');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type === 'end' && end.reason, 'error');
+  assert.ok(end.type === 'end' && 'failure' in end && end.failure);
+});
+
+test('Grok 私有 auto_compact_started 为当前会话记一条压缩事件，不把完成或别的会话通知重复计入', async t => {
+  const ctx = await acpFixture(t, { notifications: [
+    { method: '_x.ai/session/update', params: { update: { sessionUpdate: 'auto_compact_started', tokens_used: 850, context_window: 1000, percentage: 85, reason: 'threshold' } } },
+    { method: '_x.ai/session/update', params: { update: { sessionUpdate: 'auto_compact_completed', tokens_before: 850 } } },
+    { method: '_x.ai/session/update', params: { sessionId: 'other', update: { sessionUpdate: 'auto_compact_started' } } },
+  ] });
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('执行');
+  const events = await collect(session.events);
+  assert.equal(events.filter(e => e.type === 'compaction').length, 1);
+  assert.equal(events.at(-1)?.type === 'end' && (events.at(-1) as any).reason, 'completed');
+});
+
+for (const script of [{ response: null }, { malformedOn: 'session/prompt' }]) test(`ACP 协议畸形也结束为出错退出，不挂到看门狗超时：${JSON.stringify(script)}`, async t => {
+  const ctx = await acpFixture(t, script);
+  const controller = new AbortController();
+  const session = await ctx.driver.start({ ...ctx.options, signal: controller.signal });
+  const timer = setTimeout(() => controller.abort(), 1500);
+  t.after(() => { clearTimeout(timer); session.cancel(); });
+  await session.send('执行');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type === 'end' && end.reason, 'error');
+  assert.ok(end.type === 'end' && end.failure);
+  assert.equal(controller.signal.aborted, false, '驱动必须自行识别协议错误');
 });
 
 test('Grok 按 initialize 公布的模型与各模型推理档位检查可用性，不把无效组合悄悄换档', async t => {

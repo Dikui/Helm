@@ -13,6 +13,8 @@ interface AcpAgentProfile {
   unavailable(template: AgentTemplate): string | undefined;
   initializationUnavailable(template: AgentTemplate, response: InitializeResponse): string | undefined;
   usage(response: PromptResponse): TokenUsage;
+  quotaErrors: { codes: number[]; pattern: RegExp };
+  compactionNotification?: { method: string; sessionUpdate: string };
   installCommand: string;
   loginCommand: string;
 }
@@ -47,6 +49,10 @@ export const acpAgents: Record<'grok', AcpAgentProfile> = {
       const tokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
       return { inputTokens: tokens(usage?.inputTokens), outputTokens: tokens(usage?.outputTokens) };
     },
+    // xai-grok-shell/src/sampling/error.rs: HTTP 429 maps to -32003;
+    // subscription exhaustion can also appear in the RPC error's data.
+    quotaErrors: { codes: [-32003], pattern: /subscription:free-usage-exhausted|quota[ _-](?:exceeded|exhausted)|(?:usage|credit)[ _-]limit[ _-](?:reached|exceeded)|hit (?:the |your )?rate limit|rate limit (?:for your plan|exceeded)|insufficient_quota/i },
+    compactionNotification: { method: '_x.ai/session/update', sessionUpdate: 'auto_compact_started' },
     installCommand: 'curl -fsSL https://x.ai/cli/install.sh | bash', loginCommand: 'grok login',
   },
 };

@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { PROTOCOL_VERSION, type InitializeResponse, type NewSessionRequest } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest } from '@agentclientprotocol/sdk';
+import { z } from 'zod';
 import { acpAgents } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability } from './driver.js';
@@ -8,6 +9,8 @@ import { templatePrompt } from './prompts.js';
 import { TemplateCatalog, templateEnvironment, type AgentTemplate } from './templates.js';
 
 type EventContent<Event = DriverEvent> = Event extends DriverEvent ? Omit<Event, 'step'> : never;
+const extensionUpdate = z.object({ sessionId: z.string(), update: z.object({ sessionUpdate: z.string() }) });
+const promptResponse = z.object({ stopReason: z.string() });
 
 export class AcpDriver implements Driver {
   private profile;
@@ -67,7 +70,6 @@ export class AcpDriver implements Driver {
     }
     const cwd = await realpath(options.cwd);
     if (await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
-    if (options.resumeSessionId !== undefined) throw new Error('ACP 续跑尚未接入（任务单 02）。');
     options.signal?.throwIfAborted();
     const queue: DriverEvent[] = [];
     let wake: (() => void) | undefined;
@@ -77,10 +79,30 @@ export class AcpDriver implements Driver {
     let sent = false;
     let finished = false;
     let cancelled = false;
+    let cancellation: Promise<void> | undefined;
+    let cancelTimer: NodeJS.Timeout | undefined;
+    let resolveEnded!: () => void;
+    const ended = new Promise<void>(resolve => { resolveEnded = resolve; });
     const push = (event: EventContent) => { if (!finished) { queue.push({ ...event, step: ++step }); wake?.(); } };
     const output = (message: unknown) => push({ type: 'output', text: JSON.stringify(message) });
+    const finish = (event: Extract<EventContent, { type: 'end' }>) => {
+      if (finished) return;
+      push(event);
+      finished = true;
+      clearTimeout(cancelTimer);
+      resolveEnded();
+      wake?.();
+      void close();
+    };
     const acp = new AcpClient(this.command(template), { ...options, cwd }, this.environment(options.env), {
-      output,
+      notifications: profile.compactionNotification ? [profile.compactionNotification.method] : [],
+      output(message) {
+        output(message);
+        if (message.method !== profile.compactionNotification?.method) return;
+        const notification = extensionUpdate.safeParse(message.params);
+        if (notification.success && notification.data.sessionId === id
+          && notification.data.update.sessionUpdate === profile.compactionNotification.sessionUpdate) push({ type: 'compaction' });
+      },
       update(notification) {
         output({ method: 'session/update', params: notification });
         if (notification.sessionId !== id) return;
@@ -100,22 +122,44 @@ export class AcpDriver implements Driver {
     });
     const close = () => {
       options.signal?.removeEventListener('abort', cancel);
-      return acp.close();
+      return cancellation ?? acp.close();
     };
-    const cancel = () => { cancelled = true; wake?.(); void close(); };
+    const cancel = () => {
+      if (finished || cancelled) return;
+      cancelled = true;
+      cancellation = ended.then(() => acp.close());
+      const aborted = () => finish({ type: 'end', reason: 'aborted', usage: { inputTokens: 0, outputTokens: 0 } });
+      // Give a cooperative agent a bounded chance to persist the turn and its
+      // usage. Process/cwd cleanup is still performed by the execution layer.
+      cancelTimer = setTimeout(aborted, 1000);
+      if (id) {
+        void acp.connection.agent.notify('session/cancel', { sessionId: id }).then(() => { if (!sent) aborted(); }, aborted);
+      } else aborted();
+    };
     options.signal?.addEventListener('abort', cancel, { once: true });
     const timer = setTimeout(cancel, this.config.timeoutMs ?? 10_000);
     try {
       if (options.signal?.aborted) cancel();
-      await this.initialize(acp, template);
+      const initialized = await this.initialize(acp, template);
+      if (options.resumeSessionId !== undefined && !initialized.agentCapabilities?.sessionCapabilities?.resume) {
+        throw new Error('ACP agent does not support session/resume');
+      }
+      if (cancelled) throw new Error('ACP session cancelled during startup');
       if (this.profile.authentication) await acp.connection.agent.request('authenticate', { methodId: this.profile.authentication });
       const request: NewSessionRequest = { cwd,
         mcpServers: Object.entries(options.mcpServers).map(([name, server]) => ({ type: 'http' as const, name, url: server.url,
           headers: Object.entries(server.headers).map(([name, value]) => ({ name, value })) })) };
-      const session = await acp.connection.agent.request<'session/new'>('session/new', request);
-      if (!session.sessionId) throw new Error('ACP agent did not return a session id');
-      id = session.sessionId;
-      output({ method: 'session/new', result: session });
+      if (options.resumeSessionId !== undefined) {
+        id = options.resumeSessionId;
+        const session = await acp.connection.agent.request('session/resume', { ...request, sessionId: id });
+        output({ method: 'session/resume', result: session });
+      } else {
+        const session = await acp.connection.agent.request('session/new', request);
+        if (!session.sessionId) throw new Error('ACP agent did not return a session id');
+        id = session.sessionId;
+        output({ method: 'session/new', result: session });
+      }
+      if (cancelled) throw new Error('ACP session cancelled during startup');
       clearTimeout(timer);
       return {
         id, cancel,
@@ -127,19 +171,23 @@ export class AcpDriver implements Driver {
           void acp.connection.agent.request('session/prompt', { sessionId: id!, prompt: [
             { type: 'text', text: templatePrompt(template) }, { type: 'text', text: content },
           ] }).then(response => {
+            promptResponse.parse(response);
             output({ method: 'session/prompt', result: response });
-            const completed = response.stopReason === 'end_turn';
-            push({ type: 'end', reason: completed ? 'completed' : response.stopReason === 'cancelled' ? 'aborted' : 'error',
-              ...(completed ? { finalAnswer } : {}), usage: profile.usage(response) });
-          }, error => {
-            output({ method: 'session/prompt', error: String(error) });
-            push({ type: 'end', reason: 'error', usage: { inputTokens: 0, outputTokens: 0 } });
-          }).finally(() => { finished = true; wake?.(); void close(); });
+            const completed = !cancelled && response.stopReason === 'end_turn';
+            finish({ type: 'end', reason: cancelled ? 'aborted' : completed ? 'completed' : response.stopReason === 'cancelled' ? 'aborted' : 'error',
+              ...(completed ? { finalAnswer } : !cancelled && response.stopReason !== 'cancelled' ? { failure: `ACP session/prompt stopped: ${response.stopReason}` } : {}),
+              usage: profile.usage(response) });
+          }).catch(error => {
+            const failure = error instanceof RequestError ? JSON.stringify({ code: error.code, message: error.message, data: error.data }) : String(error);
+            output({ method: 'session/prompt', error: failure });
+            const quota = (error instanceof RequestError && profile.quotaErrors.codes.includes(error.code)) || profile.quotaErrors.pattern.test(failure);
+            finish({ type: 'end', reason: cancelled ? 'aborted' : quota ? 'quota-exhausted' : 'error',
+              ...(!cancelled ? { failure } : {}), usage: { inputTokens: 0, outputTokens: 0 } });
+          });
         },
         events: (async function* () {
           try {
             for (;;) {
-              if (cancelled) return;
               const event = queue.shift();
               if (event) { yield event; if (event.type === 'end') return; continue; }
               if (finished) return;

@@ -240,6 +240,7 @@ export class ExecutionRunner {
           if (event.type === 'end') {
             reason = event.reason === 'context-overflow' ? 'error' : event.reason;
             usage = event.usage;
+            failure = event.failure ?? failure;
             if (reason === 'completed') finalAnswer = event.finalAnswer ?? '';
             break;
           }

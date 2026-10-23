@@ -25,7 +25,7 @@ export type DriverEvent =
   | { type: 'output'; step: number; text: string }
   | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }
-  | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage };
+  | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage; failure?: string };
 export interface DriverSession {
   id: string;
   sqlitePath?: string;

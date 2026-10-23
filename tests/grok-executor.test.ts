@@ -7,7 +7,8 @@ import { test } from 'node:test';
 import { startHelmd } from '../src/server.js';
 import { defaultTemplateDir, TemplateCatalog } from '../src/templates.js';
 import { acpFixture } from './acp-fixture.js';
-import { grokFixture } from './grok-executor-fixture.js';
+import { grokFixture, ok } from './grok-executor-fixture.js';
+import { until } from './browser-fixture.js';
 
 for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpose} 派单通过假 ACP 调用同一 Helm 端点的结论和浏览器，保存结果、用量与卡片改动`, async t => {
   const site = createServer((_request, response) => response.end('<h1>Grok ACP fixture</h1>'));
@@ -82,4 +83,86 @@ test('startHelmd 默认登记 Grok 驱动和内置模板；调度者模板不可
     assert.match((await call('list-pending')).find((p: any) => p.templateId === 'grok-coordinator').reason, /本阶段只支持执行者/);
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize'].includes(r.method)), '启动检查不建模型会话');
   } finally { await daemon.close(); }
+});
+
+for (const [operation, abortReason] of [
+  ['pause-card', '卡片暂停'], ['cancel-card', '卡片取消'], ['pause-work', '工作暂停'], ['cancel-work', '工作取消'],
+] as const) test(`Grok ${operation} 发送协议取消，保存被中止结果并按 cwd 清理独立子进程`, async t => {
+  const acp = await acpFixture(t, { uniqueSession: true, holdPrompt: true, spawnChild: true,
+    writes: [{ path: 'progress.txt', content: '中止前进度' }] }, false);
+  const daemon = await grokFixture(t, acp.driver);
+  await daemon.confirm();
+  const requests = await until(acp.requests, requests => requests.some(r => r.method === 'fixture/child'));
+  const child = requests.find(r => r.method === 'fixture/child').pid;
+  t.after(() => { try { process.kill(child, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; } });
+  const [running] = await daemon.dispatches();
+  ok(await daemon.call(operation, { workId: daemon.work.id,
+    ...(operation.endsWith('-card') ? { cardId: running.cardId } : {}),
+    ...(operation === 'cancel-card' ? { reason: '测试中止' } : {}),
+  }));
+  const [ended] = await daemon.ended();
+  assert.equal(ended.endReason, 'aborted', ended.failure);
+  assert.equal(ended.abortReason, abortReason);
+  assert.equal(ended.finalAnswer, null);
+  const cancels = (await acp.requests()).filter(r => r.method === 'session/cancel');
+  assert.equal(cancels.length, 1);
+  assert.equal(cancels[0].params.sessionId, ended.sessionId);
+  assert.throws(() => process.kill(child, 0), { code: 'ESRCH' });
+  assert.ok((await daemon.events()).some(e => e.action === 'dispatch-processes-cleaned' && e.details.pids.includes(child)), '取消不负责清子进程，运行层必须清理');
+});
+
+for (const [script, reason, failure] of [
+  [{ rejectOn: 'session/prompt', error: { code: -32003, message: 'Rate limited', data: 'subscription:free-usage-exhausted' } }, 'quota-exhausted', /free-usage-exhausted/],
+  [{ rejectOn: 'session/prompt', error: { code: -32603, message: 'Internal error', data: 'connection reset' } }, 'error', /connection reset/],
+  [{ exitOn: 'session/prompt' }, 'error', /ACP/],
+  [{ response: { stopReason: 42 } }, 'error', /stopReason/],
+] as const) test(`Grok ACP ${JSON.stringify(script)} 将结束方式和错误原因保存到派单结果`, async t => {
+  const acp = await acpFixture(t, script, false);
+  const daemon = await grokFixture(t, acp.driver);
+  await daemon.confirm();
+  const [ended] = await daemon.ended();
+  assert.equal(ended.endReason, reason);
+  assert.match(ended.failure, failure);
+  assert.equal(ended.finalAnswer, null);
+  assert.equal(ended.conclusion, 'undeclared');
+});
+
+test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话，压缩事件落库', async t => {
+  const acp = await acpFixture(t, { uniqueSession: true, notifications: [
+    { method: '_x.ai/session/update', params: { update: { sessionUpdate: 'auto_compact_started', tokens_used: 850, context_window: 1000, percentage: 85, reason: 'threshold' } } },
+  ] }, false);
+  const daemon = await grokFixture(t, acp.driver);
+  const idle = () => until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
+  await daemon.confirm();
+  const [first] = await daemon.ended();
+  await idle();
+  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true,
+    mcpTools: [{ name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '需要修改' } }] }));
+  daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
+    workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'verification', purpose: 'verification',
+  }, check: ok }]);
+  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'verification', body: '验收' }));
+  const verification = (await daemon.ended(2))[1];
+  assert.equal(verification.conclusion, 'failed');
+  assert.notEqual(verification.sessionId, first.sessionId);
+  assert.equal(verification.resumeSessionId, null);
+  await idle();
+  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true }));
+  daemon.actions.push([
+    { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
+      templateId: 'grok-executor', key: 'invalid-verification', purpose: 'verification', resumeSessionId: first.sessionId },
+      check: value => assert.equal((value as any).error.code, 'INVALID_RESUME') },
+    { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
+      templateId: 'grok-executor', key: 'resume', resumeSessionId: first.sessionId, content: '按验收意见修改' }, check: ok },
+  ]);
+  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '打回续跑' }));
+  const resumed = (await daemon.ended(3))[2];
+  assert.equal(resumed.endReason, 'completed', resumed.failure);
+  assert.equal(resumed.sessionId, first.sessionId);
+  const requests = await acp.requests();
+  assert.equal(requests.filter(r => r.method === 'session/new').length, 2);
+  assert.equal(requests.filter(r => r.method === 'session/resume').length, 1);
+  const compacted = (await daemon.events()).filter(e => e.action === 'context-compacted');
+  assert.equal(compacted.length, 1, JSON.stringify(await daemon.output(first.id)));
+  assert.equal(compacted[0].dispatchId, first.id);
 });

@@ -1,6 +1,7 @@
 // Independent scripted JSON-RPC peer: no model, credentials, or real browser.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { spawn } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -14,7 +15,8 @@ const modelState = { currentModelId: 'grok-4.7', availableModels: [
 const pending = new Map<string, (result: unknown) => void>();
 let sequence = 0;
 let servers: any[] = [];
-const sessionId = script.uniqueSession ? `session-${process.pid}` : 'session-scripted';
+let promptId: number | string | undefined;
+let sessionId = script.uniqueSession ? `session-${process.pid}` : 'session-scripted';
 const request = (method: string, params: object) => new Promise(resolve => {
   const id = `agent-${++sequence}`;
   pending.set(id, resolve);
@@ -28,16 +30,28 @@ async function handle(line: string) {
   if (!message.method) { pending.get(message.id)?.(message.result ?? message.error); pending.delete(message.id); return; }
   if (message.method === script.exitOn) process.exit(2);
   if (message.method === script.hangOn) return;
+  if (message.method === 'session/cancel' && promptId !== undefined && !script.ignoreCancel) {
+    emit({ id: promptId, result: script.cancelResponse ?? { stopReason: 'cancelled', _meta: { usage: { inputTokens: 12, outputTokens: 3 } } } });
+  }
   if (message.id === undefined) return;
+  if (message.method === script.malformedOn) { process.stdout.write('{invalid-json\n'); return; }
   if (message.method === script.rejectOn) {
-    emit({ id: message.id, error: { code: -32000, message: 'scripted ACP failure' } });
+    emit({ id: message.id, error: script.error ?? { code: -32000, message: 'scripted ACP failure' } });
     return;
   }
   let result: object = {};
   if (message.method === 'initialize') result = script.initialize ?? { protocolVersion: 1,
-    authMethods: [{ id: 'cached_token', name: 'Local login' }], agentCapabilities: { mcpCapabilities: { http: true } }, _meta: { modelState: script.modelState ?? modelState } };
+    authMethods: [{ id: 'cached_token', name: 'Local login' }], agentCapabilities: { mcpCapabilities: { http: true },
+      sessionCapabilities: script.resume === false ? {} : { resume: {} } }, _meta: { modelState: script.modelState ?? modelState } };
   if (message.method === 'session/new') { servers = message.params.mcpServers; result = { sessionId }; }
+  if (message.method === 'session/resume') { sessionId = message.params.sessionId; servers = message.params.mcpServers; }
   if (message.method === 'session/prompt') {
+    promptId = message.id;
+    if (script.spawnChild) {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+      child.unref();
+      appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/child', pid: child.pid })}\n`);
+    }
     for (const write of script.writes ?? []) writeFileSync(write.path, write.content);
     if (script.mcpTools) {
       const server = servers.find(server => server.name === 'helm');
@@ -62,7 +76,10 @@ async function handle(line: string) {
     for (const update of script.updates ?? [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '已完成' } }]) {
       emit({ method: 'session/update', params: { sessionId, update } });
     }
-    result = script.response ?? { stopReason: 'end_turn', _meta: { inputTokens: 999, outputTokens: 999,
+    for (const notification of script.notifications ?? []) emit({ method: notification.method,
+      params: { sessionId, ...notification.params } });
+    if (script.holdPrompt) return;
+    result = Object.hasOwn(script, 'response') ? script.response : { stopReason: 'end_turn', _meta: { inputTokens: 999, outputTokens: 999,
       usage: { inputTokens: 120, outputTokens: 9, cachedReadTokens: 80 } } };
   }
   emit({ id: message.id, result });

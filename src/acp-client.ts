@@ -13,9 +13,10 @@ export class AcpClient {
   private closing?: Promise<void>;
 
   constructor(command: AcpCommand, options: Pick<SessionOptions, 'cwd' | 'onProcess'>, env: Record<string, string>, handlers: {
+    notifications?: string[];
     update(notification: SessionNotification): void;
     permission(request: RequestPermissionRequest): RequestPermissionResponse;
-    output(message: unknown): void;
+    output(message: { method: string; params?: unknown }): void;
   }) {
     this.child = spawn(command.file, command.args, { cwd: options.cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.exited = new Promise(resolve => this.child.once('close', () => resolve()));
@@ -27,7 +28,25 @@ export class AcpClient {
     // through the agent's own sandbox, never through unsandboxed helmd.
     // @types/node 22 and lib.dom describe the same Web Streams differently.
     const input = Readable.toWeb(this.child.stdout) as ReadableStream<Uint8Array>;
-    this.connection = app.connect(ndJsonStream(Writable.toWeb(this.child.stdin), input));
+    const writer = Writable.toWeb(this.child.stdin).getWriter();
+    const stream = ndJsonStream(new WritableStream<Uint8Array>({
+      write(chunk) {
+        // The SDK normally answers malformed JSON and keeps reading. A broken
+        // agent protocol must instead fail this dispatch, rather than hang it.
+        const message = JSON.parse(new TextDecoder().decode(chunk));
+        if (message.id === null && message.error) throw new Error(`ACP protocol error: ${message.error.message}`);
+        return writer.write(chunk);
+      },
+    }), input);
+    this.connection = app.connect({ ...stream, readable: stream.readable.pipeThrough(new TransformStream({
+      transform(message, controller) {
+        // SDK fallback handlers are asynchronous. Consume known extensions in
+        // wire order so an adjacent prompt response cannot overtake them.
+        if ('method' in message && !('id' in message) && handlers.notifications?.includes(message.method)) {
+          handlers.output({ method: message.method, params: message.params });
+        } else controller.enqueue(message);
+      },
+    })) });
     this.child.on('error', error => this.connection.close(error));
     this.child.stdin.on('error', error => this.connection.close(error));
     this.child.on('close', (code, signal) => this.connection.close(new Error(`ACP agent exited (${signal ?? code})`)));

@@ -11,13 +11,14 @@ import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { AcpDriver } from '../src/acp-driver.js';
 import { runtimeEnvironment } from '../src/environment.js';
-import { grokFixture } from './grok-executor-fixture.js';
+import { grokFixture, ok } from './grok-executor-fixture.js';
+import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_GROK_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱、token、模型/推理强度和共用 leader 真并行',
-  { skip: !enabled, timeout: 480_000 }, async t => {
+test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱、token、模型/推理强度、共用 leader 真并行、续跑与取消',
+  { skip: !enabled, timeout: 720_000 }, async t => {
     const realHome = homedir();
     const stagedAuth = join(realHome, '.grok', 'auth.json');
     assert.ok((await stat(stagedAuth)).isFile(), '先在本机 grok login');
@@ -32,11 +33,14 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     console.log(`Grok 冒烟证据目录：${evidence}`);
     const outside = join(evidence, 'outside.txt');
     const marker = randomUUID();
+    const memory = randomUUID();
+    let cancelResponse: ServerResponse | undefined;
     const waiting = new Map<string, { response: ServerResponse; timer: NodeJS.Timeout }>();
     const arrivals: Record<string, number> = {};
     let paired = false;
     let cliHome = '';
     const site = createServer((request, response) => {
+      if (request.url === '/cancel-in-flight') { cancelResponse = response; return; }
       const slot = request.url?.match(/^\/rendezvous\/(one|two)$/)?.[1];
       if (!slot) { response.end('<h1>Helm Grok executor smoke</h1>'); return; }
       if (waiting.has(slot) || paired) { response.writeHead(409).end('Do not retry'); return; }
@@ -64,6 +68,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     });
     await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
     t.after(async () => {
+      cancelResponse?.destroy();
       for (const entry of waiting.values()) { clearTimeout(entry.timer); entry.response.destroy(); }
       site.closeAllConnections();
       await new Promise<void>(resolve => site.close(() => resolve()));
@@ -80,6 +85,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
 第一步只执行一次原样命令 ${rendezvous('one')}，等待另一派单到达；不得提前结束、重试或绕过。成功应输出 parallel-ok。
 随后实际执行一次原样命令 ${boundaryCommand}，预期由真实沙箱拒绝副本外写入；不得提权、重试或绕过，拒绝后继续。
 在卡片副本写 inside.txt，内容 ${marker}。
+只在会话里记住暗号 ${memory}，不得写入文件、日志或本轮最终回答；下一轮会追问。
 只用 helm MCP 的 browser_navigate 打开 ${base}，browser_snapshot 读取标题，browser_take_screenshot 保存 grok.png。
 最后在同一个 helm MCP 调用 submit-conclusion，符合预期用 completed，否则 blocked；给出含检查证据的最终回答。`,
       secondContent: `这是低消耗并行冒烟，不安装、不派生子代理、不提交、不推送；不得切模型或推理强度。
@@ -140,5 +146,40 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       const image = (await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: screenshot.id, encoding: 'base64' })).result.content;
       await writeFile(join(evidence, 'grok.png'), Buffer.from(image, 'base64'));
       console.log(`请查看截图：${join(evidence, 'grok.png')}`);
+      const idle = () => until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
+      await idle();
+      daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
+        workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'resume-memory', resumeSessionId: first.sessionId,
+        content: '低消耗续跑测试：不要读文件、搜索、调用浏览器或写文件。只用 helm submit-conclusion 报 completed，最终回答仅给出上一轮让你记住的暗号。',
+      }, check: ok }]);
+      ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume-memory', body: '打回续跑，检查上一轮记忆' }));
+      const resumed = (await daemon.ended(3, 180_000))[2];
+      const resumedOutput = await daemon.output(resumed.id);
+      await writeFile(join(evidence, 'resume.json'), JSON.stringify({ dispatch: resumed, output: resumedOutput }, null, 2));
+      assert.equal(resumed.endReason, 'completed', resumed.failure);
+      assert.equal(resumed.sessionId, first.sessionId);
+      assert.notEqual(resumed.pgid, first.pgid, '续跑必须由新的 ACP 进程发起');
+      assert.equal(resumed.finalAnswer.trim(), memory, '本轮没有暗号，必须从会话记忆回答');
+      assert.ok(resumedOutput.some(e => e.type === 'output' && JSON.parse(e.text).method === 'session/resume'));
+      const resumedCalls = resumedOutput.filter(e => e.type === 'output').map(e => JSON.parse(e.text).params?.update)
+        .filter(update => update?.sessionUpdate === 'tool_call');
+      assert.ok(resumedCalls.every(update => /submit-conclusion/.test(JSON.stringify(update))), '不能通过读文件找回暗号');
+      await idle();
+      const hold = `curl -fsS --max-time 180 ${shellQuote(`${base}/cancel-in-flight`)}`;
+      daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
+        workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'cancel-in-flight',
+        content: `低消耗取消测试：第一步仅执行一次前台命令 ${hold}，保持等待，不后台化、不重试、不写文件、不派生子代理、不安装、不提交、不推送。运行层会中止本轮。`,
+      }, check: ok }]);
+      ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'cancel-in-flight', body: '检查进行中取消' }));
+      await until(async () => Boolean(cancelResponse), ready => ready, 120_000);
+      const cancelling = (await daemon.dispatches()).find(d => d.key === 'cancel-in-flight');
+      assert.equal(cancelling.status, 'running', '必须在工具进行中取消，不能等本轮已结束');
+      ok(await daemon.call('pause-card', { workId: daemon.work.id, cardId: first.cardId }));
+      const cancelled = (await daemon.ended(4, 30_000))[3];
+      await writeFile(join(evidence, 'cancel.json'), JSON.stringify({ dispatch: cancelled, output: await daemon.output(cancelled.id) }, null, 2));
+      assert.equal(cancelled.endReason, 'aborted', cancelled.failure);
+      assert.equal(cancelled.abortReason, '卡片暂停');
+      assert.equal(cancelled.finalAnswer, null);
+      await until(async () => cancelResponse!.destroyed, closed => closed, 10_000);
     } finally { await stopLeader(); }
   });
