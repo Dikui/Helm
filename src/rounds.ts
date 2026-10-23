@@ -35,7 +35,9 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
     coordinatorNotes: String(store.notes(workId).body),
+    // Executor steps can number thousands per round; outcomes arrive as dispatch-ended, steps stay readable via get-dispatch-output.
     newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
+      .filter(event => event.action !== 'dispatch-step')
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
     recentConversation: store.conversation(workId).slice(-20),

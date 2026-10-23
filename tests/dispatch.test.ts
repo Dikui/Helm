@@ -397,6 +397,9 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   await until(daemon.events, events => events.some(event => event.action === 'round-started' && event.details.eventIds.includes(eventId(ended))));
   function eventId(events: any[]) { return events.find(event => event.action === 'dispatch-ended').id; }
   assert.ok(brief?.cardGraph.some((node: any) => node.id === card.id));
+  assert.ok(ended.some(event => event.action === 'dispatch-step'));
+  assert.ok(brief!.newEvents.some(event => event.action === 'dispatch-ended'));
+  assert.equal(brief!.newEvents.some(event => event.action === 'dispatch-step'), false);
 });
 
 test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
