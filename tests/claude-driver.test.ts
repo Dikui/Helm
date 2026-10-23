@@ -55,6 +55,59 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
+test('Claude 模板只挂自己的 skills 插件，两个角色均可调用自己的 skill', async t => {
+  const base = await fixture(t);
+  const context = { signal: new AbortController().signal, toolUseID: 'skill', requestId: 'skill' };
+  await Promise.all((['coordinator', 'executor'] as const).map(async role => {
+    const id = `template-${role}`;
+    const directory = join(base.cwd, id);
+    await mkdir(join(directory, 'skills', 'secret'), { recursive: true });
+    await mkdir(join(directory, 'skills', 'not-a-skill'));
+    await writeFile(join(directory, 'skills', 'README.md'), 'Not a skill');
+    await writeFile(join(directory, 'skills', 'secret', 'SKILL.md'), '---\nname: "passphrase" # The frontmatter name overrides the directory.\ndescription: Test skill\n---\nSecret instructions');
+    await mkdir(join(directory, 'skills', 'fallback'));
+    await writeFile(join(directory, 'skills', 'fallback', 'SKILL.md'), 'No frontmatter; use the directory name.');
+    await writeFile(join(directory, 'config.json'), JSON.stringify({
+      role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: 'Test template',
+    }));
+    await writeFile(join(directory, 'prompt.md'), 'Test strategy');
+    const template = new TemplateCatalog(base.cwd).get(id);
+    let inspected = false;
+    const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: args => ({ close() {}, async *[Symbol.asyncIterator]() {
+        inspected = true;
+        const sdk = args.options!;
+        assert.deepEqual(sdk.plugins, [{ type: 'local', path: directory, skipMcpDiscovery: true }]);
+        assert.deepEqual(sdk.skills, [`${id}:fallback`, `${id}:passphrase`]);
+        assert.equal((await sdk.canUseTool!('Skill', { skill: `${id}:passphrase` }, context))?.behavior, 'allow');
+        assert.equal((await sdk.canUseTool!('Skill', { skill: 'other-template:secret' }, context))?.behavior, 'deny');
+        yield result();
+      } }) });
+    await collect(driver, { ...base, template,
+      sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : base.sandbox });
+    assert.equal(inspected, true);
+  }));
+});
+
+test('Claude 没有 skills 目录时不挂插件，空目录也显式禁用所有 skills', async t => {
+  const options = await fixture(t);
+  const empty = join(options.cwd, 'skills');
+  await mkdir(empty);
+  for (const home of ['shared', 'template'] as const) {
+    for (const skillsPath of [null, empty]) {
+      let inspected = false;
+      await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+        query: fakeQuery([result()], args => {
+          inspected = true;
+          assert.deepEqual(args.options!.skills, []);
+          assert.deepEqual(args.options!.plugins, skillsPath === null ? undefined
+            : [{ type: 'local', path: options.cwd, skipMcpDiscovery: true }]);
+        }) }), { ...options, template: { ...options.template!, directory: options.cwd, skillsPath, home } });
+      assert.equal(inspected, true);
+    }
+  }
+});
+
 test('Claude 订阅和 API 模板使用 Helm 主目录，只有 API 加载用户设置', async t => {
   const options = await fixture(t);
   options.env.HOME = options.cwd;
