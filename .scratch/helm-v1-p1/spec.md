@@ -241,7 +241,18 @@ Map: [Helm v1 设计](../helm-v1/map.md)
 
 ## Out of Scope
 
-- **第二阶段**：Codex 驱动（含原 14 技术验证④⑥、token 记录、额度用完）、用户级服务自启动（`helm service install`）、输出管理（工作结束后 gzip、10 GB 提示、导出和删除输出）、换调度者模板、新增或修改 Agent 模板。模板配置：调度者、执行者各一份，包括提示词（即策略）、skill、工具调整，放在 Helm 仓库里的配置目录，每个调度轮次、每次派单开始时读取，改了不用改代码或重启；Helm 自己的 MCP 工具、沙箱、凭据过滤和运行层约定（端口、提交结论、进程清理、截图路径、不推送）留在代码里，不进配置。会话记录隔离：Helm 拉起的所有 agent CLI（Claude Code、Codex，以及第三阶段的 Grok、DeepSeek）用 Helm 专用主目录 `~/.helm/agent-homes/<cli>/`（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`DSH_HOME`），会话记录和配置与用户在 Helm 之外的使用分开。登录：Codex、Grok、dsh 由 Helm 在专用目录建软链接指向用户原来的凭据文件，沿用用户的登录；Claude 的登录在钥匙串里、按配置目录区分，用户在专用目录 `claude auth login` 一次。Helm 只建链接，不打开、不复制、不转发凭据。实测见 [第二阶段待办](../helm-v1-p2/issues/01-agent-home-isolation.md)。
+- **第二阶段**（2026-10-23 grilling 定稿，实测见 [第二阶段待办 01](../helm-v1-p2/issues/01-agent-home-isolation.md)、[02](../helm-v1-p2/issues/02-templates-skills-and-api-homes.md)，主目录与凭据的取舍见 [ADR 0004](../../docs/adr/0004-agent-homes-and-cli-owned-credentials.md)）：
+  - **完成标准**：用 2048 跑一次端到端，Codex 调度者，执行者 Claude 和 Codex 都有、两家交叉验收；用消耗小的模型、低推理强度、不开 fast。
+  - **Agent 模板**：以文件为准，放在 Helm 仓库的模板目录，每个模板一个目录（设置文件、`prompt.md`、`skills/`），每个调度轮次、每次派单开始时读取，改了不用改代码或重启；任务库不存模板内容，只在派单和调度轮次上存解析后的快照。字段：角色、驱动（`claude-sdk` / `codex`）、模型、推理强度、fast、主目录、提示词、skills、职责说明（调度者在 `list-agent-templates` 里看到）。不做工具调整和额外 MCP。内置四个模板：Claude、Codex 各一个调度者、一个执行者。Helm 自己的 MCP 工具、沙箱、凭据过滤和运行层约定（端口、提交结论、进程清理、截图路径、不推送）留在代码里，不进模板。
+  - **fast**：可选，默认关。Codex 对应 `service_tier="fast"`。Claude 的 fast 只有 Opus 系列支持，订阅下要开 extra usage 并计入 extra usage，设了 fast 的 Claude 模板拒绝加载并说明原因。
+  - **skills**：Claude 每个模板用 SDK `plugins` 挂一个本地插件目录，`skills` 只列模板自己的 skill（藏起 Claude Code 自带的）；Codex 每个进程用 `skills/extraRoots/set` 指向模板的 skills 目录，Codex 自带的系统 skills 和 OpenAI 精选插件保留。
+  - **换调度者模板**：创建工作时选（不选用项目默认），之后随时可换，从下一个调度轮次起生效，记一条事件。
+  - **主目录与登录**：Helm 拉起的所有 agent CLI（Claude Code、Codex，以及第三阶段的 Grok、DeepSeek）都用 Helm 专用主目录（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`DSH_HOME`），会话记录和配置与用户在 Helm 之外的使用分开。订阅模板共用 `~/.helm/agent-homes/<cli>/`：Codex、Grok、dsh 由 Helm 在该目录建软链接指向用户原来的凭据文件；Claude 的登录在钥匙串里、按配置目录区分，用户在该目录 `claude auth login` 一次。API 模板各用 `~/.helm/agent-homes/<模板 id>/`，接口和 key 由用户按 CLI 自己的格式写在里面（Claude 写 `settings.json` 的 `env`，该模板读主目录里的用户设置；Codex 写 `config.toml` 的自定义 provider 和 `experimental_bearer_token`）。Helm 只指定目录和建链接，不打开、不复制、不转发凭据。计费方式由模板的主目录决定，`apiKeySource` 区分不了。API 模板功能不做验收，标"未经实测"（只用本机假接口确认过请求路由和 key）。
+  - **可用性检查**：helmd 启动时和每次使用模板前检查：订阅模板查登录状态，API 模板只查主目录和配置文件存在。不可用的模板在 `list-agent-templates` 标出原因，并列进待处理事项附登录命令；用户补好后不用重启。
+  - **Codex 驱动**：每个派单、每个调度轮次一个 `codex app-server` 进程，各用自己的 `CODEX_SQLITE_HOME`（[04](../helm-v1/issues/04-tech-stack.md) Q15），`CODEX_HOME` 用专用主目录；`NO_PROXY` 必须含 `127.0.0.1,localhost`（实测没有代理变量时也会被拦）。验收项：原 14 技术验证④（专用主目录下不读 `~/.codex/config.toml`、`~/.codex/AGENTS.md`）⑥（MCP 工具审批 `default_tools_approval_mode: approve` 和 `NO_PROXY` 对调度者同样生效）、token 记录、"额度用完"。推翻条件：新 sqlite 目录的 backfill 让 `initialize` 超过约 15 秒时，改为共用进程或共用 sqlite 目录。
+  - **额度用完**：Claude、Codex 都用真实错误消息样本做驱动单元测试，不要求真实触发；真撞上时把原始消息存为固定输入。API 模板余额不足或 key 失效记"额度用完"，429 限流由 CLI 自己重试，仍失败记"出错退出"。
+  - **用户级服务自启动**：`helm service install` 在 macOS 写 LaunchAgent、Linux 写 systemd user unit（提示开 lingering），安装时把当前 shell 的 `PATH` 和代理变量写进去，变了就重新 install；开机启动、崩溃自动重启，日志在 `~/.helm/logs/`。Linux 未实测。
+  - **输出管理**：工作结束后把派单输出和调度轮次输出 gzip。`~/.helm/` 下输出总量超过 10 GB（可调）时只提示一次：列进待处理事项并推送"需要用户处理"事件，不自动删任何东西。"导出"和"删除输出"做成用户操作（`helm` 命令行随之生成子命令），只对已结束的工作；导出为一个 `.tar.gz`（全部输出文件加该工作在任务库里的记录 JSON）；删除前提示先导出，只删原始事件流，成果文件和代码保留，派单、事件仍在，输出处标"已删除"。
 - **第三阶段**：界面（前置条件是用户的前端设计）、Grok 和 DeepSeek 的 ACP 驱动、界面做完后再跑一次 2048。Grok 驱动关掉 `~/.claude/`、`~/.cursor/` 规则来源，与 Claude 驱动 `settingSources: []` 一样不读本机全局配置；关法届时实测，来由见 [第二阶段待办 01](../helm-v1-p2/issues/01-agent-home-isolation.md)。
 - 调度者能力（A1、A2）的验证，以及对齐确认、关卡判断、汇总报告、拆单派单返工等调度者技能：用户在 Helm 之外另做。
 - 执行者外层隔离（Seatbelt 外壳、独立系统用户、容器、VM）。
@@ -254,7 +265,7 @@ Map: [Helm v1 设计](../helm-v1/map.md)
 ## Further Notes
 
 - 所有实测都在 macOS 上做；v1 目标是 macOS 和 Linux，Linux 上的沙箱、按工作目录找进程、`merge-tree` 版本要求还没实测。
-- 执行者额度用完在冒烟测试里很难真正触发，怎么验证 Claude 驱动的识别还没定。
+- 执行者额度用完在冒烟测试里很难真正触发；第二阶段定为用真实错误消息样本做驱动单元测试（Claude、Codex 都补）。
 - 已接受的风险：执行者能在沙箱里连到 `helmd` 冒充用户；可写范围超出副本的部分（各家状态目录、`/tmp`）；用 `setsid` 或先 `cd` 出副本的进程清不到；用户在副本目录里开的终端会被杀（文档要提示看代码去工作分支）；浏览器在沙箱外写 Chrome for Testing 的 Crashpad 目录。
 - 开发测试用真实驱动时一律用消耗小的模型、调低推理强度。
 - 开发任务单在 [issues/](issues/)，共 15 张，按各单的 Blocked by 推进。
