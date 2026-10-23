@@ -1,6 +1,6 @@
 import { lstat, mkdir, readlink, realpath, stat, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
 import { CodexRpc, type CodexCommand } from './codex-rpc.js';
 import { templatePrompt } from './prompts.js';
@@ -78,6 +78,16 @@ export class CodexDriver implements Driver {
       const initializeDurationMs = Math.round(performance.now() - before);
       rpc.notify('initialized', {});
       await rpc.request('skills/extraRoots/set', { extraRoots: template.skillsPath ? [template.skillsPath] : [] });
+      const listed = await rpc.request('skills/list', { cwds: [cwd], forceReload: true });
+      const skillsRoot = template.skillsPath ? await realpath(template.skillsPath) : null;
+      for (const entry of listed.data) for (const skill of entry.skills) {
+        if (skill.scope !== 'user') continue;
+        // CODEX_HOME does not isolate HOME/.agents/skills. Canonicalize aliases
+        // (including /var on macOS) before deciding which template owns a skill.
+        const path = await realpath(skill.path);
+        const enabled = skillsRoot !== null && path.startsWith(skillsRoot + sep);
+        if (skill.enabled !== enabled) await rpc.request('skills/config/write', { path, enabled });
+      }
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
         ...(template.model ? { model: template.model } : {}), developerInstructions: templatePrompt(template),

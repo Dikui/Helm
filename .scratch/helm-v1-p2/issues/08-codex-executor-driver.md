@@ -19,3 +19,5 @@
 ## Comments
 
 已实现 Codex 执行者 app-server 驱动、专用主目录与凭据软链接、token/结束方式映射、thread 续跑与 sqlite 路径记录、模板和 skills 注入，并补齐假 app-server 与主边界测试；真实 Codex 冒烟已并入 test:real，遵照本轮约束未运行，留给调度者在临时 HOME 的沙箱外环境验收。
+
+2026-10-23：发现专用 CODEX_HOME 仍会泄漏读取 ~/.agents/skills 的 user 范围技能，现于每次 app-server 启动挂载模板后、thread 开始或续跑前，按 realpath 比较并通过 skills/config/write 关闭模板外 user 技能、恢复本模板技能，保留 repo/system 范围。
