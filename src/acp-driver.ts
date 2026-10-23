@@ -1,5 +1,6 @@
-import { realpath } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { acpAgents } from './acp-agents.js';
@@ -18,9 +19,10 @@ export class AcpDriver implements Driver {
     this.profile = acpAgents[agent];
   }
 
-  private environment(base: Record<string, string>) {
+  private environment(base: Record<string, string>, template: AgentTemplate) {
     const env = { ...base, ...this.profile.environment.set };
     for (const key of this.profile.environment.unset) delete env[key];
+    if (this.profile.homeVariable && template.home === 'template') env[this.profile.homeVariable] = join(base.HOME ?? homedir(), '.helm', 'agent-homes', template.id);
     return env;
   }
 
@@ -46,11 +48,13 @@ export class AcpDriver implements Driver {
   private async configureSession(acp: AcpClient, template: AgentTemplate, sessionId: string,
     configOptions: SessionConfigOption[] | null | undefined, output: (message: unknown) => void) {
     const settings = this.profile.sessionSettings(template);
+    const expected = new Map(settings.map(setting => [setting.id, setting.value]));
     for (const setting of settings.filter(setting => setting.apply)) {
       const option = configOptions?.find(option => option.id === setting.id);
       const values = option?.type === 'select' ? option.options.flatMap(value => 'group' in value ? value.options : [value]) : [];
-      const selected = values.find(value => value.value === setting.value);
+      const selected = values.find(value => setting.matches ? setting.matches(value.value) : value.value === setting.value);
       if (!selected) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 没有公布取值 ${setting.value}，不能使用模板指定的设置。`);
+      expected.set(setting.id, selected.value);
       const response = await acp.connection.agent.request('session/set_config_option', { sessionId, configId: setting.id, value: selected.value });
       output({ method: 'session/set_config_option', configId: setting.id, result: response });
       configOptions = response.configOptions;
@@ -58,22 +62,36 @@ export class AcpDriver implements Driver {
     // A model change can reset reasoning effort; verify the final full state.
     for (const setting of settings) {
       const current = configOptions?.find(option => option.id === setting.id)?.currentValue;
-      if (current !== setting.value) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与模板不一致：期望 ${setting.value}，实际 ${current ?? '未公布'}。`);
+      if (current !== expected.get(setting.id)) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与模板不一致：期望 ${expected.get(setting.id)}，实际 ${current ?? '未公布'}。`);
     }
   }
 
   async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
     const reason = this.profile.unavailable(template);
     if (reason) return { available: false, reason };
+    const env = this.environment(templateEnvironment(template), template);
+    if (this.profile.homeVariable && template.home === 'template') {
+      const directory = env[this.profile.homeVariable]!;
+      try {
+        if (!(await stat(directory)).isDirectory()) throw new Error('not a directory');
+        const configured = await Promise.all((this.profile.homeConfigFiles ?? []).map(file => stat(join(directory, file)).then(info => info.isFile(), () => false)));
+        if (!configured.some(Boolean)) throw new Error('missing CLI configuration');
+      }
+      catch {
+        const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
+        return { available: false, reason: `API 模板需要专用主目录 ${directory}；请按 dsh 格式配置接口和 key（Helm 不读取凭据）。`,
+          command: `mkdir -p ${quoted} && DSH_HOME=${quoted} dsh web` };
+      }
+    }
     const command = this.command(template);
-    const acp = new AcpClient(command, { cwd: homedir() }, this.environment(templateEnvironment(template)),
+    const acp = new AcpClient(command, { cwd: homedir() }, env,
       { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
     const timer = setTimeout(() => { void acp.close(); }, this.config.timeoutMs ?? 10_000);
     try {
       await this.initialize(acp, template);
       return { available: true };
     } catch (error) {
-      return { available: false, reason: `${this.profile.name} 无法完成 ACP initialize 或缺少 ${this.profile.authentication} / HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`,
+      return { available: false, reason: `${this.profile.name} 无法完成 ACP initialize 或缺少${this.profile.authentication ? ` ${this.profile.authentication} /` : ''} HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`,
         command: `${this.profile.installCommand} && ${this.profile.loginCommand}` };
     } finally { clearTimeout(timer); await acp.close(); }
   }
@@ -95,8 +113,11 @@ export class AcpDriver implements Driver {
     let step = 0;
     let id: string | undefined;
     let finalAnswer = '';
+    const toolInputs = new Map<string, unknown>();
     let sent = false;
     let finished = false;
+    let settling = false;
+    let previousUsage = { inputTokens: 0, outputTokens: 0 };
     let cancelled = false;
     let cancellation: Promise<void> | undefined;
     let cancelTimer: NodeJS.Timeout | undefined;
@@ -113,7 +134,9 @@ export class AcpDriver implements Driver {
       wake?.();
       void close();
     };
-    const acp = new AcpClient(this.command(template), { ...options, cwd }, this.environment(options.env), {
+    const env = this.environment(options.env, template);
+    if (this.profile.homeVariable && template.home === 'template') await mkdir(env[this.profile.homeVariable]!, { recursive: true, mode: 0o700 });
+    const acp = new AcpClient(this.command(template), { ...options, cwd }, env, {
       notifications: profile.compactionNotification ? [profile.compactionNotification.method] : [],
       output(message) {
         output(message);
@@ -126,11 +149,14 @@ export class AcpDriver implements Driver {
         output({ method: 'session/update', params: notification });
         if (notification.sessionId !== id) return;
         const update = notification.update;
+        if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.rawInput !== undefined) toolInputs.set(update.toolCallId, update.rawInput);
         if (update.sessionUpdate === 'tool_call') finalAnswer = '';
         if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') finalAnswer += update.content.text;
       },
       permission(request) {
-        const option = request.sessionId === id ? request.options.find(option => option.kind === 'allow_once') : undefined;
+        const input = request.toolCall.rawInput ?? toolInputs.get(request.toolCall.toolCallId);
+        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input) ?? true);
+        const option = allowed ? request.options.find(option => option.kind === 'allow_once') : undefined;
         // Selecting a persistent rejection can also mutate the user's settings.
         const reject = request.options.find(option => option.kind === 'reject_once');
         const selected = option ?? reject;
@@ -139,15 +165,38 @@ export class AcpDriver implements Driver {
         return response;
       },
     });
+    const settle = async (event: Extract<EventContent, { type: 'end' }>) => {
+      if (finished || settling) return;
+      settling = true;
+      clearTimeout(cancelTimer);
+      if (id && profile.sessionUsage) {
+        let flushTimer: NodeJS.Timeout | undefined;
+        try {
+          // dsh buffers durable events. session/close drains and flushes before
+          // we read usage; killing the process first can discard this turn.
+          await Promise.race([
+            acp.connection.agent.request('session/close', { sessionId: id }),
+            new Promise((_, reject) => { flushTimer = setTimeout(() => reject(new Error('ACP session/close timed out')), 1000); }),
+          ]);
+        } catch (error) { output({ method: 'session/close', error: String(error) }); }
+        finally { clearTimeout(flushTimer); }
+        try {
+          const total = await profile.sessionUsage(env, id);
+          event.usage = { inputTokens: Math.max(0, total.inputTokens - previousUsage.inputTokens),
+            outputTokens: Math.max(0, total.outputTokens - previousUsage.outputTokens) };
+        } catch (error) { output({ method: 'helm/usage', error: `${profile.name} 用量读取失败：${String(error)}` }); }
+      }
+      finish(event);
+    };
     const close = () => {
       options.signal?.removeEventListener('abort', cancel);
       return cancellation ?? acp.close();
     };
     const cancel = () => {
-      if (finished || cancelled) return;
+      if (finished || settling || cancelled) return;
       cancelled = true;
       cancellation = ended.then(() => acp.close());
-      const aborted = () => finish({ type: 'end', reason: 'aborted', usage: { inputTokens: 0, outputTokens: 0 } });
+      const aborted = () => { void settle({ type: 'end', reason: 'aborted', usage: { inputTokens: 0, outputTokens: 0 } }); };
       // Give a cooperative agent a bounded chance to persist the turn and its
       // usage. Process/cwd cleanup is still performed by the execution layer.
       cancelTimer = setTimeout(aborted, 1000);
@@ -183,6 +232,7 @@ export class AcpDriver implements Driver {
       }
       if (cancelled) throw new Error('ACP session cancelled during startup');
       await this.configureSession(acp, template, id, configOptions, output);
+      if (profile.sessionUsage) previousUsage = await profile.sessionUsage(env, id, true);
       if (cancelled) throw new Error('ACP session cancelled during startup');
       clearTimeout(timer);
       return {
@@ -194,18 +244,18 @@ export class AcpDriver implements Driver {
           // nonblocking so helmd can consume updates and reset its idle timer.
           void acp.connection.agent.request('session/prompt', { sessionId: id!, prompt: [
             { type: 'text', text: templatePrompt(template) }, { type: 'text', text: content },
-          ] }).then(response => {
+          ] }).then(async response => {
             promptResponse.parse(response);
             output({ method: 'session/prompt', result: response });
             const completed = !cancelled && response.stopReason === 'end_turn';
-            finish({ type: 'end', reason: cancelled ? 'aborted' : completed ? 'completed' : response.stopReason === 'cancelled' ? 'aborted' : 'error',
+            await settle({ type: 'end', reason: cancelled ? 'aborted' : completed ? 'completed' : response.stopReason === 'cancelled' ? 'aborted' : 'error',
               ...(completed ? { finalAnswer } : !cancelled && response.stopReason !== 'cancelled' ? { failure: `ACP session/prompt stopped: ${response.stopReason}` } : {}),
               usage: profile.usage(response) });
-          }).catch(error => {
+          }).catch(async error => {
             const failure = error instanceof RequestError ? JSON.stringify({ code: error.code, message: error.message, data: error.data }) : String(error);
             output({ method: 'session/prompt', error: failure });
             const quota = (error instanceof RequestError && profile.quotaErrors.codes.includes(error.code)) || profile.quotaErrors.pattern.test(failure);
-            finish({ type: 'end', reason: cancelled ? 'aborted' : quota ? 'quota-exhausted' : 'error',
+            await settle({ type: 'end', reason: cancelled ? 'aborted' : profile.contextOverflowErrors?.test(failure) ? 'context-overflow' : quota ? 'quota-exhausted' : 'error',
               ...(!cancelled ? { failure } : {}), usage: { inputTokens: 0, outputTokens: 0 } });
           });
         },

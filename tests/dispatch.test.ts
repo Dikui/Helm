@@ -527,7 +527,7 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   await daemon.finished();
   await until(async () => options, value => value !== undefined);
   const templates = (await daemon.call('list-agent-templates')).result;
-  assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'grok-executor']);
+  assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
   const remote = join(daemon.directory, 'remote.git');
   execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/control'], { stdio: 'ignore' });
   assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/forbidden'], { env: options!.env, stdio: 'pipe' }));
@@ -674,7 +674,7 @@ test('所有结束方式保留执行改动，异常结束的最终回答和自�
     await daemon.finished();
     await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
     const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-    assert.equal(result.endReason, outcome === 'blocked' ? 'completed' : ['context-overflow', 'crash'].includes(outcome) ? 'error' : outcome);
+    assert.equal(result.endReason, outcome === 'blocked' ? 'completed' : outcome === 'crash' ? 'error' : outcome);
     assert.equal(result.conclusion, outcome === 'blocked' ? 'blocked' : 'undeclared');
     assert.equal(result.finalAnswer, ['completed', 'blocked'].includes(outcome) ? '仅正常完成保留' : null);
     assert.equal(result.conclusionReason, outcome === 'blocked' ? '执行者自报' : null);

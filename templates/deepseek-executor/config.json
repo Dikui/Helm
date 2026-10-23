@@ -1,0 +1,9 @@
+{
+  "role": "executor",
+  "driver": "deepseek",
+  "model": "deepseek-flash",
+  "reasoningEffort": "low",
+  "fast": false,
+  "home": "shared",
+  "description": "在卡片副本中沿用 dsh web 登录的 DeepSeek 账号执行或验收派单，报告检查过程和证据"
+}

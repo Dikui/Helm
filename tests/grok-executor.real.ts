@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { AcpDriver } from '../src/acp-driver.js';
-import { grokFixture, ok } from './grok-executor-fixture.js';
+import { acpExecutorFixture as grokFixture, ok } from './acp-executor-fixture.js';
 import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_GROK_EXECUTOR_REAL === '1';

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runRealSmoke } from './real-smoke-runner.js';
 
-test('真实冒烟入口按顺序在干净环境运行七套测试，失败时停止（只用进程替身）', () => {
+test('真实冒烟入口按顺序在干净环境运行八套测试，失败时停止（只用进程替身）', () => {
   const parent = { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42',
     CLAUDE_CODE_DESKTOP_SESSION: 'desktop', ARBITRARY: 'secret', NODE_OPTIONS: '--inspect',
     HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', npm_config_cache: '/caller/cache' };
@@ -17,9 +17,10 @@ test('真实冒烟入口按顺序在干净环境运行七套测试，失败时�
     ['--test', 'dist/tests/browser.real.js'], ['--test', 'dist/tests/claude-executor.real.js'], ['--test', 'dist/tests/claude-coordinator.real.js'],
     ['--test', 'dist/tests/claude-skills.real.js'], ['--test', 'dist/tests/codex-executor.real.js'], ['--test', 'dist/tests/codex-coordinator.real.js'],
     ['--test', 'dist/tests/grok-executor.real.js'],
+    ['--test', 'dist/tests/deepseek-executor.real.js'],
   ]);
   for (const [index, call] of calls.entries()) {
-    const flag = ['HELM_BROWSER_REAL', 'HELM_CLAUDE_EXECUTOR_REAL', 'HELM_CLAUDE_COORDINATOR_REAL', 'HELM_CLAUDE_SKILLS_REAL', 'HELM_CODEX_EXECUTOR_REAL', 'HELM_CODEX_COORDINATOR_REAL', 'HELM_GROK_EXECUTOR_REAL'][index]!;
+    const flag = ['HELM_BROWSER_REAL', 'HELM_CLAUDE_EXECUTOR_REAL', 'HELM_CLAUDE_COORDINATOR_REAL', 'HELM_CLAUDE_SKILLS_REAL', 'HELM_CODEX_EXECUTOR_REAL', 'HELM_CODEX_COORDINATOR_REAL', 'HELM_GROK_EXECUTOR_REAL', 'HELM_DEEPSEEK_EXECUTOR_REAL'][index]!;
     assert.deepEqual(call.env, { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42', [flag]: '1' });
     assert.equal(call.cwd, resolve(fileURLToPath(new URL('../..', import.meta.url))));
   }

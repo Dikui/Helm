@@ -36,7 +36,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 }
 
 export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
-  const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok') };
+  const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'), new TemplateCatalog(options.templateDir, Object.keys(drivers)));
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;

@@ -221,7 +221,7 @@ for (const reason of ['error', 'quota-exhausted', 'timed-out', 'aborted', 'conte
       return [{ type: 'end', reason }];
     }], { needsBrowser: true });
     const result = await daemon.ended();
-    assert.equal(result.endReason, reason === 'context-overflow' ? 'error' : reason, result.failure);
+    assert.equal(result.endReason, reason, result.failure);
     assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
     assert.equal((await daemon.call('submit-conclusion', { conclusion: 'completed', reason: '已结束' }, token)).status, 401);
   });

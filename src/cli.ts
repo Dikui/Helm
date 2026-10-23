@@ -35,7 +35,8 @@ async function main() {
       ? { checkAvailability: (template: Parameters<typeof claude.checkAvailability>[0]) => fake.checkAvailability(template),
         start: (options: Parameters<typeof claude.start>[0]) => (options.template?.role === 'coordinator' ? fake : claude).start(options) }
       : claude, codex: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new CodexDriver(),
-      grok: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new AcpDriver('grok') };
+      grok: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new AcpDriver('grok'),
+      deepseek: process.env.HELM_FAKE_COORDINATOR === '1' ? new FakeDriver() : new AcpDriver('deepseek') };
     const daemon = await startHelmd({ port, dataDir: values['data-dir'], drivers });
     console.log(JSON.stringify({ url: daemon.url }));
     const stop = () => { daemon.close().catch(error => { console.error(error); process.exitCode = 1; }); };

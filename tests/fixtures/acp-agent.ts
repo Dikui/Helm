@@ -1,5 +1,6 @@
 // Independent scripted JSON-RPC peer: no model, credentials, or real browser.
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -46,6 +47,12 @@ async function handle(line: string) {
     emit({ id: message.id, error: script.error ?? { code: -32000, message: 'scripted ACP failure' } });
     return;
   }
+  // Persist only at close, as dsh's session/close drains and flushes the log.
+  if (message.method === 'session/close' && script.sessionLog) {
+    const root = join(process.env.DSH_HOME ?? join(process.env.HOME!, '.dsh'), 'sessions', '--fixture-project--', sessionId);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'session.v4.jsonl.zstd'), Buffer.from(script.sessionLog, 'base64'));
+  }
   let result: object = {};
   if (message.method === 'initialize') result = script.initialize ?? { protocolVersion: 1,
     authMethods: [{ id: 'cached_token', name: 'Local login' }], agentCapabilities: { mcpCapabilities: { http: true },
@@ -84,9 +91,14 @@ async function handle(line: string) {
         }
       } finally { await client.close(); }
     }
-    for (const options of script.permissions ?? []) await request('session/request_permission', {
-      sessionId, toolCall: { toolCallId: 'permission-tool', title: 'Scripted tool' }, options,
-    });
+    for (const [index, options] of (script.permissions ?? []).entries()) {
+      const toolCall = script.permissionToolCalls?.[index] ?? { toolCallId: 'permission-tool', title: 'Scripted tool' };
+      if (script.permissionToolCalls) emit({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'tool_call', ...toolCall } } });
+      await request('session/request_permission', {
+        // dsh sends only the id here; rawInput was in the preceding update.
+        sessionId, toolCall: { toolCallId: toolCall.toolCallId }, options,
+      });
+    }
     for (const update of script.updates ?? [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '已完成' } }]) {
       emit({ method: 'session/update', params: { sessionId, update } });
     }

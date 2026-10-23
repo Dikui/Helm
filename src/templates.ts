@@ -8,7 +8,7 @@ import type { TemplateAvailability } from './driver.js';
 import { acpAgents } from './acp-agents.js';
 
 const settings = z.object({
-  role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok']),
+  role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
   model: z.string().trim().min(1).nullable(),
   reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable(),
   fast: z.boolean().default(false), home: z.enum(['shared', 'template']),

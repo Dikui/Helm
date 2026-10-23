@@ -24,6 +24,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['codex-executor', 'HELM_CODEX_EXECUTOR_REAL'],
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
     ['grok-executor', 'HELM_GROK_EXECUTOR_REAL'],
+    ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
   ] as const) {
     const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
     if (result.error || result.signal || result.status !== 0) return result.status || 1;

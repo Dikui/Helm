@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { startHelmd } from '../src/server.js';
 import { defaultTemplateDir, TemplateCatalog } from '../src/templates.js';
 import { acpFixture } from './acp-fixture.js';
-import { grokFixture, ok } from './grok-executor-fixture.js';
+import { acpExecutorFixture as grokFixture, ok } from './acp-executor-fixture.js';
 import { until } from './browser-fixture.js';
 
 for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpose} 派单通过假 ACP 调用同一 Helm 端点的结论和浏览器，保存结果、用量与卡片改动`, async t => {

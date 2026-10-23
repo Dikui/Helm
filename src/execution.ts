@@ -238,7 +238,7 @@ export class ExecutionRunner {
             if (event.type === 'artifact' && artifact) saveArtifact(this.store, dispatch, event.kind, artifact.name, artifact.content);
           });
           if (event.type === 'end') {
-            reason = event.reason === 'context-overflow' ? 'error' : event.reason;
+            reason = event.reason;
             usage = event.usage;
             failure = event.failure ?? failure;
             if (reason === 'completed') finalAnswer = event.finalAnswer ?? '';

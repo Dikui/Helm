@@ -1,5 +1,6 @@
 import type { InitializeResponse, PromptResponse } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
+import { deepseekUsage } from './deepseek-usage.js';
 import type { TokenUsage } from './driver.js';
 import type { AgentTemplate } from './templates.js';
 
@@ -10,11 +11,16 @@ interface AcpAgentProfile {
   arguments(template: AgentTemplate): string[];
   authentication?: string;
   environment: { set: Record<string, string>; unset: string[] };
+  homeVariable?: string;
+  homeConfigFiles?: string[];
+  permissionAllowed?(input: unknown): boolean;
   unavailable(template: AgentTemplate): string | undefined;
   initializationUnavailable(template: AgentTemplate, response: InitializeResponse): string | undefined;
-  sessionSettings(template: AgentTemplate): { id: string; value: string; apply: boolean }[];
+  sessionSettings(template: AgentTemplate): { id: string; value: string; apply: boolean; matches?: (value: string) => boolean }[];
   usage(response: PromptResponse): TokenUsage;
+  sessionUsage?(env: Record<string, string>, sessionId: string, allowMissing?: boolean): Promise<TokenUsage>;
   quotaErrors: { codes: number[]; pattern: RegExp };
+  contextOverflowErrors?: RegExp;
   compactionNotification?: { method: string; sessionUpdate: string };
   installCommand: string;
   loginCommand: string;
@@ -24,8 +30,46 @@ const efforts: Record<string, string> = { low: 'low', medium: 'medium', high: 'h
 const modelState = z.object({ availableModels: z.array(z.object({ modelId: z.string(),
   _meta: z.object({ reasoningEfforts: z.array(z.object({ value: z.string() })) }).optional(),
 })) });
+const deepseekRoutes: Record<string, string> = {
+  'deepseek-flash': 'deepseek-account', 'deepseek-v4-pro': 'deepseek-account', 'deepseek-v4-flash': 'deepseek-official',
+};
 
-export const acpAgents: Record<'grok', AcpAgentProfile> = {
+export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
+  deepseek: {
+    name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
+    environment: { set: { DSH_PERMISSION_MODE: 'workspace-write' }, unset: ['DEEPSEEK_API_KEY', 'DSH_HOME'] },
+    homeVariable: 'DSH_HOME',
+    homeConfigFiles: ['.credentials.yaml', '.env', 'cordis.patch.yml'],
+    permissionAllowed(input) {
+      // dsh's bash/fs tools can request a per-call sandbox escalation. Never
+      // auto-approve a wider boundary than the standing card sandbox.
+      if (!input || typeof input !== 'object' || !('sandbox_permissions' in input)) return true;
+      return input.sandbox_permissions === 'read-only' || input.sandbox_permissions === 'workspace-write';
+    },
+    unavailable(template) {
+      if (template.role !== 'executor') return 'DeepSeek 本阶段只支持执行者，不支持调度者。';
+      if (!template.model || !Object.hasOwn(deepseekRoutes, template.model)) return `DeepSeek 不支持模型 id ${template.model ?? '未指定'}；请指定 deepseek-flash、deepseek-v4-pro 或 deepseek-v4-flash。`;
+      if (!template.reasoningEffort || !['low', 'high', 'max'].includes(template.reasoningEffort)) return `DeepSeek 不支持推理强度 ${template.reasoningEffort ?? '未指定'}；请选 low、high 或 max。`;
+      if ((template.home === 'template') !== (deepseekRoutes[template.model] === 'deepseek-official')) return 'DeepSeek 账号模型须用 home: shared；API 模型 deepseek-v4-flash 须用 home: template 专用主目录。';
+      if (template.fast) return 'DeepSeek 不支持模板 fast 档，请设为 false。';
+      if (template.skillsPath) return 'DeepSeek 模板 skills 尚未接入，请移除 skills 目录后重试（任务单 04）。';
+    },
+    initializationUnavailable() { return undefined; },
+    sessionSettings: template => [
+      { id: 'model', value: template.model!, apply: true, matches(value) {
+        try {
+          const route: unknown = JSON.parse(value);
+          return Array.isArray(route) && route.length === 2 && route[0] === deepseekRoutes[template.model!] && route[1] === template.model;
+        } catch { return false; }
+      } },
+      { id: 'reasoning_effort', value: template.reasoningEffort!, apply: true },
+    ],
+    usage: () => ({ inputTokens: 0, outputTokens: 0 }),
+    sessionUsage: deepseekUsage,
+    quotaErrors: { codes: [], pattern: /\b(?:ACCOUNT_QUOTA|QUOTA|insufficient[ _-](?:quota|balance|credits?)|(?:quota|usage[ _-]limit)[ _-](?:exceeded|exhausted|reached)|(?:balance|credits?)[ _-](?:exhausted|depleted))\b/i },
+    contextOverflowErrors: /\bCONTEXT_WINDOW_EXCEEDED\b|context[ _-](?:window|length)[ _-](?:exceeded|overflow)|maximum context length/i,
+    installCommand: 'npm install -g @deepseek-ai/dsh', loginCommand: 'dsh web',
+  },
   grok: {
     name: 'Grok', command: 'grok', authentication: 'cached_token',
     arguments: template => ['agent', '--effort', efforts[template.reasoningEffort!]!, 'stdio'],
