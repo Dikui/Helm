@@ -4,11 +4,20 @@
 
 **Blocked by:** 04 — 调度者模板的选择与更换；06 — Claude 模板的 skills；08 — Codex 执行者驱动；09 — Codex 调度者驱动；10 — 用户级服务自启动；11 — 输出压缩与超限提示
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 沙箱外手动 `helm service install`，确认服务起来、日志写进 `~/.helm/logs/`
-- [ ] 工作用 `codex-coordinator`；执行者 Claude 和 Codex 都有派单，两家互相验收，含浏览器验收
-- [ ] 用消耗小的模型、低推理强度、不开 fast
-- [ ] 工作结束后输出已压缩、仍可读
-- [ ] 跑完核对用户 `~/.claude/projects/`、`~/.codex/sessions/` 没有新增记录
-- [ ] 查看浏览器验收截图；暴露的 Helm 问题记在本单 Comments，必要时另开修复单
+- [x] 沙箱外手动 `helm service install`，确认服务起来、日志写进 `~/.helm/logs/`
+- [x] 工作用 `codex-coordinator`；执行者 Claude 和 Codex 都有派单，两家互相验收，含浏览器验收
+- [x] 用消耗小的模型、低推理强度、不开 fast
+- [x] 工作结束后输出已压缩、仍可读
+- [x] ~~跑完核对用户 `~/.claude/projects/`、`~/.codex/sessions/` 没有新增记录~~（ADR 0005 改为默认主目录，会话记录写进用户历史，本项作废）
+- [x] 查看浏览器验收截图；暴露的 Helm 问题记在本单 Comments，必要时另开修复单
+
+## Comments
+
+2026-10-23 端到端跑通（运行目录 `/private/var/folders/zm/3n6r9htn6cz5h86nxgz0cnj80000gn/T/helm-2048-4E7mNe`，证据在未提交的 `.scratch/tasks/p2-13-run/`）。`helm service install` 装成 LaunchAgent，日志写进 `~/.helm/logs/`，`launchctl kill SIGKILL` 后自动重启（开机/登录自启未验证）。54 个调度轮次全是 `codex-coordinator`（gpt-6-luna/low/fast 关），32 张派单 Claude（haiku）和 Codex（gpt-6-luna）都有执行，每张实现卡由另一家验收，17 次浏览器验收均为有界面 Chrome for Testing。审核一次退回、一次接受；合并 `merged`、推送 `pushed`，`main` 与本地远端同为 `441c857`；32 份派单输出和 54 轮输出均已自动 gzip、读回一致；从 `main` 试玩一局 1268 分，截图已看。中途因调度者把 workId 抄错停滞，暂停后恢复，用户消息纠正 ID 后继续。用户全局 hooks（Codex、ponytail）未造成拦截；全局 gungnir skills 可见但未被调用；未见执行者自行起 agent CLI。
+
+暴露的问题，之后修：
+- **Helm**：① 调度者工具要自己传 workId，抄错导致整轮操作全被拒、工作停滞且无人通知——workId 应由轮次令牌确定；一轮操作全被拒时应能察觉。② 执行派单不自动附卡片说明快照（验收派单有），调度者写得简略时执行者不知道做什么。③ 一次调度轮次输入超过 Codex RPC 上限（1,055,661 > 1,048,576 字符），运行层重投后恢复，启动简报需控制体积。④ 浏览器快照返回相对路径，执行者难以定位截图。
+- **调度者提示词**：派单要完整转述需求、需要浏览器的执行派单设 needsBrowser、执行者不要自己 git commit、ID 从图里原样复制、整体验收两家派在同一卡上不要提前完成、验收误判（左边界按左键无变化当成失效）。
+- **其他**：服务配置记的是带版本号的 node 路径，`brew upgrade node` 后要重新 install。
