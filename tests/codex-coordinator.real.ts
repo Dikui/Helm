@@ -1,11 +1,11 @@
-// Outside the sandbox only. Log in independently under a temporary HOME, then:
-// HELM_CODEX_SMOKE_HOME=<temporary-home> npm run test:codex-coordinator
+// Outside the sandbox only: npm run test:codex-coordinator
+// Uses the real Codex login through a symlink (never opened).
 // No browser or real executor is needed for this coordinator smoke.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexCoordinatorDriver } from '../src/codex-driver.js';
 import type { Driver, SessionOptions } from '../src/driver.js';
@@ -101,14 +101,9 @@ function successfulTool(round: Observation, name: string, count: number) {
 
 test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重投 key 去重、只读沙箱和 NO_PROXY',
   { skip: !enabled, timeout: 600_000 }, async t => {
-    const supplied = process.env.HELM_CODEX_SMOKE_HOME;
-    assert.ok(supplied, '先在临时 HOME 中独立 codex login，再设置 HELM_CODEX_SMOKE_HOME；不读真实主目录');
-    const stagedHome = await realpath(supplied);
-    const suffix = relative(await realpath(tmpdir()), stagedHome);
-    assert.ok(suffix && suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix), '登录 HOME 必须位于系统临时目录下');
-    const stagedAuth = join(stagedHome, '.codex', 'auth.json');
-    assert.ok((await stat(stagedAuth)).isFile());
-    assert.equal(await realpath(stagedAuth), stagedAuth, '临时登录不能链接到真实主目录');
+    // Link the real login as Helm does in production; only file metadata is checked here.
+    const stagedAuth = join(homedir(), '.codex', 'auth.json');
+    assert.ok((await stat(stagedAuth)).isFile(), '先在本机 codex login（文件存储）');
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-coordinator-evidence-')));
     console.log(`Codex 调度者冒烟证据目录：${evidence}`);
     const observed = observedDriver();

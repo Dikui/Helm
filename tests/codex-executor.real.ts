@@ -1,11 +1,11 @@
-// Outside the sandbox only. Prepare a freshly logged-in temporary HOME first:
-// HELM_CODEX_SMOKE_HOME=<temporary-home> npm run test:codex-executor
+// Outside the sandbox only: npm run test:codex-executor
+// Uses the real Codex login through a symlink (never opened) and the installed Playwright browsers.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
 import { codexFixture, ok } from './codex-executor-fixture.js';
@@ -17,19 +17,13 @@ const shellQuote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 
 test('Codex 真实执行者：同端点结论/浏览器、沙箱、专用主目录、token、续跑和两模板 skills 隔离',
   { skip: !enabled, timeout: 720_000 }, async t => {
-    // Never look in the real ~/.codex or ~/.helm, even to locate credentials.
-    const supplied = process.env.HELM_CODEX_SMOKE_HOME;
-    assert.ok(supplied, '先在临时 HOME 中运行 codex login，再设置 HELM_CODEX_SMOKE_HOME；测试不读取真实主目录');
-    const stagedHome = await realpath(supplied);
-    const suffix = relative(await realpath(tmpdir()), stagedHome);
-    assert.ok(suffix && suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix), 'HELM_CODEX_SMOKE_HOME 必须是系统临时目录下的独立目录');
-    const stagedAuth = join(stagedHome, '.codex', 'auth.json');
-    assert.ok((await stat(stagedAuth)).isFile(), '临时 HOME 需要独立的 Codex 登录');
-    assert.equal(await realpath(stagedAuth), stagedAuth, '临时登录文件不能链接到真实主目录');
-    const browsers = join(stagedHome, 'browsers');
-    assert.ok((await stat(browsers)).isDirectory(), '先用 PLAYWRIGHT_BROWSERS_PATH=<临时 HOME>/browsers 运行 npm run browser:install');
+    // Link the real login as Helm does in production; only file metadata is checked here.
+    const realHome = homedir();
+    const stagedAuth = join(realHome, '.codex', 'auth.json');
+    assert.ok((await stat(stagedAuth)).isFile(), '先在本机 codex login（文件存储）');
+    // The fixture swaps HOME, so pin Playwright to the browsers already installed for the real HOME.
     const previousBrowsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
-    process.env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+    process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(realHome, process.platform === 'darwin' ? 'Library/Caches/ms-playwright' : '.cache/ms-playwright');
     t.after(() => {
       if (previousBrowsers === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
       else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsers;

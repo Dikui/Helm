@@ -29,13 +29,6 @@ test('真实冒烟入口按顺序在干净环境运行六套测试，失败时�
   assert.equal(runRealSmoke(() => ({ status: null, signal: null, error: new Error('spawn failed') }), parent), 1);
 });
 
-test('Codex 冒烟只接收显式准备的临时 HOME，不把它传给其他冒烟（只用进程替身）', () => {
-  const calls: Record<string, string>[] = [];
-  assert.equal(runRealSmoke((_args, options) => { calls.push(options.env); return { status: 0, signal: null }; },
-    { HOME: '/home/test', HELM_CODEX_SMOKE_HOME: '/private/tmp/codex-smoke' }, () => []), 0);
-  assert.deepEqual(calls.map(env => env.HELM_CODEX_SMOKE_HOME), [undefined, undefined, undefined, undefined, '/private/tmp/codex-smoke', '/private/tmp/codex-smoke']);
-});
-
 test('真实冒烟核对用户 Claude projects 没有新增目录（只用进程和目录替身）', () => {
   let snapshots = 0;
   let runs = 0;

@@ -33,9 +33,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['codex-executor', 'HELM_CODEX_EXECUTOR_REAL'],
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
   ] as const) {
-    const codexHome: Record<string, string> = file.startsWith('codex-') && parent.HELM_CODEX_SMOKE_HOME
-      ? { HELM_CODEX_SMOKE_HOME: parent.HELM_CODEX_SMOKE_HOME } : {};
-    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, ...codexHome, [flag]: '1' } });
+    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
     const added = projects(home).filter(name => !baseline.has(name));
     if (added.length) {
       console.error(`Claude 主目录隔离失败，用户 ~/.claude/projects/ 新增目录：${added.join(', ')}`);
