@@ -27,6 +27,8 @@
 - **复制不可行**：Codex 刷新令牌会轮换，旧令牌约一小时后失效，复制的两份必有一份坏掉；Orca、Paperclip 都踩过（见调研）。
 - **用户主目录**：两轮实测前后，`~/.claude`、`~/.claude.json`、`~/.codex`（含 sqlite）、`~/.grok`、`~/.dsh` 里改动过的文件都不含工作目录路径、暗号或会话 id，`sessions/` 下没有新增条目；唯一命中的是调度者本会话自己的记录。默认目录的 `codex login status` 仍为 `Logged in using ChatGPT`。
 - **关掉落盘不可行**：`persistSession: false`、`--no-session-persistence`、`codex exec --ephemeral` 等都会让按会话 id 续跑失效。
+- **Codex `history.jsonl`**：app-server 跑完后专用目录里没有 `history.jsonl`，用户 `~/.codex/history.jsonl` 也不含本次内容；按配置参考，它只记交互界面的输入历史，app-server 不写。
+- **Grok 仍会读用户的规则**：按 Grok 自带文档，规则来源除 `$GROK_HOME` 外还有已启用的 `~/.claude/`、`~/.cursor/`。换 `GROK_HOME` 不影响这一点，属于读取、不写入，未实测；需要时由 Grok 驱动在配置里关掉这些来源。
 
 **用户一次性步骤**：Codex、Grok、dsh 不用登录，Helm 首次使用时在专用目录建凭据软链接，指向用户原来的凭据文件。Claude 在专用目录登录一次：`CLAUDE_CONFIG_DIR=~/.helm/agent-homes/claude claude auth login`（用户选定，2026-10-23 已登录）。成熟产品对 Claude 也只有"沿用默认目录"和"专用目录另登录"两种做法。
 
