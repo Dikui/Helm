@@ -58,7 +58,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-template-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       if (wakes.length) this.schedule();
     });
     this.schedule();
@@ -186,7 +186,7 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const template = agentTemplate(this.store, 'claude-coordinator', 'coordinator');
+      const template = agentTemplate(this.store, brief.work.coordinatorTemplateId, 'coordinator');
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET template_snapshot = ? WHERE id = ?').run(JSON.stringify(template), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-template-loaded', { template }, { workId });

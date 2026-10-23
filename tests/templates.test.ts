@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 
@@ -91,8 +93,153 @@ async function startWork(daemon: Awaited<ReturnType<typeof fixture>>) {
   const work = (await daemon.call('send-message', { projectId: project.id, key: 'start', body: '检查模板' })).result.work;
   const events = async (): Promise<any[]> => (await daemon.call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(value => value.action === 'round-ended'));
-  return { work, events };
+  return { project, work, events };
 }
+
+test('项目默认调度者模板可修改，新工作继承默认且现有工作保持原选择，重启后保留', async t => {
+  const drivers = { 'claude-sdk': new FakeDriver(), codex: new FakeDriver() };
+  const daemon = await fixture(t, drivers);
+  await daemon.writeTemplate('claude-coordinator', { role: 'coordinator' });
+  await daemon.writeTemplate('codex-coordinator', { role: 'coordinator', driver: 'codex' });
+  const { project, work } = await startWork(daemon);
+  assert.equal(project.defaultCoordinatorTemplateId, 'claude-coordinator');
+  assert.equal(work.coordinatorTemplateId, 'claude-coordinator');
+  const changed = await daemon.call('set-project-coordinator-template', { projectId: project.id, templateId: 'codex-coordinator' });
+  ok(changed);
+  assert.equal(changed.result.defaultCoordinatorTemplateId, 'codex-coordinator');
+  const inherited = await daemon.call('send-message', { projectId: project.id, key: 'inherited', body: '用项目默认' });
+  ok(inherited);
+  assert.equal(inherited.result.work.coordinatorTemplateId, 'codex-coordinator');
+  assert.equal((await daemon.call('get-work', { workId: work.id })).result.coordinatorTemplateId, 'claude-coordinator');
+  const inheritedEvents = await until(async () => (await daemon.call('get-events', { workId: inherited.result.work.id })).result as any[],
+    events => events.some(event => event.action === 'round-ended'));
+  assert.equal(inheritedEvents.find(event => event.action === 'round-template-loaded').details.template.id, 'codex-coordinator');
+  await daemon.close();
+  const restarted = await startHelmd({ port: 0, dataDir: join(daemon.directory, 'data'), templateDir: daemon.templateDir, drivers });
+  t.after(() => restarted.close());
+  const read = async (name: string, params: object = {}) => (await (await fetch(`${restarted.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json() as any).result;
+  assert.equal((await read('list-projects'))[0].defaultCoordinatorTemplateId, 'codex-coordinator');
+  assert.equal((await read('get-work', { workId: inherited.result.work.id })).coordinatorTemplateId, 'codex-coordinator');
+  assert.equal((await read('list-works')).find((item: any) => item.id === work.id).coordinatorTemplateId, 'claude-coordinator');
+});
+
+test('创建工作可指定调度者模板，key 重投保留选择且拒绝执行者、缺失和坏模板', async t => {
+  const seen: string[] = [];
+  const daemon = await fixture(t, { 'claude-sdk': new FakeDriver(), codex: new FakeDriver([ctx => {
+    seen.push(ctx.options.template!.id);
+    return [];
+  }]) });
+  await daemon.writeTemplate('claude-coordinator', { role: 'coordinator' });
+  await daemon.writeTemplate('codex-coordinator', { role: 'coordinator', driver: 'codex' });
+  await daemon.writeTemplate('executor');
+  await daemon.writeTemplate('broken', { role: 'coordinator', fast: true });
+  const { project, work } = await startWork(daemon);
+  const params = { projectId: project.id, key: 'explicit', body: '用另一家调度', coordinatorTemplateId: 'codex-coordinator' };
+  const created = await daemon.call('send-message', params);
+  ok(created);
+  assert.equal(created.result.work.coordinatorTemplateId, 'codex-coordinator');
+  await until(async () => (await daemon.call('get-events', { workId: created.result.work.id })).result as any[],
+    events => events.some(event => event.action === 'round-ended'));
+  assert.deepEqual(seen, ['codex-coordinator']);
+  const retried = await daemon.call('send-message', { ...params, coordinatorTemplateId: 'claude-coordinator' });
+  ok(retried);
+  assert.deepEqual(retried.result, created.result);
+  assert.equal((await daemon.call('list-projects')).result[0].defaultCoordinatorTemplateId, 'claude-coordinator');
+  for (const templateId of ['executor', 'missing', 'broken']) {
+    const rejected = await daemon.call('send-message', { ...params, key: templateId, coordinatorTemplateId: templateId });
+    assert.equal(rejected.error.code, 'TEMPLATE_UNAVAILABLE');
+    assert.equal(rejected.error.details.templateId, templateId);
+    assert.equal((await daemon.call('set-project-coordinator-template', { projectId: project.id, templateId })).error.code, 'TEMPLATE_UNAVAILABLE');
+  }
+  assert.equal((await daemon.call('list-works')).result.length, 2);
+  const onExistingWork = await daemon.call('send-message', { workId: work.id, key: 'invalid', body: '创建后不能这样改模板', coordinatorTemplateId: 'codex-coordinator' });
+  assert.equal(onExistingWork.error.code, 'INVALID_PARAMS');
+});
+
+test('换调度者模板只影响下一轮，当前运行或启动中的轮次不受影响，暂停时也可通过 CLI 更换', async t => {
+  for (const phase of ['running', 'starting'] as const) await t.test(phase, async t => {
+    let releaseStart!: () => void;
+    let releaseRound!: () => void;
+    const starting = new Promise<void>(resolve => { releaseStart = resolve; });
+    const running = new Promise<void>(resolve => { releaseRound = resolve; });
+    t.after(() => { releaseStart(); releaseRound(); });
+    const seen: { template: any; input: any }[] = [];
+    let firstOptions: FakeContext['options'] | undefined;
+    const original = new FakeDriver([ctx => {
+      seen.push({ template: structuredClone(ctx.options.template), input: JSON.parse(ctx.input) });
+      return [{ type: 'hang', until: running }];
+    }]);
+    const record: FakeScript = ctx => {
+      seen.push({ template: structuredClone(ctx.options.template), input: JSON.parse(ctx.input) });
+      return [];
+    };
+    const replacements = new FakeDriver([record, record]);
+    const daemon = await fixture(t, { 'claude-sdk': { async start(options) {
+      firstOptions = options;
+      if (phase === 'starting') await starting;
+      return original.start(options);
+    } }, codex: replacements });
+    await daemon.writeTemplate('claude-coordinator', { role: 'coordinator', model: 'original' }, '原来的调度策略');
+    await daemon.writeTemplate('codex-coordinator', { role: 'coordinator', driver: 'codex', model: 'replacement' }, '替换后的调度策略');
+    await daemon.writeTemplate('executor');
+    // startWork waits for round completion; register without waiting for this held round.
+    const repo = join(daemon.directory, 'project');
+    execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+    const project = (await daemon.call('register-project', { path: repo })).result;
+    const work = (await daemon.call('send-message', { projectId: project.id, key: 'start', body: '开始调度' })).result.work;
+    const params = { workId: work.id };
+    const events = async (): Promise<any[]> => (await daemon.call('get-events', params)).result;
+    await until(async () => phase === 'starting' ? Boolean(firstOptions) : seen.length === 1, Boolean);
+    const firstRound = (await events()).find(event => event.action === 'round-started').object.id;
+    for (const templateId of ['executor', 'missing']) {
+      assert.equal((await daemon.call('change-coordinator-template', { ...params, templateId })).error.code, 'TEMPLATE_UNAVAILABLE');
+    }
+    const forbidden = await fetch(`${daemon.url}/api/change-coordinator-template`, { method: 'POST',
+      headers: { Authorization: firstOptions!.mcpServers.helm!.headers.Authorization! },
+      body: JSON.stringify({ ...params, templateId: 'codex-coordinator' }) });
+    assert.equal(forbidden.status, 403);
+    const changed = await daemon.call('change-coordinator-template', { ...params, templateId: 'codex-coordinator' });
+    ok(changed);
+    assert.equal(changed.result.coordinatorTemplateId, 'codex-coordinator');
+    assert.equal(changed.result.status, 'aligning');
+    ok(await daemon.call('change-coordinator-template', { ...params, templateId: 'codex-coordinator' }));
+    assert.equal(firstOptions!.signal!.aborted, false);
+    const during = await events();
+    assert.equal(during.filter(event => event.action === 'round-started').length, 1);
+    assert.equal(during.filter(event => event.action === 'round-ended').length, 0);
+    const changes = during.filter(event => event.action === 'coordinator-template-changed');
+    assert.equal(changes.length, 1);
+    assert.deepEqual(changes[0].details, { previousTemplateId: 'claude-coordinator', templateId: 'codex-coordinator' });
+    assert.equal(changes[0].actor.type, 'user');
+    releaseStart();
+    await until(async () => seen.length, count => count === 1);
+    assert.equal(seen[0]!.template.id, 'claude-coordinator');
+    assert.equal(seen[0]!.input.work.coordinatorTemplateId, 'claude-coordinator');
+    releaseRound();
+    const ended = await until(events, values => values.filter(event => event.action === 'round-ended').length === 2);
+    assert.equal(ended.find(event => event.action === 'round-ended' && event.object.id === firstRound).details.reason, 'completed');
+    assert.deepEqual(seen.map(value => value.template.id), ['claude-coordinator', 'codex-coordinator']);
+    assert.equal(seen[1]!.input.work.coordinatorTemplateId, 'codex-coordinator');
+    assert.ok(seen[1]!.input.wakeEvents.some((event: any) => event.action === 'coordinator-template-changed'));
+    assert.deepEqual(ended.filter(event => event.action === 'round-template-loaded').map(event => event.details.template.prompt), ['原来的调度策略', '替换后的调度策略']);
+
+    ok(await daemon.call('pause-work', params));
+    await daemon.writeTemplate('other-coordinator', { role: 'coordinator', driver: 'codex' });
+    const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)),
+      'change-coordinator-template', '--url', daemon.url, '--workId', work.id, '--templateId', 'other-coordinator']);
+    const cliResult = JSON.parse(stdout);
+    ok(cliResult);
+    assert.equal(cliResult.result.status, 'paused');
+    assert.equal(cliResult.result.coordinatorTemplateId, 'other-coordinator');
+    assert.equal((await events()).filter(event => event.action === 'round-started').length, 2);
+    ok(await daemon.call('resume-work', params));
+    await until(events, values => values.filter(event => event.action === 'round-ended').length === 3);
+    assert.equal(seen[2]!.template.id, 'other-coordinator');
+    ok(await daemon.call('change-coordinator-template', { ...params, templateId: 'codex-coordinator' }));
+    const afterIdleChange = await until(events, values => values.filter(event => event.action === 'round-ended').length === 4);
+    assert.equal(afterIdleChange.filter(event => event.action === 'round-template-loaded').at(-1).details.template.id, 'codex-coordinator');
+  });
+});
 
 const alignment = (ctx: FakeContext): FakeStep[] => [
   { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: '模板文件生效', boundary: '本机', criteria: '快照和驱动一致' }, check: ok },
