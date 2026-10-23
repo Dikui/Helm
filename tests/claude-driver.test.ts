@@ -176,7 +176,7 @@ test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环�
     const availability = await driver.checkAvailability(options.template!);
     assert.equal(availability.available, typeof status !== 'string' && status.loggedIn && status.authMethod === 'claude.ai' && exit === 0);
     const probe = JSON.parse(await readFile(evidence, 'utf8'));
-    assert.deepEqual(probe.args, ['auth', 'status', '--json', '--setting-sources', '']);
+    assert.deepEqual(probe.args, ['auth', 'status', '--json']);
     assert.equal(probe.env.CLAUDE_CONFIG_DIR, join(options.cwd, '.helm/agent-homes/claude'));
     assert.equal(probe.cwd, probe.env.CLAUDE_CONFIG_DIR);
     assert.equal(probe.env.ANTHROPIC_API_KEY, undefined);

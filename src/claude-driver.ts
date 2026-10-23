@@ -118,7 +118,7 @@ function coordinatorPermission(servers: string[], skills: string[]): CanUseTool 
 type AuthStatus = (executable: string, options: { cwd: string; env: Record<string, string> }) => Promise<boolean>;
 const authStatus: AuthStatus = async (executable, options) => {
   // Ask the CLI, which owns Keychain/file credentials. Never read its files.
-  const { stdout } = await promisify(execFile)(executable, ['auth', 'status', '--json', '--setting-sources', ''],
+  const { stdout } = await promisify(execFile)(executable, ['auth', 'status', '--json'],
     { ...options, timeout: 10_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 });
   const status = JSON.parse(stdout);
   return status.loggedIn === true && status.authMethod === 'claude.ai';
