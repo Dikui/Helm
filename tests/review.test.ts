@@ -68,6 +68,52 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   return { ...daemon, directory, repo, remote, baseline, work, call, events, getWork, conversation, pendingReview, roundsEnded };
 }
 
+test('非终态卡片阻止审核，错误和拒绝事件列出卡片，全部取消后可用原 key 重试', async t => {
+  const paused = hold();
+  const rejected = hold();
+  let returnedError: unknown;
+  t.after(() => { paused.release(); rejected.release(); });
+  const daemon = await fixture(t, [[
+    ...['ready', 'waiting', 'paused'].map(key => ({ type: 'tool' as const, name: 'create-card',
+      arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), key, content: `${key} 卡片` }), saveAs: key, check: ok })),
+    { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx),
+      upstream: { type: 'card', id: saved(ctx, 'ready').id }, downstream: { type: 'card', id: saved(ctx, 'waiting').id } }), check: ok },
+    { type: 'hang', until: paused.promise },
+    review('review', value => { returnedError = value.error; code('NON_TERMINAL_CARDS')(value); }),
+    { type: 'hang', until: rejected.promise },
+    ...['ready', 'waiting', 'paused'].map(key => ({ type: 'tool' as const, name: 'cancel-card',
+      arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id, reason: '移除需求' }), check: ok })),
+    review(), { type: 'hang' },
+  ]]);
+  const graph = (await until(async () => (await daemon.call('get-card-graph', { workId: daemon.work.id })).result as any[],
+    nodes => nodes.filter(node => node.type === 'card').length === 3 && nodes.some(node => node.status === 'waiting')))
+    .filter(node => node.type === 'card');
+  const pausedCard = graph.find(card => card.key === 'paused');
+  ok(await daemon.call('pause-card', { workId: daemon.work.id, cardId: pausedCard.id }));
+  paused.release();
+  const events = await until(daemon.events, values => values.some(event => event.action === 'operation-rejected'
+    || event.action === 'gate-created' && event.details.kind === 'review'));
+  const failure = events.find(event => event.action === 'operation-rejected');
+  assert.ok(failure, '非终态卡片存在时应拒绝审核，而非创建审核关卡');
+  assert.deepEqual(await until(async () => returnedError, value => value !== undefined), failure.details);
+  assert.equal(failure.object.id, 'request-review');
+  assert.equal(failure.actor.type, 'coordinator-round');
+  assert.equal(failure.details.code, 'NON_TERMINAL_CARDS');
+  assert.match(failure.details.reason, /完成.*取消/);
+  assert.deepEqual(failure.details.details.nonTerminalCards, graph.map(card => ({ id: card.id,
+    content: card.content, status: card.key === 'paused' ? 'paused' : card.status })));
+  assert.ok(failure.details.allowedOperations.includes('complete-card'));
+  assert.ok(failure.details.allowedOperations.includes('cancel-card'));
+  assert.equal((await daemon.getWork()).status, 'executing');
+  assert.ok(!(await daemon.conversation()).some(item => item.kind === 'review'));
+  assert.ok(!events.some(event => event.action === 'needs-user-attention' && event.details.kind === 'review'));
+  rejected.release();
+  const gate = await daemon.pendingReview();
+  assert.equal(gate.key, 'review');
+  assert.equal((await daemon.getWork()).status, 'awaiting-review');
+  assert.equal(gate.review.rejectedOperationCount, 1);
+});
+
 test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留报告和意见并唤醒新一轮', async t => {
   const daemon = await fixture(t, [[
     review(),
@@ -82,7 +128,19 @@ test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留
     assert.equal(brief.work.status, 'executing');
     assert.ok(brief.wakeEvents.some(event => event.action === 'gate-decided' && (event.details as any).decision === 'return'));
     assert.ok(brief.recentConversation.some(item => (item as any).comment === 'shared.txt:1 请改进'));
-    return [review('revision')];
+    const original = brief.recentConversation.find(item => (item as any).key === 'review') as any;
+    return [
+      { type: 'tool', name: 'create-card', arguments: { workId: brief.work.id, key: 'repair', content: '处理审核意见' }, saveAs: 'repair', check: ok },
+      review('review', value => { ok(value); assert.equal(value.result.id, original.id); assert.equal(value.result.body, original.body); }),
+      review('revision', value => {
+        code('NON_TERMINAL_CARDS')(value);
+        assert.equal(value.error.details.nonTerminalCards.length, 1);
+        assert.equal(value.error.details.nonTerminalCards[0].content, '处理审核意见');
+        assert.equal(value.error.details.nonTerminalCards[0].status, 'ready');
+      }),
+      { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'repair').id, reason: '意见已通过消息澄清' }), check: ok },
+      review('revision'),
+    ];
   }]);
   await daemon.roundsEnded(2);
   const gate = await daemon.pendingReview();
@@ -228,11 +286,17 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', templateId: 'claude-executor' }), check: ok },
     { type: 'hang', until: executed.promise },
+    review('before-execution-completed', code('NON_TERMINAL_CARDS')),
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '按工作说明做整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
     { type: 'hang', until: verified.promise },
+    review('before-verification-completed', value => {
+      code('NON_TERMINAL_CARDS')(value);
+      assert.deepEqual(value.error.details.nonTerminalCards.map((card: any) => ({ content: card.content, status: card.status })),
+        [{ content: '按工作说明做整体验收', status: 'verifying' }]);
+    }),
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id }), check: ok },
     review(), { type: 'hang' },
   ]], [
@@ -248,6 +312,7 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   assert.equal(gate.review.baseRef, 'main');
   assert.equal(gate.review.baseCommit, daemon.baseline);
   assert.equal(gate.review.undeclaredDispatchCount, 1);
+  assert.equal(gate.review.rejectedOperationCount, 2);
   assert.equal(gate.review.overallVerification.length, 1);
   assert.equal(gate.review.overallVerification[0].conclusion, 'passed');
   assert.equal(gate.review.overallVerification[0].reason, '整体验收标准全部通过');
@@ -266,7 +331,7 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
 });
 
 for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验收卡片 ${oldStatus} 后新卡不依赖旧卡，审核列出有效卡片的最近一次验收结论`, async t => {
-  const ended = [hold(), hold(), hold(), hold()];
+  const ended = [hold(), hold(), hold(), hold(), hold()];
   t.after(() => ended.forEach(signal => signal.release()));
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
@@ -275,23 +340,27 @@ for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验�
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'cancelled-code', content: '取消的实现' }), saveAs: 'cancelled-code', check: ok },
     { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'cancelled-code').id, reason: '移除需求' }), check: ok },
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'partial', content: '未覆盖全部实现的验收', needsVerification: true }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'partial', content: '未覆盖全部实现的验收', needsVerification: true }), saveAs: 'partial', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'partial').id, key: 'partial-verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[1]!.promise },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'partial').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'old-overall', content: '旧整体验收', needsVerification: true }), saveAs: 'old-overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'old-overall').id } }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, key: 'old-verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
-    { type: 'hang', until: ended[1]!.promise },
+    { type: 'hang', until: ended[2]!.promise },
     { type: 'tool', name: oldStatus === 'cancelled' ? 'cancel-card' : 'complete-card',
       arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, ...(oldStatus === 'cancelled' ? { reason: '由新卡替代' } : {}) }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '新整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-failed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
-    { type: 'hang', until: ended[2]!.promise },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-passed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[3]!.promise },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-passed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[4]!.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id }), check: ok },
     review(), { type: 'hang' },
   ]], [
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '实现完成' }, check: ok }],
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '部分验收通过' }, check: ok }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '旧卡验收通过' }, check: ok }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '需要再次检查' }, check: ok }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '新卡最近一次验收通过' }, check: ok }],
@@ -331,26 +400,36 @@ test('审核未关闭时确认新版工作说明仍待审核；暂停恢复保�
   assert.equal((await daemon.getWork()).status, 'executing');
 });
 
-test('审核不把未结束验收的提前声明当作派单结果，接受后中止派单且不再唤醒', async t => {
+test('未结束验收的提前声明不能绕过终态检查，取消卡片后才可审核', async t => {
   const declared = hold();
-  t.after(declared.release);
+  const rejected = hold();
+  t.after(() => { declared.release(); rejected.release(); });
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
-    { type: 'hang', until: declared.promise }, review(), { type: 'hang' },
+    { type: 'hang', until: declared.promise }, review('review', code('NON_TERMINAL_CARDS')),
+    { type: 'hang', until: rejected.promise },
+    { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, reason: '取消仍在运行的验收' }), check: ok },
+    review(), { type: 'hang' },
   ]], [[{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '提前声明' }, check: ok }, { type: 'hang' }]]);
   await until(daemon.events, values => values.some(event => event.action === 'conclusion-submitted'));
   declared.release();
+  const events = await until(daemon.events, values => values.some(event => event.action === 'operation-rejected'));
+  const failure = events.find(event => event.action === 'operation-rejected').details;
+  assert.equal(failure.code, 'NON_TERMINAL_CARDS');
+  assert.equal(failure.details.nonTerminalCards[0].status, 'verifying');
+  assert.equal((await daemon.getWork()).status, 'executing');
+  assert.ok(!(await daemon.conversation()).some(item => item.kind === 'review'));
+  rejected.release();
   const gate = await daemon.pendingReview();
-  assert.equal(gate.review.overallVerification[0].status, 'running');
-  assert.equal(gate.review.overallVerification[0].conclusion, 'undeclared');
-  assert.equal(gate.review.undeclaredDispatchCount, 0, '只统计已形成派单结果的派单');
+  assert.deepEqual(gate.review.overallVerification, []);
+  assert.equal(gate.review.undeclaredDispatchCount, 1, '取消后的派单结果不采信提前声明');
   const work = await daemon.getWork();
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
   const dispatch = (await daemon.call('list-dispatches', { workId: work.id })).result[0];
   assert.equal(dispatch.status, 'ended');
   assert.equal(dispatch.endReason, 'aborted');
-  assert.equal(dispatch.abortReason, '审核接受');
+  assert.equal(dispatch.abortReason, '卡片取消');
   assert.equal(dispatch.conclusion, 'undeclared');
   assert.equal(existsSync(work.workPath), false);
   assert.equal((await daemon.getWork()).status, 'completed');

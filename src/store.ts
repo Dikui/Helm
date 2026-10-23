@@ -53,7 +53,7 @@ export interface HelmEvent {
 }
 
 export class RuleError extends Error {
-  constructor(public code: string, reason: string, public status = 409) { super(reason); }
+  constructor(public code: string, reason: string, public status = 409, public details?: Record<string, unknown>) { super(reason); }
 }
 
 export class TaskStore {

@@ -411,7 +411,8 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
 
 export function rejectOperation(store: TaskStore, actor: Actor, name: string, error: RuleError, input?: unknown) {
   const allowedOperations = operations.filter(item => item.callers.includes(actor.type)).map(item => item.name);
-  const failure = { code: error.code, reason: error.message, allowedOperations };
+  const failure = { code: error.code, reason: error.message, allowedOperations,
+    ...(error.details ? { details: error.details } : {}) };
   const workId = actor.workId ?? (input && typeof input === 'object' && 'workId' in input && typeof input.workId === 'string' ? input.workId : undefined);
   store.transaction(() => store.appendEvent(actor, { type: 'operation', id: name }, 'operation-rejected', failure, { workId }));
   return { status: error.status, body: { ok: false as const, error: failure } };
