@@ -16,7 +16,7 @@ const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as a
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 type ApiCall = (name: string, params?: object, token?: string) => Promise<any>;
 
-async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean, timeoutMs = 5_000): Promise<T> {
+async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean, timeoutMs = 30_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
@@ -162,8 +162,8 @@ test('派单看门狗分别限制无输出和墙钟总时长，超时保留改�
     }], { beforeConfirm: async call => {
       // Isolate each deadline: MCP startup under parallel load must not make
       // the wall-clock case hit its idle deadline before streaming starts.
-      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: threshold === 'wall' ? 1000 : 5000,
-        idleTimeoutMs: threshold === 'wall' ? 5000 : 150 }));
+      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: threshold === 'wall' ? 3000 : 30_000,
+        idleTimeoutMs: threshold === 'wall' ? 30_000 : 1000 }));
     } });
     await daemon.finished();
     const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
@@ -191,7 +191,7 @@ test('驱动启动、发送或输出挂住时看门狗仍结束派单，后续�
         : { ...session, events: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) } };
     } }, beforeConfirm: async call => {
       ok(await call('set-concurrency', { limit: 1 }));
-      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: 5000, idleTimeoutMs: 100 }));
+      ok(await call('set-dispatch-watchdog', { wallTimeoutMs: 30_000, idleTimeoutMs: 1000 }));
     } });
     await daemon.finished();
     await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 2);
@@ -331,10 +331,10 @@ test('看门狗记录执行者 pgid 和启动时间，SIGTERM 后等 5 秒再杀
     return new Promise(() => {});
   } };
   const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: driver, beforeConfirm: async call => {
-    ok(await call('set-dispatch-watchdog', { wallTimeoutMs: 1000, idleTimeoutMs: 5000 }));
+    ok(await call('set-dispatch-watchdog', { wallTimeoutMs: 3000, idleTimeoutMs: 30_000 }));
   } });
   await daemon.finished();
-  const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'), 10_000);
+  const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'), 30_000);
   const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
   assert.equal(result.endReason, 'timed-out');
   assert.equal(result.pgid, pid);

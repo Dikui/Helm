@@ -4,9 +4,13 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 迁移改为有序列表，版本号由列表位置决定；删掉手写的版本白名单，库版本高于最新迁移时拒绝启动；已有数据库（版本 1–10）照常升级，有测试覆盖
-- [ ] pre-commit 运行 `npm run check`，`npm install` 后自动启用（例如 `core.hooksPath` 指向仓库内的 hook 目录）
-- [ ] GitHub Actions 在 push 和 PR 上运行 `npm ci`、`npm run check`、`npm test`（Node 版本满足 package.json 的 engines），不运行真实冒烟
-- [ ] 看门狗测试放大时间余量或改为可控时钟，连续运行全量测试 5 次不失败
+- [x] 迁移改为有序列表，版本号由列表位置决定；删掉手写的版本白名单，库版本高于最新迁移时拒绝启动；已有数据库（版本 1–10）照常升级，有测试覆盖
+- [x] pre-commit 运行 `npm run check`，`npm install` 后自动启用（例如 `core.hooksPath` 指向仓库内的 hook 目录）
+- [x] GitHub Actions 在 push 和 PR 上运行 `npm ci`、`npm run check`、`npm test`（Node 版本满足 package.json 的 engines），不运行真实冒烟
+- [x] 看门狗测试放大时间余量或改为可控时钟，连续运行全量测试 5 次不失败
+
+## Comments
+
+已将迁移改为按列表位置顺序执行并覆盖历史版本 1–10 升级，接入自动启用的 pre-commit 和 push/PR CI，放大看门狗测试时间余量，使用 Node 22.13.0 连续 5 次运行全量测试均通过（每次 214 项）。
