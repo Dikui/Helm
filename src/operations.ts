@@ -42,6 +42,7 @@ export const eventFilterSchema = z.object({
 
 const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
+const projectColumns = 'id, name, path, created_at, default_coordinator_template_id AS defaultCoordinatorTemplateId';
 
 export const operations: readonly Operation[] = [
   operation({
@@ -83,6 +84,21 @@ export const operations: readonly Operation[] = [
     name: 'interrupt-round', description: '打断当前调度轮次并重投事件和用户消息', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ actor, userOperations }, { workId }) => userOperations.interruptRound(actor, workId),
+  }),
+  operation({
+    name: 'change-coordinator-template', description: '更换工作的调度者模板，从下一调度轮次起生效', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), templateId: z.string().min(1) }).strict(),
+    execute({ store, actor }, { workId, templateId }) {
+      const work = store.work(workId);
+      store.templates.get(templateId, 'coordinator');
+      if (work.coordinatorTemplateId !== templateId) {
+        store.db.prepare('UPDATE works SET coordinator_template_id = ? WHERE id = ?').run(templateId, workId);
+        const event = store.appendEvent(actor, { type: 'work', id: workId }, 'coordinator-template-changed',
+          { previousTemplateId: work.coordinatorTemplateId, templateId }, { workId });
+        store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
+      }
+      return store.work(workId);
+    },
   }),
   operation({
     name: 'list-agent-templates', description: '读取文件中的 Agent 模板、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
@@ -138,19 +154,34 @@ export const operations: readonly Operation[] = [
         const candidate = realpathSync(resolve(params.path));
         path = realpathSync(execFileSync('git', ['-C', candidate, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
       } catch { throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400); }
-      const existing = store.db.prepare('SELECT * FROM projects WHERE path = ?').get(path);
+      const existing = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE path = ?`).get(path);
       if (existing) return existing;
       const id = randomUUID();
       const time = new Date().toISOString();
-      store.db.prepare('INSERT INTO projects VALUES (?, ?, ?, ?)').run(id, params.name ?? basename(path), path, time);
+      store.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(id, params.name ?? basename(path), path, time);
       store.appendEvent(actor, { type: 'project', id }, 'project-registered', { path, name: params.name ?? basename(path) });
-      return store.db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+      return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(id);
     },
   }),
   operation({
     name: 'list-projects', description: '列出项目', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
-    execute: ({ store }) => store.db.prepare('SELECT * FROM projects ORDER BY created_at, id').all(),
+    execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all(),
+  }),
+  operation({
+    name: 'set-project-coordinator-template', description: '设置项目默认调度者模板，仅影响之后创建的工作', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ projectId: z.string().min(1), templateId: z.string().min(1) }).strict(),
+    execute({ store, actor }, { projectId, templateId }) {
+      const project = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
+      if (!project) throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
+      store.templates.get(templateId, 'coordinator');
+      if (project.defaultCoordinatorTemplateId !== templateId) {
+        store.db.prepare('UPDATE projects SET default_coordinator_template_id = ? WHERE id = ?').run(templateId, projectId);
+        store.appendEvent(actor, { type: 'project', id: projectId }, 'project-coordinator-template-set',
+          { previousTemplateId: project.defaultCoordinatorTemplateId, templateId });
+      }
+      return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
+    },
   }),
   operation({
     name: 'get-settings', description: '读取全局设置', callers: ['user'], keyed: false, mutates: false,
@@ -220,20 +251,26 @@ export const operations: readonly Operation[] = [
     schema: z.object({
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
-    }).strict().refine(params => Boolean(params.projectId) !== Boolean(params.workId), '必须且只能提供 projectId 或 workId。'),
+      coordinatorTemplateId: z.string().min(1).optional(),
+    }).strict().refine(params => Boolean(params.projectId) !== Boolean(params.workId), '必须且只能提供 projectId 或 workId。')
+      .refine(params => !params.coordinatorTemplateId || Boolean(params.projectId), 'coordinatorTemplateId 只能在创建工作时指定；已有工作请用 change-coordinator-template。'),
     execute({ store, actor }, params) {
       let workId = params.workId;
       let isNew = false;
       if (params.projectId) {
-        if (!store.db.prepare('SELECT id FROM projects WHERE id = ?').get(params.projectId)) {
+        const project = store.db.prepare('SELECT default_coordinator_template_id FROM projects WHERE id = ?').get(params.projectId);
+        if (!project) {
           throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
         }
         const existing = store.db.prepare('SELECT id FROM works WHERE project_id = ? AND creation_key = ?').get(params.projectId, params.key);
         if (existing) workId = String(existing.id);
         else {
           workId = randomUUID();
-          store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES (?, ?, ?, ?, ?)').run(workId, params.projectId, 'aligning', params.key, new Date().toISOString());
-          store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId }, { workId });
+          const coordinatorTemplateId = params.coordinatorTemplateId ?? String(project.default_coordinator_template_id);
+          if (params.coordinatorTemplateId) store.templates.get(coordinatorTemplateId, 'coordinator');
+          store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_template_id) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(workId, params.projectId, 'aligning', params.key, new Date().toISOString(), coordinatorTemplateId);
+          store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId, coordinatorTemplateId }, { workId });
           isNew = true;
         }
       }
@@ -269,7 +306,7 @@ export const operations: readonly Operation[] = [
     name: 'list-works', description: '列出工作及状态和待决定关卡', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({ projectId: z.string().min(1).optional() }).strict(),
     execute: ({ store }, { projectId }) => store.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
-      runtime_pause_reason AS runtimePauseReason,
+      runtime_pause_reason AS runtimePauseReason, coordinator_template_id AS coordinatorTemplateId,
       (status NOT IN ('completed', 'cancelled') AND EXISTS(SELECT 1 FROM gates WHERE gates.work_id = works.id AND gates.status = 'pending')) AS hasPendingGate
       FROM works WHERE (? IS NULL OR project_id = ?) ORDER BY created_at, id`).all(projectId ?? null, projectId ?? null)
       .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate), usage: store.workUsage(String(work.id)) })),

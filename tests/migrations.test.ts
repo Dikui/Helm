@@ -40,7 +40,9 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
       return body.result;
     };
     assert.equal((await call('list-projects'))[0].name, '旧项目');
+    assert.equal((await call('list-projects'))[0].defaultCoordinatorTemplateId, 'claude-coordinator');
     assert.equal((await call('get-work', { workId: 'work' })).status, 'aligning');
+    assert.equal((await call('get-work', { workId: 'work' })).coordinatorTemplateId, 'claude-coordinator');
     assert.equal((await call('get-conversation', { workId: 'work' }))[0].body, '升级前的消息');
     const settings = await call('get-settings');
     assert.equal(settings.concurrencyLimit, 3);

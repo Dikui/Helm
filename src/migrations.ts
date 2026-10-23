@@ -168,4 +168,8 @@ export const migrations: readonly string[] = [
   ALTER TABLE works ADD COLUMN outputs_exported_at TEXT;
   ALTER TABLE works ADD COLUMN outputs_deleted_at TEXT;
   `,
+  `
+  ALTER TABLE projects ADD COLUMN default_coordinator_template_id TEXT NOT NULL DEFAULT 'claude-coordinator';
+  ALTER TABLE works ADD COLUMN coordinator_template_id TEXT NOT NULL DEFAULT 'claude-coordinator';
+  `,
 ];
