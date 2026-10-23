@@ -265,6 +265,53 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   assert.equal((await daemon.conversation()).find(item => item.id === gate.id).review.overallVerification[0].conclusion, 'passed');
 });
 
+for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验收卡片 ${oldStatus} 后新卡不依赖旧卡，审核列出有效卡片的最近一次验收结论`, async t => {
+  const ended = [hold(), hold(), hold(), hold()];
+  t.after(() => ended.forEach(signal => signal.release()));
+  const daemon = await fixture(t, [[
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[0]!.promise },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'cancelled-code', content: '取消的实现' }), saveAs: 'cancelled-code', check: ok },
+    { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'cancelled-code').id, reason: '移除需求' }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'partial', content: '未覆盖全部实现的验收', needsVerification: true }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'old-overall', content: '旧整体验收', needsVerification: true }), saveAs: 'old-overall', check: ok },
+    { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'old-overall').id } }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, key: 'old-verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[1]!.promise },
+    { type: 'tool', name: oldStatus === 'cancelled' ? 'cancel-card' : 'complete-card',
+      arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, ...(oldStatus === 'cancelled' ? { reason: '由新卡替代' } : {}) }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '新整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
+    { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-failed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[2]!.promise },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-passed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended[3]!.promise },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id }), check: ok },
+    review(), { type: 'hang' },
+  ]], [
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '实现完成' }, check: ok }],
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '旧卡验收通过' }, check: ok }],
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '需要再次检查' }, check: ok }],
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '新卡最近一次验收通过' }, check: ok }],
+  ]);
+  for (const [index, signal] of ended.entries()) {
+    await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === index + 1);
+    signal.release();
+  }
+  const gate = await daemon.pendingReview();
+  const dispatches = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result;
+  const old = dispatches.find((dispatch: any) => dispatch.key === 'old-verify');
+  const latest = dispatches.find((dispatch: any) => dispatch.key === 'new-verify-passed');
+  const expected = [{ cardId: latest.cardId, dispatchId: latest.id,
+    status: 'ended', endReason: 'completed', conclusion: 'passed', reason: '新卡最近一次验收通过' }];
+  if (oldStatus === 'completed') expected.push({ cardId: old.cardId, dispatchId: old.id,
+    status: 'ended', endReason: 'completed', conclusion: 'passed', reason: '旧卡验收通过' });
+  assert.deepEqual(gate.review.overallVerification.toSorted((a: any, b: any) => a.cardId.localeCompare(b.cardId)),
+    expected.toSorted((a, b) => a.cardId.localeCompare(b.cardId)));
+});
+
 test('审核未关闭时确认新版工作说明仍待审核；暂停恢复保持关卡，退回后恢复执行', async t => {
   const daemon = await fixture(t, [[review(),
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '新版需求', boundary: '本机', criteria: '新版标准' }), check: ok },

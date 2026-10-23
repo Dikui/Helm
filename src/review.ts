@@ -14,11 +14,13 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
   if (fields.kind !== 'review') return gate;
   const work = store.work(String(fields.workId));
   const project = projectPath(store, work.id);
-  const cards = cardGraph(store, work.id).filter(node => node.type === 'card');
+  const cards = cardGraph(store, work.id).filter(node => node.type === 'card').filter(card => card.status !== 'cancelled');
   const dispatches = listDispatches(store, work.id);
-  const overallVerification = cards.filter(card => card.needsVerification
-    && cards.every(other => other.id === card.id || card.dependencies.some(node => node.type === 'card' && node.id === other.id))
-    && !dispatches.some(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'execution'))
+  const verificationOnlyCards = cards.filter(card => card.needsVerification
+    && !dispatches.some(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'execution'));
+  const requiredCards = cards.filter(card => !verificationOnlyCards.includes(card));
+  const overallVerification = verificationOnlyCards.filter(card => requiredCards.every(other =>
+    card.dependencies.some(node => node.type === 'card' && node.id === other.id)))
     .map(card => {
       const latest = dispatches.filter(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'verification').at(-1);
       return { cardId: card.id, dispatchId: latest?.id ?? null, status: latest?.status ?? null,
