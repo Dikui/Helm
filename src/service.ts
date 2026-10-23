@@ -79,14 +79,23 @@ WantedBy=default.target
 `);
   const domain = `gui/${process.getuid!()}`;
   const target = `${domain}/${launchAgent}`;
-  let loaded = true;
-  try { await exec('launchctl', ['print', target]); }
-  catch (error) {
-    // launchctl print reports 113 when the service target is not yet registered.
-    if ((error as { code?: number }).code !== 113) throw error;
-    loaded = false;
+  const registered = async () => {
+    try { await exec('launchctl', ['print', target]); return true; }
+    catch (error) {
+      // launchctl print reports 113 when the service target is not registered.
+      if ((error as { code?: number }).code !== 113) throw error;
+      return false;
+    }
+  };
+  if (await registered()) {
+    await exec('launchctl', ['bootout', target]);
+    // bootout returns before launchd finishes removing the target; bootstrapping
+    // too early fails with "Bootstrap failed: 5: Input/output error".
+    for (let attempt = 0; await registered(); attempt++) {
+      if (attempt === 50) throw new Error(`launchctl bootout did not finish for ${target}`);
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
   }
-  if (loaded) await exec('launchctl', ['bootout', target]);
   await exec('launchctl', ['enable', target]);
   await exec('launchctl', ['bootstrap', domain, path]);
   return `Installed helmd LaunchAgent: ${path}\nLogs: ${logs}`;

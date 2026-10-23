@@ -21,7 +21,7 @@ async function fixture(t: TestContext, platform: string) {
   const calls = join(directory, 'calls.jsonl');
   for (const manager of ['launchctl', 'systemctl']) {
     await writeFile(join(bin, manager), `#!${process.execPath}
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 appendFileSync(process.env.HELM_TEST_CALLS, JSON.stringify([${JSON.stringify(manager)}, ...args]) + '\\n');
 if (args.includes(process.env.HELM_TEST_FAIL)) {
@@ -32,6 +32,7 @@ if (${JSON.stringify(manager)} === 'launchctl') {
   const state = process.env.HELM_TEST_CALLS + '.loaded';
   if (args[0] === 'print' && !existsSync(state)) process.exit(113);
   if (args[0] === 'bootstrap') writeFileSync(state, 'loaded');
+  if (args[0] === 'bootout') rmSync(state);
 }
 `, { mode: 0o755 });
   }
@@ -89,7 +90,7 @@ test('helm service install 在 macOS 本地安装并更新自动重启的 Launch
   assert.ok(updated.includes('http://user:p&amp;&lt;&quot;word@new.test:8443'));
   assert.ok(!updated.includes('<key>http_proxy</key>'));
   assert.deepEqual((await f.calls()).slice(3), [
-    ['launchctl', 'print', target], ['launchctl', 'bootout', target],
+    ['launchctl', 'print', target], ['launchctl', 'bootout', target], ['launchctl', 'print', target],
     ['launchctl', 'enable', target], ['launchctl', 'bootstrap', domain, path],
   ]);
 });
