@@ -150,4 +150,8 @@ export const migrations: readonly string[] = [
   ALTER TABLE settings ADD COLUMN output_total_bytes INTEGER NOT NULL DEFAULT 0 CHECK(output_total_bytes >= 0);
   ALTER TABLE settings ADD COLUMN output_threshold_exceeded INTEGER NOT NULL DEFAULT 0 CHECK(output_threshold_exceeded IN (0, 1));
   `,
+  `
+  ALTER TABLE works ADD COLUMN outputs_exported_at TEXT;
+  ALTER TABLE works ADD COLUMN outputs_deleted_at TEXT;
+  `,
 ];

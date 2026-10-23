@@ -11,6 +11,7 @@ export interface Work {
   baseRef: string | null; baseCommit: string | null; workBranch: string | null;
   workPath: string | null; activeDescriptionId: string | null;
   runtimePauseReason: string | null;
+  outputsExportedAt: string | null; outputsDeletedAt: string | null;
   usage: TokenUsage;
 }
 export interface WorkDescription {
@@ -137,7 +138,8 @@ COMMIT;`);
     const work = this.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
       base_ref AS baseRef, base_commit AS baseCommit, work_branch AS workBranch,
       work_path AS workPath, active_description_id AS activeDescriptionId,
-      runtime_pause_reason AS runtimePauseReason FROM works WHERE id = ?`).get(id);
+      runtime_pause_reason AS runtimePauseReason, outputs_exported_at AS outputsExportedAt,
+      outputs_deleted_at AS outputsDeletedAt FROM works WHERE id = ?`).get(id);
     if (!work) throw new RuleError('NOT_FOUND', '找不到这项工作。', 404);
     return { ...work, usage: this.workUsage(id) } as unknown as Work;
   }
