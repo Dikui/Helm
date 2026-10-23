@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,15 @@ function xml(value: string) {
 function unitQuote(value: string) {
   return `"${value.replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     .replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`;
+}
+
+// process.execPath resolves Homebrew's versioned Cellar path, which breaks after an upgrade.
+async function stableNode(path: string) {
+  for (const directory of path.split(':').filter(isAbsolute)) {
+    const node = join(directory, 'node');
+    if (await access(node, constants.X_OK).then(() => true, () => false)) return node;
+  }
+  return process.execPath;
 }
 
 async function saveConfig(path: string, content: string) {
@@ -37,6 +46,7 @@ export async function installUserService(): Promise<string> {
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
   }
+  const node = await stableNode(env.PATH!);
   await mkdir(logs, { recursive: true });
   if (process.platform === 'linux') {
     const configHome = process.env.XDG_CONFIG_HOME;
@@ -47,7 +57,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=${[process.execPath, cli, 'serve'].map(arg => unitQuote(arg).replace(/\$/g, () => '$$')).join(' ')}
+ExecStart=${[node, cli, 'serve'].map(arg => unitQuote(arg).replace(/\$/g, () => '$$')).join(' ')}
 WorkingDirectory=${home.replace(/%/g, '%%')}
 ${Object.entries(env).map(([key, value]) => `Environment=${unitQuote(`${key}=${value}`)}`).join('\n')}
 Restart=always
@@ -68,7 +78,7 @@ WantedBy=default.target
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${launchAgent}</string>
-<key>ProgramArguments</key><array>${[process.execPath, cli, 'serve'].map(arg => `<string>${xml(arg)}</string>`).join('')}</array>
+<key>ProgramArguments</key><array>${[node, cli, 'serve'].map(arg => `<string>${xml(arg)}</string>`).join('')}</array>
 <key>WorkingDirectory</key><string>${xml(home)}</string>
 <key>EnvironmentVariables</key><dict>${Object.entries(env).map(([key, value]) => `<key>${key}</key><string>${xml(value)}</string>`).join('')}</dict>
 <key>RunAtLoad</key><true/>

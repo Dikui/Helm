@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -36,6 +36,7 @@ if (${JSON.stringify(manager)} === 'launchctl') {
 }
 `, { mode: 0o755 });
   }
+  await symlink(process.execPath, join(bin, 'node'));
   const env: NodeJS.ProcessEnv = {
     HOME: home, PATH: `${bin}:/usr/bin:/bin`,
     HELM_TEST_SERVICE_PLATFORM: platform, HELM_TEST_CALLS: calls,
@@ -48,7 +49,7 @@ if (${JSON.stringify(manager)} === 'launchctl') {
     all_proxy: 'socks5://lower.test:1080', no_proxy: 'local.test',
   };
   return {
-    home, env,
+    home, env, node: join(bin, 'node'),
     install: () => exec(process.execPath, ['--import', platformFixture, cli, 'service', 'install'], { env }),
     calls: async () => (await readFile(calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line)),
   };
@@ -63,7 +64,7 @@ test('helm service install 在 macOS 本地安装并更新自动重启的 Launch
   assert.match(plist, /<key>Label<\/key>\s*<string>io\.helm\.helmd<\/string>/);
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
-  assert.ok(plist.includes(`<string>${process.execPath}</string>`));
+  assert.ok(plist.includes(`<string>${f.node}</string>`));
   assert.ok(plist.includes(`<string>${cli}</string>`));
   assert.ok(plist.includes('<string>serve</string>'));
   assert.ok(plist.includes(`<string>${f.home.replace('&', '&amp;')}/.helm/logs/helmd.stdout.log</string>`));
@@ -106,7 +107,7 @@ test('helm service install 在 Linux 启用并更新用户服务，提示 linger
   assert.match(unit, /^WantedBy=default.target$/m);
   assert.match(unit, /^Restart=always$/m);
   assert.match(unit, /^RestartSec=5$/m);
-  assert.ok(unit.includes(`ExecStart="${process.execPath}" "${cli}" "serve"`));
+  assert.ok(unit.includes(`ExecStart="${f.node}" "${cli}" "serve"`));
   assert.ok(unit.includes(`StandardOutput=append:${f.home}/.helm/logs/helmd.stdout.log`));
   assert.ok(unit.includes(`StandardError=append:${f.home}/.helm/logs/helmd.stderr.log`));
   assert.ok((await stat(join(f.home, '.helm', 'logs'))).isDirectory());
