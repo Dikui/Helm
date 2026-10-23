@@ -37,7 +37,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, 'codex-executor', { model: 'gpt-5.4-mini', reasoningEffort: 'low', fast: false });
+  await configureTestTemplate(templateDir, 'codex-executor', { model: 'gpt-6-luna', reasoningEffort: 'low', fast: false });
   for (const [name, text] of Object.entries(config.skills ?? {})) {
     const path = join(templateDir, 'codex-executor', 'skills', name);
     await mkdir(path, { recursive: true });

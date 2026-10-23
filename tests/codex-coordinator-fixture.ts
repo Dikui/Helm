@@ -32,7 +32,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, 'codex-coordinator', { model: 'gpt-5.4-mini', reasoningEffort: 'low' });
+  await configureTestTemplate(templateDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'low' });
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       key: 'draft', requirements: 'Codex 调度者冒烟', boundary: '临时项目', criteria: 'MCP、只读、重投和额度处理' }),

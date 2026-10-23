@@ -30,7 +30,7 @@ function observedDriver() {
     async start(options) {
       assert.deepEqual(options.sandbox, { mode: 'read-only', writableRoots: [] });
       assert.equal(options.resumeSessionId, undefined);
-      assert.equal(options.template?.model, 'gpt-5.4-mini');
+      assert.equal(options.template?.model, 'gpt-6-luna');
       assert.equal(options.template?.reasoningEffort, 'low');
       // Exercise the driver's loopback bypass even when callers supply none.
       const env = { ...options.env };
