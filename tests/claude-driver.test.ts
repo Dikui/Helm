@@ -10,6 +10,7 @@ import type { CanUseTool, SDKMessage, SDKResultMessage } from '@anthropic-ai/cla
 import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
+import { claudeErrors } from './fixtures/claude-errors.js';
 
 async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'executor'): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
@@ -285,7 +286,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
     const error = result({ subtype: 'error_during_execution', is_error: true, errors: ['Request failed'] });
     const cases: { messages: SDKMessage[]; reason: string }[] = [
       { messages: [rejected, error], reason: 'quota-exhausted' },
-      { messages: [rateError, error], reason: 'quota-exhausted' },
+      { messages: [rateError, error], reason: 'error' },
       { messages: [result({ subtype: 'success', is_error: true, result: "You've hit your limit · resets 3pm" })], reason: 'quota-exhausted' },
       { messages: [result({ subtype: 'error_during_execution', is_error: true, errors: ['Weekly usage limit reached'] })], reason: 'quota-exhausted' },
       { messages: [warning, error], reason: 'error' },
@@ -301,6 +302,50 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
       assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
     }
   });
+}
+
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  test(`${role}: Claude 临时 429 留给 CLI 重试，只按最终 result 结束`, async t => {
+    const options = await fixture(t, role);
+    const sample = claudeErrors.find(sample => sample.name === 'transient 429')!;
+    const diagnostic = { type: 'assistant', error: sample.error,
+      message: { content: [{ type: 'text', text: sample.text }] } } as SDKMessage;
+    const failure = result({ subtype: 'error_during_execution', is_error: true, errors: [sample.text] });
+    for (const terminal of [failure, result()]) {
+      const messages = [diagnostic, diagnostic, terminal];
+      const { events, end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+      assert.equal(end?.reason, terminal === failure ? 'error' : 'completed', sample.source);
+      assert.equal(events.filter(event => event.type === 'end').length, 1);
+      assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
+    }
+  });
+}
+
+for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
+  for (const sample of claudeErrors) {
+    test(`${role}: Claude 真实错误样本 ${sample.name}`, async t => {
+      const options = await fixture(t, role);
+      const content = { content: [{ type: 'text', text: sample.text }] };
+      const assistant = { type: 'assistant', error: sample.error, message: content } as SDKMessage;
+      const ordinary = { type: 'assistant', message: content } as SDKMessage;
+      const failure = result({ subtype: 'error_during_execution', is_error: true, errors: ['Request failed'] });
+      const cases: { name: string; messages: SDKMessage[]; reason: string; answer?: string }[] = [
+        { name: 'error result', messages: [result({ subtype: 'error_during_execution', is_error: true, errors: [sample.text] })], reason: sample.reason },
+        { name: 'success subtype with is_error', messages: [result({ is_error: true, result: sample.text })], reason: sample.reason },
+        { name: 'assistant diagnostic', messages: [assistant, failure], reason: sample.reason },
+        { name: 'CLI recovered', messages: [assistant, result()], reason: 'completed', answer: '最终回答' },
+        { name: 'ordinary assistant text', messages: [ordinary, failure], reason: 'error' },
+        { name: 'successful answer quoting an error', messages: [result({ result: sample.text })], reason: 'completed', answer: sample.text },
+      ];
+      for (const { name, messages, reason, answer } of cases) {
+        const { events, end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
+        assert.equal(end?.reason, reason, `${name}: ${sample.source}`);
+        assert.equal(end?.finalAnswer, answer);
+        assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
+        assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
+      }
+    });
+  }
 }
 
 for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {

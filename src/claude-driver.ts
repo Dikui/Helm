@@ -28,11 +28,12 @@ function tokenUsage(message: SDKResultMessage): TokenUsage {
   }), { inputTokens: 0, outputTokens: 0 });
 }
 
-function subscriptionLimit(message: SDKResultMessage) {
-  // Older local CLIs only put subscription-limit diagnostics in error results.
-  // Never examine a successful result or ordinary assistant text for this.
-  const errors = message.subtype === 'success' ? [message.result] : message.errors;
-  return errors.some(text => /you['’]ve hit your (?:usage )?limit|weekly (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded)/i.test(text));
+function quotaExhausted(text: string) {
+  // Match CLI diagnostics only; callers exclude normal assistant text and give
+  // successful results precedence. A bare rate_limit tag/HTTP 429 is ambiguous.
+  return /you['’]ve hit your (?:(?:usage|session) )?limit|you['’]re out of extra usage|weekly (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded)/i.test(text)
+    || /credit balance (?:is )?too low/i.test(text)
+    || /invalid (?:api key|x-api-key|bearer token)/i.test(text);
 }
 
 function inside(root: string, path: string) {
@@ -178,10 +179,15 @@ class ClaudeDriver implements Driver {
               yield { type: 'compaction', step: ++step };
             }
             if (message.type === 'rate_limit_event' && message.rate_limit_info.status === 'rejected') quotaRejected = true;
-            if (message.type === 'assistant' && message.error === 'rate_limit') quotaRejected = true;
+            // Let the CLI retry transient errors and wait for its result.
+            if (message.type === 'assistant' && message.error && message.message.content.some(
+              block => block.type === 'text' && quotaExhausted(block.text),
+            )) quotaRejected = true;
             if (message.type === 'result') {
               const completed = message.subtype === 'success' && !message.is_error;
-              yield { type: 'end', step: ++step, reason: completed ? 'completed' : quotaRejected || subscriptionLimit(message) ? 'quota-exhausted' : 'error',
+              // Older CLIs can put the diagnostic only in the error result.
+              const diagnostics = message.subtype === 'success' ? [message.result] : message.errors;
+              yield { type: 'end', step: ++step, reason: completed ? 'completed' : quotaRejected || diagnostics.some(quotaExhausted) ? 'quota-exhausted' : 'error',
                 ...(completed ? { finalAnswer: message.result } : {}), usage: tokenUsage(message) };
               return;
             }
