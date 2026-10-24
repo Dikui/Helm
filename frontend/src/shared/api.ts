@@ -4,7 +4,8 @@ export class OperationError extends Error {
 }
 export type Fetch = typeof fetch;
 export class ApiClient {
-  constructor(readonly baseUrl = '', readonly transport: Fetch = fetch) {}
+  constructor(readonly baseUrl = '', // Wrapped: calling window.fetch as this.transport(...) throws Illegal invocation in browsers.
+    readonly transport: Fetch = (...args) => fetch(...args)) {}
   async call<T>(name: string, params: object = {}, signal?: AbortSignal): Promise<T> {
     const response = await this.transport(`${this.baseUrl}/api/${encodeURIComponent(name)}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params), signal,

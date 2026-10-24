@@ -26,3 +26,7 @@
 - 新增 HTTP 静态托管与读取测试，以及 Vitest + jsdom 渲染整个 App、假驱动真实 helmd 的测试夹具。覆盖实时更新、Last-Event-ID 补读、单个事件重读失败后的恢复、关卡决定、审核退回、暂停原因、搜索、计时、语言持久化与深链接。新增测试的 HOME 使用临时目录。
 - 已运行类型检查、构建与完整测试；最终命令、结果及自行 diff-review 结论见本地 `.scratch/tasks/ui-02/report.md`。
 - 按执行要求未启动浏览器或真实 Agent 会话，未运行 `npm run test:real`；最后一项验收保持未勾选，真实冒烟交由调度者另行安排。Status 保持不变。
+
+### 2026-10-24 真实冒烟（调度者）
+
+沙箱外 Chromium 打开 `helm serve`：静态托管、深浅主题、深链接回落正常；但所有 API/SSE 请求报 `Failed to execute 'fetch' on 'Window': Illegal invocation`——`ApiClient` 默认 `transport = fetch` 被当方法调用，jsdom 注入 transport 测不出。已改为包一层箭头函数。`test:real` 另有 Codex 第二模板技能断言失败：技能只说"写入"，Codex 追加而非覆盖，属测试指令不明确，已改为"覆盖全部内容"。证据见 `.scratch/tasks/ui-02-real/`。两项修复后需重跑真实冒烟再关闭本单。

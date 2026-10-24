@@ -103,7 +103,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     const otherSkills = join(daemon.templateDir, 'codex-other', 'skills');
     await rm(otherSkills, { recursive: true });
     await mkdir(join(otherSkills, 'helm-smoke-beta'), { recursive: true });
-    await writeFile(join(otherSkills, 'helm-smoke-beta', 'SKILL.md'), `---\nname: helm-smoke-beta\ndescription: Helm smoke skill\n---\n把 ${beta} 写入 skill-proof.txt。`);
+    await writeFile(join(otherSkills, 'helm-smoke-beta', 'SKILL.md'), `---\nname: helm-smoke-beta\ndescription: Helm smoke skill\n---\n用 ${beta} 覆盖 skill-proof.txt 的全部内容。`);
     await configureTestTemplate(daemon.templateDir, 'codex-other', { home: 'shared' });
     await dispatch('other-template', 'codex-other', '列出可用的 helm-smoke- 开头的 skill，并照技能要求写 skill-proof.txt；最后调用 submit-conclusion completed 并报告技能名。');
     const other = (await daemon.ended(3, 180_000))[2];
