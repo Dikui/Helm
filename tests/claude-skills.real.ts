@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ClaudeDriver } from '../src/claude-driver.js';
 import { runtimeEnvironment } from '../src/environment.js';
 import { AgentCatalog } from '../src/agents.js';
@@ -84,16 +88,52 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
     for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
   });
 
-test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再由真实 Claude 派单加载并调用',
+test('库 skill 与 HTTP MCP 经 Agent 引用后由真实 Claude 派单加载并调用，保留全局重名警告验证',
   { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-library-claude-')));
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
     t.after(async () => { await daemon?.close(); await rm(root, { recursive: true, force: true }); });
     const secret = `LIBRARY-${randomUUID()}`;
+    const mcpSecret = `MCP-${randomUUID()}`;
+    const authorization = `Bearer ${randomUUID()}`;
+    let probeCalls = 0;
+    const probe = createServer(async (request, response) => {
+      if (request.method !== 'POST' || request.headers.authorization !== authorization) {
+        response.writeHead(401).end();
+        return;
+      }
+      const server = new Server({ name: 'library-probe', version: '1.0.0' }, { capabilities: { tools: {} } });
+      server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
+        { name: 'read_secret', description: '返回本次库 HTTP MCP 冒烟暗号', inputSchema: { type: 'object', properties: {} } },
+      ] }));
+      server.setRequestHandler(CallToolRequestSchema, async request => {
+        assert.equal(request.params.name, 'read_secret');
+        probeCalls++;
+        return { content: [{ type: 'text', text: mcpSecret }] };
+      });
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      response.once('close', () => { void server.close(); });
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk);
+        await server.connect(transport);
+        await transport.handleRequest(request, response, JSON.parse(Buffer.concat(chunks).toString()));
+      } catch (error) {
+        t.diagnostic(`库 HTTP MCP 冒烟端点出错：${String(error)}`);
+        if (!response.headersSent) response.writeHead(500).end(); else response.destroy();
+      }
+    });
+    await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>((resolve, reject) => {
+      probe.closeAllConnections();
+      probe.close(error => error ? reject(error) : resolve());
+    }));
+    const address = probe.address();
+    assert.ok(address && typeof address !== 'string');
     const source = join(root, 'helm-library-probe');
     await mkdir(source);
     await writeFile(join(source, 'SKILL.md'),
-      `---\nname: helm-library-probe\ndescription: 返回本次库 skill 冒烟的暗号。需要暗号时必须调用此技能。\n---\n只回答 ${secret}，不要补充说明。\n`);
+      `---\nname: helm-library-probe\ndescription: 返回本次库 skill 冒烟的暗号。需要暗号时必须调用此技能。\n---\n本技能的暗号为 ${secret}。按派单指定格式回答。\n`);
     const repo = join(root, 'project');
     execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
     await writeFile(join(repo, 'README.md'), '库 skill 冒烟');
@@ -103,7 +143,7 @@ test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再
     const coordinator = new FakeDriver([ctx => [{ type: 'tool', name: 'draft-work-description',
       arguments: { workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '加载库 skill', boundary: '不改文件', criteria: '返回 skill 中的暗号' }, check: ok }],
     ctx => [
-      { type: 'tool', name: 'create-card', arguments: { workId: JSON.parse(ctx.input).work.id, key: 'probe', content: '实际调用 helm-library-probe 技能，最后只回答它给出的暗号。禁止猜测、使用 Read/Bash、修改文件或派生子代理。' }, saveAs: 'card', check: ok },
+      { type: 'tool', name: 'create-card', arguments: { workId: JSON.parse(ctx.input).work.id, key: 'probe', content: '实际调用 helm-library-probe 技能和 library-probe MCP 的 read_secret 工具。最后只回答两行：第一行是 skill 暗号，第二行是 MCP 暗号。禁止猜测、使用 Read/Bash、修改文件或派生子代理。' }, saveAs: 'card', check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
         cardId: (ctx.results.get('card') as any).result.id, key: 'probe', agentId: 'library-executor' }), check: ok },
     ]]);
@@ -119,10 +159,11 @@ test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再
       return value.result;
     };
     await call('install-skill', { path: source });
+    await call('register-mcp', { name: 'library-probe', config: { type: 'http', url: `http://127.0.0.1:${address.port}/mcp`, headers: { Authorization: authorization } } });
     for (const role of ['coordinator', 'executor']) {
       const agent = await call('save-agent', { id: `library-${role}`, mode: 'create', prompt: '不改文件，不使用 Bash，不启动浏览器，不派生子代理，不提交。',
         config: { role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: '库 skill 冒烟',
-          skills: role === 'executor' ? ['helm-library-probe'] : [] } });
+          skills: role === 'executor' ? ['helm-library-probe'] : [], mcp: role === 'executor' ? ['library-probe'] : [] } });
       assert.equal(agent.available, true, agent.reason ?? 'Agent 不可用');
     }
     // Construct the warning in a temporary HOME without changing the user's global skills.
@@ -151,7 +192,8 @@ test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再
     const dispatches = await until(() => call('list-dispatches', { workId: work.id }), values => values.length === 1 && values[0].status === 'ended', 180_000);
     const dispatch = dispatches[0];
     assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? '派单未正常结束');
-    assert.equal(dispatch.finalAnswer?.trim(), secret);
+    assert.equal(dispatch.finalAnswer?.trim(), `${secret}\n${mcpSecret}`);
+    assert.ok(probeCalls > 0, '必须带登记的请求头实际调用库 HTTP MCP');
     assert.equal(dispatch.agent.skillsPath, join(dirname(dispatch.outputPath), 'skills'));
     assert.ok((await readFile(join(dispatch.agent.skillsPath, 'helm-library-probe', 'SKILL.md'), 'utf8')).includes(secret));
     const output = await call('get-dispatch-output', { workId: work.id, dispatchId: dispatch.id });
@@ -166,5 +208,8 @@ test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再
     assert.ok(calls.length > 0, '须实际调用库 skill');
     assert.ok(calls.some(call => messages.some(message => message.type === 'user' && Array.isArray(message.message.content)
       && message.message.content.some(block => block.type === 'tool_result' && block.tool_use_id === call.id && !block.is_error))), '库 Skill 调用须成功');
-    t.diagnostic(`库 skill ${skill} 已由真实 Claude 派单加载并调用，暗号验证通过`);
+    assert.ok(init.mcp_servers.some(server => server.name === 'library-probe' && server.status === 'connected'), '库 HTTP MCP 须实际连接');
+    assert.ok(messages.some(message => message.type === 'assistant' && message.message.content.some(block =>
+      block.type === 'tool_use' && block.name === 'mcp__library-probe__read_secret')), '须保留实际库 MCP 工具调用');
+    t.diagnostic(`库 skill ${skill} 和 HTTP MCP 已由真实 Claude 派单加载并调用，两份暗号验证通过`);
   });

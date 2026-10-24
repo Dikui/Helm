@@ -77,7 +77,7 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
 });
 
 const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', reasoningEffort: 'high', fast: false,
-  home: 'shared', description: '界面保存的执行者', skills: [] };
+  home: 'shared', description: '界面保存的执行者', skills: [], mcp: [] };
 
 test('订阅 Agent 的库 skill 与全局目录同名只返回警告，API 和未选中的 skill 不警告，目录变化立即生效', async t => {
   const daemon = await fixture(t);
@@ -208,6 +208,46 @@ test('库 skill 安装拒绝重名、缺 SKILL.md、非法名字和符号链接�
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
 });
 
+test('用户经 HTTP 和 CLI 登记 HTTP MCP，库文件私密且列表和事件不回显请求头值，删除记事件', async t => {
+  const daemon = await fixture(t);
+  const config = { type: 'http', url: 'https://tools.example.invalid/mcp', headers: { Authorization: 'Bearer library-secret', 'X-Account': 'private-account' } };
+  const registered = await daemon.call('register-mcp', { name: 'remote', config });
+  ok(registered);
+  const library = join(daemon.directory, 'data', 'library', 'mcp');
+  const path = join(library, 'remote.json');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), config);
+  assert.equal((await lstat(path)).mode & 0o777, 0o600);
+  const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)),
+    'register-mcp', '--url', daemon.url, '--name', 'public', '--config', JSON.stringify({ type: 'http', url: 'http://localhost:9000/mcp' })]);
+  ok(JSON.parse(stdout));
+  assert.deepEqual((await daemon.call('list-library')).result, [
+    { type: 'mcp', name: 'public', transport: 'http', url: 'http://localhost:9000/mcp', headerKeys: [], agents: [] },
+    { type: 'mcp', name: 'remote', transport: 'http', url: config.url, headerKeys: ['Authorization', 'X-Account'], agents: [] },
+  ]);
+  await writeFile(join(library, 'manual.json'), JSON.stringify({ type: 'http', url: 'https://manual.example.invalid/mcp' }), { mode: 0o600 });
+  assert.deepEqual((await daemon.call('list-library')).result.map((entry: any) => entry.name), ['manual', 'public', 'remote']);
+  assert.equal((await daemon.call('register-mcp', { name: 'remote', config: { type: 'http', url: 'https://changed.example.invalid' } })).error.code, 'LIBRARY_ENTRY_EXISTS');
+  for (const name of ['../escape', 'Upper', '', '-bad', 'a'.repeat(65)]) {
+    assert.equal((await daemon.call('register-mcp', { name, config })).error.code, 'INVALID_PARAMS');
+  }
+  for (const invalid of [{ type: 'stdio', command: 'tool' }, { type: 'http', url: 'file:///secret' }, { type: 'http', url: 'invalid' },
+    { type: 'http', url: config.url, headers: { Authorization: 42 } }]) {
+    assert.equal((await daemon.call('register-mcp', { name: 'invalid', config: invalid })).error.code, 'INVALID_PARAMS');
+  }
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), config);
+  assert.deepEqual(await readdir(library), ['manual.json', 'public.json', 'remote.json']);
+  ok(await daemon.call('delete-library-entry', { type: 'mcp', name: 'remote' }));
+  await assert.rejects(lstat(path), { code: 'ENOENT' });
+  assert.equal((await daemon.call('delete-library-entry', { type: 'mcp', name: 'remote' })).error.code, 'LIBRARY_ENTRY_NOT_FOUND');
+  const events = (await daemon.call('get-events')).result;
+  assert.deepEqual(events.filter((event: any) => event.action.startsWith('library-')).map((event: any) => [event.action, event.actor.type, event.details.name]),
+    [['library-mcp-registered', 'user', 'remote'], ['library-mcp-registered', 'user', 'public'], ['library-entry-deleted', 'user', 'remote']]);
+  for (const value of [registered, JSON.parse(stdout), await daemon.call('list-library'), events]) {
+    assert.ok(!JSON.stringify(value).includes('library-secret'));
+    assert.ok(!JSON.stringify(value).includes('private-account'));
+  }
+});
+
 test('Agent 保存和复制保留库 skill 引用，列表显示引用，拒绝删除被引用条目', async t => {
   const daemon = await fixture(t);
   const source = join(daemon.directory, 'shared-skill');
@@ -235,6 +275,52 @@ test('Agent 保存和复制保留库 skill 引用，列表显示引用，拒绝�
   ok(await daemon.call('delete-library-entry', { type: 'skill', name: 'shared-skill' }));
   const events = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'agent-saved');
   assert.deepEqual(events.map((event: any) => event.details.skills), [['shared-skill'], ['shared-skill'], [], []]);
+});
+
+test('Agent 的 MCP 引用默认空，保存和复制保留选择，缺失或保留名字不可用且被引用 MCP 不可删除', async t => {
+  const daemon = await fixture(t);
+  const config = { type: 'http', url: 'https://remote.example.invalid/mcp', headers: { Authorization: 'Bearer private-value' } };
+  for (const name of ['shared', 'helm', 'browser', 'playwright']) ok(await daemon.call('register-mcp', { name, config }));
+  await daemon.writeAgent('default');
+  assert.deepEqual((await daemon.call('list-agents')).result[0].config.mcp, []);
+  const created = await daemon.call('save-agent', { id: 'first', mode: 'create',
+    config: { ...savedConfig, mcp: ['shared'] }, prompt: '附加要求' });
+  ok(created);
+  assert.equal(created.result.available, true, created.result.reason);
+  assert.deepEqual(created.result.config.mcp, ['shared']);
+  const copy = await daemon.call('save-agent', { id: 'copy', mode: 'create', config: { ...created.result.config, fast: true }, prompt: created.result.prompt });
+  ok(copy);
+  assert.equal(copy.result.available, false);
+  assert.deepEqual(JSON.parse(await readFile(join(daemon.agentDir, 'copy', 'config.json'), 'utf8')).mcp, ['shared']);
+  const listed = (await daemon.call('list-library')).result.find((entry: any) => entry.name === 'shared');
+  assert.deepEqual(listed.agents, ['copy', 'first']);
+  const denied = await daemon.call('delete-library-entry', { type: 'mcp', name: 'shared' });
+  assert.equal(denied.error.code, 'LIBRARY_ENTRY_IN_USE');
+  assert.deepEqual(denied.error.details.agents, ['copy', 'first']);
+  assert.deepEqual(JSON.parse(await readFile(join(daemon.directory, 'data', 'library', 'mcp', 'shared.json'), 'utf8')), config);
+  for (const name of ['absent', 'helm', 'browser', 'playwright']) {
+    const value = await daemon.call('save-agent', { id: `uses-${name}`, mode: 'create', config: { ...savedConfig, mcp: [name] }, prompt: '' });
+    ok(value);
+    assert.equal(value.result.available, false, name);
+    assert.ok(value.result.reason.includes(name), value.result.reason);
+    assert.match(value.result.reason, name === 'absent' ? /不存在/ : /冲突/);
+  }
+  // Invalid MCP files must neither make a healthy Agent unavailable nor disclose credentials.
+  const path = join(daemon.directory, 'data', 'library', 'mcp', 'absent.json');
+  await writeFile(path, '{ "headers": { "Authorization": "private-value" }');
+  const broken = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'uses-absent');
+  assert.equal(broken.available, false);
+  assert.ok(!JSON.stringify(broken).includes('private-value'));
+  await writeFile(path, JSON.stringify({ type: 'http', url: 'https://repaired.example.invalid/mcp' }));
+  assert.equal((await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'uses-absent').available, true);
+  for (const id of ['first', 'copy']) {
+    const current = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === id);
+    ok(await daemon.call('save-agent', { id, mode: 'update', baseRevision: current.revision,
+      config: { ...current.config, mcp: [] }, prompt: current.prompt }));
+  }
+  ok(await daemon.call('delete-library-entry', { type: 'mcp', name: 'shared' }));
+  const saved = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'agent-saved' && ['first', 'copy'].includes(event.object.id));
+  assert.deepEqual(saved.map((event: any) => event.details.mcp), [['shared'], ['shared'], [], []]);
 });
 
 test('用户经 HTTP、CLI 和 MCP 保存 Agent，写入文件、检查可用性并记录事件', async t => {
@@ -396,6 +482,8 @@ const forbiddenLibrary: FakeStep[] = [
   { type: 'tool', name: 'install-skill', arguments: { path: '/must-not-install', name: 'shared' },
     check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
   { type: 'tool', name: 'delete-library-entry', arguments: { type: 'skill', name: 'shared' },
+    check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
+  { type: 'tool', name: 'register-mcp', arguments: { name: 'must-not-register', config: { type: 'http', url: 'https://forbidden.example.invalid' } },
     check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
 ];
 
@@ -683,6 +771,72 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
     || event.details.agent.skillsPath === join(daemon.directory, 'data', 'rounds', event.object.id, 'skills')));
 });
 
+test('四个驱动的派单及支持的调度轮次合并所选 HTTP MCP，排队在启动时读取且运行中的配置保持不变', async t => {
+  for (const driver of ['claude-sdk', 'codex', 'grok', 'deepseek'] as const) await t.test(driver, async t => {
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const second = new Promise<void>(resolve => { releaseSecond = resolve; });
+    t.after(() => { releaseFirst(); releaseSecond(); });
+    const seen: FakeContext['options'][] = [];
+    const executor = new FakeDriver([first, second].map(hold => ctx => {
+      seen.push(ctx.options);
+      return [...forbiddenLibrary, { type: 'hang', until: hold }];
+    }));
+    const roundOptions: FakeContext['options'][] = [];
+    const rounds = new FakeDriver([ctx => { roundOptions.push(ctx.options); return [...forbiddenLibrary, ...alignment(ctx)]; }, ctx => {
+      roundOptions.push(ctx.options);
+      return ['first', 'queued'].flatMap(key => [
+        { type: 'tool' as const, name: 'create-card', arguments: { workId: workIdOf(ctx), key, content: key }, saveAs: key, check: ok },
+        { type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx),
+          cardId: (ctx.results.get(key) as any).result.id, key, agentId: 'executor' }), check: ok },
+      ]);
+    }]);
+    const router: Driver = { checkAvailability: async () => ({ available: true }),
+      start: options => (options.agent.role === 'coordinator' ? rounds : executor).start(options) };
+    const daemon = await fixture(t, { 'claude-sdk': router, [driver]: router });
+    ok(await daemon.call('register-mcp', { name: 'remote', config: { type: 'http', url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } } }));
+    for (const name of ['public', 'unused']) ok(await daemon.call('register-mcp', { name, config: { type: 'http', url: 'https://public.example.invalid/mcp' } }));
+    const coordinatorDriver = driver === 'codex' ? 'codex' : 'claude-sdk';
+    await daemon.writeAgent('claude-coordinator', { role: 'coordinator', driver: coordinatorDriver, mcp: ['remote', 'public'] });
+    await daemon.writeAgent('executor', { driver, model: { 'claude-sdk': 'haiku', codex: 'gpt-6-luna', grok: 'grok-4.7', deepseek: 'deepseek-flash' }[driver],
+      mcp: ['remote', 'public'] });
+    ok(await daemon.call('set-concurrency', { limit: 1 }));
+    const { work } = await startWork(daemon);
+    const gate = (await daemon.call('list-pending')).result[0];
+    ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
+    const dispatches = async (): Promise<any[]> => (await daemon.call('list-dispatches', { workId: work.id })).result;
+    await until(dispatches, values => values.length === 2 && values[0].status === 'running' && values[1].status === 'queued' && seen.length === 1);
+    for (const options of [...roundOptions, seen[0]!]) {
+      assert.deepEqual(Object.keys(options.mcpServers).sort(), ['helm', 'public', 'remote']);
+      assert.deepEqual(options.mcpServers.remote, { url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } });
+      assert.deepEqual(options.mcpServers.public, { url: 'https://public.example.invalid/mcp', headers: {} });
+      assert.equal(options.mcpServers.helm!.url, `${daemon.url}/mcp`);
+      assert.match(options.mcpServers.helm!.headers.Authorization!, /^Bearer \S+$/);
+    }
+    await writeFile(join(daemon.directory, 'data', 'library', 'mcp', 'remote.json'),
+      JSON.stringify({ type: 'http', url: 'https://remote.example.invalid/v2', headers: { Authorization: 'Bearer remote-secret-v2' } }));
+    releaseFirst();
+    await until(dispatches, values => values[1]?.status === 'running' && seen.length === 2);
+    assert.deepEqual(seen[1]!.mcpServers.remote, { url: 'https://remote.example.invalid/v2', headers: { Authorization: 'Bearer remote-secret-v2' } });
+    assert.deepEqual(seen[0]!.mcpServers.remote, { url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } });
+    for (const id of ['claude-coordinator', 'executor']) {
+      const agent = (await daemon.call('list-agents')).result.find((agent: any) => agent.id === id);
+      ok(await daemon.call('save-agent', { id, mode: 'update', baseRevision: agent.revision, config: { ...agent.config, mcp: [] }, prompt: agent.prompt }));
+    }
+    ok(await daemon.call('delete-library-entry', { type: 'mcp', name: 'remote' }));
+    assert.equal(seen[1]!.mcpServers.remote!.url, 'https://remote.example.invalid/v2');
+    assert.equal(roundOptions[0]!.mcpServers.remote!.url, 'https://remote.example.invalid/v1');
+    releaseSecond();
+    await until(dispatches, values => values.length === 2 && values.every(value => value.status === 'ended'));
+    for (const name of ['list-agents', 'get-events', 'list-dispatches', 'list-rounds']) {
+      const value = await daemon.call(name, ['list-dispatches', 'list-rounds'].includes(name) ? { workId: work.id } : {});
+      ok(value);
+      assert.ok(!JSON.stringify(value).includes('remote-secret'), `${name} 不得泄露库 MCP 请求头值`);
+    }
+  });
+});
+
 test('每次派单和调度轮次读取文件并留快照，下一轮按文件中的驱动路由，无须重启', async t => {
   const seen: { driver: string; agent: any }[] = [];
   const jobs = ['first'];
@@ -743,7 +897,7 @@ test('每次派单和调度轮次读取文件并留快照，下一轮按文件�
 });
 
 test('排队派单在实际启动时重读 Agent，已经运行的派单保留原快照', async t => {
-  for (const change of ['valid', 'broken', 'missing-skill'] as const) await t.test(change, async t => {
+  for (const change of ['valid', 'broken', 'missing-skill', 'missing-mcp'] as const) await t.test(change, async t => {
     let release!: () => void;
     const hold = new Promise<void>(resolve => { release = resolve; });
     t.after(() => release());
@@ -770,7 +924,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     if (change !== 'valid') {
       await writeFile(join(card.workPath, 'unstarted.txt'), '派单尚未开始');
       if (change === 'broken') await writeFile(join(daemon.agentDir, 'file-executor', 'config.json'), '{');
-      else await daemon.writeAgent('file-executor', { skills: ['absent'] });
+      else await daemon.writeAgent('file-executor', change === 'missing-mcp' ? { mcp: ['absent'] } : { skills: ['absent'] });
     } else {
       const current = (await daemon.call('list-agents')).result.find((item: any) => item.id === 'file-executor');
       ok(await daemon.call('save-agent', { id: 'file-executor', mode: 'update', baseRevision: current.revision,
@@ -792,7 +946,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
       assert.match(execFileSync('git', ['-C', card.workPath, 'status', '--porcelain'], { encoding: 'utf8' }), /unstarted.txt/);
       const ended = (await events()).find(value => value.action === 'dispatch-ended' && value.dispatchId === values[1].id);
       assert.equal(ended.details.error.code, 'AGENT_UNAVAILABLE');
-      if (change === 'missing-skill') assert.match(ended.details.error.reason, /absent/);
+      if (change === 'missing-skill' || change === 'missing-mcp') assert.match(ended.details.error.reason, /absent/);
       return;
     }
     assert.equal(values[1].agent.model, 'after-queue');
@@ -802,24 +956,30 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
 });
 
 test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', async t => {
-  const daemon = await fixture(t, { 'claude-sdk': new FakeDriver([[{ type: 'end', reason: 'completed', finalAnswer: '第一轮' }]]) });
-  await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
-  const { project, work, events } = await startWork(daemon);
-  await daemon.writeAgent('claude-coordinator', { role: 'coordinator', fast: true });
-  const rejected = await daemon.call('send-message', { projectId: project.id, key: 'second', body: '新工作' });
-  assert.equal(rejected.error.code, 'AGENT_UNAVAILABLE');
-  await daemon.call('send-message', { workId: work.id, key: 'again', body: '再来一轮' });
-  await until(events, values => values.filter(value => value.action === 'round-ended').length === 2);
-  const ended = (await events()).filter(value => value.action === 'round-ended')[1];
-  assert.equal(ended.details.error.code, 'AGENT_UNAVAILABLE');
-  assert.equal(ended.details.error.details.agentId, 'claude-coordinator');
-  assert.match(ended.details.error.reason, /extra usage/);
+  for (const [name, config, reason] of [
+    ['fast', { fast: true }, /extra usage/],
+    ['missing-mcp', { mcp: ['absent'] }, /absent/],
+    ['reserved-mcp', { mcp: ['helm'] }, /helm.*冲突/],
+  ] as const) await t.test(name, async t => {
+    const daemon = await fixture(t, { 'claude-sdk': new FakeDriver([[{ type: 'end', reason: 'completed', finalAnswer: '第一轮' }]]) });
+    await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
+    const { project, work, events } = await startWork(daemon);
+    await daemon.writeAgent('claude-coordinator', { role: 'coordinator', ...config });
+    const rejected = await daemon.call('send-message', { projectId: project.id, key: 'second', body: '新工作' });
+    assert.equal(rejected.error.code, 'AGENT_UNAVAILABLE');
+    await daemon.call('send-message', { workId: work.id, key: 'again', body: '再来一轮' });
+    await until(events, values => values.filter(value => value.action === 'round-ended').length === 2);
+    const ended = (await events()).filter(value => value.action === 'round-ended')[1];
+    assert.equal(ended.details.error.code, 'AGENT_UNAVAILABLE');
+    assert.equal(ended.details.error.details.agentId, 'claude-coordinator');
+    assert.match(ended.details.error.reason, reason);
+  });
 });
 
 test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，健康 Agent 仍能派单', async t => {
   const rounds = new FakeDriver([alignment, ctx => [
     { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '检查不可用 Agent' }, saveAs: 'card', check: ok },
-    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill'].map(agentId => ({
+    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill', 'missing-mcp', 'reserved-mcp'].map(agentId => ({
       type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: agentId, agentId }),
       check: (value: any) => {
         assert.equal(value.ok, false, JSON.stringify(value));
@@ -837,12 +997,14 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   await writeFile(join(daemon.agentDir, 'broken', 'config.json'), '{');
   await daemon.writeAgent('missing-skill', { skills: ['absent'] });
   await daemon.writeAgent('clashing-skill', { skills: ['shared'] });
+  await daemon.writeAgent('missing-mcp', { mcp: ['absent'] });
+  await daemon.writeAgent('reserved-mcp', { mcp: ['helm'] });
   const library = join(daemon.directory, 'data', 'library', 'skills', 'shared');
   await mkdir(library, { recursive: true });
   await writeFile(join(library, 'SKILL.md'), '库 skill');
   await mkdir(join(daemon.agentDir, 'clashing-skill', 'skills', 'shared'), { recursive: true });
   const agents = (await daemon.call('list-agents')).result;
-  for (const [id, reason] of [['missing-skill', /absent/], ['clashing-skill', /同名.*shared/]] as const) {
+  for (const [id, reason] of [['missing-skill', /absent/], ['clashing-skill', /同名.*shared/], ['missing-mcp', /absent/], ['reserved-mcp', /helm.*冲突/]] as const) {
     const agent = agents.find((entry: any) => entry.id === id);
     assert.equal(agent.available, false);
     assert.match(agent.reason, reason);
@@ -856,7 +1018,7 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   const gate = (await daemon.call('list-pending')).result[0];
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const values = await until(events, values => values.some(value => value.action === 'dispatch-ended'));
-  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 6);
+  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 8);
   const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].agentId, 'healthy');

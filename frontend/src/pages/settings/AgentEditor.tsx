@@ -14,7 +14,8 @@ import '../work/work-actions.css';
 function draft(source?: AgentEntry) {
   return { id: source?.id ?? '', config: { role: source?.role ?? 'executor', driver: source?.driver ?? 'claude-sdk',
     model: source?.model ?? null, reasoningEffort: source?.reasoningEffort ?? null, fast: source?.fast ?? false,
-    home: source?.home ?? 'shared', description: source?.description ?? '', skills: source?.config?.skills ?? [] } as AgentSettings, prompt: source?.prompt ?? '' };
+    home: source?.home ?? 'shared', description: source?.description ?? '', skills: source?.config?.skills ?? [],
+    mcp: source?.config?.mcp ?? [] } as AgentSettings, prompt: source?.prompt ?? '' };
 }
 export function AgentEditor({ source, creating = false, initialSaved = false, onSaved, onDuplicate, onDeleted }: {
   source?: AgentEntry; creating?: boolean; initialSaved?: boolean; onSaved: (agent: AgentEntry) => void; onDuplicate?: (source: AgentEntry) => void; onDeleted?: () => void;

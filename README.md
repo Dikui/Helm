@@ -80,6 +80,16 @@ helm delete-library-entry --type skill --name shared-skill
 
 Agent 的 `config.json` 用 `"skills": ["shared-skill"]` 引用库 skill，省略时为空数组。`list-agents` 的 `config` 可直接用于 `save-agent --config`，保存和复制会带上库引用；原有 `skills` 列表仍表示 Agent 自带 `skills/` 的目录条目。`list-library` 返回每个条目的 `type`、`name` 和引用它的 Agent id 列表 `agents`。仍被引用的条目不能删除，错误详情含引用列表；缺失引用或自带 skill 与库 skill 同名会使 Agent 不可用。安装、删除及 Agent 保存均记录事件。
 
+HTTP MCP 登记在 `<dataDir>/library/mcp/<名字>.json`，文件权限为 0600，内容是 `{ "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } }`，`headers` 可省略。名字规则与库 skill 相同，也可手动放入普通 JSON 文件。通过 CLI 登记和删除：
+
+```sh
+helm register-mcp --name remote-tools --config '{"type":"http","url":"https://example.com/mcp"}'
+helm list-library
+helm delete-library-entry --type mcp --name remote-tools
+```
+
+Agent 在 `config.json` 用 `"mcp": ["remote-tools"]` 选择库 MCP，省略时为空数组，保存和复制保留选择。派单和调度轮次启动时，所选 MCP 与带令牌的 `helm` MCP 一起交给驱动；排队派单在实际启动时读取，改动库文件不影响已运行的配置。引用缺失或无效 MCP，或引用保留名字 `helm`、`browser`、`playwright` 时，Agent 不可用。`list-library` 的 MCP 条目返回 `type: "mcp"`、`name`、`transport: "http"`、`url`、请求头键名 `headerKeys` 和引用它的 `agents`；登记返回和事件同样只含键名。登记及删除只允许用户调用，被任何 Agent 引用时拒绝删除。
+
 订阅 Agent（`home: "shared"`）选中的库 skill 与对应 CLI 的全局 skill 目录同名时，`list-agents` 返回 `warnings: string[]`，文案含 skill 名字和全局目录路径；无警告时为空数组。只比较目录名，不解析内容，不影响 Agent 可用性或派单；API Agent 不检查。检查默认用户目录：Claude 的 `~/.claude/skills/`，Codex 的 `~/.codex/skills/` 与 `~/.agents/skills/`，Grok 的 `~/.grok/skills/`、`~/.claude/skills/` 与 `~/.agents/skills/`，DeepSeek 的 `~/.dsh/skills/` 与 `~/.agents/skills/`。目录缺失或不可读时跳过，不检查插件或项目内的 skill 来源。
 
 派单和调度轮次在实际启动时把自带和选中的库 skill 复制到各自数据目录的 `skills/`，当次 Agent 快照的 `skillsPath` 指向这份副本。没有 skill 时不创建目录；库和 Agent 文件的后续变动不影响已启动运行。Claude 从副本的上一级加载插件，其余驱动沿用现有 skills 接法。

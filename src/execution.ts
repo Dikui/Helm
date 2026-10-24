@@ -172,6 +172,7 @@ export class ExecutionRunner {
       const configuredAgent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
       if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(dispatch.outputPath, '..'));
+      const mcpServers = this.store.agents.mcpServers(agent);
       if (dispatch.resumeSessionId && (dispatch.agent.driver ?? 'claude-sdk') !== agent.driver) {
         throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
@@ -210,7 +211,7 @@ export class ExecutionRunner {
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls),
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
-          mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
+          mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
           signal: stop.signal,
           onProcess: process => {

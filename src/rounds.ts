@@ -192,6 +192,7 @@ export class RoundScheduler {
       const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
+      const mcpServers = this.store.agents.mcpServers(agent);
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent }, { workId });
@@ -202,7 +203,7 @@ export class RoundScheduler {
         env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
-        mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
+        mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
         signal: controller.signal,
         onProcess: process => {
           processes.push(process);

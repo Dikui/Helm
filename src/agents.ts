@@ -5,9 +5,9 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
-import type { AgentAvailability } from './driver.js';
+import type { AgentAvailability, SessionOptions } from './driver.js';
 import { acpAgents } from './acp-agents.js';
-import { libraryName, SkillLibrary } from './library.js';
+import { libraryName, McpLibrary, SkillLibrary } from './library.js';
 
 export const agentSettings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
@@ -17,6 +17,7 @@ export const agentSettings = z.object({
   fast: z.boolean().default(false), home: z.enum(['shared', 'dedicated']),
   description: z.string().trim().min(1),
   skills: z.array(libraryName).default([]),
+  mcp: z.array(libraryName).default([]),
 }).strict();
 
 export const saveAgentSchema = z.object({
@@ -25,8 +26,8 @@ export const saveAgentSchema = z.object({
   mode: z.enum(['update', 'create']), baseRevision: z.string().min(1).optional(),
 }).strict();
 
-export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills'> {
-  id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[];
+export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills' | 'mcp'> {
+  id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[]; mcp?: string[];
 }
 
 function revision(config: Buffer, prompt: Buffer) {
@@ -41,7 +42,8 @@ export class AgentCatalog {
   private report?: (id: string, result: AgentAvailability) => void;
 
   constructor(readonly directory: string, private drivers: readonly string[] = ['claude-sdk'],
-    readonly library = new SkillLibrary(join(directory, '..', 'library', 'skills'))) {}
+    readonly library = new SkillLibrary(join(directory, '..', 'library', 'skills')),
+    readonly mcpLibrary = new McpLibrary(join(library.directory, '..', 'mcp'))) {}
 
   save(input: z.infer<typeof saveAgentSchema>) {
     const { id, config, prompt, mode, baseRevision } = saveAgentSchema.parse(input);
@@ -166,6 +168,8 @@ export class AgentCatalog {
       catch (error) { return `库 skill ${name} 不可用：${error instanceof Error ? error.message : String(error)}`; }
       if (agent.skillsPath && readdirSync(agent.skillsPath).includes(name)) return `Agent 自带 skill 与库 skill 同名：${name}`;
     }
+    try { this.mcpServers(agent); }
+    catch (error) { return error instanceof Error ? error.message : '库 MCP 不可用。'; }
     return acpAgents[agent.driver as keyof typeof acpAgents]?.unavailable(agent) ?? null;
   }
 
@@ -199,12 +203,13 @@ export class AgentCatalog {
   }
 
   // Keep references even when another setting makes the Agent unavailable.
-  skillReferences(name: string) {
+  libraryReferences(type: 'skill' | 'mcp', name: string) {
     if (!existsSync(this.directory)) return [];
     return readdirSync(this.directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().filter(id => {
       try {
         const config = JSON.parse(readFileSync(join(this.directory, id, 'config.json'), 'utf8'));
-        return Array.isArray(config.skills) && config.skills.includes(name);
+        const references = config[type === 'skill' ? 'skills' : 'mcp'];
+        return Array.isArray(references) && references.includes(name);
       } catch { return false; }
     });
   }
@@ -221,6 +226,20 @@ export class AgentCatalog {
     const reason = this.unavailable(agent) ?? (role && agent.role !== role ? `Agent 角色必须为 ${role}。` : null);
     if (reason) throw new RuleError('AGENT_UNAVAILABLE', reason, 409, { agentId: id });
     return agent;
+  }
+
+  // Credentials live only in driver startup options, never in the Agent snapshot.
+  mcpServers(agent: AgentConfig): SessionOptions['mcpServers'] {
+    try {
+      return Object.fromEntries((agent.mcp ?? []).map(name => {
+        // Keep Helm's authenticated endpoint and the browser MCP names reserved.
+        if (['helm', 'browser', 'playwright'].includes(name)) throw new Error(`库 MCP ${name} 与 Helm 内置 MCP 或浏览器工具名字冲突。`);
+        const { url, headers = {} } = this.mcpLibrary.read(name);
+        return [name, { url, headers }];
+      }));
+    } catch (error) {
+      throw new RuleError('AGENT_UNAVAILABLE', `Agent ${agent.id} 的 MCP 不可用：${error instanceof Error ? error.message : '无法读取库 MCP'}`, 409, { agentId: agent.id });
+    }
   }
 
   // Each dispatch or coordinator round owns a fixed copy, assembled only at startup.

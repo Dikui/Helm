@@ -16,7 +16,7 @@ import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
-import { deleteLibraryEntry, installSkill, libraryName, listLibrary } from './library.js';
+import { deleteLibraryEntry, httpMcpSchema, installSkill, libraryName, listLibrary, registerMcp } from './library.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -60,9 +60,14 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, { path, name }) => installSkill(store, actor, path, name),
   }),
   operation({
+    name: 'register-mcp', description: '登记 HTTP MCP 到库', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ name: libraryName, config: httpMcpSchema }).strict(),
+    execute: ({ store, actor }, { name, config }) => registerMcp(store, actor, name, config),
+  }),
+  operation({
     name: 'delete-library-entry', description: '删除未被 Agent 引用的库条目', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ type: z.literal('skill'), name: libraryName }).strict(),
-    execute: ({ store, actor }, { name }) => deleteLibraryEntry(store, actor, name),
+    schema: z.object({ type: z.enum(['skill', 'mcp']), name: libraryName }).strict(),
+    execute: ({ store, actor }, { type, name }) => deleteLibraryEntry(store, actor, type, name),
   }),
   operation({
     name: 'export-outputs', description: '导出已结束工作的全部输出、成果文件和任务库记录为 .tar.gz', callers: ['user'], keyed: false, mutates: true, transactional: false,
@@ -125,7 +130,7 @@ export const operations: readonly Operation[] = [
     async execute({ store, actor }, params) {
       const agent = store.agents.save(params);
       store.transaction(() => store.appendEvent(actor, { type: 'agent', id: agent.id }, 'agent-saved',
-        { mode: params.mode, revision: agent.revision, skills: agent.skills }));
+        { mode: params.mode, revision: agent.revision, skills: agent.skills, mcp: agent.mcp }));
       try { await store.agents.check(agent.id); }
       catch (error) { if (!(error instanceof RuleError)) throw error; }
       const saved = store.agents.list().find(item => item.id === agent.id)!;

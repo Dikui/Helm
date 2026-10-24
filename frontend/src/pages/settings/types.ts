@@ -4,6 +4,7 @@ export interface AgentSettings {
   reasoningEffort: string | null; fast: boolean;
   home: 'shared' | 'dedicated'; description: string;
   skills?: string[];
+  mcp?: string[];
 }
 export interface AgentEntry {
   config?: AgentSettings;
