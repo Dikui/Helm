@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeDriver, type FakeScript } from '../src/driver.js';
-import { startTestHelmd } from './helmd-fixture.js';
+import { copyTemplates, startTestHelmd } from './helmd-fixture.js';
 
 // Shared HTTP / whole-app boundary. Every driver is fake, and HOME is disposable.
-export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string) {
+export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, executorScripts: FakeScript[] = []) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-')));
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
@@ -20,7 +20,9 @@ export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string) 
     const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
     git('add', 'README.md');
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-    daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), driver: new FakeDriver(scripts), ...(staticDir ? { staticDir } : {}) });
+    const templateDir = await copyTemplates(directory);
+    daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), templateDir,
+      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(executorScripts), ...(staticDir ? { staticDir } : {}) });
     const url = daemon.url;
     const call = async (name: string, params: object = {}) => {
       const response = await fetch(`${url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });

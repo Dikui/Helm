@@ -6,9 +6,18 @@
 
 **Status:** ready-for-agent
 
-- [ ] `list-agent-templates` 每个模板返回使用情况：正在运行的派单数、以它为调度者模板的未结束工作数
-- [ ] 保存与复制调用 `save-agent-template`，带回 `revision`；校验失败按字段显示原因；冲突不覆盖
-- [ ] 不提供删除模板；不在界面编辑 `skills/` 和 API 模板主目录
-- [ ] 项目和运行参数调用 `register-project`、`set-project-coordinator-template`、`set-concurrency`、`set-dispatch-watchdog`、`set-round-watchdog`、`set-output-threshold`
-- [ ] HTTP 接口测试覆盖使用情况字段；jsdom 整页测试覆盖可用性显示、保存、复制为新模板、角色不可改、冲突提示、项目登记与默认模板、运行参数保存
+- [x] `list-agent-templates` 每个模板返回使用情况：正在运行的派单数、以它为调度者模板的未结束工作数
+- [x] 保存与复制调用 `save-agent-template`，带回 `revision`；校验失败按字段显示原因；冲突不覆盖
+- [x] 不提供删除模板；不在界面编辑 `skills/` 和 API 模板主目录
+- [x] 项目和运行参数调用 `register-project`、`set-project-coordinator-template`、`set-concurrency`、`set-dispatch-watchdog`、`set-round-watchdog`、`set-output-threshold`
+- [x] HTTP 接口测试覆盖使用情况字段；jsdom 整页测试覆盖可用性显示、保存、复制为新模板、角色不可改、冲突提示、项目登记与默认模板、运行参数保存
 - [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+
+
+## Comments
+
+2026-10-24：实现设置页的 Agent 模板、项目、运行三个分区，沿用任务单 02 的路由、useResource / api.call、共享 SSE 与中英字典。模板按角色显示可用性原因、运行中派单数和未结束工作数；详情支持全部 schema 字段、prompt.md、带 revision 保存、复制与新建、字段错误、文件冲突后的显式重新载入。已有模板角色固定，skills/ 目录条目只读，API 仅提示主目录路径。新建表单使用 /settings/new-template，避免占用合法模板 id new 的详情路径；未保存模板的站内链接跳转提供保留输入或丢弃入口。
+
+项目支持登记、默认调度者模板和工作数；运行参数按并发、派单看门狗、轮次看门狗、输出阈值分别保存，分钟 / GB 转换到现有接口的毫秒 / 字节。没有新增数据层或 SSE，没有修改共享路由、App、样式、类型或 operations。HTTP 与整页测试使用临时 HOME、模板副本及假驱动，新增模板保存不会改动仓库原始模板。
+
+本轮自行完成 diff-review；检查和测试的实际结果见调度者指定报告 /Users/dikui/Project/Helm/.scratch/tasks/ui-09/report.md。按本轮指令不提交、不启动浏览器或真实会话；最后一项包含沙箱外真实冒烟，保持未勾选，留待调度者安排。

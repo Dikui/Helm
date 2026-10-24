@@ -173,6 +173,8 @@ export class TemplateCatalog {
         const reason = this.unavailable(template);
         const availability = this.availability.get(id);
         return { ...template, billing: template.home === 'shared' ? 'subscription' : 'api',
+          skills: template.skillsPath ? readdirSync(template.skillsPath, { withFileTypes: true })
+            .map(entry => entry.name + (entry.isDirectory() ? '/' : '')).sort() : [],
           available: reason === null && availability?.available !== false, reason: reason ?? availability?.reason ?? null,
           ...(availability?.command ? { command: availability.command } : {}) };
       } catch (error) {
@@ -186,7 +188,15 @@ export class TemplateCatalog {
   }
 }
 
-export const agentTemplates = (store: TaskStore) => store.templates.refresh();
+export async function agentTemplates(store: TaskStore) {
+  const templates = await store.templates.refresh();
+  const dispatches = new Map(store.db.prepare(`SELECT template_id AS id, count(*) AS count FROM dispatches
+    WHERE status = 'running' GROUP BY template_id`).all().map(row => [String(row.id), Number(row.count)]));
+  const works = new Map(store.db.prepare(`SELECT coordinator_template_id AS id, count(*) AS count FROM works
+    WHERE status NOT IN ('completed', 'cancelled') GROUP BY coordinator_template_id`).all().map(row => [String(row.id), Number(row.count)]));
+  return templates.map(template => ({ ...template, runningDispatches: dispatches.get(template.id) ?? 0,
+    activeWorks: works.get(template.id) ?? 0 }));
+}
 export const agentTemplate = (store: TaskStore, id: string, role?: AgentTemplate['role']) => store.templates.get(id, role);
 
 // Add only Helm-owned values after selecting the host runtime allowlist.
