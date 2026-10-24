@@ -2,7 +2,10 @@ import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { defaultTemplateDir } from '../src/templates.js';
+import { fileURLToPath } from 'node:url';
+
+// Agent configs for tests; the role rules are built into src/prompts.ts.
+export const fixtureAgentDir = fileURLToPath(new URL('../../tests/fixtures/agents/', import.meta.url));
 
 // Existing scenarios have independent scripts for each role. Register both at
 // the same CLI boundary so their queues do not depend on wake-event timing.
@@ -10,20 +13,20 @@ export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof start
   driver?: Pick<Driver, 'start'> & Partial<Driver>; executorDriver?: Pick<Driver, 'start'> & Partial<Driver>; codexDriver?: Driver;
 } = {}) {
   const { driver = new FakeDriver(), executorDriver = new FakeDriver(), codexDriver = new FakeDriver(), ...runtime } = options;
-  return startHelmd({ ...runtime, drivers: { 'claude-sdk': {
+  return startHelmd({ agentDir: fixtureAgentDir, ...runtime, drivers: { 'claude-sdk': {
     // These fixtures exercise sessions; availability scenarios register their own driver.
     checkAvailability: async () => ({ available: true }),
-    start: session => (session.template?.role === 'coordinator' ? driver : executorDriver).start(session),
+    start: session => (session.agent?.role === 'coordinator' ? driver : executorDriver).start(session),
   }, codex: codexDriver, grok: new FakeDriver(), deepseek: new FakeDriver() } });
 }
 
-export async function copyTemplates(directory: string) {
-  const templateDir = join(directory, 'templates');
-  await cp(defaultTemplateDir, templateDir, { recursive: true });
-  return templateDir;
+export async function copyAgents(directory: string) {
+  const agentDir = join(directory, 'agents');
+  await cp(fixtureAgentDir, agentDir, { recursive: true });
+  return agentDir;
 }
 
-export async function configureTestTemplate(templateDir: string, id: string, settings: object) {
-  const path = join(templateDir, id, 'config.json');
+export async function configureTestAgent(agentDir: string, id: string, settings: object) {
+  const path = join(agentDir, id, 'config.json');
   await writeFile(path, JSON.stringify({ ...JSON.parse(await readFile(path, 'utf8')), ...settings }));
 }

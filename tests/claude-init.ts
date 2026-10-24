@@ -24,7 +24,7 @@ export function assertInitialization(messages: SDKMessage[], role: 'coordinator'
       `${role} 不应加载工具 ${tool}`);
     assert.ok(init.tools.some(tool => tool.startsWith('mcp__helm__')), '必须实际加载 Helm 工具');
     assert.ok(init.mcp_servers.some(server => server.name === 'helm'), '必须保留注入的 Helm MCP');
-    assert.equal(init.fast_mode_state, 'off', '模板必须压过用户或项目设置里的 fast');
+    assert.equal(init.fast_mode_state, 'off', 'Agent 必须压过用户或项目设置里的 fast');
     assert.equal(init.permissionMode, 'default');
   }
 }

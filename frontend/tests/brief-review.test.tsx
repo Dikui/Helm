@@ -38,13 +38,13 @@ async function prepareReview() {
   const verificationEnded = new Promise<void>(resolve => { releaseVerification = resolve; });
   daemon = await uiFixture([[draft(1)], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('code') as any).result.id, key: 'execute', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('code') as any).result.id, key: 'execute', agentId: 'claude-executor' }), check: ok },
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'too-early', body: '还未完成' }), check: value => expect((value as any).error.code).toBe('NON_TERMINAL_CARDS') },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('code') as any).result.id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: (ctx.results.get('code') as any).result.id }, downstream: { type: 'card', id: (ctx.results.get('overall') as any).result.id } }), check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id, key: 'verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: verificationEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id }), check: ok },
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', body: '汇总报告原文\n成果：result.txt' }), check: ok },

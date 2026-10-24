@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript } from '../src/driver.js';
-import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
@@ -40,16 +40,16 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
     git('add', '.claude/settings.json');
   }
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-  const templateDir = await copyTemplates(directory);
-  if (config.model) await configureTestTemplate(templateDir, 'claude-executor', { model: config.model, reasoningEffort: 'low' });
-  const options = { templateDir,
+  const agentDir = await copyAgents(directory);
+  if (config.model) await configureTestAgent(agentDir, 'claude-executor', { model: config.model, reasoningEffort: 'low' });
+  const options = { agentDir,
     port: 0, dataDir: join(directory, 'data'), executorDriver: config.executorDriver ?? new FakeDriver(executors),
     browserCommand: config.realBrowser ? undefined : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), ...(config.browserArgs ?? [])] },
     driver: new FakeDriver([[
       { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '浏览器派单', boundary: '本机', criteria: '截图匹配页面' }), check: ok },
     ], [
       { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: config.content ?? '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
-      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', purpose: config.purpose, needsBrowser: config.needsBrowser ?? false }), check: ok },
+      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose: config.purpose, needsBrowser: config.needsBrowser ?? false }), check: ok },
       { type: 'end', reason: 'completed', finalAnswer: 'created' },
     ], ...(config.after ? [config.after] : [])]),
   } satisfies Parameters<typeof startHelmd>[0];

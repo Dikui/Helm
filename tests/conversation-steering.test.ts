@@ -43,7 +43,7 @@ test('针对卡片的消息校验工作归属、幂等保存，并在调度者�
   assert.equal(ended.result.filter((event: any) => event.action === 'round-ended')[1].details.reason, 'completed');
 });
 
-test('轮次读取含模板、时间、用量和实时输出；已接收消息不排队，下一轮接收后移出队列', async t => {
+test('轮次读取含 Agent、时间、用量和实时输出；已接收消息不排队，下一轮接收后移出队列', async t => {
   let advance!: () => void;
   let finish!: () => void;
   const firstStep = new Promise<void>(resolve => { advance = resolve; });
@@ -66,7 +66,7 @@ test('轮次读取含模板、时间、用量和实时输出；已接收消息�
   assert.equal(initial.ok, true);
   const running = (await until(read, value => value.result.currentSteps.some((step: any) => step.text === '正在读取项目'))).result;
   assert.equal(running.rounds[0].number, 1);
-  assert.equal(running.rounds[0].templateId, 'claude-coordinator');
+  assert.equal(running.rounds[0].agentId, 'claude-coordinator');
   assert.equal(running.rounds[0].status, 'running');
   assert.ok(Date.parse(running.rounds[0].startedAt));
   assert.equal(running.rounds[0].endedAt, null);

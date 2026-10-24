@@ -38,7 +38,7 @@ async function fixture(t: TestContext, executor: FakeScript, after: FakeScript =
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '保存输出', boundary: '本机', criteria: '内容不丢' }), check: ok },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '生成输出' }), saveAs: 'card', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', agentId: 'claude-executor' }), check: ok },
   ], after];
   let daemon = await startHelmd({ port: 0, dataDir, executorDriver: new FakeDriver([executor]), driver: new FakeDriver(scripts()) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });

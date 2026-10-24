@@ -285,13 +285,13 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   t.after(() => { executed.release(); verified.release(); });
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: executed.promise },
     review('before-execution-completed', code('NON_TERMINAL_CARDS')),
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '按工作说明做整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: verified.promise },
     review('before-verification-completed', value => {
       code('NON_TERMINAL_CARDS')(value);
@@ -352,26 +352,26 @@ for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验�
   t.after(() => ended.forEach(signal => signal.release()));
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id, key: 'execute', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[0]!.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'code').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'cancelled-code', content: '取消的实现' }), saveAs: 'cancelled-code', check: ok },
     { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'cancelled-code').id, reason: '移除需求' }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'partial', content: '未覆盖全部实现的验收', needsVerification: true }), saveAs: 'partial', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'partial').id, key: 'partial-verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'partial').id, key: 'partial-verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[1]!.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'partial').id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'old-overall', content: '旧整体验收', needsVerification: true }), saveAs: 'old-overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'old-overall').id } }), check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, key: 'old-verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, key: 'old-verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[2]!.promise },
     { type: 'tool', name: oldStatus === 'cancelled' ? 'cancel-card' : 'complete-card',
       arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'old-overall').id, ...(oldStatus === 'cancelled' ? { reason: '由新卡替代' } : {}) }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '新整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'code').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-failed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-failed', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[3]!.promise },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-passed', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'new-verify-passed', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: ended[4]!.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id }), check: ok },
     review(), { type: 'hang' },
@@ -423,7 +423,7 @@ test('未结束验收的提前声明不能绕过终态检查，取消卡片后�
   t.after(() => { declared.release(); rejected.release(); });
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', templateId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: declared.promise }, review('review', code('NON_TERMINAL_CARDS')),
     { type: 'hang', until: rejected.promise },
     { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'overall').id, reason: '取消仍在运行的验收' }), check: ok },

@@ -6,5 +6,5 @@ import { SettingsPage } from './pages/settings/SettingsPage.js';
 export const routes: RouteDefinition[] = [
   { pattern: /^\/(?:works\/([^/]+)(?:\/([^/]+))?)?\/?$/, params: match => ({ workId: match[1], view: match[2] }), component: WorkPage },
   { pattern: /^\/new\/?$/, params: () => ({}), component: NewWorkPage },
-  { pattern: /^\/settings(?:\/([^/]+)(?:\/([^/]+))?)?\/?$/, params: match => ({ section: match[1], templateId: match[2] }), component: SettingsPage },
+  { pattern: /^\/settings(?:\/([^/]+)(?:\/([^/]+))?)?\/?$/, params: match => ({ section: match[1], agentId: match[2] }), component: SettingsPage },
 ];

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep, type SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -27,7 +27,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean, ti
 }
 
 async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript[], config: {
-  after?: FakeScript; additionalRounds?: FakeScript[]; alignment?: FakeStep[]; executorDriver?: Driver; beforeConfirm?: (call: ApiCall, templateDir: string) => Promise<void>;
+  after?: FakeScript; additionalRounds?: FakeScript[]; alignment?: FakeStep[]; executorDriver?: Driver; beforeConfirm?: (call: ApiCall, agentDir: string) => Promise<void>;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-dispatch-')));
   const repo = join(directory, 'project');
@@ -38,8 +38,8 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const dataDir = join(directory, 'data');
   // Separate drivers keep executor scripts independent of coordinator wake timing.
-  const templateDir = await copyTemplates(directory);
-  const options = { templateDir, port: 0, dataDir, executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: new FakeDriver([[
+  const agentDir = await copyAgents(directory);
+  const options = { agentDir, port: 0, dataDir, executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '执行派单', boundary: '本机', criteria: '成果可读' }), check: ok },
     ...(config.alignment ?? []),
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'dispatch-script-finished' }], ...(config.after ? [config.after] : []), ...(config.additionalRounds ?? [])]) };
@@ -55,17 +55,17 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
   const events = async () => (await call('get-events', { workId: work.id })).result as any[];
   await until(events, events => events.some(event => event.action === 'round-ended'));
   const gate = (await call('list-pending')).result[0];
-  await config.beforeConfirm?.(call, templateDir);
+  await config.beforeConfirm?.(call, agentDir);
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const finished = async () => {
     const values = await until(events, events => events.filter(event => event.action === 'round-ended').length >= 2);
     assert.equal(values.filter(event => event.action === 'round-ended')[1].details.finalAnswer, 'dispatch-script-finished', JSON.stringify(values));
   };
-  return { ...daemon, call, work, events, finished, dataDir, repo, git, directory, templateDir };
+  return { ...daemon, call, work, events, finished, dataDir, repo, git, directory, agentDir };
 }
 
 const create: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '写实现并报告结果' }), saveAs: 'card', check: ok };
-const dispatch = (key = 'dispatch'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key, templateId: 'claude-executor' }), saveAs: key, check: ok });
+const dispatch = (key = 'dispatch'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key, agentId: 'claude-executor' }), saveAs: key, check: ok });
 
 test('全局并发满时按序排队，调低不打断，调高立即补位；调度轮次不占执行者名额', async t => {
   const releases: (() => void)[] = [];
@@ -417,7 +417,7 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   assert.equal(brief.newEvents.some(event => event.action === 'dispatch-step'), false);
 });
 
-test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
+test('同一卡片续跑复用副本和原 Agent 会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
   let firstDone!: () => void;
   let secondReady!: () => void;
   let resumeToken = '';
@@ -430,10 +430,10 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'other', content: '另一张卡片' }), saveAs: 'other', check: ok },
     // The first return was queued: read the completed dispatch to get its assigned session id.
     { type: 'tool', name: 'get-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: saved(ctx, 'first').id }), saveAs: 'previous', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'other').id, key: 'cross-card-real', templateId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }),
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'other').id, key: 'cross-card-real', agentId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }),
       check: value => assert.equal((value as any).error.code, 'INVALID_RESUME') },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume', templateId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }), saveAs: 'resume', check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-duplicate', templateId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }),
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume', agentId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }), saveAs: 'resume', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-duplicate', agentId: 'claude-executor', resumeSessionId: saved(ctx, 'previous').sessionId }),
       check: value => assert.equal((value as any).error.code, 'DISPATCH_ACTIVE') },
     { type: 'hang', until: secondHold },
     { type: 'tool', name: 'revoke-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: saved(ctx, 'resume').id, reason: '调度者撤销：改变方向' }), check: ok },
@@ -443,8 +443,8 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
     return [{ type: 'write', path: 'first.txt', content: '第一轮\n' }];
   }, ctx => {
     assert.equal(ctx.options.cwd, original!.cwd);
-    assert.equal(ctx.options.template?.id, original!.template?.id);
-    assert.equal(ctx.options.template?.model, 'resume-updated-model');
+    assert.equal(ctx.options.agent?.id, original!.agent?.id);
+    assert.equal(ctx.options.agent?.model, 'resume-updated-model');
     assert.ok(ctx.options.resumeSessionId);
     resumeToken = ctx.options.mcpServers.helm!.headers.Authorization!;
     return [{ type: 'write', path: 'resumed.txt', content: '续跑进度\n' }, { type: 'hang' }];
@@ -455,7 +455,7 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
   await writeFile(join(workPath, 'new-upstream.txt'), '后来的工作分支进度\n');
   execFileSync('git', ['-C', workPath, 'add', 'new-upstream.txt']);
   execFileSync('git', ['-C', workPath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'advance work branch'], { stdio: 'ignore' });
-  await configureTestTemplate(daemon.templateDir, 'claude-executor', { model: 'resume-updated-model' });
+  await configureTestAgent(daemon.agentDir, 'claude-executor', { model: 'resume-updated-model' });
   firstDone();
   await until(daemon.events, events => events.some(event => event.action === 'dispatch-step' && event.dispatchId !== first.id));
   secondReady();
@@ -464,7 +464,7 @@ test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑�
   const results = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result;
   const resumed = results.find((value: any) => value.key === 'resume');
   assert.equal(resumed.sessionId, first.sessionId);
-  assert.equal(resumed.templateId, first.templateId);
+  assert.equal(resumed.agentId, first.agentId);
   assert.equal(resumed.startCommit, first.endCommit);
   assert.notEqual(resumed.startCommit, daemon.git('rev-parse', `helm/${daemon.work.id}`));
   assert.equal(resumed.endReason, 'aborted');
@@ -490,7 +490,7 @@ test('曾派单卡片在空闲时新增未决前置会阻塞；运行中新增�
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'gate', question: '继续吗？' }), saveAs: 'gate', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => edge(ctx, 'gate'), check: ok },
     { type: 'tool', name: 'get-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id }), check: value => { ok(value); assert.equal((value as any).result.status, 'waiting'); } },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'blocked-again', templateId: 'claude-executor' }), check: value => assert.equal((value as any).error.code, 'CARD_NOT_DISPATCHABLE') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'blocked-again', agentId: 'claude-executor' }), check: value => assert.equal((value as any).error.code, 'CARD_NOT_DISPATCHABLE') },
     { type: 'hang', until: gateHold }, dispatch('second'),
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'late', question: '之后怎么办？' }), saveAs: 'late', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => edge(ctx, 'late'), check: ok },
@@ -510,7 +510,7 @@ test('曾派单卡片在空闲时新增未决前置会阻塞；运行中新增�
   assert.equal((await daemon.call('get-card', { workId: daemon.work.id, cardId: second.cardId })).result.status, 'waiting');
 });
 
-test('文件模板设置模型与推理强度，清理订阅冲突环境；本地远端推送被执行者环境拦截', async t => {
+test('文件 Agent 设置模型与推理强度，清理订阅冲突环境；本地远端推送被执行者环境拦截', async t => {
   const home = await mkdtemp(join(tmpdir(), 'helm-git-environment-'));
   const previousHome = process.env.HOME;
   process.env.HOME = home;
@@ -536,11 +536,11 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
     for (const key of keys.slice(0, 5)) assert.equal(ctx.options.env[key], undefined, key);
     assert.equal(ctx.options.env.GH_TOKEN, 'helm-push-disabled');
     assert.ok(ctx.options.env.NO_PROXY!.includes('127.0.0.1'));
-    assert.equal(ctx.options.template?.model, 'small-test-model');
-    assert.equal(ctx.options.template?.reasoningEffort, 'low');
+    assert.equal(ctx.options.agent?.model, 'small-test-model');
+    assert.equal(ctx.options.agent?.reasoningEffort, 'low');
     return [{ type: 'hang', until: hold }];
-  }], { beforeConfirm: async (call, templateDir) => {
-    await configureTestTemplate(templateDir, 'claude-executor', { model: 'small-test-model', reasoningEffort: 'low' });
+  }], { beforeConfirm: async (call, agentDir) => {
+    await configureTestAgent(agentDir, 'claude-executor', { model: 'small-test-model', reasoningEffort: 'low' });
     const repo = (await call('list-projects')).result[0].path;
     const remote = join(dirname(repo), "remote 'quoted' \\ path.git");
     execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
@@ -549,8 +549,8 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   } });
   await daemon.finished();
   await until(async () => options, value => value !== undefined);
-  const templates = (await daemon.call('list-agent-templates')).result;
-  assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
+  const agents = (await daemon.call('list-agents')).result;
+  assert.deepEqual(agents.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
   const remote = join(daemon.directory, "remote 'quoted' \\ path.git");
   // dsh 0.2.1-rc.2 scrubs credential-shaped names before spawning shell tools.
   // Exercise both the original driver environment and the environment git sees.
@@ -578,7 +578,7 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   release();
 });
 
-test('按实际步骤号读输出，步骤不连续仍可读取；重启后派单、成果和模板快照保留', async t => {
+test('按实际步骤号读输出，步骤不连续仍可读取；重启后派单、成果和 Agent 快照保留', async t => {
   const fake = new FakeDriver([[
     { type: 'write', path: 'kept.txt', content: '持久保存\n' },
     { type: 'output', text: '第二个实际步骤' },
@@ -596,26 +596,26 @@ test('按实际步骤号读输出，步骤不连续仍可读取；重启后派�
   assert.deepEqual((await daemon.call('get-dispatch-output', { ...params, fromStep: 3, toStep: 5 })).result, [{ type: 'output', step: 4, text: '第二个实际步骤' }]);
   const artifacts = (await daemon.call('get-dispatch-artifacts', params)).result;
   await daemon.close();
-  await configureTestTemplate(daemon.templateDir, 'claude-executor', { model: 'persisted-model', reasoningEffort: 'low' });
-  const reopened = await startHelmd({ port: 0, dataDir: daemon.dataDir, templateDir: daemon.templateDir });
+  await configureTestAgent(daemon.agentDir, 'claude-executor', { model: 'persisted-model', reasoningEffort: 'low' });
+  const reopened = await startHelmd({ port: 0, dataDir: daemon.dataDir, agentDir: daemon.agentDir });
   t.after(() => reopened.close());
   const call = async (name: string, params: object) => (await (await fetch(`${reopened.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any).result;
   assert.deepEqual(await call('get-dispatch', params), result);
   assert.deepEqual(await call('get-dispatch-artifacts', params), artifacts);
-  assert.equal((await call('list-agent-templates', {})).find((value: any) => value.id === 'claude-executor').model, 'persisted-model');
+  assert.equal((await call('list-agents', {})).find((value: any) => value.id === 'claude-executor').model, 'persisted-model');
   assert.equal((await call('get-dispatch-output', { ...params, fromStep: 4, toStep: 4 }))[0].text, '第二个实际步骤');
 });
 
-test('派单按 key 去重，拒绝等待前置、取消、已有派单的卡片、无效模板和非法续跑', async t => {
+test('派单按 key 去重，拒绝等待前置、取消、已有派单的卡片、无效 Agent 和非法续跑', async t => {
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
   const reject = (code: string) => (value: any) => assert.equal(value.error?.code, code, JSON.stringify(value));
-  const params = (ctx: FakeContext, key: string, extra: object = {}) => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, templateId: 'claude-executor', key, ...extra });
+  const params = (ctx: FakeContext, key: string, extra: object = {}) => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, agentId: 'claude-executor', key, ...extra });
   const daemon = await fixture(t, [
     create,
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-template', { templateId: 'unknown' }), check: reject('TEMPLATE_UNAVAILABLE') },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'coordinator-template', { templateId: 'claude-coordinator' }), check: reject('TEMPLATE_UNAVAILABLE') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-agent', { agentId: 'unknown' }), check: reject('AGENT_UNAVAILABLE') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'coordinator-agent', { agentId: 'claude-coordinator' }), check: reject('AGENT_UNAVAILABLE') },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'bad-resume', { resumeSessionId: 'no-such-session' }), check: reject('INVALID_RESUME') },
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'gate', question: '等待决定' }), saveAs: 'gate', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'gate').id }, downstream: { type: 'card', id: saved(ctx, 'card').id } }), check: ok },
@@ -628,13 +628,13 @@ test('派单按 key 去重，拒绝等待前置、取消、已有派单的卡片
     { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'cancelled').id, reason: '不用了' }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => params(ctx, 'cancelled', { cardId: saved(ctx, 'cancelled').id }), check: reject('CARD_NOT_DISPATCHABLE') },
   ], [[{ type: 'hang', until: hold }]], { alignment: [
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: 'not-created', key: 'aligning', templateId: 'claude-executor' }), check: reject('WORK_NOT_EXECUTING') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: 'not-created', key: 'aligning', agentId: 'claude-executor' }), check: reject('WORK_NOT_EXECUTING') },
   ] });
   await daemon.finished();
   const dispatches = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result;
   assert.equal(dispatches.length, 1);
   assert.equal((await daemon.events()).filter(event => event.action === 'dispatch-created').length, 1);
-  assert.equal((await daemon.call('create-dispatch', { workId: daemon.work.id, cardId: dispatches[0].cardId, key: 'user', templateId: 'claude-executor' })).error.code, 'FORBIDDEN');
+  assert.equal((await daemon.call('create-dispatch', { workId: daemon.work.id, cardId: dispatches[0].cardId, key: 'user', agentId: 'claude-executor' })).error.code, 'FORBIDDEN');
   release();
 });
 

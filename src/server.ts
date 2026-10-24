@@ -13,8 +13,8 @@ import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
-import { TemplateCatalog } from './templates.js';
-import { monitorTemplateAvailability } from './availability.js';
+import { AgentCatalog, migrateLegacyAgents } from './agents.js';
+import { monitorAgentAvailability } from './availability.js';
 import { defaultStaticDir, serveStatic, staticPath } from './static-files.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
@@ -36,9 +36,11 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
   const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
-  const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'), new TemplateCatalog(options.templateDir, Object.keys(drivers)));
+  const dataDir = options.dataDir ?? join(homedir(), '.helm');
+  const store = new TaskStore(dataDir, new AgentCatalog(options.agentDir ?? join(dataDir, 'agents'), Object.keys(drivers)));
+  migrateLegacyAgents(store);
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
   let userOperations: UserOperations;
@@ -108,8 +110,8 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
   } catch (error) { store.close(); throw error; }
   try {
     await reconcileStartup(store);
-    monitorTemplateAvailability(store, drivers);
-    await store.templates.refresh();
+    monitorAgentAvailability(store, drivers);
+    await store.agents.refresh();
   }
   catch (error) {
     server.closeAllConnections();
@@ -131,7 +133,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
       ready = false;
       closing ??= Promise.all([scheduler.close(), executions.close()]).then(() => new Promise<void>((resolve, reject) => {
         server.close(error => {
-          void store.templates.settleChecks().then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
+          void store.agents.settleChecks().then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
         });
         server.closeAllConnections();
       }));

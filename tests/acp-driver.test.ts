@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AcpDriver } from '../src/acp-driver.js';
-import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
+import { AgentCatalog, type AgentConfig } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
 
@@ -78,11 +79,11 @@ for (const method of ['session/new', 'session/prompt']) test(`ACP 日志之后�
   }
 });
 
-test('Grok 在 session/new 后从配置选项设置模板模型，核对模型和推理强度后才发送派单', async t => {
+test('Grok 在 session/new 后从配置选项设置 Agent 模型，核对模型和推理强度后才发送派单', async t => {
   const ctx = await acpFixture(t);
-  const session = await ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'grok-4.5' } });
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: 'grok-4.5' } });
   t.after(() => session.cancel());
-  await session.send('使用模板指定模型');
+  await session.send('使用 Agent 指定模型');
   const events = await collect(session.events);
   const requests = (await ctx.requests()).filter(r => r.method !== 'fixture/spawn');
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/set_config_option', 'session/prompt']);
@@ -101,7 +102,7 @@ for (const [model, effort, reason] of [
     { id: 'model', name: 'Model', type: 'select', currentValue: model, options: [{ value: 'grok-4.5', name: 'Grok 4.5' }] },
     { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: effort, options: [{ value: 'low', name: 'Low' }] },
   ] });
-  const starting = ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'grok-4.5' } })
+  const starting = ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: 'grok-4.5' } })
     .then(session => { t.after(() => session.cancel()); return session; });
   await assert.rejects(starting, reason);
   const requests = await ctx.requests();
@@ -115,7 +116,7 @@ for (const [script, reason] of [
     options: [{ value: 'other', name: 'grok-4.7' }] }] }, /model.*grok-4\.7/],
   [{ configuredOptions: [] }, /model.*grok-4\.7.*未公布/],
   [{ rejectOn: 'session/set_config_option' }, /scripted ACP failure/],
-] as const) test(`Grok 未公布模板模型或配置失败时拒绝启动，不按显示名猜模型：${JSON.stringify(script)}`, async t => {
+] as const) test(`Grok 未公布 Agent 模型或配置失败时拒绝启动，不按显示名猜模型：${JSON.stringify(script)}`, async t => {
   const ctx = await acpFixture(t, script);
   const starting = ctx.driver.start(ctx.options).then(session => { t.after(() => session.cancel()); return session; });
   await assert.rejects(starting, reason);
@@ -124,7 +125,7 @@ for (const [script, reason] of [
   assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
 });
 
-test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及卡片沙箱运行，返回最终回答和本轮 token', async t => {
+test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及卡片沙箱运行，返回最终回答和本轮 token', async t => {
   const ctx = await acpFixture(t);
   const processes: number[] = [];
   const session = await ctx.driver.start({ ...ctx.options, onProcess: process => { processes.push(process.pid); } });
@@ -152,7 +153,7 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及�
     url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: 'Bearer dispatch-token' }] }] });
   const prompt = requests[4].params.prompt;
   assert.equal(prompt[0].type, 'text');
-  assert.match(prompt[0].text, /^测试策略/);
+  assert.match(prompt[0].text, /^你是 Helm 执行者.*\n\n测试策略\n\n/s);
   assert.match(prompt[0].text, /submit-conclusion/);
   assert.match(prompt[0].text, /不要自己 git commit、不要改 git 配置/);
   assert.match(prompt[0].text, /不要自己安装或启动浏览器/);
@@ -199,7 +200,7 @@ for (const stopReason of ['end_turn', 'max_tokens', 'max_turn_requests', 'refusa
 
 test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录没有重定向或复制登录', async t => {
   const ctx = await acpFixture(t);
-  ctx.options.template = { ...ctx.template, reasoningEffort: 'max' };
+  ctx.options.agent = { ...ctx.agent, reasoningEffort: 'max' };
   ctx.options.env.GROK_HOME = '/must-not-use';
   for (let round = 0; round < 2; round++) {
     const session = await ctx.driver.start(ctx.options);
@@ -217,22 +218,22 @@ test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录�
   await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' });
 });
 
-test('Grok 模板拒绝调度者、未指定模型、不支持的推理档位、fast 和 API 主目录', async t => {
+test('Grok Agent 拒绝调度者、未指定模型、不支持的推理档位、fast 和 API 主目录', async t => {
   const ctx = await acpFixture(t);
-  const cases: [Partial<AgentTemplate>, RegExp][] = [
+  const cases: [Partial<AgentConfig>, RegExp][] = [
     [{ role: 'coordinator' }, /本阶段只支持执行者/], [{ model: null }, /模型 id/],
-    [{ reasoningEffort: null }, /推理强度/], [{ reasoningEffort: 'minimal' as AgentTemplate['reasoningEffort'] }, /不支持推理强度/],
-    [{ fast: true }, /fast/], [{ home: 'template' }, /本机登录/],
+    [{ reasoningEffort: null }, /推理强度/], [{ reasoningEffort: 'minimal' as AgentConfig['reasoningEffort'] }, /不支持推理强度/],
+    [{ fast: true }, /fast/], [{ home: 'dedicated' }, /本机登录/],
   ];
   for (const [settings, reason] of cases) {
-    const template = { ...ctx.template, ...settings };
-    const availability = await ctx.driver.checkAvailability(template);
+    const agent = { ...ctx.agent, ...settings };
+    const availability = await ctx.driver.checkAvailability(agent);
     assert.equal(availability.available, false);
     assert.match(availability.reason!, reason);
-    await assert.rejects(ctx.driver.start({ ...ctx.options, template }), reason);
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent }), reason);
   }
-  assert.deepEqual(await ctx.requests(), [], '无效模板不启动进程');
-  const builtin = new TemplateCatalog(undefined, ['grok']).get('grok-executor', 'executor');
+  assert.deepEqual(await ctx.requests(), [], '无效 Agent 不启动进程');
+  const builtin = new AgentCatalog(fixtureAgentDir, ['grok']).get('grok-executor', 'executor');
   assert.equal(builtin.model, 'grok-4.7');
   assert.equal(builtin.reasoningEffort, 'low');
   assert.equal(builtin.home, 'shared');
@@ -240,7 +241,7 @@ test('Grok 模板拒绝调度者、未指定模型、不支持的推理档位、
 
 test('Grok 可用性只完成 initialize 并检查 cached_token / HTTP MCP，不认证、不建会话、不读取凭据', async t => {
   const ctx = await acpFixture(t);
-  assert.deepEqual(await ctx.driver.checkAvailability(ctx.template), { available: true });
+  assert.deepEqual(await ctx.driver.checkAvailability(ctx.agent), { available: true });
   const [spawn, ...requests] = await ctx.requests();
   assert.equal(spawn.env.HOME, ctx.home);
   assert.deepEqual(requests.map(r => r.method), ['initialize']);
@@ -253,7 +254,7 @@ for (const initialize of [
   { protocolVersion: 2 },
 ]) test(`Grok 缺少协议能力时不可用并提供安装/登录命令：${JSON.stringify(initialize)}`, async t => {
   const ctx = await acpFixture(t, { initialize });
-  const result = await ctx.driver.checkAvailability(ctx.template);
+  const result = await ctx.driver.checkAvailability(ctx.agent);
   assert.equal(result.available, false);
   assert.match(result.reason!, /initialize/);
   assert.match(result.command!, /install.*grok login/);
@@ -263,17 +264,17 @@ for (const initialize of [
 test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第一轮认证失败不宣称已登录', async t => {
   const ctx = await acpFixture(t);
   const absent = new AcpDriver('grok', { command: { file: join(ctx.directory, 'absent'), args: [] } });
-  assert.equal((await absent.checkAvailability(ctx.template)).available, false);
+  assert.equal((await absent.checkAvailability(ctx.agent)).available, false);
   for (const script of [{ rejectOn: 'initialize' }, { hangOn: 'initialize' }, { exitOn: 'initialize' }]) {
     await t.test(JSON.stringify(script), async t => {
       const scenario = await acpFixture(t, script);
       const driver = new AcpDriver('grok', { command: scenario.command, timeoutMs: 500 });
-      assert.equal((await driver.checkAvailability(scenario.template)).available, false);
+      assert.equal((await driver.checkAvailability(scenario.agent)).available, false);
     });
   }
   await t.test('未登录', async t => {
     const auth = await acpFixture(t, { rejectOn: 'authenticate' });
-    assert.equal((await auth.driver.checkAvailability(auth.template)).available, true);
+    assert.equal((await auth.driver.checkAvailability(auth.agent)).available, true);
     await assert.rejects(auth.driver.start(auth.options), /scripted ACP failure/);
   });
 });
@@ -290,7 +291,7 @@ test('Grok 沙箱根必须恰为卡片副本，拒绝只读或额外根', async 
 
 test('Grok 续跑在新进程用 session/resume，保持会话 id 并更新本次派单的 HTTP MCP 令牌', async t => {
   const ctx = await acpFixture(t, { uniqueSession: true });
-  ctx.options.template = { ...ctx.template, model: 'grok-4.5' };
+  ctx.options.agent = { ...ctx.agent, model: 'grok-4.5' };
   const first = await ctx.driver.start(ctx.options);
   await first.send('第一轮');
   await collect(first.events);
@@ -425,13 +426,13 @@ for (const script of [{ response: null }, { malformedOn: 'session/prompt' }]) te
 test('Grok 按 initialize 公布的模型与各模型推理档位检查可用性，不把无效组合悄悄换档', async t => {
   const ctx = await acpFixture(t);
   for (const settings of [{ model: 'unknown-model' }, { model: 'grok-4.5', reasoningEffort: 'max' as const }]) {
-    const template = { ...ctx.template, ...settings };
-    const result = await ctx.driver.checkAvailability(template);
+    const agent = { ...ctx.agent, ...settings };
+    const result = await ctx.driver.checkAvailability(agent);
     assert.equal(result.available, false);
     assert.match(result.reason!, settings.model === 'unknown-model' ? /unknown-model/ : /xhigh/);
-    await assert.rejects(ctx.driver.start({ ...ctx.options, template }));
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent }));
   }
-  assert.equal((await ctx.driver.checkAvailability({ ...ctx.template, model: 'grok-4.5', reasoningEffort: 'medium' })).available, true);
+  assert.equal((await ctx.driver.checkAvailability({ ...ctx.agent, model: 'grok-4.5', reasoningEffort: 'medium' })).available, true);
   assert.equal((await ctx.requests()).some(r => r.method === 'authenticate'), false);
 });
 

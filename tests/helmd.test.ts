@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { copyAgents } from './helmd-fixture.js';
 
 const exec = promisify(execFile);
 const cliPath = fileURLToPath(new URL('../src/cli.js', import.meta.url));
@@ -58,6 +59,7 @@ async function fixture(t: TestContext) {
   const repo = join(directory, 'project');
   await exec('git', ['init', repo]);
   const dataDir = join(directory, 'data');
+  await copyAgents(dataDir);
   const daemon = await startDaemon(t, dataDir);
   return { ...daemon, directory, repo, dataDir };
 }

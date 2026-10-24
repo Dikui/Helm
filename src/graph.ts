@@ -5,7 +5,7 @@ import type { TokenUsage } from './driver.js';
 export interface Card {
   id: string; workId: string; key: string; content: string; needsVerification: boolean;
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
-  templateId?: string | null; latestDispatchId?: string | null; currentStep?: number;
+  agentId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
   repairOfCardId?: string | null;
   usage: TokenUsage;
@@ -14,7 +14,7 @@ export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
 const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt,
-  work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, template_id AS templateId, latest_dispatch_id AS latestDispatchId,
+  work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,

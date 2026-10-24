@@ -34,7 +34,7 @@ export function CoordinatorView({ work }: { work: Work }) {
       {!rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds">
         {rounds.data.rounds.slice().reverse().map(round => <li key={round.id}>
           <button className="btn sm" aria-pressed={selected?.id === round.id} aria-label={`${t('structureRound')} #${round.number}`} onClick={() => selectRound(round.id)}>#{round.number}</button>
-          <span>{round.templateId}</span><span className={`pill ${round.status === 'running' ? 'run' : ''}`}>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span>
+          <span>{round.agentId}</span><span className={`pill ${round.status === 'running' ? 'run' : ''}`}>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span>
           <time className="mono">{elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}</time>
           <small className="muted"><time dateTime={round.startedAt}>{date(round.startedAt)}</time> → {round.endedAt ? <time dateTime={round.endedAt}>{date(round.endedAt)}</time> : t('structureNow')}</small>
         </li>)}

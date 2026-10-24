@@ -41,7 +41,7 @@ test('Claude 调度者接入运行层：带令牌 MCP 改卡片图，打断后�
           await tool('remove-dependency', dependency);
           await tool('add-dependency', dependency);
         }
-        await tool('create-dispatch', { key: 'dispatch', cardId: upstream.id, templateId: 'claude-executor', needsBrowser: false });
+        await tool('create-dispatch', { key: 'dispatch', cardId: upstream.id, agentId: 'claude-executor', needsBrowser: false });
         if (attempt === 1) {
           yield { type: 'system', subtype: 'compact_boundary' } as SDKMessage;
           await new Promise<void>(resolve => {

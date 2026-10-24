@@ -9,13 +9,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
 import { codexFixture, ok, sandboxDenied } from './codex-executor-fixture.js';
-import { configureTestTemplate } from './helmd-fixture.js';
+import { configureTestAgent } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_CODEX_EXECUTOR_REAL === '1';
 const shellQuote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 
-test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目录、token、续跑和两模板 skills 隔离',
+test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目录、token、续跑和两 Agent skills 隔离',
   { skip: !enabled, timeout: 720_000 }, async t => {
     // Only this smoke links the real login into a temporary default CLI home; never write to the real home.
     const realHome = homedir();
@@ -86,10 +86,10 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     const image = (await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: screenshot.id, encoding: 'base64' })).result.content;
     await writeFile(join(evidence, 'codex.png'), Buffer.from(image, 'base64'));
     console.log(`请查看截图：${join(evidence, 'codex.png')}`);
-    const dispatch = async (key: string, templateId: string, content: string, resumeSessionId?: string) => {
+    const dispatch = async (key: string, agentId: string, content: string, resumeSessionId?: string) => {
       await until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
       daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
-        templateId, key, content, ...(resumeSessionId ? { resumeSessionId } : {}) }, check: ok }]);
+        agentId, key, content, ...(resumeSessionId ? { resumeSessionId } : {}) }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key, body: content }));
     };
     await dispatch('resume', 'codex-executor', '只凭先前对话回答会话记号，不读文件。最后调用 submit-conclusion completed 并在最终回答中写出记号。', first.sessionId);
@@ -99,13 +99,13 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     assert.equal(resumed.sessionId, first.sessionId);
     assert.notEqual(resumed.sqlitePath, first.sqlitePath);
     assert.ok(resumed.finalAnswer.includes(marker), '真实 thread/resume 必须恢复对话');
-    await cp(join(daemon.templateDir, 'codex-executor'), join(daemon.templateDir, 'codex-other'), { recursive: true });
-    const otherSkills = join(daemon.templateDir, 'codex-other', 'skills');
+    await cp(join(daemon.agentDir, 'codex-executor'), join(daemon.agentDir, 'codex-other'), { recursive: true });
+    const otherSkills = join(daemon.agentDir, 'codex-other', 'skills');
     await rm(otherSkills, { recursive: true });
     await mkdir(join(otherSkills, 'helm-smoke-beta'), { recursive: true });
     await writeFile(join(otherSkills, 'helm-smoke-beta', 'SKILL.md'), `---\nname: helm-smoke-beta\ndescription: Helm smoke skill\n---\n用 ${beta} 覆盖 skill-proof.txt 的全部内容。`);
-    await configureTestTemplate(daemon.templateDir, 'codex-other', { home: 'shared' });
-    await dispatch('other-template', 'codex-other', '列出可用的 helm-smoke- 开头的 skill，并照技能要求写 skill-proof.txt；最后调用 submit-conclusion completed 并报告技能名。');
+    await configureTestAgent(daemon.agentDir, 'codex-other', { home: 'shared' });
+    await dispatch('other-agent', 'codex-other', '列出可用的 helm-smoke- 开头的 skill，并照技能要求写 skill-proof.txt；最后调用 submit-conclusion completed 并报告技能名。');
     const other = (await daemon.ended(3, 180_000))[2];
     await saveOutput(other);
     assert.equal(other.endReason, 'completed', other.failure);

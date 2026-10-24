@@ -112,7 +112,7 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '摘要卡片' }), saveAs: 'card', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'dispatch', cardId: (ctx.results.get('card') as any).result.id, templateId: 'claude-executor' }), check: ok },
+      key: 'dispatch', cardId: (ctx.results.get('card') as any).result.id, agentId: 'claude-executor' }), check: ok },
     { type: 'hang' },
   ]], undefined, { executorScripts: [script] });
   t.after(async () => { releases.forEach(release => release()); await daemon.close(); });

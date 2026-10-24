@@ -7,12 +7,12 @@ import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
-import { agentTemplates, saveTemplateSchema } from './templates.js';
+import { listAgents, saveAgentSchema } from './agents.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
 import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
-import { pendingTemplates } from './availability.js';
+import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
@@ -46,7 +46,7 @@ export const eventFilterSchema = z.object({
 
 const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
-const projectColumns = 'id, name, path, created_at, default_coordinator_template_id AS defaultCoordinatorTemplateId';
+const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id AS defaultCoordinatorAgentId';
 
 export const operations: readonly Operation[] = [
   operation({
@@ -90,56 +90,56 @@ export const operations: readonly Operation[] = [
     execute: ({ actor, userOperations }, { workId }) => userOperations.interruptRound(actor, workId),
   }),
   operation({
-    name: 'change-coordinator-template', description: '更换工作的调度者模板，从下一调度轮次起生效', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ workId: z.string().min(1), templateId: z.string().min(1) }).strict(),
-    execute({ store, actor }, { workId, templateId }) {
+    name: 'change-coordinator-agent', description: '更换工作的调度者 Agent，从下一调度轮次起生效', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), agentId: z.string().min(1) }).strict(),
+    execute({ store, actor }, { workId, agentId }) {
       const work = store.work(workId);
-      store.templates.get(templateId, 'coordinator');
-      if (work.coordinatorTemplateId !== templateId) {
-        store.db.prepare('UPDATE works SET coordinator_template_id = ? WHERE id = ?').run(templateId, workId);
-        const event = store.appendEvent(actor, { type: 'work', id: workId }, 'coordinator-template-changed',
-          { previousTemplateId: work.coordinatorTemplateId, templateId }, { workId });
+      store.agents.get(agentId, 'coordinator');
+      if (work.coordinatorAgentId !== agentId) {
+        store.db.prepare('UPDATE works SET coordinator_agent_id = ? WHERE id = ?').run(agentId, workId);
+        const event = store.appendEvent(actor, { type: 'work', id: workId }, 'coordinator-agent-changed',
+          { previousAgentId: work.coordinatorAgentId, agentId }, { workId });
         store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
       }
       return store.work(workId);
     },
   }),
   operation({
-    name: 'save-agent-template', description: '保存文件中的 Agent 模板；更新须带列表中的 revision，新建须使用新 id', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: saveTemplateSchema,
+    name: 'save-agent', description: '保存文件中的 Agent；更新须带列表中的 revision，新建须使用新 id', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: saveAgentSchema,
     async execute({ store, actor }, params) {
-      const template = store.templates.save(params);
-      store.transaction(() => store.appendEvent(actor, { type: 'agent-template', id: template.id }, 'agent-template-saved',
-        { mode: params.mode, revision: template.revision }));
-      try { await store.templates.check(template.id); }
+      const agent = store.agents.save(params);
+      store.transaction(() => store.appendEvent(actor, { type: 'agent', id: agent.id }, 'agent-saved',
+        { mode: params.mode, revision: agent.revision }));
+      try { await store.agents.check(agent.id); }
       catch (error) { if (!(error instanceof RuleError)) throw error; }
-      const saved = store.templates.list().find(item => item.id === template.id)!;
-      return { ...saved, notice: template.home === 'template' ? `请按 CLI 格式配置 ~/.helm/agent-homes/${template.id}/ 中的接口和凭据。` : null };
+      const saved = store.agents.list().find(item => item.id === agent.id)!;
+      return { ...saved, notice: agent.home === 'dedicated' ? `请按 CLI 格式配置 ~/.helm/agent-homes/${agent.id}/ 中的接口和凭据。` : null };
     },
   }),
   operation({
-    name: 'delete-agent-template', description: '删除文件中的 Agent 模板；仍被未结束的工作、排队或运行中的派单、项目默认调度者使用时拒绝', callers: ['user'], keyed: false, mutates: true,
+    name: 'delete-agent', description: '删除文件中的 Agent；仍被未结束的工作、排队或运行中的派单、项目默认调度者使用时拒绝', callers: ['user'], keyed: false, mutates: true,
     schema: z.object({ id: z.string().min(1) }).strict(),
     execute({ store, actor }, { id }) {
       const usage = store.db.prepare(`SELECT
-        (SELECT count(*) FROM works WHERE coordinator_template_id = ? AND status NOT IN ('completed', 'cancelled')) AS works,
-        (SELECT count(*) FROM dispatches WHERE template_id = ? AND status IN ('queued', 'running')) AS dispatches,
-        (SELECT count(*) FROM projects WHERE default_coordinator_template_id = ?) AS projects`).get(id, id, id)!;
+        (SELECT count(*) FROM works WHERE coordinator_agent_id = ? AND status NOT IN ('completed', 'cancelled')) AS works,
+        (SELECT count(*) FROM dispatches WHERE agent_id = ? AND status IN ('queued', 'running')) AS dispatches,
+        (SELECT count(*) FROM projects WHERE default_coordinator_agent_id = ?) AS projects`).get(id, id, id)!;
       const [works, dispatches, projects] = [Number(usage.works), Number(usage.dispatches), Number(usage.projects)];
-      if (works || dispatches || projects) throw new RuleError('TEMPLATE_IN_USE',
-        `模板 ${id} 仍在使用：${works} 个未结束的工作、${dispatches} 个排队或运行中的派单、${projects} 个项目的默认调度者。`, 409, { templateId: id });
-      store.appendEvent(actor, { type: 'agent-template', id }, 'agent-template-deleted', {});
-      store.templates.remove(id);
+      if (works || dispatches || projects) throw new RuleError('AGENT_IN_USE',
+        `Agent ${id} 仍在使用：${works} 个未结束的工作、${dispatches} 个排队或运行中的派单、${projects} 个项目的默认调度者。`, 409, { agentId: id });
+      store.appendEvent(actor, { type: 'agent', id }, 'agent-deleted', {});
+      store.agents.remove(id);
       return { id, deleted: true };
     },
   }),
   operation({
-    name: 'list-agent-templates', description: '读取文件中的 Agent 模板、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => agentTemplates(store),
+    name: 'list-agents', description: '读取文件中的 Agent、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => listAgents(store),
   }),
   operation({
     name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑，验收一律新开对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
-    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), templateId: z.string().min(1),
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), agentId: z.string().min(1),
       purpose: z.enum(['execution', 'verification']).optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional(), needsBrowser: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => createDispatch(store, actor, params),
   }),
@@ -202,16 +202,16 @@ export const operations: readonly Operation[] = [
     execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all().map(projectGitStatus),
   }),
   operation({
-    name: 'set-project-coordinator-template', description: '设置项目默认调度者模板，仅影响之后创建的工作', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ projectId: z.string().min(1), templateId: z.string().min(1) }).strict(),
-    execute({ store, actor }, { projectId, templateId }) {
+    name: 'set-project-coordinator-agent', description: '设置项目默认调度者 Agent，仅影响之后创建的工作', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ projectId: z.string().min(1), agentId: z.string().min(1) }).strict(),
+    execute({ store, actor }, { projectId, agentId }) {
       const project = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
       if (!project) throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
-      store.templates.get(templateId, 'coordinator');
-      if (project.defaultCoordinatorTemplateId !== templateId) {
-        store.db.prepare('UPDATE projects SET default_coordinator_template_id = ? WHERE id = ?').run(templateId, projectId);
-        store.appendEvent(actor, { type: 'project', id: projectId }, 'project-coordinator-template-set',
-          { previousTemplateId: project.defaultCoordinatorTemplateId, templateId });
+      store.agents.get(agentId, 'coordinator');
+      if (project.defaultCoordinatorAgentId !== agentId) {
+        store.db.prepare('UPDATE projects SET default_coordinator_agent_id = ? WHERE id = ?').run(agentId, projectId);
+        store.appendEvent(actor, { type: 'project', id: projectId }, 'project-coordinator-agent-set',
+          { previousAgentId: project.defaultCoordinatorAgentId, agentId });
       }
       return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
     },
@@ -297,14 +297,14 @@ export const operations: readonly Operation[] = [
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
       cardId: z.string().min(1).optional(),
-      coordinatorTemplateId: z.string().min(1).optional(),
+      coordinatorAgentId: z.string().min(1).optional(),
     }).strict().refine(params => Boolean(params.projectId) !== Boolean(params.workId), '必须且只能提供 projectId 或 workId。')
-      .refine(params => !params.coordinatorTemplateId || Boolean(params.projectId), 'coordinatorTemplateId 只能在创建工作时指定；已有工作请用 change-coordinator-template。'),
+      .refine(params => !params.coordinatorAgentId || Boolean(params.projectId), 'coordinatorAgentId 只能在创建工作时指定；已有工作请用 change-coordinator-agent。'),
     execute({ store, actor }, params) {
       let workId = params.workId;
       let isNew = false;
       if (params.projectId) {
-        const project = store.db.prepare('SELECT default_coordinator_template_id FROM projects WHERE id = ?').get(params.projectId);
+        const project = store.db.prepare('SELECT default_coordinator_agent_id FROM projects WHERE id = ?').get(params.projectId);
         if (!project) {
           throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
         }
@@ -312,11 +312,11 @@ export const operations: readonly Operation[] = [
         if (existing) workId = String(existing.id);
         else {
           workId = randomUUID();
-          const coordinatorTemplateId = params.coordinatorTemplateId ?? String(project.default_coordinator_template_id);
-          if (params.coordinatorTemplateId) store.templates.get(coordinatorTemplateId, 'coordinator');
-          store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_template_id) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(workId, params.projectId, 'aligning', params.key, new Date().toISOString(), coordinatorTemplateId);
-          store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId, coordinatorTemplateId }, { workId });
+          const coordinatorAgentId = params.coordinatorAgentId ?? String(project.default_coordinator_agent_id);
+          store.agents.get(coordinatorAgentId, 'coordinator');
+          store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_agent_id) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(workId, params.projectId, 'aligning', params.key, new Date().toISOString(), coordinatorAgentId);
+          store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId, coordinatorAgentId }, { workId });
           isNew = true;
         }
       }
@@ -381,7 +381,7 @@ export const operations: readonly Operation[] = [
         FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
         .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
       ...pendingOutputWarning(store),
-      ...await pendingTemplates(store),
+      ...await pendingAgents(store),
     ],
   }),
   operation({

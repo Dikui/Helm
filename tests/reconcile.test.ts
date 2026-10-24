@@ -107,7 +107,7 @@ console.log(readFileSync(path, 'utf8'));
   const currentWork = await call('get-work', scope);
   const create = async (key = 'card', needsBrowser = false) => {
     const card = await tool('create-card', { ...scope, key, content: key, needsVerification: purpose === 'verification' });
-    const dispatch = await tool('create-dispatch', { ...scope, cardId: card.id, key: `dispatch-${key}`, templateId: 'claude-executor', needsBrowser,
+    const dispatch = await tool('create-dispatch', { ...scope, cardId: card.id, key: `dispatch-${key}`, agentId: 'claude-executor', needsBrowser,
       purpose: purpose === 'verification' ? 'verification' : 'execution' });
     return { card, dispatch, read: () => call('get-dispatch', { ...scope, dispatchId: dispatch.id }) };
   };

@@ -31,7 +31,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 const card = (key: string): FakeStep => ({ type: 'tool', name: 'create-card',
   arguments: ctx => ({ workId: workIdOf(ctx), key, content: key }), saveAs: key, check: ok });
 const dispatch = (key: string): FakeStep => ({ type: 'tool', name: 'create-dispatch',
-  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id, key, templateId: 'claude-executor' }), saveAs: `${key}-dispatch`, check: ok });
+  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id, key, agentId: 'claude-executor' }), saveAs: `${key}-dispatch`, check: ok });
 const complete = (key: string, check: (value: any) => void = ok): FakeStep => ({ type: 'tool', name: 'complete-card',
   arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id }), check });
 const cancel = (key: string, check: (value: any) => void = ok): FakeStep => ({ type: 'tool', name: 'cancel-card',

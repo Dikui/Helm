@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { AcpDriver } from '../src/acp-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
-import { templateEnvironment, type AgentTemplate } from '../src/templates.js';
+import { agentEnvironment, type AgentConfig } from '../src/agents.js';
 
-export async function acpFixture(t: TestContext, script: object = {}, manageHome = true, agent: 'grok' | 'deepseek' = 'grok') {
+export async function acpFixture(t: TestContext, script: object = {}, manageHome = true, kind: 'grok' | 'deepseek' = 'grok') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-acp-')));
   const home = join(directory, 'home');
   const cwd = join(directory, 'card');
@@ -24,14 +24,14 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   await writeFile(record, '');
   await writeFile(path, JSON.stringify({ record, ...script }));
   const command = { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/acp-agent.js', import.meta.url)), path] };
-  const driver = new AcpDriver(agent, { command, timeoutMs: 2000 });
-  const template: AgentTemplate = { id: `${agent}-executor`, role: 'executor', driver: agent, model: agent === 'grok' ? 'grok-4.7' : 'deepseek-flash',
+  const driver = new AcpDriver(kind, { command, timeoutMs: 2000 });
+  const agent: AgentConfig = { id: `${kind}-executor`, role: 'executor', driver: kind, model: kind === 'grok' ? 'grok-4.7' : 'deepseek-flash',
     reasoningEffort: 'low', fast: false, home: 'shared', description: '测试执行者', prompt: '测试策略', directory, skillsPath: null };
-  const options: SessionOptions = { template, cwd, env: { ...templateEnvironment(template), HOME: home, XAI_API_KEY: 'must-not-inherit' },
+  const options: SessionOptions = { agent, cwd, env: { ...agentEnvironment(agent), HOME: home, XAI_API_KEY: 'must-not-inherit' },
     sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };
   const requests = async (): Promise<any[]> => (await readFile(record, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-  return { driver, command, template, options, directory, home, cwd, requests };
+  return { driver, command, agent, options, directory, home, cwd, requests };
 }
 
 export async function collect(events: AsyncIterable<DriverEvent>) {

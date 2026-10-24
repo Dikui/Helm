@@ -11,7 +11,7 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
   let quotaWake = false;
   const real = new CodexExecutorDriver({ command: { file: process.execPath,
     args: ['-e', 'process.exit(process.argv.slice(1).join(" ") === "login status" ? 0 : 1)'] } });
-  const fake = new FakeDriver([[{ type: 'end', reason: 'quota-exhausted', usage: { inputTokens: 18, outputTokens: 2 } }]], template => real.checkAvailability(template));
+  const fake = new FakeDriver([[{ type: 'end', reason: 'quota-exhausted', usage: { inputTokens: 18, outputTokens: 2 } }]], agent => real.checkAvailability(agent));
   const reassign = (ctx: FakeContext): FakeStep[] => {
     const brief = JSON.parse(ctx.input);
     const ended = brief.wakeEvents.find((e: any) => e.action === 'dispatch-ended' && e.details.endReason === 'quota-exhausted');
@@ -19,7 +19,7 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
     if (!ended) { daemon.actions.push(reassign); return []; }
     quotaWake = true;
     return [{ type: 'tool', name: 'create-dispatch', arguments: { workId: brief.work.id, cardId: ended.cardId,
-      templateId: 'claude-executor', key: 'replacement' }, check: ok }];
+      agentId: 'claude-executor', key: 'replacement' }, check: ok }];
   };
   const daemon = await codexFixture(t, fake, { after: reassign });
   const source = join(daemon.home, '.codex', 'auth.json');
@@ -30,7 +30,7 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
   assert.ok(quotaWake);
   assert.equal(dispatches[0].endReason, 'quota-exhausted');
   assert.deepEqual(dispatches[0].usage, { inputTokens: 18, outputTokens: 2 });
-  assert.equal(dispatches[1].templateId, 'claude-executor');
+  assert.equal(dispatches[1].agentId, 'claude-executor');
   assert.equal(dispatches[1].endReason, 'completed');
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatches[1].cardId })).result;
   assert.equal(daemon.git('show', `${card.cardBranch}:replacement.txt`), '由另一家完成');
@@ -50,7 +50,7 @@ test('Codex 派单保存 thread 与 sqlite 目录，续跑同 thread 另开进�
   const first = (await daemon.ended())[0];
   await until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
   const steps: FakeStep[] = [{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
-    templateId: 'codex-executor', resumeSessionId: first.sessionId, key: 'resume' }, check: ok }];
+    agentId: 'codex-executor', resumeSessionId: first.sessionId, key: 'resume' }, check: ok }];
   daemon.actions.push(steps);
   ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '继续执行' }));
   const dispatches = await daemon.ended(2);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
-import { templateEnvironment } from './templates.js';
+import { agentEnvironment } from './agents.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
@@ -169,18 +169,18 @@ export class ExecutionRunner {
     const wallTimer = setTimeout(() => timeout('wall'), Number(watchdog.dispatch_wall_timeout_ms));
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
-      const template = await abortable(this.store.templates.check(dispatch.templateId, 'executor'), stop.signal);
+      const agent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
       if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
-      if (dispatch.resumeSessionId && (dispatch.template.driver ?? 'claude-sdk') !== template.driver) {
-        throw new RuleError('INVALID_RESUME', '模板的驱动已更改，不能续跑原驱动会话。');
+      if (dispatch.resumeSessionId && (dispatch.agent.driver ?? 'claude-sdk') !== agent.driver) {
+        throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
-      dispatch = { ...dispatch, template };
+      dispatch = { ...dispatch, agent };
       prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
       refreshVerificationCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
-        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, template_snapshot = ? WHERE id = ?`)
-          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(template), dispatch.id);
+        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
+          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), dispatch.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
           this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }
@@ -204,9 +204,9 @@ export class ExecutionRunner {
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
-        const starting = this.drivers[dispatch.template.driver]!.start({
+        const starting = this.drivers[dispatch.agent.driver]!.start({
           dataDir: join(dispatch.outputPath, '..'),
-          template: dispatch.template, cwd: workPath, env: { ...templateEnvironment(dispatch.template, pushUrls),
+          agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls),
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },

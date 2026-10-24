@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardGraph } from './graph.js';
-import { templateEnvironment } from './templates.js';
+import { agentEnvironment } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
@@ -60,7 +60,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-template-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       if (wakes.length) this.schedule();
     });
     this.schedule();
@@ -179,7 +179,7 @@ export class RoundScheduler {
         }
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure,
           ...(ruleFailure ? { error: ruleFailure } : {}), eventIds: ids, processed: reason === 'completed' }, { workId });
-        if (reason === 'error' && ruleFailure?.code === 'TEMPLATE_UNAVAILABLE') pauseWorkFromRuntime(this.store, workId, id, `调度者模板不可用：${ruleFailure.reason}`);
+        if (reason === 'error' && ruleFailure?.code === 'AGENT_UNAVAILABLE') pauseWorkFromRuntime(this.store, workId, id, `调度者 Agent 不可用：${ruleFailure.reason}`);
         else if (reason === 'completed') this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
         else if (['error', 'timed-out', 'context-overflow'].includes(reason)) {
           const row = this.store.db.prepare(`UPDATE works SET consecutive_round_failures = consecutive_round_failures + 1 WHERE id = ? RETURNING consecutive_round_failures`).get(workId)!;
@@ -189,16 +189,16 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const template = await this.store.templates.check(brief.work.coordinatorTemplateId, 'coordinator');
+      const agent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
       this.store.transaction(() => {
-        this.store.db.prepare('UPDATE coordinator_rounds SET template_snapshot = ? WHERE id = ?').run(JSON.stringify(template), id);
-        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-template-loaded', { template }, { workId });
+        this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
+        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent }, { workId });
       });
-      const session = await this.drivers[template.driver]!.start({
-        template,
+      const session = await this.drivers[agent.driver]!.start({
+        agent,
         cwd: brief.work.workPath ?? projectPath(this.store, workId),
-        env: templateEnvironment(template),
+        env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
         mcpServers: { helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },

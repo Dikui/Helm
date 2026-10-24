@@ -84,7 +84,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
 在卡片副本原样执行一次命令 ${executorGitProbe}，git status 必须成功，git push 必须因 /dev/null/helm-push-disabled/ 失败；不得 unset 环境、覆盖 git 配置或重试，保留工具输出。本地裸远端由测试保留检查，不要清理。
 随后实际执行一次原样命令 ${boundaryCommand}，预期由真实沙箱拒绝副本外写入；不得提权、重试或绕过，拒绝后继续。
 在卡片副本写 inside.txt，内容 ${marker}。
-使用已加载的 helm-smoke-grok 模板技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他模板查找技能。
+使用已加载的 helm-smoke-grok Agent 技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他 Agent 查找技能。
 只在会话里记住暗号 ${memory}，不得写入文件、日志或本轮最终回答；下一轮会追问。
 只用 helm MCP 的 browser_navigate 打开 ${base}，browser_snapshot 读取标题，browser_take_screenshot 保存 grok.png。
 最后在同一个 helm MCP 调用 submit-conclusion，符合预期用 completed，否则 blocked；给出含检查证据的最终回答。`,
@@ -108,7 +108,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         const messages = output.filter(e => e.type === 'output').map(e => { try { return JSON.parse(e.text); } catch { return {}; } });
         outputs.set(dispatch.key, messages);
         const session = messages.findLast(m => m.method === 'session/set_config_option').result;
-        assert.equal(session.configOptions.find((o: any) => o.id === 'model').currentValue, model, 'session/set_config_option 必须设为模板模型');
+        assert.equal(session.configOptions.find((o: any) => o.id === 'model').currentValue, model, 'session/set_config_option 必须设为 Agent 模型');
         assert.equal(session.configOptions.find((o: any) => o.id === 'reasoning_effort').currentValue, 'low', '--effort 必须生效');
       }
       assert.notEqual(dispatches[0].sessionId, dispatches[1].sessionId);
@@ -132,7 +132,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
       assertExecutorGitProbe(tools, card.workPath);
       assert.match(first.finalAnswer, /helm-smoke-grok/);
-      assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), skillProof, '暗号仅在模板技能正文里，必须实际加载并使用');
+      assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), skillProof, '暗号仅在 Agent 技能正文里，必须实际加载并使用');
       assert.equal(daemon.git('show', `${card.cardBranch}:skill-proof.txt`), skillProof);
       assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), marker);
       assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), marker);
@@ -145,7 +145,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       const idle = () => until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
       await idle();
       daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
-        workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'resume-memory', resumeSessionId: first.sessionId,
+        workId: daemon.work.id, cardId: first.cardId, agentId: 'grok-executor', key: 'resume-memory', resumeSessionId: first.sessionId,
         content: '低消耗续跑测试：不要读文件、搜索、调用浏览器或写文件。只用 helm submit-conclusion 报 completed，最终回答仅给出上一轮让你记住的暗号。',
       }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume-memory', body: '打回续跑，检查上一轮记忆' }));
@@ -163,7 +163,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       await idle();
       const hold = `curl -fsS --max-time 180 ${shellQuote(`${base}/cancel-in-flight`)}`;
       daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
-        workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'cancel-in-flight',
+        workId: daemon.work.id, cardId: first.cardId, agentId: 'grok-executor', key: 'cancel-in-flight',
         content: `低消耗取消测试：第一步仅执行一次前台命令 ${hold}，保持等待，不后台化、不重试、不写文件、不派生子代理、不安装、不提交、不推送。运行层会中止本轮。`,
       }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'cancel-in-flight', body: '检查进行中取消' }));

@@ -5,13 +5,13 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, TokenUsage } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
-import { templatePrompt } from './prompts.js';
-import { TemplateCatalog, type AgentTemplate } from './templates.js';
+import { agentPrompt } from './prompts.js';
+import type { AgentConfig } from './agents.js';
 
-function claudeHome(template: AgentTemplate, home = homedir()) {
-  return join(home, '.helm', 'agent-homes', template.id);
+function claudeHome(agent: AgentConfig, home = homedir()) {
+  return join(home, '.helm', 'agent-homes', agent.id);
 }
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
@@ -101,15 +101,15 @@ export class ClaudeDriver implements Driver {
   install = { executable: 'claude', command: 'npm install -g @anthropic-ai/claude-code' };
   constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
 
-  async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
-    const directory = claudeHome(template);
+  async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {
+    const directory = claudeHome(agent);
     const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
-    if (template.home === 'template') {
+    if (agent.home === 'dedicated') {
       const command = `mkdir -p ${quoted} && \${EDITOR:-vi} ${quoted}/settings.json`;
       try {
         if ((await stat(directory)).isDirectory() && (await stat(join(directory, 'settings.json'))).isFile()) return { available: true };
       } catch { /* Only file metadata is needed; the CLI validates contents. */ }
-      return { available: false, reason: `API 模板需要主目录 ${directory} 和 settings.json；请按 Claude 格式配置接口和 key。`, command };
+      return { available: false, reason: `API Agent 需要主目录 ${directory} 和 settings.json；请按 Claude 格式配置接口和 key。`, command };
     }
     const command = 'claude auth login';
     try {
@@ -122,12 +122,12 @@ export class ClaudeDriver implements Driver {
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    const coordinator = (this.role ?? options.template?.role) === 'coordinator';
+    const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
     if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
-      || options.template?.role === 'executor' || options.resumeSessionId !== undefined)) {
+      || options.agent?.role === 'executor' || options.resumeSessionId !== undefined)) {
       throw new Error('ClaudeCoordinatorDriver requires a fresh read-only coordinator round');
     }
-    if (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.template?.role === 'coordinator')) {
+    if (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.agent?.role === 'coordinator')) {
       throw new Error('ClaudeExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
@@ -135,7 +135,7 @@ export class ClaudeDriver implements Driver {
       throw new Error('Claude executor writable roots must contain only its card copy');
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
-    const template = options.template ?? new TemplateCatalog().get(coordinator ? 'claude-coordinator' : 'claude-executor');
+    const agent = options.agent;
     options.signal?.throwIfAborted();
     const id = options.resumeSessionId ?? randomUUID();
     const controller = new AbortController();
@@ -154,21 +154,21 @@ export class ClaudeDriver implements Driver {
     // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
     const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
     delete env.CLAUDE_CONFIG_DIR;
-    if (template.home === 'template') env.CLAUDE_CONFIG_DIR = claudeHome(template, options.env.HOME);
+    if (agent.home === 'dedicated') env.CLAUDE_CONFIG_DIR = claudeHome(agent, options.env.HOME);
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
-      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: template.home === 'template' ? ['user'] : ['user', 'project', 'local'],
+      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: agent.home === 'dedicated' ? ['user'] : ['user', 'project', 'local'],
       settings: { autoMemoryEnabled: false, fastMode: false,
         // Ask rules precede settings allow rules; otherwise they can skip our
         // path and sandbox checks in canUseTool, even in default mode.
         // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
         permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] },
       },
-      // The template directory is the plugin root; Claude discovers its skills/.
-      ...(template.skillsPath ? { plugins: [{ type: 'local', path: resolve(template.directory), skipMcpDiscovery: true }] } : {}),
+      // The agent directory is the plugin root; Claude discovers its skills/.
+      ...(agent.skillsPath ? { plugins: [{ type: 'local', path: resolve(agent.directory), skipMcpDiscovery: true }] } : {}),
       skills: 'all',
-      systemPrompt: templatePrompt(template),
+      systemPrompt: agentPrompt(agent),
       permissionMode: 'default', abortController: controller,
       canUseTool: coordinator ? coordinatorPermission() : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
@@ -195,8 +195,8 @@ export class ClaudeDriver implements Driver {
         network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, { type: 'http', ...server }])),
-      ...(options.template?.model ? { model: options.template.model } : {}),
-      ...(options.template?.reasoningEffort ? { effort: options.template.reasoningEffort } : {}),
+      ...(options.agent?.model ? { model: options.agent.model } : {}),
+      ...(options.agent?.reasoningEffort ? { effort: options.agent.reasoningEffort } : {}),
       ...(options.resumeSessionId ? { resume: id } : { sessionId: id }),
     };
     const runQuery = this.config.query ?? query;

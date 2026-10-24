@@ -3,7 +3,7 @@ import { OperationError } from '../../shared/api.js';
 import { useData } from '../../shared/data.js';
 import type { Work } from '../../shared/types.js';
 
-type MessageInput = { body: string } & ({ projectId: string; coordinatorTemplateId: string } | { workId: string; cardId?: string; gateId?: string });
+type MessageInput = { body: string } & ({ projectId: string; coordinatorAgentId: string } | { workId: string; cardId?: string; gateId?: string });
 export function useSendMessage() {
   const { api } = useData();
   const attempt = useRef<{ params: MessageInput; key: string } | undefined>(undefined);

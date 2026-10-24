@@ -178,4 +178,26 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE messages ADD COLUMN card_id TEXT REFERENCES cards(id);
   `,
+  `
+  ALTER TABLE cards RENAME COLUMN template_id TO agent_id;
+  ALTER TABLE dispatches RENAME COLUMN template_id TO agent_id;
+  ALTER TABLE dispatches RENAME COLUMN template_snapshot TO agent_snapshot;
+  ALTER TABLE coordinator_rounds RENAME COLUMN template_snapshot TO agent_snapshot;
+  ALTER TABLE projects RENAME COLUMN default_coordinator_template_id TO default_coordinator_agent_id;
+  ALTER TABLE works RENAME COLUMN coordinator_template_id TO coordinator_agent_id;
+  UPDATE dispatches SET agent_snapshot = replace(agent_snapshot, '"home":"template"', '"home":"dedicated"');
+  UPDATE coordinator_rounds SET agent_snapshot = replace(agent_snapshot, '"home":"template"', '"home":"dedicated"') WHERE agent_snapshot IS NOT NULL;
+  UPDATE events SET object_type = 'agent' WHERE object_type = 'agent-template';
+  UPDATE events SET action = CASE action
+    WHEN 'round-template-loaded' THEN 'round-agent-loaded'
+    WHEN 'coordinator-template-changed' THEN 'coordinator-agent-changed'
+    WHEN 'project-coordinator-template-set' THEN 'project-coordinator-agent-set'
+    WHEN 'template-availability-changed' THEN 'agent-availability-changed'
+    WHEN 'agent-template-saved' THEN 'agent-saved'
+    WHEN 'agent-template-deleted' THEN 'agent-deleted'
+    ELSE action END;
+  UPDATE events SET details = replace(replace(replace(replace(replace(replace(details,
+    '"templateId":', '"agentId":'), '"previousTemplateId":', '"previousAgentId":'), '"coordinatorTemplateId":', '"coordinatorAgentId":'),
+    '"template":', '"agent":'), '"kind":"template-unavailable"', '"kind":"agent-unavailable"'), '"home":"template"', '"home":"dedicated"');
+  `,
 ];

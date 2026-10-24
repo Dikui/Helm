@@ -8,7 +8,8 @@ import { FakeDriver, type DriverEvent, type EndReason, type SessionOptions } fro
 async function fixture(t: TestContext): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-driver-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  return { cwd, env: { HELM_TEST: 'scripted' }, sandbox: { mode: 'workspace-write', writableRoots: [cwd] }, mcpServers: {} };
+  return { agent: { id: 'test', role: 'executor', driver: 'claude-sdk', model: null, reasoningEffort: null, fast: false, home: 'shared',
+    description: '测试', prompt: '', directory: cwd, skillsPath: null }, cwd, env: { HELM_TEST: 'scripted' }, sandbox: { mode: 'workspace-write', writableRoots: [cwd] }, mcpServers: {} };
 }
 
 test('假驱动接受新开或续跑及任意输入，按 cwd 写文件，逐条报告输出、压缩和结束', async t => {

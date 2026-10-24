@@ -9,12 +9,12 @@ import { CoordinatorChooser } from './CoordinatorChooser.js';
 import { ActionDialog } from './ActionDialog.js';
 import './work-actions.css';
 
-export interface ActionWork extends Work { allowedOperations?: string[]; coordinatorTemplateId?: string; outputsDeletedAt?: string | null }
+export interface ActionWork extends Work { allowedOperations?: string[]; coordinatorAgentId?: string; outputsDeletedAt?: string | null }
 export function WorkActions({ work, reload }: { work: ActionWork; reload: () => void }) {
   const { t } = useI18n();
   const { api } = useData();
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState<'cancel' | 'template' | 'export' | 'delete'>();
+  const [panel, setPanel] = useState<'cancel' | 'agent' | 'export' | 'delete'>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error>();
   const [restriction, setRestriction] = useState<{ status: string; operations: string[] }>();
@@ -54,7 +54,7 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
     {open && <div className="work-actions-menu" role="group" aria-label={t('workActionsGroup')}>
       <button className="btn sm" disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
         onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')}</button>
-      <button className="btn sm" disabled={!enabled('change-coordinator-template')} onClick={() => { setError(undefined); setOpen(false); setPanel('template'); }}>{t('changeCoordinator')}</button>
+      <button className="btn sm" disabled={!enabled('change-coordinator-agent')} onClick={() => { setError(undefined); setOpen(false); setPanel('agent'); }}>{t('changeCoordinator')}</button>
       <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>
       <button className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setOpen(false); setPanel('export'); }}>{t('exportOutputs')}</button>
       <button className="btn sm work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('delete'); }}>{t('deleteOutputs')}</button>
@@ -74,9 +74,9 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
       {deletePrompt && <><p role="status">{t('outputsNotExported')}</p><button className="btn" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setPanel('export'); }}>{t('exportFirst')}</button></>}
       <button className="btn work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => void run('delete-outputs', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteOutputs')}</button>
     </ActionDialog>}
-    {panel === 'template' && <ActionDialog title={t('changeCoordinator')} busy={busy} onClose={close} returnFocus={trigger}>
+    {panel === 'agent' && <ActionDialog title={t('changeCoordinator')} busy={busy} onClose={close} returnFocus={trigger}>
       {error && <ErrorNotice error={error} />}
-      <CoordinatorChooser current={work.coordinatorTemplateId} busy={busy || !enabled('change-coordinator-template')} onSubmit={templateId => void run('change-coordinator-template', { templateId })} />
+      <CoordinatorChooser current={work.coordinatorAgentId} busy={busy || !enabled('change-coordinator-agent')} onSubmit={agentId => void run('change-coordinator-agent', { agentId })} />
     </ActionDialog>}
     {panel === 'cancel' && <ActionDialog title={t('cancelWork')} description={`${work.title} · ${t('cancelWorkConsequence')}`} busy={busy} onClose={close} returnFocus={trigger}>
       {error && <ErrorNotice error={error} />}

@@ -15,7 +15,7 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
   let observed: SessionOptions | undefined;
   let starts = 0;
   const daemon = await coordinatorFixture(t, {
-    checkAvailability: template => driver.checkAvailability(template),
+    checkAvailability: agent => driver.checkAvailability(agent),
     async start(options) {
       observed = options;
       starts++;

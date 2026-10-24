@@ -58,7 +58,7 @@ const draft: FakeStep = { type: 'tool', name: 'draft-work-description', argument
   requirements: '测试可靠性', boundary: '本机', criteria: '失败可恢复' }), check: ok };
 const create: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '实现卡片' }), saveAs: 'card', check: ok };
 const dispatch: FakeStep = { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
-  key: 'dispatch', templateId: 'claude-executor' }), check: ok };
+  key: 'dispatch', agentId: 'claude-executor' }), check: ok };
 
 test('连续失败三次暂停，推送待处理通知，消息和确认关卡不绕过暂停，重启后只由用户恢复', async t => {
   let pausedBrief: StartupBrief | undefined;
@@ -269,7 +269,7 @@ test('运行层暂停工作会中止正在运行的派单，保留执行改动�
   for (const purpose of ['execution', 'verification'] as const) await t.test(purpose, async t => {
     let ready!: () => void;
     const executorReady = new Promise<void>(resolve => { ready = resolve; });
-    const daemon = await fixture(t, [[draft], [create, { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', purpose }) }, { type: 'hang', until: executorReady }, { type: 'end', reason: 'quota-exhausted' }]], [[
+    const daemon = await fixture(t, [[draft], [create, { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose }) }, { type: 'hang', until: executorReady }, { type: 'end', reason: 'quota-exhausted' }]], [[
       { type: 'write', path: 'progress.txt', content: '暂停前的进度' },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'verification' ? 'passed' : 'completed', reason: '尚未结束' }, check: value => { ok(value); ready(); } },
       { type: 'hang' },
@@ -333,7 +333,7 @@ test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项�
 
 test('轮次重投依靠 key 不重复建卡和派单，执行者额度用完唤醒调度者', async t => {
   for (const purpose of ['execution', 'verification'] as const) await t.test(purpose, async t => {
-    const keyedDispatch: FakeStep = { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', templateId: 'claude-executor', purpose }) };
+    const keyedDispatch: FakeStep = { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose }) };
     let release!: () => void;
     const hold = new Promise<void>(resolve => { release = resolve; });
     t.after(() => release());
@@ -367,7 +367,7 @@ test('卡片汇总全部派单 token，工作另加全部轮次 token，压缩�
   const daemon = await fixture(t, [
     [draft, { type: 'compaction' }, { type: 'end', reason: 'completed', usage: { inputTokens: 10, outputTokens: 5 } }],
     [create, dispatch, { type: 'hang', until: hold },
-      { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'second', templateId: 'claude-executor' }) },
+      { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'second', agentId: 'claude-executor' }) },
       { type: 'end', reason: 'completed', usage: { inputTokens: 20, outputTokens: 7 } }],
   ], [
     [{ type: 'compaction' }, { type: 'end', reason: 'quota-exhausted', usage: { inputTokens: 11, outputTokens: 7 } }],

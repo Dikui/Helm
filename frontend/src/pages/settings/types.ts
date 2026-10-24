@@ -1,17 +1,17 @@
-export type TemplateRole = 'coordinator' | 'executor';
-export interface TemplateConfig {
-  role: TemplateRole; driver: 'claude-sdk' | 'codex' | 'grok' | 'deepseek'; model: string | null;
+export type AgentRole = 'coordinator' | 'executor';
+export interface AgentSettings {
+  role: AgentRole; driver: 'claude-sdk' | 'codex' | 'grok' | 'deepseek'; model: string | null;
   reasoningEffort: 'low' | 'medium' | 'high' | 'max' | null; fast: boolean;
-  home: 'shared' | 'template'; description: string;
+  home: 'shared' | 'dedicated'; description: string;
 }
-export interface TemplateEntry {
-  id: string; revision: string | null; role: TemplateRole | null; driver: TemplateConfig['driver'] | null;
-  model: string | null; reasoningEffort?: TemplateConfig['reasoningEffort']; fast?: boolean;
-  home?: TemplateConfig['home']; description: string | null; prompt?: string; directory?: string;
+export interface AgentEntry {
+  id: string; revision: string | null; role: AgentRole | null; driver: AgentSettings['driver'] | null;
+  model: string | null; reasoningEffort?: AgentSettings['reasoningEffort']; fast?: boolean;
+  home?: AgentSettings['home']; description: string | null; prompt?: string; directory?: string;
   skillsPath?: string | null; skills?: string[]; billing: string | null; available: boolean; reason: string | null; command?: string;
   runningDispatches: number; activeWorks: number;
 }
-export interface Project { id: string; name: string; path: string; defaultCoordinatorTemplateId: string }
+export interface Project { id: string; name: string; path: string; defaultCoordinatorAgentId: string }
 export interface RuntimeSettings {
   concurrencyLimit: number; dispatchWallTimeoutMs: number; dispatchIdleTimeoutMs: number;
   roundTotalTimeoutMs: number; roundIdleTimeoutMs: number; outputThresholdBytes: number;

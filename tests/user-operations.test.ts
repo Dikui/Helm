@@ -17,7 +17,7 @@ const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as a
 const create = (key: string): FakeStep => ({ type: 'tool', name: 'create-card',
   arguments: ctx => ({ workId: workIdOf(ctx), key, content: key }), saveAs: key, check: ok });
 const dispatch = (key: string): FakeStep => ({ type: 'tool', name: 'create-dispatch',
-  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id, key, templateId: 'claude-executor' }), check: ok });
+  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id, key, agentId: 'claude-executor' }), check: ok });
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5_000;
@@ -85,7 +85,7 @@ test('用户暂停卡片会中止派单并拒绝新派单，恢复推导状态�
   const paused = await daemon.call('pause-card', params);
   ok(paused);
   assert.equal(paused.result.status, 'paused');
-  assert.equal((await daemon.call('create-dispatch', { ...params, key: 'paused', templateId: 'claude-executor' }, token)).error.code, 'CARD_NOT_DISPATCHABLE');
+  assert.equal((await daemon.call('create-dispatch', { ...params, key: 'paused', agentId: 'claude-executor' }, token)).error.code, 'CARD_NOT_DISPATCHABLE');
   ok(await daemon.call('pause-card', params));
   const result = (await daemon.call('list-dispatches', daemon.params)).result[0];
   assert.equal(result.endReason, 'aborted');
@@ -145,7 +145,7 @@ test('工作暂停不改卡片状态，只投递用户消息，关卡仍可决�
   const result = (await daemon.call('list-dispatches', daemon.params)).result[0];
   assert.equal(result.endReason, 'aborted');
   assert.equal(result.abortReason, '工作暂停');
-  assert.equal((await daemon.call('create-dispatch', { ...daemon.params, cardId: idle.id, key: 'paused', templateId: 'claude-executor' }, token)).error.code, 'WORK_NOT_EXECUTING');
+  assert.equal((await daemon.call('create-dispatch', { ...daemon.params, cardId: idle.id, key: 'paused', agentId: 'claude-executor' }, token)).error.code, 'WORK_NOT_EXECUTING');
   const gate = (await daemon.call('list-pending')).result.find((gate: any) => gate.key === 'choice');
   ok(await daemon.call('decide-gate', { ...daemon.params, gateId: gate.id, decision: '先停下' }));
   const before = (await daemon.events()).filter(event => event.action === 'round-started').length;

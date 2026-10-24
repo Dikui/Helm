@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -38,7 +38,7 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   skills?: Record<string, string>; gitProbe?: boolean;
 } = {}) {
   const agent = config.agent ?? 'grok';
-  const templateId = `${agent}-executor`;
+  const agentId = `${agent}-executor`;
   const directory = await realpath(await mkdtemp(join(tmpdir(), `helm-${agent}-executor-`)));
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
@@ -65,12 +65,12 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
     git('add', '.gitignore');
   }
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-  const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, templateId, { model: config.model ?? (agent === 'grok' ? 'grok-4.7' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
+  const agentDir = await copyAgents(directory);
+  await configureTestAgent(agentDir, agentId, { model: config.model ?? (agent === 'grok' ? 'grok-4.7' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
   for (const [name, content] of Object.entries(config.skills ?? {})) {
-    const skill = join(templateDir, templateId, 'skills', name);
+    const skill = join(agentDir, agentId, 'skills', name);
     await mkdir(skill, { recursive: true });
-    await writeFile(join(skill, 'SKILL.md'), `---\nname: ${name}\ndescription: Helm smoke skill; use when asked to verify template skills.\n---\n${content}\n`);
+    await writeFile(join(skill, 'SKILL.md'), `---\nname: ${name}\ndescription: Helm smoke skill; use when asked to verify agent skills.\n---\n${content}\n`);
   }
   let created = false;
   const actions: FakeScript[] = [];
@@ -84,12 +84,12 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
     return [config.content ?? '实现卡片', ...(config.secondContent ? [config.secondContent] : [])].flatMap((content, index): FakeStep[] => [
       { type: 'tool', name: 'create-card', arguments: { workId: work.id, key: `card-${index}`, content: `${agent} 冒烟卡片`, needsVerification: config.purpose === 'verification' }, saveAs: `card-${index}`, check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: work.id,
-        cardId: (ctx.results.get(`card-${index}`) as any).result.id, templateId, key: `dispatch-${index}`,
+        cardId: (ctx.results.get(`card-${index}`) as any).result.id, agentId, key: `dispatch-${index}`,
         content, purpose: config.purpose ?? 'execution', needsBrowser: index === 0 && (config.needsBrowser ?? false) }), check: ok },
     ]);
   }));
   const dataDir = join(directory, 'data');
-  daemon = await startHelmd({ port: 0, dataDir, templateDir, drivers: { 'claude-sdk': coordinator, [agent]: executor },
+  daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: { 'claude-sdk': coordinator, [agent]: executor },
     ...(!config.realBrowser ? { browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url))] } } : {}) });
   const call = async (name: string, params: object = {}): Promise<any> =>
     (await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json();
@@ -104,6 +104,6 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
     try { return await until(dispatches, values => values.length >= count && values.slice(0, count).every(d => d.status === 'ended'), timeout); }
     catch (error) { throw new Error(`${String(error)}\n${JSON.stringify(await events())}`); }
   };
-  return { ...daemon, directory, home, repo, git, templateDir, dataDir, call, work, events, dispatches, ended, confirm, actions,
+  return { ...daemon, directory, home, repo, git, agentDir, dataDir, call, work, events, dispatches, ended, confirm, actions,
     output: async (id: string): Promise<any[]> => (await call('get-dispatch-output', { workId: work.id, dispatchId: id })).result };
 }

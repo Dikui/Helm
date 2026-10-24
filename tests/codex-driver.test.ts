@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { CodexDriver, CodexCoordinatorDriver, CodexExecutorDriver } from '../src/codex-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
-import { TemplateCatalog, templateEnvironment, type AgentTemplate } from '../src/templates.js';
+import { AgentCatalog, agentEnvironment, type AgentConfig } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 async function fixture(t: TestContext, notifications: object[], script: object = {}, role: 'executor' | 'coordinator' = 'executor') {
@@ -19,9 +20,9 @@ async function fixture(t: TestContext, notifications: object[], script: object =
   await writeFile(path, JSON.stringify({ record, notifications, ...script }));
   const driver = new CodexDriver({ command: { file: process.execPath,
     args: [fileURLToPath(new URL('./fixtures/codex-app-server.js', import.meta.url)), path] } });
-  const template: AgentTemplate = { id: `codex-${role}`, role, driver: 'codex', model: 'test-model',
+  const agent: AgentConfig = { id: `codex-${role}`, role, driver: 'codex', model: 'test-model',
     reasoningEffort: 'low', fast: true, home: 'shared', description: '执行', prompt: '测试策略', directory, skillsPath: join(directory, 'skills') };
-  const options: SessionOptions = { template, cwd: directory, dataDir: join(directory, 'dispatch'),
+  const options: SessionOptions = { agent, cwd: directory, dataDir: join(directory, 'dispatch'),
     env: { CODEX_HOME: '/caller/must-not-use', HOME: directory, PATH: process.env.PATH!, NO_PROXY: 'example.test', no_proxy: 'internal.test' },
     sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [directory] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };
@@ -45,7 +46,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
     notification('item/completed', { item: { id: 'answer', type: 'agentMessage', text: '已完成', phase: 'final_answer' } }),
     completed(),
   ]);
-  ctx.options.env = { ...templateEnvironment(ctx.options.template!), ...ctx.options.env };
+  ctx.options.env = { ...agentEnvironment(ctx.options.agent!), ...ctx.options.env };
   const session = await ctx.driver.start(ctx.options);
   t.after(() => session.cancel());
   await session.send('实现派单');
@@ -56,7 +57,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9 } });
   const requests = await ctx.requests();
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'thread/start', 'turn/start']);
-  assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.template!.skillsPath] });
+  assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.agent!.skillsPath] });
   const thread = requests[3].params;
   assert.equal(thread.approvalPolicy, 'never');
   assert.equal(thread.sandbox, 'workspace-write');
@@ -82,7 +83,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
 
 for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默认策略与运行约定进入实际 RPC 提示词`, async t => {
   const ctx = await fixture(t, [completed()], {}, role);
-  ctx.options.template = { ...ctx.options.template!, prompt: new TemplateCatalog(undefined, ['codex']).get(`codex-${role}`).prompt };
+  ctx.options.agent = { ...ctx.options.agent!, prompt: new AgentCatalog(fixtureAgentDir, ['codex']).get(`codex-${role}`).prompt };
   for (const resumeSessionId of role === 'executor' ? [undefined, 'thread-scripted'] : [undefined]) {
     const session = await ctx.driver.start({ ...ctx.options, resumeSessionId });
     t.after(() => session.cancel());
@@ -150,9 +151,9 @@ test('Codex 成功优先于重试中的额度错误；普通回答中的额度�
   assert.equal(end.type === 'end' && end.reason, 'completed');
 });
 
-test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skills 均取当前模板', async t => {
+test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skills 均取当前 Agent', async t => {
   const ctx = await fixture(t, [completed()]);
-  ctx.options.template = { ...ctx.options.template!, id: 'api-codex', home: 'template', fast: false, skillsPath: null, reasoningEffort: 'max' };
+  ctx.options.agent = { ...ctx.options.agent!, id: 'api-codex', home: 'dedicated', fast: false, skillsPath: null, reasoningEffort: 'max' };
   ctx.options.resumeSessionId = 'thread-scripted';
   const session = await ctx.driver.start(ctx.options);
   await session.send('继续');
@@ -226,11 +227,11 @@ test('Codex 订阅可用性由默认环境的 CLI 退出码决定，不依赖 au
   const executable = join(ctx.directory, 'codex-substitute');
   const evidence = join(ctx.directory, 'login-probe.json');
   const driver = new CodexDriver({ command: { file: executable, args: [] } });
-  const template = ctx.options.template!;
+  const agent = ctx.options.agent!;
   for (const exit of [0, 1]) {
     await writeFile(executable, `#!${process.execPath}\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({args: process.argv.slice(2), env: process.env, cwd: process.cwd()}));\nconsole.error('opaque account information');\nprocess.exit(${exit});\n`);
     await chmod(executable, 0o755);
-    const availability = await driver.checkAvailability(template);
+    const availability = await driver.checkAvailability(agent);
     assert.equal(availability.available, exit === 0);
     if (exit) assert.equal(availability.command, 'codex login');
     assert.doesNotMatch(JSON.stringify(availability), /opaque account information/);
@@ -243,14 +244,14 @@ test('Codex 订阅可用性由默认环境的 CLI 退出码决定，不依赖 au
     await assert.rejects(stat(join(ctx.directory, '.codex')), { code: 'ENOENT' });
   }
   await rm(executable);
-  assert.equal((await driver.checkAvailability(template)).available, false, 'CLI 缺失时不可用');
-  const api = { ...template, id: 'codex-api', home: 'template' as const };
+  assert.equal((await driver.checkAvailability(agent)).available, false, 'CLI 缺失时不可用');
+  const api = { ...agent, id: 'codex-api', home: 'dedicated' as const };
   const apiHome = join(ctx.directory, '.helm', 'agent-homes', 'codex-api');
   assert.equal((await driver.checkAvailability(api)).available, false);
   await mkdir(apiHome, { recursive: true });
   assert.equal((await driver.checkAvailability(api)).available, false);
   await writeFile(join(apiHome, 'config.toml'), 'opaque, not parsed by Helm');
-  assert.equal((await driver.checkAvailability(api)).available, true, 'API 模板不调用登录检查');
+  assert.equal((await driver.checkAvailability(api)).available, true, 'API Agent 不调用登录检查');
 });
 
 test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP 配置生效', async t => {
@@ -304,7 +305,7 @@ test('Codex 调度者拒绝续跑、可写沙箱和错配角色，角色专用�
     { ...ctx.options, sandbox: { mode: 'workspace-write' as const, writableRoots: [ctx.directory] } },
     { ...ctx.options, sandbox: { mode: 'read-only' as const, writableRoots: [ctx.directory] } },
   ]) await assert.rejects(ctx.driver.start(options), /fresh read-only coordinator round/);
-  await assert.rejects(new CodexCoordinatorDriver().start({ ...ctx.options, template: { ...ctx.options.template!, role: 'executor' } }), /coordinator/);
+  await assert.rejects(new CodexCoordinatorDriver().start({ ...ctx.options, agent: { ...ctx.options.agent!, role: 'executor' } }), /coordinator/);
   await assert.rejects(new CodexExecutorDriver().start(ctx.options), /executor card copy/);
   assert.deepEqual(await ctx.requests(), []);
 });

@@ -4,32 +4,32 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { FakeDriver, type FakeContext, type FakeStep, type TemplateAvailability } from '../src/driver.js';
+import { FakeDriver, type FakeContext, type FakeStep, type AgentAvailability } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyTemplates } from './helmd-fixture.js';
+import { copyAgents } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 const unavailable = { available: false, reason: '默认主目录未登录', command: 'claude auth login' };
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 
-async function fixture(t: TestContext, initial: Record<string, TemplateAvailability> = {}) {
+async function fixture(t: TestContext, initial: Record<string, AgentAvailability> = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-availability-')));
-  const templateDir = await copyTemplates(directory);
+  const agentDir = await copyAgents(directory);
   const states = new Map(Object.entries(initial));
-  const probes = new Map<string, () => Promise<TemplateAvailability>>();
+  const probes = new Map<string, () => Promise<AgentAvailability>>();
   const actions: ((ctx: FakeContext) => FakeStep[])[] = [];
   const executors: FakeStep[][] = [];
   const started: string[] = [];
   const driver = new FakeDriver(Array(40).fill((ctx: FakeContext): FakeStep[] => {
-    started.push(ctx.options.template!.id);
-    if (ctx.options.template!.role === 'executor') return executors.shift() ?? [];
+    started.push(ctx.options.agent!.id);
+    if (ctx.options.agent!.role === 'executor') return executors.shift() ?? [];
     const work = JSON.parse(ctx.input).work;
     if (work.status === 'aligning') return [{ type: 'tool', name: 'draft-work-description', arguments: {
-      workId: work.id, key: 'draft', requirements: '可用性检查', boundary: '假驱动', criteria: '拒绝不可用模板并恢复',
+      workId: work.id, key: 'draft', requirements: '可用性检查', boundary: '假驱动', criteria: '拒绝不可用 Agent 并恢复',
     }, check: ok }];
     return actions.shift()?.(ctx) ?? [];
-  }), template => probes.get(template.id)?.() ?? states.get(template.id) ?? { available: true });
-  const options = { port: 0, dataDir: join(directory, 'data'), templateDir, drivers: { 'claude-sdk': driver, codex: new FakeDriver() } };
+  }), agent => probes.get(agent.id)?.() ?? states.get(agent.id) ?? { available: true });
+  const options = { port: 0, dataDir: join(directory, 'data'), agentDir, drivers: { 'claude-sdk': driver, codex: new FakeDriver() } };
   let daemon = await startHelmd(options);
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> => {
@@ -58,16 +58,16 @@ function dispatchSteps(expected: boolean): (ctx: FakeContext) => FakeStep[] {
   return ctx => {
     const workId = JSON.parse(ctx.input).work.id;
     return [
-      { type: 'tool', name: 'list-agent-templates', arguments: { workId }, check: (value: any) => {
+      { type: 'tool', name: 'list-agents', arguments: { workId }, check: (value: any) => {
         ok(value);
         assert.equal(value.result.find((t: any) => t.id === 'claude-executor').available, expected);
       } },
       { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: '执行' }, saveAs: 'card', check: ok },
-      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, key: 'dispatch', templateId: 'claude-executor', cardId: (ctx.results.get('card') as any).result.id }),
+      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, key: 'dispatch', agentId: 'claude-executor', cardId: (ctx.results.get('card') as any).result.id }),
         check: (value: any) => {
           assert.equal(value.ok, expected, JSON.stringify(value));
           if (!expected) {
-            assert.equal(value.error.code, 'TEMPLATE_UNAVAILABLE');
+            assert.equal(value.error.code, 'AGENT_UNAVAILABLE');
             assert.equal(value.error.details.command, unavailable.command);
           }
         } },
@@ -75,17 +75,17 @@ function dispatchSteps(expected: boolean): (ctx: FakeContext) => FakeStep[] {
   };
 }
 
-test('启动检查模板，原因进入待处理和事件并去重；MCP 拒绝派单，修复后无须重启', async t => {
+test('启动检查 Agent，原因进入待处理和事件并去重；MCP 拒绝派单，修复后无须重启', async t => {
   const daemon = await fixture(t, { 'claude-executor': unavailable });
-  const notices = async () => (await daemon.events()).filter(e => e.action === 'needs-user-attention' && e.details.templateId === 'claude-executor');
+  const notices = async () => (await daemon.events()).filter(e => e.action === 'needs-user-attention' && e.details.agentId === 'claude-executor');
   assert.equal((await notices()).length, 1, '启动时已检查');
   for (let i = 0; i < 2; i++) {
-    const templates = (await daemon.call('list-agent-templates')).result;
-    const item = templates.find((t: any) => t.id === 'claude-executor');
+    const agents = (await daemon.call('list-agents')).result;
+    const item = agents.find((t: any) => t.id === 'claude-executor');
     assert.equal(item.available, false);
     assert.equal(item.reason, unavailable.reason);
     assert.equal(item.command, unavailable.command);
-    const pending = (await daemon.call('list-pending')).result.find((p: any) => p.templateId === item.id);
+    const pending = (await daemon.call('list-pending')).result.find((p: any) => p.agentId === item.id);
     assert.equal(pending.reason, unavailable.reason);
     assert.equal(pending.command, unavailable.command);
   }
@@ -98,20 +98,20 @@ test('启动检查模板，原因进入待处理和事件并去重；MCP 拒绝�
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   await daemon.idle();
   assert.deepEqual((await daemon.call('list-dispatches', { workId: work.id })).result, []);
-  assert.ok((await daemon.events()).some(e => e.action === 'operation-rejected' && e.details.code === 'TEMPLATE_UNAVAILABLE'));
+  assert.ok((await daemon.events()).some(e => e.action === 'operation-rejected' && e.details.code === 'AGENT_UNAVAILABLE'));
   assert.equal((await notices()).length, 1);
   daemon.states.set('claude-executor', { available: true });
   daemon.actions.push(dispatchSteps(true));
   ok(await daemon.call('send-message', { workId: work.id, key: 'retry', body: '已登录' }));
   await until(async () => (await daemon.call('list-dispatches', { workId: work.id })).result as any[], items => items.length === 1 && items[0].status === 'ended');
   assert.ok(daemon.started.includes('claude-executor'));
-  assert.equal((await daemon.call('list-pending')).result.some((p: any) => p.templateId === 'claude-executor'), false);
+  assert.equal((await daemon.call('list-pending')).result.some((p: any) => p.agentId === 'claude-executor'), false);
   daemon.states.set('claude-executor', { ...unavailable, reason: 'settings.json 缺失' });
-  await daemon.call('list-agent-templates');
-  await daemon.call('list-agent-templates');
+  await daemon.call('list-agents');
+  await daemon.call('list-agents');
   assert.equal((await notices()).length, 2, '新原因只通知一次');
   daemon.states.set('claude-executor', { available: false, reason: 'settings.json 缺失', command: '更新后的配置命令' });
-  await daemon.call('list-agent-templates');
+  await daemon.call('list-agents');
   assert.equal((await notices()).length, 2, '仅命令变化不重复通知同一原因');
 });
 
@@ -139,7 +139,7 @@ test('异步可用性检查期间的重复派单仍按 key 去重，关闭时等
   let checked = 0;
   daemon.probes.set('claude-executor', async () => { checked++; await hold; return { available: true }; });
   const dispatch = () => fetch(`${daemon.url}/api/create-dispatch`, { method: 'POST', headers: { Authorization: authorization },
-    body: JSON.stringify({ workId: work.id, cardId: card.id, key: 'dispatch', templateId: 'claude-executor' }) }).then(response => response.json() as Promise<any>);
+    body: JSON.stringify({ workId: work.id, cardId: card.id, key: 'dispatch', agentId: 'claude-executor' }) }).then(response => response.json() as Promise<any>);
   const first = dispatch();
   const duplicate = dispatch();
   await until(async () => checked, count => count === 2);
@@ -154,7 +154,7 @@ test('异步可用性检查期间的重复派单仍按 key 去重，关闭时等
   t.after(() => finishProbe());
   daemon.probes.set('claude-executor', async () => { checked++; await finalProbe; return unavailable; });
   const before = checked;
-  const listing = daemon.call('list-agent-templates').catch(() => undefined);
+  const listing = daemon.call('list-agents').catch(() => undefined);
   await until(async () => checked, count => count > before);
   let closed = false;
   const closing = daemon.close().then(() => { closed = true; });
@@ -164,7 +164,7 @@ test('异步可用性检查期间的重复派单仍按 key 去重，关闭时等
   await Promise.all([closing, listing]);
 });
 
-test('排队期间模板变为不可用，实际启动前再次检查，不拉起执行者', async t => {
+test('排队期间 Agent 变为不可用，实际启动前再次检查，不拉起执行者', async t => {
   const daemon = await fixture(t);
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });
@@ -174,7 +174,7 @@ test('排队期间模板变为不可用，实际启动前再次检查，不拉�
   const work = await daemon.startWork();
   daemon.actions.push(ctx => ['first', 'second'].flatMap(key => [
     { type: 'tool' as const, name: 'create-card', arguments: { workId: work.id, key, content: key }, saveAs: key, check: ok },
-    { type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: work.id, key, templateId: 'claude-executor', cardId: (ctx.results.get(key) as any).result.id }), check: ok },
+    { type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: work.id, key, agentId: 'claude-executor', cardId: (ctx.results.get(key) as any).result.id }), check: ok },
   ]));
   const gate = (await daemon.call('list-pending')).result.find((g: any) => g.workId === work.id);
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
@@ -188,7 +188,7 @@ test('排队期间模板变为不可用，实际启动前再次检查，不拉�
   assert.equal(ended[1].endCommit, null);
   assert.equal(daemon.started.filter(id => id === 'claude-executor').length, 1);
   const event = (await daemon.events()).find(e => e.action === 'dispatch-ended' && e.dispatchId === ended[1].id);
-  assert.equal(event.details.error.code, 'TEMPLATE_UNAVAILABLE');
+  assert.equal(event.details.error.code, 'AGENT_UNAVAILABLE');
 });
 
 test('调度者不可用立即暂停且不重试；修复后手动恢复工作，无须重启 helmd', async t => {
@@ -214,7 +214,7 @@ test('check-agent 只在调用时检查 CLI 是否在 PATH 上，install-agent �
   process.env.PATH = `${bin}:${path}`;
   const command = `mkdir -p '${bin}' && printf '#!/bin/sh\\n' > '${bin}/helm-fake-cli' && chmod +x '${bin}/helm-fake-cli' && echo installed`;
   const codex = Object.assign(new FakeDriver(), { install: { executable: 'helm-fake-cli', command } });
-  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), templateDir: await copyTemplates(directory),
+  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory),
     drivers: { 'claude-sdk': new FakeDriver(), codex } });
   t.after(async () => { process.env.PATH = path; await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> =>

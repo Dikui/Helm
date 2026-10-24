@@ -137,7 +137,7 @@ test('运行层暂停带原因归等你处理，计时来自时间戳并每秒�
   await waitFor(() => expect(timer.textContent).not.toBe(first), { timeout: 2_500 });
   expect(window.location.pathname).toBe(`/works/${work.id}/brief`);
   view.unmount();
-  window.history.replaceState(null, '', '/settings/templates/claude-executor');
+  window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
   expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy();
 });

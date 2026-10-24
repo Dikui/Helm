@@ -60,7 +60,7 @@ async function main() {
   } else if (action === 'start') {
     helm(url, 'set-concurrency', '--limit', '2');
     const project = helm(url, 'register-project', '--path', run.repo);
-    const { work } = helm(url, 'send-message', '--projectId', project.id, '--key', '2048-start', '--coordinatorTemplateId', 'codex-coordinator', '--body', request);
+    const { work } = helm(url, 'send-message', '--projectId', project.id, '--key', '2048-start', '--coordinatorAgentId', 'codex-coordinator', '--body', request);
     await save(join(root, 'work.json'), { projectId: project.id, workId: work.id });
     console.log(JSON.stringify({ workId: work.id, url }, null, 2));
   } else if (action === 'export') {
@@ -74,7 +74,7 @@ async function main() {
       artifacts: read('get-dispatch-artifacts', '--dispatchId', dispatch.id) }));
     const snapshot = { exportedAt: new Date().toISOString(), run, work, graph, dispatches, events, artifacts,
       conversation: read('get-conversation'), descriptions: read('get-work-descriptions'),
-      templates: helm(url, 'list-agent-templates'), settings: helm(url, 'get-settings') };
+      agents: helm(url, 'list-agents'), settings: helm(url, 'get-settings') };
     const directory = join(root, 'evidence');
     await mkdir(directory, { recursive: true });
     await save(join(directory, 'snapshot.json'), snapshot);
@@ -85,27 +85,27 @@ async function main() {
       outputTokens: total.outputTokens + event.details.usage.outputTokens,
     }), { inputTokens: 0, outputTokens: 0 });
     lines.push(`调度轮次 ${rounds.length} 次，token：${JSON.stringify(roundUsage)}`);
-    const roundTemplates = new Map(events.filter(event => event.action === 'round-template-loaded')
-      .map(event => [event.object.id, event.details.template]));
+    const roundAgents = new Map(events.filter(event => event.action === 'round-agent-loaded')
+      .map(event => [event.object.id, event.details.agent]));
     for (const event of events.filter(event => event.action === 'round-started')) {
-      const template = roundTemplates.get(event.object.id);
+      const agent = roundAgents.get(event.object.id);
       const ended = rounds.find(round => round.object.id === event.object.id);
-      lines.push(`  轮次 ${event.object.id}：template=${template?.id ?? '未加载'} driver=${template?.driver ?? '-'} model=${template?.model ?? '-'} effort=${template?.reasoningEffort ?? '-'} fast=${template?.fast ?? '-'}；${ended?.details.reason ?? '运行中'}；output=${event.details.outputPath}`);
+      lines.push(`  轮次 ${event.object.id}：agent=${agent?.id ?? '未加载'} driver=${agent?.driver ?? '-'} model=${agent?.model ?? '-'} effort=${agent?.reasoningEffort ?? '-'} fast=${agent?.fast ?? '-'}；${ended?.details.reason ?? '运行中'}；output=${event.details.outputPath}`);
     }
     for (const card of graph.filter(node => node.type === 'card')) {
       lines.push(`\n卡片 ${card.id} ${card.status}：${card.content.split('\n')[0]}`, `token：${JSON.stringify(card.usage)}`);
       const attempts = dispatches.filter(dispatch => dispatch.cardId === card.id);
       const completedBy = attempts.filter(dispatch => dispatch.purpose === 'execution' && dispatch.endReason === 'completed' && dispatch.conclusion === 'completed');
-      lines.push(`完成执行派单：${completedBy.map(dispatch => `${dispatch.templateId}/${dispatch.id}`).join(', ') || '无（可能为只验收卡片或尚未完成）'}`);
+      lines.push(`完成执行派单：${completedBy.map(dispatch => `${dispatch.agentId}/${dispatch.id}`).join(', ') || '无（可能为只验收卡片或尚未完成）'}`);
       const verification = attempts.filter(dispatch => dispatch.purpose === 'verification').at(-1);
       lines.push(`最近验收：${verification ? `${verification.endReason}/${verification.conclusion}；${verification.conclusionReason ?? ''}` : '未派验收'}`);
-      for (const dispatch of attempts) lines.push(`  ${dispatch.purpose} ${dispatch.id}：${dispatch.templateId} driver=${dispatch.template.driver} model=${dispatch.template.model} effort=${dispatch.template.reasoningEffort} fast=${dispatch.template.fast} session=${dispatch.sessionId}；${dispatch.status}/${dispatch.endReason}/${dispatch.conclusion}；浏览器=${dispatch.needsBrowser}；token=${JSON.stringify(dispatch.usage)}；理由=${dispatch.conclusionReason ?? dispatch.failure ?? ''}`);
+      for (const dispatch of attempts) lines.push(`  ${dispatch.purpose} ${dispatch.id}：${dispatch.agentId} driver=${dispatch.agent.driver} model=${dispatch.agent.model} effort=${dispatch.agent.reasoningEffort} fast=${dispatch.agent.fast} session=${dispatch.sessionId}；${dispatch.status}/${dispatch.endReason}/${dispatch.conclusion}；浏览器=${dispatch.needsBrowser}；token=${JSON.stringify(dispatch.usage)}；理由=${dispatch.conclusionReason ?? dispatch.failure ?? ''}`);
     }
     lines.push('\n事件时间线（完整 details、最终回答和成果索引见 snapshot.json）：');
     for (const event of events) {
-      const template = event.object.type === 'coordinator-round' ? roundTemplates.get(event.object.id)
-        : dispatches.find(dispatch => dispatch.id === event.dispatchId)?.template;
-      lines.push(`${event.id} ${event.time} ${event.actor.type}/${event.actor.id} ${event.action} ${event.object.type}/${event.object.id} card=${event.cardId ?? '-'} dispatch=${event.dispatchId ?? '-'} template=${template?.id ?? '-'} driver=${template?.driver ?? '-'}`);
+      const agent = event.object.type === 'coordinator-round' ? roundAgents.get(event.object.id)
+        : dispatches.find(dispatch => dispatch.id === event.dispatchId)?.agent;
+      lines.push(`${event.id} ${event.time} ${event.actor.type}/${event.actor.id} ${event.action} ${event.object.type}/${event.object.id} card=${event.cardId ?? '-'} dispatch=${event.dispatchId ?? '-'} agent=${agent?.id ?? '-'} driver=${agent?.driver ?? '-'}`);
     }
     lines.push('\n需核对的问题/运行层结果：');
     for (const event of events.filter(event => ['operation-rejected', 'work-paused', 'base-merge-result', 'base-push-result'].includes(event.action)

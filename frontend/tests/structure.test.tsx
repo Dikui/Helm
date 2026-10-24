@@ -19,10 +19,10 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
   const advance: FakeScript = ctx => JSON.parse(ctx.input).newEvents
     .filter((event: any) => event.action === 'dispatch-ended' && ['first', 'verify'].includes(event.details.key))
     .map((event: any): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: { workId: workId(ctx), cardId: event.details.cardId,
-      key: event.details.key === 'first' ? 'verify' : 'repair', purpose: event.details.key === 'first' ? 'verification' : 'execution', templateId: 'claude-executor' }, check: ok }));
+      key: event.details.key === 'first' ? 'verify' : 'repair', purpose: event.details.key === 'first' ? 'verification' : 'execution', agentId: 'claude-executor' }, check: ok }));
   const createCard = (key: string, content: string): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content }), saveAs: key, check: ok });
   const dispatch = (key: string, card: string): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx),
-    cardId: (ctx.results.get(card) as any).result.id, key, templateId: 'claude-executor' }), check: ok });
+    cardId: (ctx.results.get(card) as any).result.id, key, agentId: 'claude-executor' }), check: ok });
   daemon = await uiFixture([[draft], [createCard('login', '验证码登录'), createCard('mail', '发送邮件'), dispatch('first', 'login'), dispatch('parallel', 'mail')],
     ...Array<FakeScript>(12).fill(advance)], undefined, { executorScripts: [
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '首版完成' }, check: ok }],

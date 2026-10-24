@@ -9,7 +9,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { CanUseTool, Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
-import { TemplateCatalog } from '../src/templates.js';
+import { AgentCatalog } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 import { claudeErrors } from './fixtures/claude-errors.js';
 
@@ -18,7 +19,7 @@ async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'execu
   t.after(() => rm(cwd, { recursive: true, force: true }));
   return {
     cwd, env: { HOME: cwd, PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
-    template: { ...new TemplateCatalog().get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
+    agent: { ...new AgentCatalog(fixtureAgentDir).get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
     sandbox: role === 'executor' ? { mode: 'workspace-write', writableRoots: [cwd] } : { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
   };
@@ -55,11 +56,11 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
-test('Claude 模板叠加本地 skills 插件，两个角色均可调用模板、用户和内置 skill', async t => {
+test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent、用户和内置 skill', async t => {
   const base = await fixture(t);
   const context = { signal: new AbortController().signal, toolUseID: 'skill', requestId: 'skill' };
   await Promise.all((['coordinator', 'executor'] as const).map(async role => {
-    const id = `template-${role}`;
+    const id = `agent-${role}`;
     const directory = join(base.cwd, id);
     await mkdir(join(directory, 'skills', 'secret'), { recursive: true });
     await mkdir(join(directory, 'skills', 'not-a-skill'));
@@ -68,10 +69,10 @@ test('Claude 模板叠加本地 skills 插件，两个角色均可调用模板�
     await mkdir(join(directory, 'skills', 'fallback'));
     await writeFile(join(directory, 'skills', 'fallback', 'SKILL.md'), 'No frontmatter; use the directory name.');
     await writeFile(join(directory, 'config.json'), JSON.stringify({
-      role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: 'Test template',
+      role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: 'Test agent',
     }));
     await writeFile(join(directory, 'prompt.md'), 'Test strategy');
-    const template = new TemplateCatalog(base.cwd).get(id);
+    const agent = new AgentCatalog(base.cwd).get(id);
     let inspected = false;
     const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
       query: args => ({ close() {}, async *[Symbol.asyncIterator]() {
@@ -86,7 +87,7 @@ test('Claude 模板叠加本地 skills 插件，两个角色均可调用模板�
         }
         yield result();
       } }) });
-    await collect(driver, { ...base, template,
+    await collect(driver, { ...base, agent,
       sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : base.sandbox });
     assert.equal(inspected, true);
   }));
@@ -96,7 +97,7 @@ test('Claude 没有 skills 目录或目录为空时仍开放用户和内置 skil
   const options = await fixture(t);
   const empty = join(options.cwd, 'skills');
   await mkdir(empty);
-  for (const home of ['shared', 'template'] as const) {
+  for (const home of ['shared', 'dedicated'] as const) {
     for (const skillsPath of [null, empty]) {
       let inspected = false;
       await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
@@ -106,22 +107,22 @@ test('Claude 没有 skills 目录或目录为空时仍开放用户和内置 skil
           assert.ok((args.options!.tools as string[]).includes('Skill'));
           assert.deepEqual(args.options!.plugins, skillsPath === null ? undefined
             : [{ type: 'local', path: options.cwd, skipMcpDiscovery: true }]);
-        }) }), { ...options, template: { ...options.template!, directory: options.cwd, skillsPath, home } });
+        }) }), { ...options, agent: { ...options.agent!, directory: options.cwd, skillsPath, home } });
       assert.equal(inspected, true);
     }
   }
 });
 
-test('Claude 订阅模板沿用默认主目录，API 使用模板主目录并加载用户设置', async t => {
+test('Claude 订阅 Agent 沿用默认主目录，API 使用 Agent 主目录并加载用户设置', async t => {
   const options = await fixture(t);
   options.env.HOME = options.cwd;
   options.env.CLAUDE_CONFIG_DIR = '/caller/must-not-use';
-  for (const home of ['shared', 'template'] as const) {
-    const template = { ...options.template!, id: 'api-executor', home };
+  for (const home of ['shared', 'dedicated'] as const) {
+    const agent = { ...options.agent!, id: 'api-executor', home };
     await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
       query: fakeQuery([result()], args => {
-        assert.equal(Object.hasOwn(args.options!.env!, 'CLAUDE_CONFIG_DIR'), home === 'template');
-        if (home === 'template') assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
+        assert.equal(Object.hasOwn(args.options!.env!, 'CLAUDE_CONFIG_DIR'), home === 'dedicated');
+        if (home === 'dedicated') assert.equal(args.options!.env!.CLAUDE_CONFIG_DIR,
           join(options.cwd, '.helm', 'agent-homes', 'api-executor'));
         assert.deepEqual(args.options!.settingSources, home === 'shared' ? ['user', 'project', 'local'] : ['user']);
         assert.equal(Object.hasOwn(args.options!, 'strictMcpConfig'), false);
@@ -132,7 +133,7 @@ test('Claude 订阅模板沿用默认主目录，API 使用模板主目录并加
         // Ask rules precede loaded allow rules, keeping the path checks reachable.
         assert.deepEqual(settings.permissions?.ask, ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
         assert.equal(args.options!.permissionMode, 'default');
-      }) }), { ...options, template });
+      }) }), { ...options, agent });
   }
 });
 
@@ -152,14 +153,14 @@ test('Claude 可用性只让 CLI 查订阅登录；API 仅检查目录和设置�
       assert.equal(probe.cwd, options.cwd);
       return loggedIn;
     } });
-  const unavailable = await driver.checkAvailability(options.template!);
+  const unavailable = await driver.checkAvailability(options.agent!);
   assert.equal(unavailable.available, false);
   assert.match(unavailable.reason!, /登录/);
   assert.equal(unavailable.command, 'claude auth login');
   await assert.rejects(realpath(join(options.cwd, '.helm/agent-homes/claude')), { code: 'ENOENT' });
   loggedIn = true;
-  assert.equal((await driver.checkAvailability(options.template!)).available, true);
-  const api = { ...options.template!, id: 'api-example', home: 'template' as const };
+  assert.equal((await driver.checkAvailability(options.agent!)).available, true);
+  const api = { ...options.agent!, id: 'api-example', home: 'dedicated' as const };
   assert.equal((await driver.checkAvailability(api)).available, false);
   const directory = join(options.cwd, '.helm/agent-homes/api-example');
   await mkdir(directory, { recursive: true });
@@ -167,7 +168,7 @@ test('Claude 可用性只让 CLI 查订阅登录；API 仅检查目录和设置�
   // Malformed contents deliberately pass: Helm must never parse this file.
   await writeFile(join(directory, 'settings.json'), 'not JSON; user-owned credentials');
   assert.equal((await driver.checkAvailability(api)).available, true);
-  assert.equal(probes, 2, 'API 模板不调用登录检查');
+  assert.equal(probes, 2, 'API Agent 不调用登录检查');
 });
 
 test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环境，拒绝失败或非订阅登录', async t => {
@@ -190,7 +191,7 @@ test('Claude 登录探针通过 CLI 替身获取状态，隔离配置和父环�
   ] as const) {
     await writeFile(executable, `#!${process.execPath}\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({args: process.argv.slice(2), env: process.env, cwd: process.cwd()}));\nconsole.log(${JSON.stringify(typeof status === 'string' ? status : JSON.stringify(status))});\nprocess.exit(${exit});\n`);
     await chmod(executable, 0o755);
-    const availability = await driver.checkAvailability(options.template!);
+    const availability = await driver.checkAvailability(options.agent!);
     assert.equal(availability.available, typeof status !== 'string' && status.loggedIn && status.authMethod === 'claude.ai' && exit === 0);
     const probe = JSON.parse(await readFile(evidence, 'utf8'));
     assert.deepEqual(probe.args, ['auth', 'status', '--json']);
@@ -216,7 +217,7 @@ test('真实 Claude 驱动把默认调度规则注入 SDK 提示词，保留启�
         /验收通过后.*不再.*执行派单.*改动.*新卡片/s,
         /冲突.*修复卡片.*repairOfCardId/s,
         /修复卡片.*合入.*冲突卡片.*完成/s,
-        /优先.*不同模板.*交叉验收.*只有一家.*同家/s,
+        /优先.*不同驱动的 Agent.*交叉验收.*只有一家.*同家/s,
         /验收.*卡片说明.*本卡.*边界和标准/s,
         /整体验收卡片.*工作说明.*标准/s,
         /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
@@ -284,13 +285,13 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
   }
 });
 
-test('同一个 Claude 驱动按模板角色选择会话权限，并在文件策略后追加运行约定', async t => {
+test('同一个 Claude 驱动按 Agent 角色选择会话权限，并在内置角色规则和 Agent 提示词后追加运行约定', async t => {
   for (const role of ['coordinator', 'executor'] as const) {
     const options = await fixture(t, role);
-    options.template = { ...options.template!, prompt: '测试自定义策略' };
+    options.agent = { ...options.agent!, prompt: '测试自定义策略' };
     const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
       query: fakeQuery([result()], args => {
-        assert.ok((args.options!.systemPrompt as string).startsWith('测试自定义策略\n\n'));
+        assert.match(args.options!.systemPrompt as string, role === "coordinator" ? /^你是 Helm 调度者.*\n\n测试自定义策略\n\n/s : /^你是 Helm 执行者.*\n\n测试自定义策略\n\n/s);
         assert.match(args.options!.systemPrompt as string, /不推送、不部署/);
         if (role === 'executor') {
           assert.match(args.options!.systemPrompt as string, /HELM_PORT_START.*HELM_PORT_END/);
@@ -311,7 +312,7 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
   const cwd = join(base.cwd, '_work');
   await mkdir(cwd);
   const options: SessionOptions = { ...base, cwd,
-    template: { ...new TemplateCatalog().get('claude-coordinator'), model: 'haiku', reasoningEffort: 'low' },
+    agent: { ...new AgentCatalog(fixtureAgentDir).get('claude-coordinator'), model: 'haiku', reasoningEffort: 'low' },
     sandbox: { mode: 'read-only', writableRoots: [] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-token' } } },
   };
@@ -355,12 +356,12 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
   for (const invalid of [
     { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd] } },
     { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [cwd] } },
-    { ...options, template: base.template },
+    { ...options, agent: base.agent },
     { ...options, resumeSessionId: 'previous-round' },
   ]) await assert.rejects(driver.start(invalid), /fresh read-only coordinator round/);
 });
 
-test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、模板和新开/续跑选项', async t => {
+test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和新开/续跑选项', async t => {
   const options = await fixture(t);
   for (const resumeSessionId of [undefined, 'previous-session']) {
     let requestedId: string | undefined;

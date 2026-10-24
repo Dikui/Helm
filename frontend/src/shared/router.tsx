@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ComponentType, type MouseEvent, type ReactNode } from 'react';
-export interface RouteParams { workId?: string; view?: string; section?: string; templateId?: string }
+export interface RouteParams { workId?: string; view?: string; section?: string; agentId?: string }
 export interface RouteDefinition {
   pattern: RegExp; params: (match: RegExpMatchArray) => RouteParams; component: ComponentType<{ route: RouteParams }>;
 }

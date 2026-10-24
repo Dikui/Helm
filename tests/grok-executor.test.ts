@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { startHelmd } from '../src/server.js';
-import { defaultTemplateDir, TemplateCatalog } from '../src/templates.js';
+import { AgentCatalog } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { acpFixture } from './acp-fixture.js';
 import { acpExecutorFixture as grokFixture, ok } from './acp-executor-fixture.js';
 import { until } from './browser-fixture.js';
@@ -54,7 +55,7 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
   assert.ok(artifacts.some((a: any) => a.name === 'browser/grok.png'));
 });
 
-test('startHelmd 默认登记 Grok 驱动和内置模板；调度者模板不可用并将原因写入待处理（CLI 替身）', async t => {
+test('startHelmd 默认登记 Grok 驱动和内置 Agent；调度者 Agent 不可用并将原因写入待处理（CLI 替身）', async t => {
   const acp = await acpFixture(t);
   const bin = join(acp.directory, 'bin');
   await mkdir(bin);
@@ -65,22 +66,22 @@ test('startHelmd 默认登记 Grok 驱动和内置模板；调度者模板不可
   const previousPath = process.env.PATH;
   process.env.PATH = `${bin}:${previousPath}`;
   t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; });
-  const templateDir = join(acp.directory, 'templates');
-  await cp(join(defaultTemplateDir, 'grok-executor'), join(templateDir, 'grok-executor'), { recursive: true });
-  await cp(join(defaultTemplateDir, 'grok-executor'), join(templateDir, 'grok-coordinator'), { recursive: true });
-  const configPath = join(templateDir, 'grok-coordinator', 'config.json');
+  const agentDir = join(acp.directory, 'agents');
+  await cp(join(fixtureAgentDir, 'grok-executor'), join(agentDir, 'grok-executor'), { recursive: true });
+  await cp(join(fixtureAgentDir, 'grok-executor'), join(agentDir, 'grok-coordinator'), { recursive: true });
+  const configPath = join(agentDir, 'grok-coordinator', 'config.json');
   await writeFile(configPath, JSON.stringify({ ...JSON.parse(await readFile(configPath, 'utf8')), role: 'coordinator' }));
-  const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), templateDir });
+  const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), agentDir });
   try {
-    assert.throws(() => new TemplateCatalog(templateDir, ['grok']).get('grok-coordinator', 'coordinator'), /本阶段只支持执行者/,
-      '设置调度者模板的同步入口同样拒绝 Grok');
+    assert.throws(() => new AgentCatalog(agentDir, ['grok']).get('grok-coordinator', 'coordinator'), /本阶段只支持执行者/,
+      '设置调度者 Agent 的同步入口同样拒绝 Grok');
     const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: '{}' })).json() as any).result;
-    const templates = await call('list-agent-templates');
-    assert.equal(templates.find((t: any) => t.id === 'grok-executor').available, true);
-    const coordinator = templates.find((t: any) => t.id === 'grok-coordinator');
+    const agents = await call('list-agents');
+    assert.equal(agents.find((t: any) => t.id === 'grok-executor').available, true);
+    const coordinator = agents.find((t: any) => t.id === 'grok-coordinator');
     assert.equal(coordinator.available, false);
     assert.match(coordinator.reason, /本阶段只支持执行者/);
-    assert.match((await call('list-pending')).find((p: any) => p.templateId === 'grok-coordinator').reason, /本阶段只支持执行者/);
+    assert.match((await call('list-pending')).find((p: any) => p.agentId === 'grok-coordinator').reason, /本阶段只支持执行者/);
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize'].includes(r.method)), '启动检查不建模型会话');
   } finally { await daemon.close(); }
 });
@@ -144,7 +145,7 @@ test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话
   await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true,
     mcpTools: [{ name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '需要修改' } }] }));
   daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
-    workId: daemon.work.id, cardId: first.cardId, templateId: 'grok-executor', key: 'verification', purpose: 'verification',
+    workId: daemon.work.id, cardId: first.cardId, agentId: 'grok-executor', key: 'verification', purpose: 'verification',
   }, check: ok }]);
   ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'verification', body: '验收' }));
   const verification = (await daemon.ended(2))[1];
@@ -155,10 +156,10 @@ test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话
   await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true }));
   daemon.actions.push([
     { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
-      templateId: 'grok-executor', key: 'invalid-verification', purpose: 'verification', resumeSessionId: first.sessionId },
+      agentId: 'grok-executor', key: 'invalid-verification', purpose: 'verification', resumeSessionId: first.sessionId },
       check: value => assert.equal((value as any).error.code, 'INVALID_RESUME') },
     { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
-      templateId: 'grok-executor', key: 'resume', resumeSessionId: first.sessionId, content: '按验收意见修改' }, check: ok },
+      agentId: 'grok-executor', key: 'resume', resumeSessionId: first.sessionId, content: '按验收意见修改' }, check: ok },
   ]);
   ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '打回续跑' }));
   const resumed = (await daemon.ended(3))[2];

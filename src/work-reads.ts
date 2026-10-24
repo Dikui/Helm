@@ -12,7 +12,7 @@ const eventLabels: Record<string, string> = {
   'work-created': '开始对齐', 'work-description-drafted': '工作说明草稿已更新',
   'round-started': '调度者正在处理', 'round-ended': '调度轮次结束',
   'round-step': '调度者正在处理',
-  'round-template-loaded': '调度者已就绪', 'coordinator-notes-written': '调度笔记已更新',
+  'round-agent-loaded': '调度者已就绪', 'coordinator-notes-written': '调度笔记已更新',
   'gate-created': '有待决定的关卡', 'gate-updated': '关卡已更新', 'gate-decided': '关卡已决定', 'gate-withdrawn': '关卡已撤回',
   'card-created': '卡片已创建', 'card-updated': '卡片已更新', 'card-ready': '卡片等待派单',
   'card-completed': '卡片已完成', 'card-cancelled': '卡片已取消', 'card-paused': '卡片已暂停', 'card-resumed': '卡片已恢复',
@@ -20,7 +20,7 @@ const eventLabels: Record<string, string> = {
   'dispatch-revoked': '派单已撤销', 'dispatch-timed-out': '派单已超时', 'conclusion-submitted': '执行者已提交结论',
   'work-paused': '工作已暂停', 'work-resumed': '工作已恢复', 'work-cancelled': '工作已取消', 'work-completed': '工作已完成',
   'needs-user-attention': '等你处理', 'operation-rejected': '操作被拒绝', 'round-interrupted': '调度轮次已打断',
-  'coordinator-template-changed': '调度者模板已更换', 'dependency-added': '卡片依赖已添加', 'dependency-removed': '卡片依赖已移除',
+  'coordinator-agent-changed': '调度者 Agent 已更换', 'dependency-added': '卡片依赖已添加', 'dependency-removed': '卡片依赖已移除',
   'artifact-saved': '成果已保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除',
   'context-compacted': '上下文已压缩', 'process-started': 'Agent 已启动', 'browser-started': '浏览器已启动', 'browser-stopped': '浏览器已停止',
 };

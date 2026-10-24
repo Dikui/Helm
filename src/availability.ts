@@ -1,32 +1,32 @@
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
-import type { DriverRegistry, TemplateAvailability } from './driver.js';
+import type { DriverRegistry, AgentAvailability } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
-export function monitorTemplateAvailability(store: TaskStore, drivers: DriverRegistry) {
-  store.templates.monitor(template => drivers[template.driver]!.checkAvailability(template), (id, result) => {
+export function monitorAgentAvailability(store: TaskStore, drivers: DriverRegistry) {
+  store.agents.monitor(agent => drivers[agent.driver]!.checkAvailability(agent), (id, result) => {
     // Persist transitions in the event log so restart does not repeat an unchanged notice.
-    const previous = store.db.prepare(`SELECT details FROM events WHERE object_type = 'agent-template' AND object_id = ?
-      AND action = 'template-availability-changed' ORDER BY id DESC LIMIT 1`).get(id);
-    const last = previous ? JSON.parse(String(previous.details)) as TemplateAvailability : { available: true };
+    const previous = store.db.prepare(`SELECT details FROM events WHERE object_type = 'agent' AND object_id = ?
+      AND action = 'agent-availability-changed' ORDER BY id DESC LIMIT 1`).get(id);
+    const last = previous ? JSON.parse(String(previous.details)) as AgentAvailability : { available: true };
     if (last.available === result.available && last.reason === result.reason && last.command === result.command) return;
     store.transaction(() => {
-      const details = { templateId: id, ...result };
-      store.appendEvent(runtime, { type: 'agent-template', id }, 'template-availability-changed', details);
-      if (!result.available && (last.available || last.reason !== result.reason)) store.appendEvent(runtime, { type: 'agent-template', id }, 'needs-user-attention',
-        { kind: 'template-unavailable', ...details });
+      const details = { agentId: id, ...result };
+      store.appendEvent(runtime, { type: 'agent', id }, 'agent-availability-changed', details);
+      if (!result.available && (last.available || last.reason !== result.reason)) store.appendEvent(runtime, { type: 'agent', id }, 'needs-user-attention',
+        { kind: 'agent-unavailable', ...details });
     });
   });
 }
 
-export async function pendingTemplates(store: TaskStore) {
-  return (await store.templates.refresh()).filter(template => !template.available)
-    .map(template => ({ type: 'agent-template', kind: 'template-unavailable', templateId: template.id,
-      reason: template.reason, command: 'command' in template ? template.command : undefined }));
+export async function pendingAgents(store: TaskStore) {
+  return (await store.agents.refresh()).filter(agent => !agent.available)
+    .map(agent => ({ type: 'agent', kind: 'agent-unavailable', agentId: agent.id,
+      reason: agent.reason, command: 'command' in agent ? agent.command : undefined }));
 }
 
 // Checked only when the user picks a driver, so Helm never prompts for agents nobody chose.

@@ -9,15 +9,16 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeExecutorDriver } from '../src/claude-driver.js';
-import { TemplateCatalog } from '../src/templates.js';
+import { AgentCatalog } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { fixture } from './browser-fixture.js';
 import { assertInitialization, helmToolNames } from './claude-init.js';
 
 const enabled = process.env.HELM_CLAUDE_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-test('Claude 订阅模板在临时 HOME 的默认主目录已登录', { skip: !enabled, timeout: 20_000 }, async () => {
-  const availability = await new ClaudeExecutorDriver().checkAvailability(new TemplateCatalog().get('claude-executor'));
+test('Claude 订阅 Agent 在临时 HOME 的默认主目录已登录', { skip: !enabled, timeout: 20_000 }, async () => {
+  const availability = await new ClaudeExecutorDriver().checkAvailability(new AgentCatalog(fixtureAgentDir).get('claude-executor'));
   assert.equal(availability.available, true, `${availability.reason}\n${availability.command}`);
 });
 

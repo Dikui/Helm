@@ -34,7 +34,7 @@ export function TimelineView({ nodes, dispatches, selectedId, select }: {
                 const label = `${loops.has(dispatch.id) ? '↺ ' : ''}${t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}${dispatch.conclusion === 'failed' ? ' ✗' : dispatch.conclusion === 'passed' ? ' ✓' : ''}`;
                 const name = `${t('graphDispatch')} #${history.indexOf(dispatch) + 1} · ${label}`;
                 return <button key={dispatch.id} className={`cs-block ${dispatch.purpose} ${dispatch.conclusion} ${dispatch.status}`} style={{ left: position(begin), width: position(start + Math.max(0, end - begin)) }}
-                  aria-label={name} title={`${name} · ${dispatch.templateId}\n${date(dispatch.startedAt!)} → ${dispatch.endedAt ? date(dispatch.endedAt) : t('structureNow')} · ${elapsed(dispatch.startedAt!, end)}`}
+                  aria-label={name} title={`${name} · ${dispatch.agentId}\n${date(dispatch.startedAt!)} → ${dispatch.endedAt ? date(dispatch.endedAt) : t('structureNow')} · ${elapsed(dispatch.startedAt!, end)}`}
                   onClick={() => select(card.id, dispatch.id)}>{label}</button>;
               })}
               {!history.length && <span className="cs-lane-empty">{t('graphNoDispatches')}</span>}

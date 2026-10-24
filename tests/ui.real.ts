@@ -11,8 +11,9 @@ import { test } from 'node:test';
 import type { Browser, Locator, Page } from 'playwright';
 import { ClaudeDriver } from '../src/claude-driver.js';
 import { startHelmd } from '../src/server.js';
-import { TemplateCatalog, defaultTemplateDir } from '../src/templates.js';
-import { configureTestTemplate } from './helmd-fixture.js';
+import { AgentCatalog } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
+import { configureTestAgent } from './helmd-fixture.js';
 
 const enabled = process.env.HELM_UI_REAL === '1';
 const title = 'UI 冒烟：添加 smoke.txt';
@@ -83,14 +84,14 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
       }
     });
 
-    const templateDir = join(directory, 'templates');
+    const agentDir = join(directory, 'agents');
     for (const id of ['claude-coordinator', 'claude-executor']) {
-      await cp(join(defaultTemplateDir, id), join(templateDir, id), { recursive: true });
-      await configureTestTemplate(templateDir, id, { model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared' });
+      await cp(join(fixtureAgentDir, id), join(agentDir, id), { recursive: true });
+      await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared' });
     }
-    await writeFile(join(templateDir, 'claude-coordinator', 'prompt.md'), coordinatorPrompt);
+    await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), coordinatorPrompt);
     const claude = new ClaudeDriver();
-    const availability = await claude.checkAvailability(new TemplateCatalog(templateDir).get('claude-coordinator'));
+    const availability = await claude.checkAvailability(new AgentCatalog(agentDir).get('claude-coordinator'));
     assert.equal(availability.available, true,
       `${availability.reason}\n请先在沙箱外登录 Claude CLI。`);
 
@@ -110,7 +111,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
 
     // This is the same helmd HTTP/MCP/SSE/static server used by `helm serve`, with real drivers.
     // Limit the catalog to Claude so availability probes cannot start other agent CLIs.
-    daemon = await startHelmd({ port: 0, dataDir: join(evidence, 'data'), templateDir, drivers: { 'claude-sdk': claude } });
+    daemon = await startHelmd({ port: 0, dataDir: join(evidence, 'data'), agentDir, drivers: { 'claude-sdk': claude } });
     const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
     const { chromium } = require('playwright') as typeof import('playwright');
     // Playwright's bundled Chromium, headed; never system Chrome.
@@ -139,7 +140,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await visible(main.getByRole('heading', { name: '新建工作', level: 1, exact: true }));
     await main.getByLabel('项目路径', { exact: true }).fill(repo);
     await click(main.getByRole('button', { name: '登记', exact: true }));
-    await main.getByRole('combobox', { name: '调度者模板', exact: true }).selectOption('claude-coordinator');
+    await main.getByRole('combobox', { name: '调度者 Agent', exact: true }).selectOption('claude-coordinator');
     await main.getByLabel('需求', { exact: true }).fill(`${title}\n只新增 smoke.txt，内容恰好是 helm-ui-smoke 加一个换行，其他文件不改。请直接起草工作说明，确认后交真实 Claude 执行和整体验收。完成后发 ${readyMessage} 并等待下一条用户消息再审核。`);
     await screenshot('02-new-work', main.getByRole('button', { name: '开始', exact: true }), main.getByText(repo, { exact: true }));
     await click(main.getByRole('button', { name: '开始', exact: true }));
@@ -201,7 +202,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await screenshot('09-main-dark', workHeader(page).getByText('已完成', { exact: true }), review);
 
     await click(sidebar.getByRole('link', { name: '设置', exact: true }));
-    await screenshot('10-settings', main.getByRole('heading', { name: '设置', level: 1, exact: true }), main.getByRole('heading', { name: 'Agent 模板', exact: true }), main.getByRole('heading', { name: 'claude-coordinator', exact: true }));
+    await screenshot('10-settings', main.getByRole('heading', { name: '设置', level: 1, exact: true }), main.getByRole('heading', { name: 'Agent', exact: true }), main.getByRole('heading', { name: 'claude-coordinator', exact: true }));
 
     // Read-only evidence after the UI has accepted the review; never seed business state via APIs.
     assert.equal(await readFile(join(repo, 'smoke.txt'), 'utf8'), contents);

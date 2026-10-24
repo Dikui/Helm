@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -53,10 +53,10 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   await writeFile(join(repo, 'README.md'), 'baseline\n');
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-  const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, 'codex-executor', { model: 'gpt-6-luna', reasoningEffort: 'low', fast: false });
+  const agentDir = await copyAgents(directory);
+  await configureTestAgent(agentDir, 'codex-executor', { model: 'gpt-6-luna', reasoningEffort: 'low', fast: false });
   for (const [name, text] of Object.entries(config.skills ?? {})) {
-    const path = join(templateDir, 'codex-executor', 'skills', name);
+    const path = join(agentDir, 'codex-executor', 'skills', name);
     await mkdir(path, { recursive: true });
     await writeFile(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: Helm smoke skill\n---\n${text}\n`);
   }
@@ -72,7 +72,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
       return [
         // Keep the card short: every later dispatch on it gets the card snapshot.
         { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: 'Codex 执行者冒烟卡片' }, saveAs: 'card', check: ok },
-        { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, cardId: result(ctx, 'card').id, templateId: 'codex-executor',
+        { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, cardId: result(ctx, 'card').id, agentId: 'codex-executor',
           key: 'first', content: config.content ?? '实现卡片', needsBrowser: config.needsBrowser ?? false }), check: ok },
       ];
     }
@@ -81,9 +81,9 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   }));
   const fallback = new FakeDriver([[{ type: 'write', path: 'replacement.txt', content: '由另一家完成\n' }]]);
   const claude: Driver = { checkAvailability: async () => ({ available: true }),
-    start: options => (options.template?.role === 'coordinator' ? coordinator : fallback).start(options) };
+    start: options => (options.agent?.role === 'coordinator' ? coordinator : fallback).start(options) };
   const dataDir = join(directory, 'data');
-  daemon = await startHelmd({ port: 0, dataDir, templateDir, drivers: { 'claude-sdk': claude, codex: executor } });
+  daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: { 'claude-sdk': claude, codex: executor } });
   const call = async (name: string, params: object = {}): Promise<any> => {
     const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
     return response.json();
@@ -103,5 +103,5 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
       throw new Error(`${String(error)}\n${JSON.stringify(diagnostic)}`);
     }
   };
-  return { ...daemon, directory, home, dataDir, templateDir, repo, git, call, work, events, dispatches, ended, confirm, actions };
+  return { ...daemon, directory, home, dataDir, agentDir, repo, git, call, work, events, dispatches, ended, confirm, actions };
 }

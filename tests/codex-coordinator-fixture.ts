@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 // All Codex metadata and credentials live in a temporary HOME. A real smoke may
@@ -31,8 +31,8 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   await writeFile(join(repo, 'README.md'), 'coordinator read-only baseline\n');
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-  const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'low' });
+  const agentDir = await copyAgents(directory);
+  await configureTestAgent(agentDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'low' });
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       key: 'draft', requirements: 'Codex 调度者冒烟', boundary: '临时项目', criteria: 'MCP、只读、重投和额度处理' }),
@@ -41,9 +41,9 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   const drain = new FakeDriver();
   let starts = 0;
   const dataDir = join(directory, 'data');
-  daemon = await startHelmd({ port: 0, dataDir, templateDir, drivers: {
+  daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: {
     'claude-sdk': new FakeDriver([[{ type: 'hang' }]]),
-    codex: { checkAvailability: template => driver.checkAvailability(template), start(options) {
+    codex: { checkAvailability: agent => driver.checkAvailability(agent), start(options) {
       const round = starts++;
       return (round === 0 ? setup : round <= (config.rounds ?? 1) ? driver : drain).start(options);
     } },
@@ -56,7 +56,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
     return body.result;
   };
   const project = await call('register-project', { path: repo });
-  const work = (await call('send-message', { projectId: project.id, coordinatorTemplateId: 'codex-coordinator', key: 'start', body: '调度者冒烟' })).work;
+  const work = (await call('send-message', { projectId: project.id, coordinatorAgentId: 'codex-coordinator', key: 'start', body: '调度者冒烟' })).work;
   const params = { workId: work.id };
   const events = async (): Promise<any[]> => call('get-events', params);
   await until(events, values => values.some(event => event.action === 'round-ended'));

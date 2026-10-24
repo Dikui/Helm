@@ -7,26 +7,26 @@ import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
-const { copyTemplates, configureTestTemplate }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
+const { copyAgents, configureTestAgent }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
-let templateDirectory: string | undefined;
+let agentDirectory: string | undefined;
 afterEach(async () => {
   cleanup();
   await daemon?.close();
   daemon = undefined;
-  if (templateDirectory) await rm(templateDirectory, { recursive: true, force: true });
-  templateDirectory = undefined;
+  if (agentDirectory) await rm(agentDirectory, { recursive: true, force: true });
+  agentDirectory = undefined;
   localStorage.clear();
   window.history.replaceState(null, '', '/');
 });
 
-test('选项目默认模板创建工作：响应丢失后重试沿用完整请求，只有一项工作并进入对齐中', async () => {
-  templateDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-retry-'));
-  const templateDir = await copyTemplates(templateDirectory);
-  daemon = await uiFixture([], undefined, { templateDir });
-  await daemon.call('set-project-coordinator-template', { projectId: daemon.project.id, templateId: 'codex-coordinator' });
+test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请求，只有一项工作并进入对齐中', async () => {
+  agentDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-retry-'));
+  const agentDir = await copyAgents(agentDirectory);
+  daemon = await uiFixture([], undefined, { agentDir });
+  await daemon.call('set-project-coordinator-agent', { projectId: daemon.project.id, agentId: 'codex-coordinator' });
   const realFetch = fetch;
   const submissions: any[] = [];
   const transport: typeof fetch = async (input, init) => {
@@ -39,8 +39,8 @@ test('选项目默认模板创建工作：响应丢失后重试沿用完整请�
   };
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} transport={transport} />);
-  const template = await screen.findByLabelText('调度者模板');
-  await waitFor(() => expect((template as HTMLSelectElement).value).toBe('codex-coordinator'));
+  const agent = await screen.findByLabelText('调度者 Agent');
+  await waitFor(() => expect((agent as HTMLSelectElement).value).toBe('codex-coordinator'));
   expect(await screen.findByText('main')).toBeTruthy();
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '邮箱验证码登录' } });
   fireEvent.keyDown(screen.getByLabelText('需求'), { key: 'Enter', isComposing: true, keyCode: 229 });
@@ -50,16 +50,16 @@ test('选项目默认模板创建工作：响应丢失后重试沿用完整请�
   expect((screen.getByLabelText('需求') as HTMLTextAreaElement).value).toBe('邮箱验证码登录');
   expect((screen.getByLabelText('需求') as HTMLTextAreaElement).disabled).toBe(true);
   // A later availability change must not block replay of an already accepted request.
-  await configureTestTemplate(templateDir, 'codex-coordinator', { driver: 'grok' });
-  await daemon.call('list-agent-templates');
-  await within(template).findByRole('option', { name: /codex-coordinator · / });
+  await configureTestAgent(agentDir, 'codex-coordinator', { driver: 'grok' });
+  await daemon.call('list-agents');
+  await within(agent).findByRole('option', { name: /codex-coordinator · / });
   expect((screen.getByRole('button', { name: '重试发送' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '重试发送' }));
   expect(await screen.findByRole('heading', { name: '邮箱验证码登录' })).toBeTruthy();
   expect(screen.getByRole('region', { name: '对话' })).toBeTruthy();
   const works = (await daemon.call('list-works')).result;
   expect(works).toHaveLength(1);
-  expect((await daemon.call('get-work', { workId: works[0].id })).result.coordinatorTemplateId).toBe('codex-coordinator');
+  expect((await daemon.call('get-work', { workId: works[0].id })).result.coordinatorAgentId).toBe('codex-coordinator');
   expect(submissions[0].key).toBeTruthy();
   expect(submissions[1]).toEqual(submissions[0]);
   expect(window.location.pathname).toBe(`/works/${works[0].id}`);
@@ -192,34 +192,34 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('aligning');
 });
 
-test('项目切换重选默认模板，不可用模板显示原因且不能开始；未提交改动提醒来自 git', async () => {
-  templateDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-templates-'));
-  const templateDir = await copyTemplates(templateDirectory);
-  await configureTestTemplate(templateDir, 'claude-coordinator', { driver: 'grok' });
-  daemon = await uiFixture([], undefined, { templateDir });
+test('项目切换重选默认 Agent，不可用 Agent 显示原因且不能开始；未提交改动提醒来自 git', async () => {
+  agentDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-agents-'));
+  const agentDir = await copyAgents(agentDirectory);
+  await configureTestAgent(agentDir, 'claude-coordinator', { driver: 'grok' });
+  daemon = await uiFixture([], undefined, { agentDir });
   await writeFile(join(daemon.repo, 'pending.md'), 'uncommitted');
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} />);
-  const templates = await screen.findByLabelText('调度者模板');
-  const unavailable = await within(templates).findByRole('option', { name: /claude-coordinator.*Grok 本阶段只支持执行者/ });
+  const agents = await screen.findByLabelText('调度者 Agent');
+  const unavailable = await within(agents).findByRole('option', { name: /claude-coordinator.*Grok 本阶段只支持执行者/ });
   expect((unavailable as HTMLOptionElement).selected).toBe(true);
   expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
   expect(await screen.findByText(/1 个未提交改动不会进入工作分支/)).toBeTruthy();
-  fireEvent.change(templates, { target: { value: 'codex-coordinator' } });
+  fireEvent.change(agents, { target: { value: 'codex-coordinator' } });
   const second = join(daemon.directory, 'second');
   execFileSync('git', ['clone', daemon.repo, second], { stdio: 'ignore' });
   const project = (await daemon.call('register-project', { path: second })).result;
   await within(screen.getByLabelText('项目')).findByRole('option', { name: 'second' });
   fireEvent.change(screen.getByLabelText('项目'), { target: { value: project.id } });
-  expect((templates as HTMLSelectElement).value).toBe('claude-coordinator');
+  expect((agents as HTMLSelectElement).value).toBe('claude-coordinator');
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(screen.getByLabelText('Coordinator template')).toBeTruthy();
-  expect(screen.getByText(/Choose an available coordinator template/)).toBeTruthy();
+  expect(screen.getByLabelText('Coordinator agent')).toBeTruthy();
+  expect(screen.getByText(/Choose an available coordinator agent/)).toBeTruthy();
 });
 
-test('选中 CLI 未安装的调度者模板时才检查，确认后下载安装，装好即可开始', async () => {
-  templateDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-install-'));
-  const bin = join(templateDirectory, 'bin');
+test('选中 CLI 未安装的调度者 Agent 时才检查，确认后下载安装，装好即可开始', async () => {
+  agentDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-install-'));
+  const bin = join(agentDirectory, 'bin');
   const cli = join(bin, 'helm-fake-codex');
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
@@ -230,10 +230,10 @@ test('选中 CLI 未安装的调度者模板时才检查，确认后下载安装
     daemon = await uiFixture([], undefined, { codexDriver });
     window.history.replaceState(null, '', '/new');
     render(<App baseUrl={daemon.url} />);
-    const templates = await screen.findByLabelText('调度者模板');
-    await waitFor(() => expect((templates as HTMLSelectElement).value).toBe('claude-coordinator'));
+    const agents = await screen.findByLabelText('调度者 Agent');
+    await waitFor(() => expect((agents as HTMLSelectElement).value).toBe('claude-coordinator'));
     expect(screen.queryByRole('group', { name: /未检测到/ })).toBeNull();
-    fireEvent.change(templates, { target: { value: 'codex-coordinator' } });
+    fireEvent.change(agents, { target: { value: 'codex-coordinator' } });
     const prompt = await screen.findByRole('group', { name: /未检测到/ });
     expect(within(prompt).getByText(command)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('需求'), { target: { value: '安装后开始' } });

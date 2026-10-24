@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { FakeDriver } from '../src/driver.js';
+import { migrations } from '../src/migrations.js';
+import { startHelmd as startRealHelmd } from '../src/server.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 // Kept outside dist: this is a frozen historical fixture, not production SQL.
@@ -40,9 +42,9 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
       return body.result;
     };
     assert.equal((await call('list-projects'))[0].name, '旧项目');
-    assert.equal((await call('list-projects'))[0].defaultCoordinatorTemplateId, 'claude-coordinator');
+    assert.equal((await call('list-projects'))[0].defaultCoordinatorAgentId, 'claude-coordinator');
     assert.equal((await call('get-work', { workId: 'work' })).status, 'aligning');
-    assert.equal((await call('get-work', { workId: 'work' })).coordinatorTemplateId, 'claude-coordinator');
+    assert.equal((await call('get-work', { workId: 'work' })).coordinatorAgentId, 'claude-coordinator');
     assert.equal((await call('get-conversation', { workId: 'work' }))[0].body, '升级前的消息');
     const settings = await call('get-settings');
     assert.equal(settings.concurrencyLimit, 3);
@@ -66,8 +68,8 @@ test('任务库版本高于程序支持的迁移时拒绝启动', async t => {
   await assert.rejects(startHelmd({ dataDir, port: 0 }), /Unsupported task store version: 2147483647/);
 });
 
-test('去掉模板表的迁移保留已有派单快照、卡片模板 id 和成果关联', async t => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'helm-template-migration-'));
+test('去掉 Agent 表的迁移保留已有派单快照、卡片 Agent id 和成果关联', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'helm-agent-migration-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const outputPath = join(dataDir, 'steps');
   await mkdir(outputPath);
@@ -97,8 +99,48 @@ test('去掉模板表的迁移保留已有派单快照、卡片模板 id 和成�
     assert.equal(body.ok, true, JSON.stringify(body));
     return body.result;
   };
-  assert.deepEqual((await call('get-dispatch', { workId: 'work', dispatchId: 'dispatch' })).template, snapshot);
-  assert.equal((await call('get-card', { workId: 'work', cardId: 'card' })).templateId, 'legacy-executor');
+  assert.deepEqual((await call('get-dispatch', { workId: 'work', dispatchId: 'dispatch' })).agent, snapshot);
+  assert.equal((await call('get-card', { workId: 'work', cardId: 'card' })).agentId, 'legacy-executor');
   assert.equal((await call('get-dispatch-artifacts', { workId: 'work', dispatchId: 'dispatch' }))[0].id, 'artifact');
   assert.equal((await call('read-artifact', { workId: 'work', artifactId: 'artifact' })).content, '旧成果');
+});
+
+test('模板改名为 Agent 的迁移改写列名和事件，已有工作时一次性生成原内置 Agent', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'helm-agent-rename-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(dataDir, 'helm.db'));
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const [index, sql] of migrations.slice(0, -1).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`
+      INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/legacy/project', '2026-01-01');
+      INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_template_id)
+        VALUES ('work', 'project', 'paused', 'start', '2026-01-01', 'codex-coordinator');
+      INSERT INTO events (time, actor_type, actor_id, object_type, object_id, action, details, work_id) VALUES
+        ('2026-01-01', 'user', 'user', 'work', 'work', 'coordinator-template-changed', '{"previousTemplateId":"claude-coordinator","templateId":"codex-coordinator"}', 'work'),
+        ('2026-01-01', 'runtime', 'helmd', 'agent-template', 'grok-executor', 'needs-user-attention', '{"kind":"template-unavailable","templateId":"grok-executor"}', NULL);
+    `);
+  } finally { db.close(); }
+  const daemon = await startRealHelmd({ port: 0, dataDir, drivers: { 'claude-sdk': new FakeDriver(), codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() } });
+  t.after(() => daemon.close());
+  const call = async (name: string, params: object = {}) => {
+    const body = await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json() as any;
+    assert.equal(body.ok, true, JSON.stringify(body));
+    return body.result;
+  };
+  assert.equal((await call('get-work', { workId: 'work' })).coordinatorAgentId, 'codex-coordinator');
+  const changed = (await call('get-events', { workId: 'work' })).find((event: any) => event.action === 'coordinator-agent-changed');
+  assert.deepEqual(changed.details, { previousAgentId: 'claude-coordinator', agentId: 'codex-coordinator' });
+  assert.deepEqual((await call('list-agents')).map((agent: any) => agent.id),
+    ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
+  assert.equal(await readFile(join(dataDir, 'agents', 'codex-coordinator', 'prompt.md'), 'utf8'), '');
+});
+
+test('全新安装不生成任何 Agent', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'helm-fresh-agents-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const daemon = await startRealHelmd({ port: 0, dataDir, drivers: { 'claude-sdk': new FakeDriver(), codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() } });
+  t.after(() => daemon.close());
+  const body = await (await fetch(`${daemon.url}/api/list-agents`, { method: 'POST', body: '{}' })).json() as any;
+  assert.deepEqual(body.result, []);
 });

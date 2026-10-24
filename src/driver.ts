@@ -3,13 +3,13 @@ import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { AgentTemplate } from './templates.js';
+import type { AgentConfig } from './agents.js';
 import type { ManagedProcess } from './processes.js';
 
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 export interface TokenUsage { inputTokens: number; outputTokens: number }
 export interface SessionOptions {
-  template?: AgentTemplate;
+  agent: AgentConfig;
   cwd: string;
   env: Record<string, string>;
   // Per-dispatch storage outside the writable card copy (CLI state, not code).
@@ -33,11 +33,11 @@ export interface DriverSession {
   cancel(): void;
   events: AsyncIterable<DriverEvent>;
 }
-export interface TemplateAvailability { available: boolean; reason?: string; command?: string }
+export interface AgentAvailability { available: boolean; reason?: string; command?: string }
 export interface Driver {
   // The official install command for the CLI, which the user may run from the UI.
   install?: { executable: string; command: string };
-  checkAvailability(template: AgentTemplate): Promise<TemplateAvailability>;
+  checkAvailability(agent: AgentConfig): Promise<AgentAvailability>;
   start(options: SessionOptions): Promise<DriverSession>;
 }
 export type DriverRegistry = Record<string, Driver>;
@@ -61,9 +61,9 @@ export type FakeScript = FakeStep[] | ((context: FakeContext) => FakeStep[]);
 // Uses the same HTTP MCP transport as a real agent; scripts never access the task store.
 export class FakeDriver implements Driver {
   constructor(private scripts: FakeScript[] = [],
-    private availability: (template: AgentTemplate) => TemplateAvailability | Promise<TemplateAvailability> = () => ({ available: true })) {}
+    private availability: (agent: AgentConfig) => AgentAvailability | Promise<AgentAvailability> = () => ({ available: true })) {}
 
-  async checkAvailability(template: AgentTemplate) { return this.availability(template); }
+  async checkAvailability(agent: AgentConfig) { return this.availability(agent); }
 
   async start(options: SessionOptions): Promise<DriverSession> {
     const script = this.scripts.shift() ?? [];

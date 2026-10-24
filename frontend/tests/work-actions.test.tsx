@@ -57,29 +57,29 @@ test('工作菜单暂停、恢复经 HTTP 生效；取消必须二次确认，�
   await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已取消');
   const menu = actions();
   expect((within(menu).getByRole('button', { name: '暂停工作' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((within(menu).getByRole('button', { name: '换调度者模板' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(menu).getByRole('button', { name: '换调度者 Agent' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-test('换调度者列出全部调度者模板，不可用的显示原因且不能应用，选择后经 HTTP 更新且从下一轮生效', async () => {
+test('换调度者列出全部调度者 Agent，不可用的显示原因且不能应用，选择后经 HTTP 更新且从下一轮生效', async () => {
   const work = await startWork();
-  const saved = await daemon!.call('save-agent-template', {
+  const saved = await daemon!.call('save-agent', {
     id: 'unavailable-coordinator', mode: 'create', prompt: '不可用的调度者',
-    config: { role: 'coordinator', driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', fast: true, home: 'shared', description: '不可用模板' },
+    config: { role: 'coordinator', driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', fast: true, home: 'shared', description: '不可用 Agent' },
   });
   expect(saved.ok).toBe(true);
   render(<App baseUrl={daemon!.url} />);
   await screen.findByRole('heading', { name: '管理输出的工作' });
-  fireEvent.click(within(actions()).getByRole('button', { name: '换调度者模板' }));
-  const dialog = await screen.findByRole('dialog', { name: '换调度者模板' });
+  fireEvent.click(within(actions()).getByRole('button', { name: '换调度者 Agent' }));
+  const dialog = await screen.findByRole('dialog', { name: '换调度者 Agent' });
   expect(await within(dialog).findByRole('radio', { name: /codex-coordinator/ })).toBeTruthy();
   fireEvent.click(await within(dialog).findByRole('radio', { name: /unavailable-coordinator.*extra usage/ }));
-  expect((within(dialog).getByRole('button', { name: '更换模板' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(dialog).getByRole('button', { name: '更换 Agent' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(dialog).queryByText(/claude-executor/)).toBeNull();
   expect(within(dialog).getByText('从下一调度轮次起生效。')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('radio', { name: /codex-coordinator/ }));
-  fireEvent.click(within(dialog).getByRole('button', { name: '更换模板' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '更换 Agent' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect((await daemon!.call('get-work', { workId: work.id })).result.coordinatorTemplateId).toBe('codex-coordinator');
+  expect((await daemon!.call('get-work', { workId: work.id })).result.coordinatorAgentId).toBe('codex-coordinator');
 });
 
 test('已结束工作导出到本机路径，错误保留输入；已导出后删除仍须确认并持久显示已删除', async () => {

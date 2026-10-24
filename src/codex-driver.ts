@@ -3,14 +3,14 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, TokenUsage } from './driver.js';
 import { CodexRpc, type CodexCommand } from './codex-rpc.js';
 import { runtimeEnvironment } from './environment.js';
-import { templatePrompt } from './prompts.js';
-import { TemplateCatalog, type AgentTemplate } from './templates.js';
+import { agentPrompt } from './prompts.js';
+import type { AgentConfig } from './agents.js';
 
-function codexHome(template: AgentTemplate, home = homedir()) {
-  return join(home, '.helm', 'agent-homes', template.id);
+function codexHome(agent: AgentConfig, home = homedir()) {
+  return join(home, '.helm', 'agent-homes', agent.id);
 }
 
 function quotaExhausted(error: any) {
@@ -23,14 +23,14 @@ export class CodexDriver implements Driver {
   install = { executable: 'codex', command: 'npm install -g @openai/codex' };
   constructor(private config: { command?: CodexCommand } = {}, private role?: 'coordinator' | 'executor') {}
 
-  async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
-    const directory = codexHome(template);
+  async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {
+    const directory = codexHome(agent);
     const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
-    if (template.home === 'template') {
+    if (agent.home === 'dedicated') {
       try {
         if ((await stat(directory)).isDirectory() && (await stat(join(directory, 'config.toml'))).isFile()) return { available: true };
       } catch { /* Only metadata: the CLI owns and validates this configuration. */ }
-      return { available: false, reason: `API 模板需要主目录 ${directory} 和 config.toml；请按 Codex 格式配置接口和 key。`,
+      return { available: false, reason: `API Agent 需要主目录 ${directory} 和 config.toml；请按 Codex 格式配置接口和 key。`,
         command: `mkdir -p ${quoted} && \${EDITOR:-vi} ${quoted}/config.toml` };
     }
     try {
@@ -46,13 +46,13 @@ export class CodexDriver implements Driver {
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    const coordinator = (this.role ?? options.template?.role) === 'coordinator';
-    const template = options.template ?? new TemplateCatalog(undefined, ['codex']).get(coordinator ? 'codex-coordinator' : 'codex-executor');
-    if (coordinator && (template.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
+    const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
+    const agent = options.agent;
+    if (coordinator && (agent.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
       || options.sandbox.writableRoots.length || options.resumeSessionId !== undefined)) {
       throw new Error('CodexCoordinatorDriver requires a fresh read-only coordinator round');
     }
-    if (!coordinator && (template.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
+    if (!coordinator && (agent.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
       throw new Error('CodexExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
@@ -62,8 +62,8 @@ export class CodexDriver implements Driver {
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
     const env: Record<string, string> = { ...options.env, CODEX_SQLITE_HOME: sqlitePath };
     delete env.CODEX_HOME;
-    if (template.home === 'template') {
-      env.CODEX_HOME = codexHome(template, options.env.HOME);
+    if (agent.home === 'dedicated') {
+      env.CODEX_HOME = codexHome(agent, options.env.HOME);
       await mkdir(env.CODEX_HOME, { recursive: true, mode: 0o700 });
     }
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
@@ -83,13 +83,13 @@ export class CodexDriver implements Driver {
       await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: '0.1.0' }, capabilities: { experimentalApi: true } });
       const initializeDurationMs = Math.round(performance.now() - before);
       rpc.notify('initialized', {});
-      await rpc.request('skills/extraRoots/set', { extraRoots: template.skillsPath ? [template.skillsPath] : [] });
+      await rpc.request('skills/extraRoots/set', { extraRoots: agent.skillsPath ? [agent.skillsPath] : [] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
-        ...(template.model ? { model: template.model } : {}), developerInstructions: templatePrompt(template),
-        serviceTier: template.fast ? 'fast' : 'default',
+        ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
+        serviceTier: agent.fast ? 'fast' : 'default',
         config: {
-          ...(template.fast ? { service_tier: 'fast' } : {}),
+          ...(agent.fast ? { service_tier: 'fast' } : {}),
           ...(!coordinator ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             url: server.url, http_headers: server.headers, default_tools_approval_mode: 'approve',
@@ -107,7 +107,7 @@ export class CodexDriver implements Driver {
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
             approvalPolicy: 'never', sandboxPolicy: coordinator ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
-            ...(template.reasoningEffort ? { effort: template.reasoningEffort === 'max' ? 'xhigh' : template.reasoningEffort } : {}) });
+            ...(agent.reasoningEffort ? { effort: agent.reasoningEffort === 'max' ? 'xhigh' : agent.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },
         events: (async function* (): AsyncGenerator<DriverEvent> {

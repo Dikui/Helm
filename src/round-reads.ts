@@ -27,7 +27,7 @@ export function roundOutput(store: TaskStore, params: { workId: string; roundId:
 export function listRounds(store: TaskStore, workId: string, includeCurrentSteps: boolean) {
   const work = store.work(workId);
   const rows = store.db.prepare(`SELECT id, work_id AS workId, status, started_at AS startedAt,
-    ended_at AS endedAt, reason, usage, template_snapshot AS templateSnapshot, event_ids AS eventIds,
+    ended_at AS endedAt, reason, usage, agent_snapshot AS agentSnapshot, event_ids AS eventIds,
     output_path AS outputPath FROM coordinator_rounds WHERE work_id = ? ORDER BY rowid`).all(workId);
   const running = rows.find(row => row.status === 'running');
   const received = new Set<number>(running ? JSON.parse(String(running.eventIds)) : []);
@@ -36,9 +36,9 @@ export function listRounds(store: TaskStore, workId: string, includeCurrentSteps
     FROM messages m JOIN wake_queue q ON q.event_id = m.sequence
     WHERE q.work_id = ? AND q.processed_by IS NULL AND m.sender = 'user' ORDER BY m.sequence`)
     .all(workId).filter(message => !received.has(Number(message.sequence)));
-  const rounds = rows.map(({ eventIds: _eventIds, outputPath: _outputPath, templateSnapshot, usage, ...round }, index) => ({
+  const rounds = rows.map(({ eventIds: _eventIds, outputPath: _outputPath, agentSnapshot, usage, ...round }, index) => ({
     ...round, number: index + 1,
-    templateId: templateSnapshot ? JSON.parse(String(templateSnapshot)).id as string : null,
+    agentId: agentSnapshot ? JSON.parse(String(agentSnapshot)).id as string : null,
     usage: usage ? JSON.parse(String(usage)) : { inputTokens: 0, outputTokens: 0 },
   }));
   // Coordinator tool responses become output too. Returning that output to the

@@ -4,7 +4,7 @@ export interface NodeRef { type: 'card' | 'gate'; id: string }
 export interface CardNode {
   type: 'card'; id: string; workId: string; content: string;
   status: 'ready' | 'waiting' | 'executing' | 'verifying' | 'paused' | 'completed' | 'cancelled';
-  templateId: string | null; latestDispatchId: string | null; currentStep: number; latestStepSummary: string | null;
+  agentId: string | null; latestDispatchId: string | null; currentStep: number; latestStepSummary: string | null;
   cardBranch: string | null; workPath: string | null; usage: Usage; dependencies: NodeRef[];
 }
 export interface GateNode extends Gate {
@@ -12,7 +12,7 @@ export interface GateNode extends Gate {
 }
 export type GraphNode = CardNode | GateNode;
 export interface Dispatch {
-  id: string; cardId: string; purpose: 'execution' | 'verification'; templateId: string;
+  id: string; cardId: string; purpose: 'execution' | 'verification'; agentId: string;
   status: 'queued' | 'running' | 'ended'; createdAt: string; startedAt: string | null; endedAt: string | null;
   endReason: 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow' | null;
   abortReason: string | null; finalAnswer: string | null; failure: string | null;

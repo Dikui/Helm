@@ -23,13 +23,13 @@ Helm 是个人使用的多 Agent 编排器。界面帮助用户在工作收件�
 
 ## 共享行为
 
-- 路由：`shared/router.tsx` 管理浏览器历史，`routes.tsx` 注册页面，支持工作 id、工作视图、设置分区与模板 id 的深链接。
+- 路由：`shared/router.tsx` 管理浏览器历史，`routes.tsx` 注册页面，支持工作 id、工作视图、设置分区与 Agent id 的深链接。
 - 读取：`shared/api.ts` 调用现有 POST 操作，保留运行层错误的 code、reason、allowedOperations；`shared/data.tsx` 负责初始读取、重读、取消过时请求。
 - 实时：`shared/events.ts` 使用 fetch 读取 POST SSE，重读相关资源成功后推进游标；断线使用 Last-Event-ID 补读。
 - 语言：`shared/i18n.tsx` 管理中文 / 英文和 localStorage。仅翻译界面文字，用户和 Agent 内容原样显示。
 - 反馈：`shared/feedback.tsx` 提供可读取原始原因的行内错误；保留输入，按钮提交中禁用并标记忙碌。
 - 搜索：收件箱本地标题过滤，关键词为临时状态；提供清除和 ⌘K / Ctrl+K 聚焦。
-- 新建与对齐：页面专用组件、类型和样式分别在 `pages/new-work/`、`pages/work/aligning/`，复用共享读取、SSE 和反馈。项目、模板及草稿版本采用原生 select，接受系统弹出层的外观与键盘交互；不可用模板在选项中展示运行层原因并禁选。
+- 新建与对齐：页面专用组件、类型和样式分别在 `pages/new-work/`、`pages/work/aligning/`，复用共享读取、SSE 和反馈。项目、调度者 Agent 及草稿版本采用原生 select，接受系统弹出层的外观与键盘交互；不可用 Agent 在选项中展示运行层原因并禁选。
 - 登记项目：本页登记表单同时用于无项目状态与弹窗。弹窗由 `pages/new-work/RegisterProject.tsx` 管理 portal、背景 inert、初始焦点、Tab 循环、Escape 和焦点恢复；登记期间禁止关闭。输入错误保留原文并关联到路径字段。
 - 发送与确认：新建及对齐消息的一次逻辑提交保存完整参数和 key；响应丢失时锁定输入，重试沿用原请求。草稿历史以逐行条目和上一版比较，新增条目使用成功色并附文字说明；历史草稿不可确认。对话和草稿旁的确认入口共用决定函数与忙碌状态。
 

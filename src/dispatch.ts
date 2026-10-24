@@ -5,13 +5,13 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
 import { cardDetails } from './graph.js';
-import type { AgentTemplate } from './templates.js';
+import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 
 export interface Dispatch {
-  id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; templateId: string;
-  template: AgentTemplate; content: string; status: 'queued' | 'running' | 'ended';
+  id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
+  agent: AgentConfig; content: string; status: 'queued' | 'running' | 'ended';
   needsBrowser: boolean; browserPgid: number | null; browserStartedAt: string | null;
   resumeSessionId: string | null; sessionId: string | null; createdAt: string; startedAt: string | null; endedAt: string | null;
   sqlitePath: string | null;
@@ -23,8 +23,8 @@ export interface Dispatch {
   conclusion: 'completed' | 'blocked' | 'passed' | 'failed' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
 }
 
-const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, template_id AS templateId,
-  template_snapshot AS template, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId, sqlite_path AS sqlitePath,
+const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, agent_id AS agentId,
+  agent_snapshot AS agent, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId, sqlite_path AS sqlitePath,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
   conclusion, conclusion_reason AS conclusionReason, usage, failure,
@@ -33,7 +33,7 @@ const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose,
   card_content_snapshot AS cardContentSnapshot, work_description_id AS workDescriptionId, work_description_version AS workDescriptionVersion`;
 
 function readDispatch(row: Record<string, unknown>, outputsDeleted: boolean): Dispatch {
-  return { ...row, outputStatus: outputsDeleted ? 'deleted' : 'available', needsBrowser: Boolean(row.needsBrowser), template: JSON.parse(String(row.template)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
+  return { ...row, outputStatus: outputsDeleted ? 'deleted' : 'available', needsBrowser: Boolean(row.needsBrowser), agent: JSON.parse(String(row.agent)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
 }
 
 export function getDispatch(store: TaskStore, workId: string, dispatchId: string) {
@@ -128,11 +128,11 @@ function cardCopy(store: TaskStore, workId: string, cardId: string) {
 }
 
 export async function createDispatch(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; key: string; templateId: string; purpose?: Dispatch['purpose']; content?: string; resumeSessionId?: string; needsBrowser?: boolean;
+  workId: string; cardId: string; key: string; agentId: string; purpose?: Dispatch['purpose']; content?: string; resumeSessionId?: string; needsBrowser?: boolean;
 }) {
   const existing = listDispatches(store, params.workId).find(item => item.key === params.key);
   if (existing) return existing;
-  const template = await store.templates.check(params.templateId, 'executor');
+  const agent = await store.agents.check(params.agentId, 'executor');
   // The probe yields to other requests. Recheck idempotency, actor and work/card
   // state before any filesystem action or dispatch publication.
   const repeated = listDispatches(store, params.workId).find(item => item.key === params.key);
@@ -149,8 +149,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   if (purpose === 'verification' && params.resumeSessionId) throw new RuleError('INVALID_RESUME', '验收派单一律新开对话，不能续跑。');
   if (params.resumeSessionId) {
     const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended' && item.purpose === 'execution');
-    if (!previous || previous.templateId !== params.templateId || (previous.template.driver ?? 'claude-sdk') !== template.driver) {
-      throw new RuleError('INVALID_RESUME', '只能用原模板和驱动续跑本卡片以前的执行者对话。');
+    if (!previous || previous.agentId !== params.agentId || (previous.agent.driver ?? 'claude-sdk') !== agent.driver) {
+      throw new RuleError('INVALID_RESUME', '只能用原 Agent 和驱动续跑本卡片以前的执行者对话。');
     }
     if (store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND status IN ('queued', 'running')`).get(params.resumeSessionId)) {
       throw new RuleError('SESSION_ACTIVE', '同一会话不能同时被两次派单续跑。');
@@ -172,14 +172,14 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   mkdirSync(outputPath, { recursive: true });
   return store.transaction(() => {
     store.db.prepare(`INSERT INTO dispatches
-      (id, work_id, card_id, key, purpose, template_id, template_snapshot, content, status, resume_session_id, session_id, created_at, output_path,
+      (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, resume_session_id, session_id, created_at, output_path,
         needs_browser, card_content_snapshot, work_description_id, work_description_version)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, work.id, card.id, params.key, purpose, template.id, JSON.stringify(template), content,
+      .run(id, work.id, card.id, params.key, purpose, agent.id, JSON.stringify(agent), content,
         params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath,
         params.needsBrowser ? 1 : 0, cardContentSnapshot, description?.id ?? null, description?.version ?? null);
-    store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, template_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
-      .run(copy.workPath, copy.cardBranch, template.id, id, card.id);
+    store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, agent_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
+      .run(copy.workPath, copy.cardBranch, agent.id, id, card.id);
     const dispatch = getDispatch(store, work.id, id);
     store.appendEvent(actor, { type: 'dispatch', id }, 'dispatch-created', dispatch, { workId: work.id, cardId: card.id, dispatchId: id });
     return dispatch;

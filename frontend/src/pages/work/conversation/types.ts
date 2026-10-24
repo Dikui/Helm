@@ -9,7 +9,7 @@ export type ConversationItem = (Message & { type: 'message' }) | (Gate & {
 });
 export interface CardReference { type: 'card' | 'gate'; id: string; content?: string }
 export interface Round {
-  id: string; number: number; templateId: string | null; status: 'running' | 'ended';
+  id: string; number: number; agentId: string | null; status: 'running' | 'ended';
   startedAt: string; endedAt: string | null; usage: Usage; reason: string | null;
 }
 export interface RoundStep {

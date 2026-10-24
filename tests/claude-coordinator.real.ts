@@ -125,7 +125,7 @@ test('冒烟①⑤：三轮真实调度者在 _work 经带令牌 HTTP MCP 建卡
 3. add-dependency，上游为第一张卡片，下游为第二张卡片（节点 type 均为 card）。
 4. remove-dependency，删除同一条依赖。
 5. add-dependency，重新加回同一条依赖。
-6. create-dispatch，key=smoke-dispatch，cardId 为上游卡片 id，templateId=claude-executor，purpose=execution，needsBrowser=false。
+6. create-dispatch，key=smoke-dispatch，cardId 为上游卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false。
 每个步骤必须实际成功，最后简短回答后退出。`);
       const daemon = await fixture(subtest, observed.driver);
       const events = await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length >= 2, 180_000);
@@ -162,7 +162,7 @@ test('冒烟②：真实调度者操作后被用户打断，新轮次重投同�
     const observed = observedDriver(() => `这是事件重投冒烟，工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 无论启动简报中是否已经存在对象，都必须实际按顺序重放以下两个工具调用：
 1. create-card，key=replay-card，content=重投卡片。
-2. create-dispatch，key=replay-dispatch，cardId 用上一步返回的卡片 id，templateId=claude-executor，purpose=execution，needsBrowser=false。
+2. create-dispatch，key=replay-dispatch，cardId 用上一步返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false。
 必须使用上述原样 key，禁止换 key 或另外新建；调用完成后简短回答并退出。`, true);
     const daemon = await fixture(t, observed.driver, 2);
     await until(async () => observed.rounds[0]?.holding ?? false, Boolean, 180_000);

@@ -32,7 +32,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 const card = (key = 'card', needsVerification = true): FakeStep => ({ type: 'tool', name: 'create-card',
   arguments: ctx => ({ workId: workIdOf(ctx), key, content: '按卡片标准验收', needsVerification }), saveAs: key, check: ok });
 const dispatch = (key: string, purpose = 'verification', cardKey = 'card'): Extract<FakeStep, { type: 'tool' }> => ({ type: 'tool', name: 'create-dispatch',
-  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, cardKey).id, key, purpose, content: '请检查成果', templateId: 'claude-executor' }), saveAs: `${key}-dispatch`, check: ok });
+  arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, cardKey).id, key, purpose, content: '请检查成果', agentId: 'claude-executor' }), saveAs: `${key}-dispatch`, check: ok });
 const complete = (check: (value: any) => void = ok, key = 'card'): FakeStep => ({ type: 'tool', name: 'complete-card',
   arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id }), check });
 
@@ -73,7 +73,7 @@ test('执行派单附上并保存派单时卡片说明快照，之后改卡不�
   for (const content of ['本次实现并提供测试证据', undefined]) await t.test(content ?? '默认派单内容', async t => {
     const daemon = await fixture(t, [card(),
       { ...dispatch('execute', 'execution'), arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
-        key: 'execute', templateId: 'claude-executor', content }) },
+        key: 'execute', agentId: 'claude-executor', content }) },
       { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '派单后修改的说明' }), check: ok },
     ], [ctx => {
       assert.equal(JSON.parse(ctx.input).content, `卡片说明快照：\n按卡片标准验收${content ? `\n\n${content}` : ''}`);
@@ -96,7 +96,7 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
   let executionSession = '';
   const daemon = await fixture(t, [card(), dispatch('execute', 'execution'), { type: 'hang', until: executed.promise },
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'unconfirmed-revision', requirements: '尚未确认的新要求', boundary: '本机', criteria: '尚未生效的新标准' }), check: ok },
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-verification', purpose: 'verification', templateId: 'claude-executor', resumeSessionId: executionSession }), check: code('INVALID_RESUME') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-verification', purpose: 'verification', agentId: 'claude-executor', resumeSessionId: executionSession }), check: code('INVALID_RESUME') },
     dispatch('verify'),
     { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '派单后修改的说明' }), check: ok },
     { type: 'hang', until: verified.promise }, complete(),
@@ -232,7 +232,7 @@ test('最近一次验收未声明、不通过或异常结束都不能沿用上�
       t.after(() => { first.release(); last.release(); });
       let verificationSession = '';
       const daemon = await fixture(t, [card(), dispatch('first'), { type: 'hang', until: first.promise },
-        { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-check-as-execution', templateId: 'claude-executor', resumeSessionId: verificationSession }), check: code('INVALID_RESUME') },
+        { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-check-as-execution', agentId: 'claude-executor', resumeSessionId: verificationSession }), check: code('INVALID_RESUME') },
         dispatch('last'), { type: 'hang', until: last.promise }, complete(code('VERIFICATION_REQUIRED')),
         { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, needsVerification: false }), check: ok }, complete(),
       ], [[{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '第一次通过' }, check: ok }], [

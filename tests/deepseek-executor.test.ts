@@ -8,7 +8,8 @@ import * as zlib from 'node:zlib';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { AcpDriver } from '../src/acp-driver.js';
 import { acpFixture, collect } from './acp-fixture.js';
-import { defaultTemplateDir, TemplateCatalog, type AgentTemplate } from '../src/templates.js';
+import { AgentCatalog, type AgentConfig } from '../src/agents.js';
+import { fixtureAgentDir } from './helmd-fixture.js';
 import { startHelmd } from '../src/server.js';
 import { acpExecutorFixture, ok } from './acp-executor-fixture.js';
 import { until } from './browser-fixture.js';
@@ -118,26 +119,26 @@ test('DeepSeek 账号执行者经 ACP 设置并核对模型路线和强度，强
   assert.deepEqual(requests.find(r => r.method === 'session/new').params.mcpServers, [
     { type: 'http', name: 'helm', url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: 'Bearer dispatch-token' }] },
   ]);
-  const builtin = new TemplateCatalog(undefined, ['deepseek']).get('deepseek-executor');
+  const builtin = new AgentCatalog(fixtureAgentDir, ['deepseek']).get('deepseek-executor');
   assert.equal(builtin.model, 'deepseek-flash');
   assert.equal(builtin.reasoningEffort, 'low');
   assert.equal(builtin.home, 'shared');
 });
 
-test('DeepSeek API 模板使用各自专用 DSH_HOME，凭据只由 CLI 读取，按公布值选择 official 路线', async t => {
+test('DeepSeek API Agent 使用各自专用 DSH_HOME，凭据只由 CLI 读取，按公布值选择 official 路线', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   for (const id of ['deepseek-api-one', 'deepseek-api-two']) {
-    const template = { ...ctx.template, id, home: 'template' as const, model: 'deepseek-v4-flash', reasoningEffort: 'max' as const };
+    const agent = { ...ctx.agent, id, home: 'dedicated' as const, model: 'deepseek-v4-flash', reasoningEffort: 'max' as const };
     const home = join(ctx.home, '.helm', 'agent-homes', id);
-    const unavailable = await ctx.driver.checkAvailability(template);
+    const unavailable = await ctx.driver.checkAvailability(agent);
     assert.equal(unavailable.available, false);
     assert.match(unavailable.reason!, /专用主目录/);
     assert.ok(unavailable.command!.includes(home) && unavailable.command!.includes('dsh web'));
     await mkdir(home, { recursive: true });
-    assert.equal((await ctx.driver.checkAvailability(template)).available, false, '空 API 主目录缺少 CLI 配置或凭据文件');
+    assert.equal((await ctx.driver.checkAvailability(agent)).available, false, '空 API 主目录缺少 CLI 配置或凭据文件');
     await writeFile(join(home, '.credentials.yaml'), 'fixture: CLI-owned-key\n', { mode: 0o600 });
-    assert.equal((await ctx.driver.checkAvailability(template)).available, true);
-    const session = await ctx.driver.start({ ...ctx.options, template });
+    assert.equal((await ctx.driver.checkAvailability(agent)).available, true);
+    const session = await ctx.driver.start({ ...ctx.options, agent });
     await session.send('API 派单');
     await collect(session.events);
   }
@@ -151,18 +152,18 @@ test('DeepSeek API 模板使用各自专用 DSH_HOME，凭据只由 CLI 读取�
 
 test('DeepSeek 拒绝调度者、未知模型、medium、fast 和计费路线与 home 不一致', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
-  const cases: [Partial<AgentTemplate>, RegExp][] = [
+  const cases: [Partial<AgentConfig>, RegExp][] = [
     [{ role: 'coordinator' }, /只支持执行者/], [{ model: null }, /模型 id/], [{ model: 'unknown' }, /unknown/],
     [{ reasoningEffort: 'medium' }, /不支持推理强度 medium/], [{ reasoningEffort: null }, /推理强度/],
     [{ fast: true }, /fast/],
-    [{ home: 'template' }, /账号模型/], [{ model: 'deepseek-v4-flash' }, /专用主目录/],
+    [{ home: 'dedicated' }, /账号模型/], [{ model: 'deepseek-v4-flash' }, /专用主目录/],
   ];
   for (const [settings, reason] of cases) {
-    const template = { ...ctx.template, ...settings };
-    const result = await ctx.driver.checkAvailability(template);
+    const agent = { ...ctx.agent, ...settings };
+    const result = await ctx.driver.checkAvailability(agent);
     assert.equal(result.available, false);
     assert.match(result.reason!, reason);
-    await assert.rejects(ctx.driver.start({ ...ctx.options, template }), reason);
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent }), reason);
   }
   assert.deepEqual(await ctx.requests(), []);
 });
@@ -178,7 +179,7 @@ test('DeepSeek 不按显示名猜模型，拒绝未公布的模型/强度与配�
     });
   }
   const ctx = await acpFixture(t, { configOptions, configuredOptions: configOptions }, true, 'deepseek');
-  await assert.rejects(ctx.driver.start(ctx.options), /与模板不一致/);
+  await assert.rejects(ctx.driver.start(ctx.options), /与 Agent 不一致/);
   assert.equal((await ctx.requests()).some(r => r.method === 'session/prompt'), false);
 });
 
@@ -189,7 +190,7 @@ test('DeepSeek 按模型 id 和 provider 匹配选项原值，Pro/high 不会误
       { value: '[ "deepseek-account", "deepseek-v4-pro" ]', name: '任意显示名' },
     ] }, configOptions[1],
   ] }, true, 'deepseek');
-  const session = await ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'deepseek-v4-pro', reasoningEffort: 'high' } });
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: 'deepseek-v4-pro', reasoningEffort: 'high' } });
   await session.send('Pro');
   await collect(session.events);
   assert.deepEqual((await ctx.requests()).filter(r => r.method === 'session/set_config_option').map(r => r.params.value), ['[ "deepseek-account", "deepseek-v4-pro" ]', 'high']);
@@ -197,17 +198,17 @@ test('DeepSeek 按模型 id 和 provider 匹配选项原值，Pro/high 不会误
 
 test('DeepSeek 可用性只做 initialize，无需认证；不可执行、拒绝或超时给安装和 dsh web 修复命令', async t => {
   const ctx = await acpFixture(t, { configOptions, initialize: { protocolVersion: 1, authMethods: [], agentCapabilities: { mcpCapabilities: { http: true } } } }, true, 'deepseek');
-  assert.deepEqual(await ctx.driver.checkAvailability(ctx.template), { available: true });
+  assert.deepEqual(await ctx.driver.checkAvailability(ctx.agent), { available: true });
   assert.deepEqual((await ctx.requests()).map(r => r.method), ['fixture/spawn', 'initialize']);
   await assert.rejects(stat(join(ctx.home, '.dsh')), { code: 'ENOENT' });
   const absent = new AcpDriver('deepseek', { command: { file: join(ctx.directory, 'absent'), args: [] } });
-  const result = await absent.checkAvailability(ctx.template);
+  const result = await absent.checkAvailability(ctx.agent);
   assert.equal(result.available, false);
   assert.match(result.command!, /npm install -g @deepseek-ai\/dsh.*dsh web/);
   for (const script of [{ hangOn: 'initialize' }, { rejectOn: 'initialize' }, { initialize: { protocolVersion: 1, agentCapabilities: {} } }]) {
     await t.test(JSON.stringify(script), async t => {
       const ctx = await acpFixture(t, script, true, 'deepseek');
-      const result = await new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 500 }).checkAvailability(ctx.template);
+      const result = await new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 500 }).checkAvailability(ctx.agent);
       assert.equal(result.available, false);
       assert.match(result.reason!, /initialize.*dsh web/);
     });
@@ -281,7 +282,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
     await until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
     await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), ...script }));
     daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
-      templateId: 'deepseek-executor', key: 'resume', resumeSessionId: first.sessionId, content: '续跑后中止' }, check: ok }]);
+      agentId: 'deepseek-executor', key: 'resume', resumeSessionId: first.sessionId, content: '续跑后中止' }, check: ok }]);
     ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '续跑' }));
   }
   const count = mode === 'resume' ? 2 : 1;
@@ -381,7 +382,7 @@ test('DeepSeek 经假 ACP 调用同端点结论和浏览器，令牌生效且运
   assert.equal((await acp.requests()).filter(r => r.method === 'fixture/mcp').length, 3);
 });
 
-test('startHelmd 默认登记 DeepSeek，调度者模板列为不可用并显示原因（CLI 替身）', async t => {
+test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显示原因（CLI 替身）', async t => {
   const acp = await acpFixture(t, { configOptions }, true, 'deepseek');
   const bin = join(acp.directory, 'bin');
   await mkdir(bin);
@@ -392,19 +393,19 @@ test('startHelmd 默认登记 DeepSeek，调度者模板列为不可用并显示
   const previousPath = process.env.PATH;
   process.env.PATH = `${bin}:${previousPath}`;
   t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; });
-  const templateDir = join(acp.directory, 'templates');
-  await cp(join(defaultTemplateDir, 'deepseek-executor'), join(templateDir, 'deepseek-executor'), { recursive: true });
-  await cp(join(defaultTemplateDir, 'deepseek-executor'), join(templateDir, 'deepseek-coordinator'), { recursive: true });
-  const path = join(templateDir, 'deepseek-coordinator', 'config.json');
+  const agentDir = join(acp.directory, 'agents');
+  await cp(join(fixtureAgentDir, 'deepseek-executor'), join(agentDir, 'deepseek-executor'), { recursive: true });
+  await cp(join(fixtureAgentDir, 'deepseek-executor'), join(agentDir, 'deepseek-coordinator'), { recursive: true });
+  const path = join(agentDir, 'deepseek-coordinator', 'config.json');
   await writeFile(path, JSON.stringify({ ...JSON.parse(await readFile(path, 'utf8')), role: 'coordinator' }));
-  const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), templateDir });
+  const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), agentDir });
   try {
     const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: '{}' })).json() as any).result;
-    const templates = await call('list-agent-templates');
-    assert.equal(templates.find((t: any) => t.id === 'deepseek-executor').available, true);
-    assert.equal(templates.find((t: any) => t.id === 'deepseek-coordinator').available, false);
-    assert.match((await call('list-pending')).find((p: any) => p.templateId === 'deepseek-coordinator').reason, /只支持执行者/);
-    assert.throws(() => new TemplateCatalog(templateDir, ['deepseek']).get('deepseek-coordinator'), /只支持执行者/);
+    const agents = await call('list-agents');
+    assert.equal(agents.find((t: any) => t.id === 'deepseek-executor').available, true);
+    assert.equal(agents.find((t: any) => t.id === 'deepseek-coordinator').available, false);
+    assert.match((await call('list-pending')).find((p: any) => p.agentId === 'deepseek-coordinator').reason, /只支持执行者/);
+    assert.throws(() => new AgentCatalog(agentDir, ['deepseek']).get('deepseek-coordinator'), /只支持执行者/);
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize'].includes(r.method)));
   } finally { await daemon.close(); }
 });

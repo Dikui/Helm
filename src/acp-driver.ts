@@ -5,9 +5,9 @@ import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessio
 import { z } from 'zod';
 import { acpAgents } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability } from './driver.js';
-import { templatePrompt } from './prompts.js';
-import { TemplateCatalog, templateEnvironment, type AgentTemplate } from './templates.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability } from './driver.js';
+import { agentPrompt } from './prompts.js';
+import { agentEnvironment, type AgentConfig } from './agents.js';
 
 type EventContent<Event = DriverEvent> = Event extends DriverEvent ? Omit<Event, 'step'> : never;
 const extensionUpdate = z.object({ sessionId: z.string(), update: z.object({ sessionUpdate: z.string() }) });
@@ -21,26 +21,26 @@ export class AcpDriver implements Driver {
   }
   install;
 
-  private environment(base: Record<string, string>, template: AgentTemplate) {
+  private environment(base: Record<string, string>, agent: AgentConfig) {
     const env = { ...base, ...this.profile.environment.set };
     for (const key of this.profile.environment.unset) delete env[key];
-    if (this.profile.homeVariable && template.home === 'template') env[this.profile.homeVariable] = join(base.HOME ?? homedir(), '.helm', 'agent-homes', template.id);
+    if (this.profile.homeVariable && agent.home === 'dedicated') env[this.profile.homeVariable] = join(base.HOME ?? homedir(), '.helm', 'agent-homes', agent.id);
     return env;
   }
 
-  private async launch(template: AgentTemplate, options: Pick<SessionOptions, 'cwd' | 'onProcess'>,
+  private async launch(agent: AgentConfig, options: Pick<SessionOptions, 'cwd' | 'onProcess'>,
     env: Record<string, string>, handlers: ConstructorParameters<typeof AcpClient>[3]) {
     const command = this.config.command ?? { file: this.profile.command, args: [] };
-    const prepared = await this.profile.prepare?.(template);
+    const prepared = await this.profile.prepare?.(agent);
     try {
       const acp = new AcpClient({ file: command.file,
-        args: [...command.args, ...this.profile.arguments(template), ...(prepared?.args ?? [])] }, options, env, handlers);
+        args: [...command.args, ...this.profile.arguments(agent), ...(prepared?.args ?? [])] }, options, env, handlers);
       let closing: Promise<void> | undefined;
       return { acp, close: () => closing ??= acp.close().finally(() => prepared?.cleanup()) };
     } catch (error) { await prepared?.cleanup(); throw error; }
   }
 
-  private async initialize(acp: AcpClient, template: AgentTemplate): Promise<InitializeResponse> {
+  private async initialize(acp: AcpClient, agent: AgentConfig): Promise<InitializeResponse> {
     const result = await acp.connection.agent.request('initialize', { protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'helm', version: '0.1.0' },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
@@ -49,20 +49,20 @@ export class AcpDriver implements Driver {
       throw new Error(`ACP agent does not offer ${this.profile.authentication}`);
     }
     if (!result.agentCapabilities?.mcpCapabilities?.http) throw new Error('ACP agent does not support HTTP MCP');
-    const reason = this.profile.initializationUnavailable(template, result);
+    const reason = this.profile.initializationUnavailable(agent, result);
     if (reason) throw new Error(reason);
     return result;
   }
 
-  private async configureSession(acp: AcpClient, template: AgentTemplate, sessionId: string,
+  private async configureSession(acp: AcpClient, agent: AgentConfig, sessionId: string,
     configOptions: SessionConfigOption[] | null | undefined, output: (message: unknown) => void) {
-    const settings = this.profile.sessionSettings(template);
+    const settings = this.profile.sessionSettings(agent);
     const expected = new Map(settings.map(setting => [setting.id, setting.value]));
     for (const setting of settings.filter(setting => setting.apply)) {
       const option = configOptions?.find(option => option.id === setting.id);
       const values = option?.type === 'select' ? option.options.flatMap(value => 'group' in value ? value.options : [value]) : [];
       const selected = values.find(value => setting.matches ? setting.matches(value.value) : value.value === setting.value);
-      if (!selected) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 没有公布取值 ${setting.value}，不能使用模板指定的设置。`);
+      if (!selected) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 没有公布取值 ${setting.value}，不能使用 Agent 指定的设置。`);
       expected.set(setting.id, selected.value);
       const response = await acp.connection.agent.request('session/set_config_option', { sessionId, configId: setting.id, value: selected.value });
       output({ method: 'session/set_config_option', configId: setting.id, result: response });
@@ -71,15 +71,15 @@ export class AcpDriver implements Driver {
     // A model change can reset reasoning effort; verify the final full state.
     for (const setting of settings) {
       const current = configOptions?.find(option => option.id === setting.id)?.currentValue;
-      if (current !== expected.get(setting.id)) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与模板不一致：期望 ${expected.get(setting.id)}，实际 ${current ?? '未公布'}。`);
+      if (current !== expected.get(setting.id)) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与 Agent 不一致：期望 ${expected.get(setting.id)}，实际 ${current ?? '未公布'}。`);
     }
   }
 
-  async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {
-    const reason = this.profile.unavailable(template);
+  async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {
+    const reason = this.profile.unavailable(agent);
     if (reason) return { available: false, reason };
-    const env = this.environment(templateEnvironment(template), template);
-    if (this.profile.homeVariable && template.home === 'template') {
+    const env = this.environment(agentEnvironment(agent), agent);
+    if (this.profile.homeVariable && agent.home === 'dedicated') {
       const directory = env[this.profile.homeVariable]!;
       try {
         if (!(await stat(directory)).isDirectory()) throw new Error('not a directory');
@@ -88,15 +88,15 @@ export class AcpDriver implements Driver {
       }
       catch {
         const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
-        return { available: false, reason: `API 模板需要专用主目录 ${directory}；请按 dsh 格式配置接口和 key（Helm 不读取凭据）。`,
+        return { available: false, reason: `API Agent 需要专用主目录 ${directory}；请按 dsh 格式配置接口和 key（Helm 不读取凭据）。`,
           command: `mkdir -p ${quoted} && DSH_HOME=${quoted} dsh web` };
       }
     }
-    const { acp, close } = await this.launch(template, { cwd: homedir() }, env,
+    const { acp, close } = await this.launch(agent, { cwd: homedir() }, env,
       { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
     const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 10_000);
     try {
-      await this.initialize(acp, template);
+      await this.initialize(acp, agent);
       return { available: true };
     } catch (error) {
       return { available: false, reason: `${this.profile.name} 无法完成 ACP initialize 或缺少${this.profile.authentication ? ` ${this.profile.authentication} /` : ''} HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`,
@@ -106,11 +106,11 @@ export class AcpDriver implements Driver {
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
-    const template = options.template ?? new TemplateCatalog(undefined, [this.agent]).get(`${this.agent}-executor`);
+    const agent = options.agent;
     const profile = this.profile;
-    const reason = this.profile.unavailable(template);
+    const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
-    if (template.driver !== this.agent || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1) {
+    if (agent.driver !== this.agent || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
@@ -142,9 +142,9 @@ export class AcpDriver implements Driver {
       wake?.();
       void close();
     };
-    const env = this.environment(options.env, template);
-    if (this.profile.homeVariable && template.home === 'template') await mkdir(env[this.profile.homeVariable]!, { recursive: true, mode: 0o700 });
-    const { acp, close: closeAgent } = await this.launch(template, { ...options, cwd }, env, {
+    const env = this.environment(options.env, agent);
+    if (this.profile.homeVariable && agent.home === 'dedicated') await mkdir(env[this.profile.homeVariable]!, { recursive: true, mode: 0o700 });
+    const { acp, close: closeAgent } = await this.launch(agent, { ...options, cwd }, env, {
       notifications: profile.compactionNotification ? [profile.compactionNotification.method] : [],
       output(message) {
         output(message);
@@ -216,7 +216,7 @@ export class AcpDriver implements Driver {
     const timer = setTimeout(cancel, this.config.timeoutMs ?? 10_000);
     try {
       if (options.signal?.aborted) cancel();
-      const initialized = await this.initialize(acp, template);
+      const initialized = await this.initialize(acp, agent);
       if (options.resumeSessionId !== undefined && !initialized.agentCapabilities?.sessionCapabilities?.resume) {
         throw new Error('ACP agent does not support session/resume');
       }
@@ -239,7 +239,7 @@ export class AcpDriver implements Driver {
         configOptions = session.configOptions;
       }
       if (cancelled) throw new Error('ACP session cancelled during startup');
-      await this.configureSession(acp, template, id, configOptions, output);
+      await this.configureSession(acp, agent, id, configOptions, output);
       if (profile.sessionUsage) previousUsage = await profile.sessionUsage(env, id, true);
       if (cancelled) throw new Error('ACP session cancelled during startup');
       clearTimeout(timer);
@@ -251,7 +251,7 @@ export class AcpDriver implements Driver {
           // session/prompt resolves only at the end of the turn. Keep send()
           // nonblocking so helmd can consume updates and reset its idle timer.
           void acp.connection.agent.request('session/prompt', { sessionId: id!, prompt: [
-            { type: 'text', text: templatePrompt(template) }, { type: 'text', text: content },
+            { type: 'text', text: agentPrompt(agent) }, { type: 'text', text: content },
           ] }).then(async response => {
             promptResponse.parse(response);
             output({ method: 'session/prompt', result: response });

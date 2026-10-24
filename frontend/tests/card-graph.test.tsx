@@ -20,11 +20,11 @@ test('派单打回回路、步骤分页及成果可查，派单结束经 SSE 同
     const ended = JSON.parse(ctx.input).newEvents.filter((event: any) => event.action === 'dispatch-ended').at(-1)?.details;
     if (!ended || ended.key === 'repair') return [];
     return [{ type: 'tool', name: 'create-dispatch', arguments: { workId: workId(ctx), cardId: ended.cardId,
-      key: ended.key === 'first' ? 'verify' : 'repair', purpose: ended.key === 'first' ? 'verification' : 'execution', templateId: 'claude-executor',
+      key: ended.key === 'first' ? 'verify' : 'repair', purpose: ended.key === 'first' ? 'verification' : 'execution', agentId: 'claude-executor',
     }, check: ok }];
   };
   daemon = await uiFixture([[draft], [card('login', '验证码登录'), {
-    type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), cardId: savedId(ctx, 'login'), key: 'first', templateId: 'claude-executor' }), check: ok,
+    type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), cardId: savedId(ctx, 'login'), key: 'first', agentId: 'claude-executor' }), check: ok,
   }], ...Array<FakeScript>(12).fill(nextDispatch)], undefined, { executorScripts: [
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '首版已实现' }, check: ok }, { type: 'end', reason: 'completed', finalAnswer: '第一版实现' }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '过期验证码仍能登录' }, check: ok }, { type: 'end', reason: 'completed', finalAnswer: '请修复过期校验' }],
@@ -176,7 +176,7 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
 
 test('检查器暂停和恢复卡片，取消前二次确认，关闭确认不改变状态', async () => {
   daemon = await uiFixture([[draft], [card('active', '正在执行的卡片'), {
-    type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), cardId: savedId(ctx, 'active'), key: 'active-dispatch', templateId: 'claude-executor' }), check: ok,
+    type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), cardId: savedId(ctx, 'active'), key: 'active-dispatch', agentId: 'claude-executor' }), check: ok,
   }]], undefined, { executorScripts: [[{ type: 'output', text: '等待用户操作' }, { type: 'hang' }]] });
   const work = await executeWork();
   const records = await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result[0]?.status === 'running');

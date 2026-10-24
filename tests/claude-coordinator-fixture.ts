@@ -7,7 +7,7 @@ import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import type { HelmEvent } from '../src/store.js';
-import { startTestHelmd as startHelmd, copyTemplates, configureTestTemplate } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
 
 type TestEvent = Omit<HelmEvent, 'details'> & { details: Record<string, any> };
 
@@ -38,9 +38,9 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
   ]]);
   const drain = new FakeDriver();
   let started = 0;
-  const templateDir = await copyTemplates(directory);
-  await configureTestTemplate(templateDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
-  const daemon = await startHelmd({ templateDir, port: 0, dataDir: join(directory, 'data'),
+  const agentDir = await copyAgents(directory);
+  await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
+  const daemon = await startHelmd({ agentDir, port: 0, dataDir: join(directory, 'data'),
     driver: { start(options) {
       const round = started++;
       return (round === 0 ? setup : round <= rounds ? driver : drain).start(options);

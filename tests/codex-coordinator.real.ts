@@ -26,12 +26,12 @@ function observedDriver() {
   const base = new CodexCoordinatorDriver();
   const rounds: Observation[] = [];
   const driver: Driver = {
-    checkAvailability: template => base.checkAvailability(template),
+    checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
       assert.deepEqual(options.sandbox, { mode: 'read-only', writableRoots: [] });
       assert.equal(options.resumeSessionId, undefined);
-      assert.equal(options.template?.model, 'gpt-6-luna');
-      assert.equal(options.template?.reasoningEffort, 'low');
+      assert.equal(options.agent?.model, 'gpt-6-luna');
+      assert.equal(options.agent?.reasoningEffort, 'low');
       // Exercise the driver's loopback bypass even when callers supply none.
       const env = { ...options.env };
       delete env.NO_PROXY;
@@ -57,7 +57,7 @@ ${attempt === 1 ? `先用 shell 原样尝试一次命令：${record.command}
 3. add-dependency，上游第一张卡片、下游第二张卡片，节点 type=card。
 4. remove-dependency，删除刚才的依赖。
 5. add-dependency，重新加回同一依赖。
-6. create-dispatch，key=smoke-dispatch，cardId 为上游 id，templateId=claude-executor，purpose=execution，needsBrowser=false。
+6. create-dispatch，key=smoke-dispatch，cardId 为上游 id，agentId=claude-executor，purpose=execution，needsBrowser=false。
 复用上述原样 key，禁止换 key。完成后简短回答并退出。\n启动简报：\n${content}`);
         },
         events: (async function* () {
