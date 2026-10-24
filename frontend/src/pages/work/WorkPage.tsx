@@ -7,6 +7,7 @@ import type { Work } from '../../shared/types.js';
 import { AligningWork } from './aligning/AligningWork.js';
 import { Link } from '../../shared/router.js';
 import { CardGraphView } from './card-graph/CardGraphView.js';
+import { BriefView } from './brief/BriefView.js';
 
 export function WorkPage({ route }: { route: RouteParams }) {
   const { t } = useI18n();
@@ -24,7 +25,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
       <Link href={`/works/${work.id}/structure`} aria-current={showGraph ? 'page' : undefined}>{t('structure')}</Link>
       <Link href={`/works/${work.id}/brief`} aria-current={route.view === 'brief' ? 'page' : undefined}>{t('brief')}</Link>
     </nav>}
-    {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : work && showGraph ? <CardGraphView key={work.id} workId={work.id} /> : <div className="page-body">
+    {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : work && route.view === 'brief' ? <BriefView work={work} /> : work && showGraph ? <CardGraphView key={work.id} workId={work.id} /> : <div className="page-body">
       {work && <><h2>{t('overview')}</h2><p className="muted">{t('pagePending')}</p></>}
     </div>}
   </>;

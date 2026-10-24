@@ -1,6 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    reviewTitle: '审核', reviewReport: '汇总报告', reviewRejected: '被拒绝的操作', reviewUndeclared: '未声明结论的派单',
+    reviewVerification: '整体验收', reviewNoVerification: '暂无整体验收结论。', reviewPassed: '通过', reviewFailed: '不通过', reviewNotDeclared: '未声明',
+    reviewCard: '卡片', reviewDispatch: '派单', reviewDiff: '工作分支相对基准的 diff', reviewViewDiff: '查看 diff', reviewNoDiff: '没有代码差异。',
+    reviewDiffContent: 'Diff 内容', reviewDiffPaging: 'Diff 分段', reviewSegment: '段', reviewPrevious: '上一段', reviewNext: '下一段',
+    reviewOpenDetails: '查看审核详情', reviewReturnHint: '退回必须附意见。', reviewDecision: '已决定',
+    briefActive: '生效中', briefHistorical: '历史版本 · 只读', briefNoActive: '暂无已确认的生效版本。', briefWorkBranch: '工作分支',
+    briefChangeHint: '要改：在对话里告诉调度者，它会起草新版本请你确认；确认前旧版继续有效。', briefChangeInChat: '在对话中提出修改',
     coordinatorRole: '调度者', executorTemplates: '执行者模板', unrecognizedTemplates: '无法识别角色',
     available: '可用', unavailable: '不可用', dispatchCount: '个运行中派单', workCount: '项未结束工作', projectWorkCount: '项工作',
     templateHelp: '按角色配置 Agent，改动从下一次派单或调度轮次生效。', newTemplate: '新建模板',
@@ -71,6 +78,13 @@ export const messages = {
     graphPausedFeedback: '卡片已暂停。', graphResumedFeedback: '卡片已恢复。', graphCancelledFeedback: '卡片已取消。',
   },
   en: {
+    reviewTitle: 'Review', reviewReport: 'Summary report', reviewRejected: 'Rejected operations', reviewUndeclared: 'Dispatches without a verdict',
+    reviewVerification: 'Overall verification', reviewNoVerification: 'No overall verification verdict yet.', reviewPassed: 'Passed', reviewFailed: 'Failed', reviewNotDeclared: 'Undeclared',
+    reviewCard: 'Card', reviewDispatch: 'Dispatch', reviewDiff: 'Work branch diff against base', reviewViewDiff: 'View diff', reviewNoDiff: 'No code changes.',
+    reviewDiffContent: 'Diff content', reviewDiffPaging: 'Diff segments', reviewSegment: 'Segment', reviewPrevious: 'Previous segment', reviewNext: 'Next segment',
+    reviewOpenDetails: 'View review details', reviewReturnHint: 'A comment is required to send back.', reviewDecision: 'Decided',
+    briefActive: 'In effect', briefHistorical: 'Historical version · Read only', briefNoActive: 'No confirmed brief is in effect yet.', briefWorkBranch: 'Work branch',
+    briefChangeHint: 'To change it, tell the coordinator in chat. It drafts a new version for you to confirm; the current one stays in effect until then.', briefChangeInChat: 'Request changes in chat',
     coordinatorRole: 'Coordinators', executorTemplates: 'Executor templates', unrecognizedTemplates: 'Unrecognized role',
     available: 'Available', unavailable: 'Unavailable', dispatchCount: 'running dispatches', workCount: 'active works', projectWorkCount: 'works',
     templateHelp: 'Configure Agents by role. Changes apply from the next dispatch or round.', newTemplate: 'New template',
