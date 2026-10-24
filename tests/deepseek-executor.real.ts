@@ -86,8 +86,8 @@ test('DeepSeek 真实账号执行者：一轮、同端点结论/浏览器、卡�
         assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(tool)
           && JSON.stringify(entries).includes('helm') && entries.some(e => e.status === 'completed')), `必须实际调用 helm/${tool}`);
       }
+      // The model may append commands (e.g. `echo "exit:$?"`), so the tool's exit code is not reliable evidence.
       assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(boundaryCommand)
-        && entries.some(e => e.status === 'failed' || /\[exit code: [1-9]\d*\]/i.test(JSON.stringify(e)))
         && /operation not permitted|permission denied|read-only file system|file access denied under workspace-write|outside.*workspace/i.test(JSON.stringify(entries))),
       '副本外写入必须有真实沙箱拒绝证据，不能只凭最终回答');
       await assert.rejects(readFile(outside), { code: 'ENOENT' });

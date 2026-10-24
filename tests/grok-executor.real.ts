@@ -124,8 +124,8 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(tool)
           && JSON.stringify(entries).includes('helm') && entries.some(e => e.status === 'completed')), `必须实际调用 helm/${tool}`);
       }
+      // The model may append commands (e.g. `echo "exit:$?"`), so the tool's exit code is not reliable evidence.
       assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(boundaryCommand)
-        && entries.some(entry => entry.status === 'failed' || (typeof entry.rawOutput?.exit_code === 'number' && entry.rawOutput.exit_code !== 0))
         && /operation not permitted|permission denied|read-only file system|sandbox/i.test(JSON.stringify(entries))), '副本外写入必须失败，并有真实沙箱拒绝证据');
       await assert.rejects(readFile(outside), { code: 'ENOENT' });
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
