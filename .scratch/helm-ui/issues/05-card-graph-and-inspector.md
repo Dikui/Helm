@@ -6,8 +6,18 @@
 
 **Status:** ready-for-agent
 
-- [ ] 布局坐标由现成的有向图布局库计算，界面只负责绘制
-- [ ] 数据只来自 `get-card-graph`、`list-dispatches`、`get-dispatch`、`get-dispatch-output`、`get-dispatch-artifacts`、`read-artifact`；派单输出按步骤分页加载
-- [ ] 卡片暂停 / 恢复 / 取消调用对应用户操作；取消先二次确认
-- [ ] jsdom 整页测试覆盖：节点与依赖、关卡节点、取消卡片、打回次数显示；派单结束经 SSE 后卡片和检查器更新；查看输出步骤和成果；卡片操作及取消确认。不测坐标
-- [ ] `npm run check`、`npm test` 通过
+- [x] 布局坐标由现成的有向图布局库计算，界面只负责绘制
+- [x] 数据只来自 `get-card-graph`、`list-dispatches`、`get-dispatch`、`get-dispatch-output`、`get-dispatch-artifacts`、`read-artifact`；派单输出按步骤分页加载
+- [x] 卡片暂停 / 恢复 / 取消调用对应用户操作；取消先二次确认
+- [x] jsdom 整页测试覆盖：节点与依赖、关卡节点、取消卡片、打回次数显示；派单结束经 SSE 后卡片和检查器更新；查看输出步骤和成果；卡片操作及取消确认。不测坐标
+- [x] `npm run check`、`npm test` 通过
+
+## Comments
+
+2026-10-24：沿用任务单 02 的资源读取、POST SSE、HTTP 操作和 i18n，在 `frontend/src/pages/work/card-graph/` 实现 Dagre 自上而下布局、依赖汇合、关卡、取消卡片虚线、上下游高亮、平移缩放和常驻检查器。节点展示状态、模板、步骤及最新摘要；派单历史展示结束方式、自报结论与理由、最终回答及打回回路；输出每次读取 20 个步骤号，成果按需读取。暂停 / 恢复走现有用户操作，取消使用含理由、焦点管理及 Escape 行为的二次确认框。
+
+新增 4 个整页场景，通过真实 helmd HTTP / MCP / SSE 和假驱动验证节点与依赖、实时派单结果、分页与成果、卡片操作、取消确认、断线与运行层拒绝原因。类型检查通过；第一次完整 `npm test` 为 Node 448/448、整页 11/11；最终完整运行 Node 447/448，唯一失败为用户预告的 dispatch 偶发项，单独复跑 1/1 通过，并补跑整页 11/11 通过。没有修改该偶发用例。已自行完成 Standards / Spec 两轴 diff-review；按执行约束不提交，由调度者代为提交。
+
+另在假驱动 HTTP 夹具中复现了未改动运行层的长历史 SSE 初次订阅问题：167 条事件约 396 KB 时首次读取出现 `UND_ERR_SOCKET`，位置为 `src/server.ts` 的背压断开逻辑。此问题交由调度者另行处理，本单没有修改共享 SSE 或运行层。
+
+- [ ] 调度者后续执行真实浏览器冒烟、截图及深浅主题视觉验收（本轮未启动任何浏览器或真实 Agent 会话）。
