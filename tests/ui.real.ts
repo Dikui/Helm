@@ -202,7 +202,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await screenshot('09-main-dark', workHeader(page).getByText('已完成', { exact: true }), review);
 
     await click(sidebar.getByRole('link', { name: '设置', exact: true }));
-    await screenshot('10-settings', main.getByRole('heading', { name: '设置', level: 1, exact: true }), main.getByRole('heading', { name: 'Agent', exact: true }), main.getByRole('heading', { name: 'claude-coordinator', exact: true }));
+    await screenshot('10-settings', main.getByRole('heading', { name: '设置', level: 1, exact: true }), main.getByRole('heading', { name: 'Agent 集群', exact: true }), main.getByRole('heading', { name: 'claude-coordinator', exact: true }));
 
     // Read-only evidence after the UI has accepted the review; never seed business state via APIs.
     assert.equal(await readFile(join(repo, 'smoke.txt'), 'utf8'), contents);
