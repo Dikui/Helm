@@ -749,3 +749,17 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, dispatch.usage);
   });
 });
+
+test('Claude 经 SDK supportedModels 列出模型和推理强度，default 记为 CLI 默认模型并关闭会话', async () => {
+  let closed = 0;
+  const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: () => ({ close() { closed++; },
+    async *[Symbol.asyncIterator]() {}, async supportedModels() { return [
+      { value: 'default', displayName: 'Default', description: '', supportedEffortLevels: ['low', 'max'] },
+      { value: 'haiku', displayName: 'Haiku', description: '' },
+    ]; } }) });
+  assert.deepEqual(await driver.listModels(), [
+    { id: null, label: 'Default', efforts: ['low', 'max'], defaultEffort: null },
+    { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null },
+  ]);
+  assert.ok(closed >= 1);
+});

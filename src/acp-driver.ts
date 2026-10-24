@@ -5,7 +5,7 @@ import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessio
 import { z } from 'zod';
 import { acpAgents } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption } from './driver.js';
 import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 
@@ -73,6 +73,21 @@ export class AcpDriver implements Driver {
       const current = configOptions?.find(option => option.id === setting.id)?.currentValue;
       if (current !== expected.get(setting.id)) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与 Agent 不一致：期望 ${expected.get(setting.id)}，实际 ${current ?? '未公布'}。`);
     }
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    if (Array.isArray(this.profile.models)) return this.profile.models;
+    // Model and effort are left unset so the CLI starts with its defaults just to answer initialize.
+    const probe: AgentConfig = { id: `${this.agent}-models`, role: 'executor', driver: this.agent, model: null, reasoningEffort: null,
+      fast: false, home: 'shared', description: '', prompt: '', directory: homedir(), skillsPath: null };
+    const { acp, close } = await this.launch(probe, { cwd: homedir() }, this.environment(agentEnvironment(probe), probe),
+      { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
+    const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 30_000);
+    try {
+      const response = await acp.connection.agent.request('initialize', { protocolVersion: PROTOCOL_VERSION,
+        clientInfo: { name: 'helm', version: '0.1.0' }, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+      return this.profile.models(response);
+    } finally { clearTimeout(timer); await close(); }
   }
 
   async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {

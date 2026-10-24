@@ -235,3 +235,20 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
   assert.equal((await call('check-environment')).result.find((tool: any) => tool.name === 'codex').installed, true);
   assert.ok((await call('get-events')).result.some((event: any) => event.action === 'tool-installed' && event.object.id === 'codex'));
 });
+
+test('list-agent-models 向驱动询问模型，驱动失败时返回结构化错误并提示去环境检查', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-models-')));
+  const models = [{ id: null, label: 'Default', efforts: ['low', 'max'], defaultEffort: null }];
+  const codex = Object.assign(new FakeDriver(), { listModels: async () => models });
+  const grok = Object.assign(new FakeDriver(), { listModels: async () => { throw new Error('grok: command not found'); } });
+  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory),
+    drivers: { 'claude-sdk': new FakeDriver(), codex, grok } });
+  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const call = async (params: object): Promise<any> =>
+    (await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', body: JSON.stringify(params) })).json();
+  assert.deepEqual((await call({ driver: 'codex' })).result, models);
+  const failed = await call({ driver: 'grok' });
+  assert.equal(failed.error.code, 'MODELS_UNAVAILABLE');
+  assert.match(failed.error.reason, /「环境」.*command not found/);
+  assert.equal((await call({ driver: 'claude-sdk' })).error.code, 'NOT_FOUND');
+});

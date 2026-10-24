@@ -70,6 +70,16 @@ export async function checkEnvironment(drivers: DriverRegistry) {
   return [...tools, { name: 'browser', executable: 'chromium', installed: await browserInstalled(), version: null, install: browserInstall, login: null }];
 }
 
+// Asks the CLI itself, so the choices match what is installed; nothing is cached or stored.
+export async function listModels(drivers: DriverRegistry, name: string) {
+  const driver = Object.hasOwn(drivers, name) ? drivers[name] : undefined;
+  if (!driver?.listModels) throw new RuleError('NOT_FOUND', `驱动 ${name} 不能列出模型。`, 404);
+  try { return await driver.listModels(); }
+  catch (error) {
+    throw new RuleError('MODELS_UNAVAILABLE', `无法从 ${name} 读取模型列表，请到「环境」确认 CLI 已安装并登录：${error instanceof Error ? error.message : String(error)}`.slice(0, 600), 409);
+  }
+}
+
 const installing = new Map<string, Promise<{ output: string }>>();
 
 // Runs only a fixed install command; the request names the tool, never the command.

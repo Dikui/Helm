@@ -17,6 +17,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   const result = message.method === 'thread/start' || message.method === 'thread/resume'
     ? { thread: { id: message.params.threadId ?? 'thread-scripted' } }
     : message.method === 'turn/start' ? { turn: { id: 'turn-scripted' } }
+    : message.method === 'model/list' ? (script.modelPages ?? [{ data: [] }])[Number(message.params.cursor ?? 0)]
     : {};
   emit({ id: message.id, result });
   if (message.method === 'initialize') emit({ method: 'fixture/environment', params: { env: process.env, cwd: process.cwd() } });

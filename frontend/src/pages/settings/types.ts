@@ -1,7 +1,7 @@
 export type AgentRole = 'coordinator' | 'executor';
 export interface AgentSettings {
   role: AgentRole; driver: 'claude-sdk' | 'codex' | 'grok' | 'deepseek'; model: string | null;
-  reasoningEffort: 'low' | 'medium' | 'high' | 'max' | null; fast: boolean;
+  reasoningEffort: string | null; fast: boolean;
   home: 'shared' | 'dedicated'; description: string;
 }
 export interface AgentEntry {

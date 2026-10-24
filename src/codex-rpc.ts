@@ -15,7 +15,7 @@ export class CodexRpc {
   private failure?: Error;
   private closed = false;
 
-  constructor(command: CodexCommand, options: SessionOptions, env: Record<string, string>) {
+  constructor(command: CodexCommand, options: Pick<SessionOptions, 'cwd' | 'onProcess'>, env: Record<string, string>) {
     this.child = spawn(command.file, command.args, { cwd: options.cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.on('error', error => this.fail(error));
     this.child.stdin.on('error', error => this.fail(error));

@@ -10,7 +10,8 @@ import { acpAgents } from './acp-agents.js';
 export const agentSettings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
   model: z.string().trim().min(1).nullable(),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable(),
+  // The CLI's own effort value, chosen from what the driver reports (list-agent-models).
+  reasoningEffort: z.string().trim().min(1).nullable(),
   fast: z.boolean().default(false), home: z.enum(['shared', 'dedicated']),
   description: z.string().trim().min(1),
 }).strict();

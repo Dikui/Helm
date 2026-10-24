@@ -198,9 +198,9 @@ for (const stopReason of ['end_turn', 'max_tokens', 'max_turn_requests', 'refusa
   }
 });
 
-test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录没有重定向或复制登录', async t => {
+test('Grok 原样下发 CLI 的推理强度；每次派单新开进程，默认主目录没有重定向或复制登录', async t => {
   const ctx = await acpFixture(t);
-  ctx.options.agent = { ...ctx.agent, reasoningEffort: 'max' };
+  ctx.options.agent = { ...ctx.agent, reasoningEffort: 'xhigh' };
   ctx.options.env.GROK_HOME = '/must-not-use';
   for (let round = 0; round < 2; round++) {
     const session = await ctx.driver.start(ctx.options);
@@ -218,11 +218,11 @@ test('Grok max 同义下发 xhigh；每次派单新开进程，默认主目录�
   await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' });
 });
 
-test('Grok Agent 拒绝调度者、未指定模型、不支持的推理档位、fast 和 API 主目录', async t => {
+test('Grok Agent 拒绝调度者、未指定模型或推理强度、fast 和 API 主目录', async t => {
   const ctx = await acpFixture(t);
   const cases: [Partial<AgentConfig>, RegExp][] = [
     [{ role: 'coordinator' }, /本阶段只支持执行者/], [{ model: null }, /模型 id/],
-    [{ reasoningEffort: null }, /推理强度/], [{ reasoningEffort: 'minimal' as AgentConfig['reasoningEffort'] }, /不支持推理强度/],
+    [{ reasoningEffort: null }, /推理强度/],
     [{ fast: true }, /fast/], [{ home: 'dedicated' }, /本机登录/],
   ];
   for (const [settings, reason] of cases) {
@@ -425,7 +425,7 @@ for (const script of [{ response: null }, { malformedOn: 'session/prompt' }]) te
 
 test('Grok 按 initialize 公布的模型与各模型推理档位检查可用性，不把无效组合悄悄换档', async t => {
   const ctx = await acpFixture(t);
-  for (const settings of [{ model: 'unknown-model' }, { model: 'grok-4.5', reasoningEffort: 'max' as const }]) {
+  for (const settings of [{ model: 'unknown-model' }, { model: 'grok-4.5', reasoningEffort: 'xhigh' }]) {
     const agent = { ...ctx.agent, ...settings };
     const result = await ctx.driver.checkAvailability(agent);
     assert.equal(result.available, false);
@@ -446,4 +446,20 @@ test('Grok 正常结束先关管道，忽略 TERM 的 ACP 进程在收尾期限�
   assert.equal(end.type === 'end' && end.reason, 'completed');
   const spawn = (await ctx.requests())[0];
   assert.throws(() => process.kill(spawn.pid, 0), { code: 'ESRCH' }, '迭代器结束时进程必须已退出');
+});
+
+test('Grok 从 initialize 公布的模型状态列出模型和各自的推理强度，探测进程不带强度参数', async t => {
+  const ctx = await acpFixture(t);
+  assert.deepEqual(await ctx.driver.listModels(), [
+    { id: 'grok-4.7', label: 'grok-4.7', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null },
+    { id: 'grok-4.5', label: 'grok-4.5', efforts: ['low', 'medium', 'high'], defaultEffort: null },
+  ]);
+  assert.deepEqual((await ctx.requests()).find(r => r.method === 'fixture/spawn').args, ['agent', 'stdio']);
+});
+
+test('DeepSeek 按 Helm 支持的路由列出模型，不启动 CLI', async t => {
+  const ctx = await acpFixture(t, {}, true, 'deepseek');
+  assert.deepEqual((await ctx.driver.listModels()).map(model => [model.id, model.efforts]),
+    ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'].map(id => [id, ['low', 'high', 'max']]));
+  assert.equal((await ctx.requests()).length, 0);
 });

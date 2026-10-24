@@ -153,7 +153,7 @@ test('Codex 成功优先于重试中的额度错误；普通回答中的额度�
 
 test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skills 均取当前 Agent', async t => {
   const ctx = await fixture(t, [completed()]);
-  ctx.options.agent = { ...ctx.options.agent!, id: 'api-codex', home: 'dedicated', fast: false, skillsPath: null, reasoningEffort: 'max' };
+  ctx.options.agent = { ...ctx.options.agent!, id: 'api-codex', home: 'dedicated', fast: false, skillsPath: null, reasoningEffort: 'ultra' };
   ctx.options.resumeSessionId = 'thread-scripted';
   const session = await ctx.driver.start(ctx.options);
   await session.send('继续');
@@ -162,7 +162,7 @@ test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skil
   assert.equal(requests[3].method, 'thread/resume');
   assert.equal(requests[3].params.threadId, 'thread-scripted');
   assert.deepEqual(requests[2].params.extraRoots, []);
-  assert.equal(requests[4].params.effort, 'xhigh');
+  assert.equal(requests[4].params.effort, 'ultra');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
   assert.equal(env.CODEX_HOME, join(ctx.directory, '.helm', 'agent-homes', 'api-codex'));
   assert.notEqual(requests[3].params.config.service_tier, 'fast');
@@ -308,4 +308,16 @@ test('Codex 调度者拒绝续跑、可写沙箱和错配角色，角色专用�
   await assert.rejects(new CodexCoordinatorDriver().start({ ...ctx.options, agent: { ...ctx.options.agent!, role: 'executor' } }), /coordinator/);
   await assert.rejects(new CodexExecutorDriver().start(ctx.options), /executor card copy/);
   assert.deepEqual(await ctx.requests(), []);
+});
+
+test('Codex 经 model/list 翻页列出可见模型和原生推理强度，默认模型另列为 id null', async t => {
+  const model = (id: string, extra: object = {}) => ({ id, model: id, displayName: id.toUpperCase(), hidden: false, isDefault: false,
+    supportedReasoningEfforts: ['low', 'max', 'ultra'].map(reasoningEffort => ({ reasoningEffort, description: '' })), defaultReasoningEffort: 'low', ...extra });
+  const ctx = await fixture(t, [], { modelPages: [
+    { data: [model('gpt-a', { isDefault: true }), model('gpt-hidden', { hidden: true })], nextCursor: '1' }, { data: [model('gpt-b')], nextCursor: null },
+  ] });
+  const models = await ctx.driver.listModels();
+  assert.deepEqual(models.map(item => item.id), [null, 'gpt-a', 'gpt-b']);
+  assert.deepEqual(models[0], { id: null, label: 'GPT-A', efforts: ['low', 'max', 'ultra'], defaultEffort: 'low' });
+  assert.deepEqual((await ctx.requests()).filter(r => r.method === 'model/list').map(r => r.params), [{}, { cursor: '1' }]);
 });

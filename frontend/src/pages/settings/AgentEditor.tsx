@@ -5,6 +5,7 @@ import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
 import { CliStatus } from '../../shared/CliStatus.js';
+import { ModelFields } from './ModelFields.js';
 import { useRouter } from '../../shared/router.js';
 import type { AgentSettings, AgentEntry } from './types.js';
 import { ActionDialog } from '../work/ActionDialog.js';
@@ -96,9 +97,8 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
           {['claude-sdk', 'codex', 'grok', 'deepseek'].map(driver => <option key={driver}>{driver}</option>)}</select>{fieldError('driver')}</label>
       </div>
       <CliStatus key={value.config.driver} driver={value.config.driver} />
-      <label htmlFor="agent-model">{t('model')}<input {...fieldProps('model')} value={value.config.model ?? ''} placeholder={t('driverDefault')} onChange={event => config('model', event.target.value)} />{fieldError('model')}</label>
-      <label htmlFor="agent-reasoningEffort">{t('reasoning')}<select {...fieldProps('reasoningEffort')} value={value.config.reasoningEffort ?? ''} onChange={event => config('reasoningEffort', event.target.value as AgentSettings['reasoningEffort'] || null)}>
-        <option value="">{t('driverDefault')}</option>{['low', 'medium', 'high', 'max'].map(effort => <option key={effort}>{effort}</option>)}</select>{fieldError('reasoningEffort')}</label>
+      <ModelFields settings={value.config} fieldProps={fieldProps} fieldError={fieldError}
+        change={next => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, ...next } })); }} />
       <label className="settings-checkbox" htmlFor="agent-fast"><input {...fieldProps('fast')} type="checkbox" checked={value.config.fast} onChange={event => config('fast', event.target.checked)} />{t('fastMode')}{fieldError('fast')}</label>
       <label htmlFor="agent-home">{t('billing')}<select {...fieldProps('home')} value={value.config.home} onChange={event => config('home', event.target.value as AgentSettings['home'])}>
         <option value="shared">{t('subscription')}</option><option value="dedicated">{t('apiBilling')}</option></select>{fieldError('home')}</label>

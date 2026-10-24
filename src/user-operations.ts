@@ -8,7 +8,7 @@ import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { completeReviewedWork, decideReview } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
-import { checkAgent, checkEnvironment, installTool } from './availability.js';
+import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry } from './driver.js';
 
 export class UserOperations {
@@ -18,6 +18,8 @@ export class UserOperations {
   checkAgent(driver: string) { return checkAgent(this.drivers, driver); }
 
   checkEnvironment() { return checkEnvironment(this.drivers); }
+
+  listModels(driver: string) { return listModels(this.drivers, driver); }
 
   installTool(actor: Actor, name: string) { return installTool(this.store, this.drivers, actor, name); }
 

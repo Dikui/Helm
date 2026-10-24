@@ -4,8 +4,8 @@ import { lstat, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, TokenUsage } from './driver.js';
+import { query, type CanUseTool, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import type { AgentConfig } from './agents.js';
@@ -15,7 +15,7 @@ function claudeHome(agent: AgentConfig, home = homedir()) {
 }
 
 // The external SDK boundary can be replaced without starting a CLI in npm test.
-export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void };
+export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void; supportedModels?(): Promise<ModelInfo[]> };
 
 async function localClaude(env: Record<string, string>) {
   const path = await findExecutable('claude', env);
@@ -120,6 +120,20 @@ export class ClaudeDriver implements Driver {
     return { available: false, reason: `Claude 默认主目录未登录或无法检查登录状态；请确认已安装 Claude CLI 并登录。`, command };
   }
 
+  async listModels(): Promise<ModelOption[]> {
+    const env = runtimeEnvironment();
+    const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(env);
+    // An input stream that never yields: the CLI starts and answers control requests without a turn.
+    async function* idle(): AsyncGenerator<never> { await new Promise(() => {}); }
+    const session = (this.config.query ?? query)({ prompt: idle(), options: { pathToClaudeCodeExecutable: executable, cwd: homedir(), env } });
+    const timer = setTimeout(() => session.close(), 30_000);
+    try {
+      const models = await session.supportedModels!();
+      return models.map(model => ({ id: model.value === 'default' ? null : model.value, label: model.displayName,
+        efforts: model.supportedEffortLevels ?? [], defaultEffort: null }));
+    } finally { clearTimeout(timer); session.close(); }
+  }
+
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
@@ -196,7 +210,7 @@ export class ClaudeDriver implements Driver {
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, { type: 'http', ...server }])),
       ...(options.agent?.model ? { model: options.agent.model } : {}),
-      ...(options.agent?.reasoningEffort ? { effort: options.agent.reasoningEffort } : {}),
+      ...(options.agent?.reasoningEffort ? { effort: options.agent.reasoningEffort as Options['effort'] } : {}),
       ...(options.resumeSessionId ? { resume: id } : { sessionId: id }),
     };
     const runQuery = this.config.query ?? query;

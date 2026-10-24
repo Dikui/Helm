@@ -3,7 +3,10 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, TokenUsage } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage } from './driver.js';
+
+interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
+  supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
 import { CodexRpc, type CodexCommand } from './codex-rpc.js';
 import { runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
@@ -42,6 +45,26 @@ export class CodexDriver implements Driver {
       return { available: true };
     } catch { /* Never store CLI output, which can contain account details. */ }
     return { available: false, reason: 'Codex 默认主目录未登录或无法检查登录状态；请确认已安装 Codex CLI 并登录。', command: 'codex login' };
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    const rpc = new CodexRpc(this.config.command ?? { file: 'codex', args: ['app-server'] }, { cwd: homedir() }, runtimeEnvironment());
+    const timer = setTimeout(() => rpc.close(), 30_000);
+    try {
+      await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+      rpc.notify('initialized', {});
+      const models: CodexModel[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: { data: CodexModel[]; nextCursor?: string | null } = await rpc.request('model/list', cursor ? { cursor } : {});
+        models.push(...page.data);
+        cursor = page.nextCursor ?? null;
+      } while (cursor);
+      const option = (model: CodexModel, id: string | null): ModelOption => ({ id, label: model.displayName,
+        efforts: model.supportedReasoningEfforts.map(effort => effort.reasoningEffort), defaultEffort: model.defaultReasoningEffort });
+      const fallback = models.find(model => model.isDefault);
+      return [...fallback ? [option(fallback, null)] : [], ...models.filter(model => !model.hidden).map(model => option(model, model.model))];
+    } finally { clearTimeout(timer); rpc.close(); }
   }
 
   async start(options: SessionOptions): Promise<DriverSession> {
@@ -107,7 +130,7 @@ export class CodexDriver implements Driver {
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
             approvalPolicy: 'never', sandboxPolicy: coordinator ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
-            ...(agent.reasoningEffort ? { effort: agent.reasoningEffort === 'max' ? 'xhigh' : agent.reasoningEffort } : {}) });
+            ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },
         events: (async function* (): AsyncGenerator<DriverEvent> {

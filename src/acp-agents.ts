@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { deepseekUsage } from './deepseek-usage.js';
-import type { TokenUsage } from './driver.js';
+import type { ModelOption, TokenUsage } from './driver.js';
 import type { AgentConfig } from './agents.js';
 
 // Only agent differences belong here; ACP sequencing stays in AcpDriver.
@@ -21,6 +21,8 @@ interface AcpAgentProfile {
   unavailable(agent: AgentConfig): string | undefined;
   initializationUnavailable(agent: AgentConfig, response: InitializeResponse): string | undefined;
   sessionSettings(agent: AgentConfig): { id: string; value: string; apply: boolean; matches?: (value: string) => boolean }[];
+  // Models from a fixed table, or read from the initialize response.
+  models: ModelOption[] | ((response: InitializeResponse) => ModelOption[]);
   usage(response: PromptResponse): TokenUsage;
   sessionUsage?(env: Record<string, string>, sessionId: string, allowMissing?: boolean): Promise<TokenUsage>;
   quotaErrors: { codes: number[]; pattern: RegExp };
@@ -30,10 +32,10 @@ interface AcpAgentProfile {
   loginCommand: string;
 }
 
-const efforts: Record<string, string> = { low: 'low', medium: 'medium', high: 'high', max: 'xhigh' };
-const modelState = z.object({ availableModels: z.array(z.object({ modelId: z.string(),
+const modelState = z.object({ availableModels: z.array(z.object({ modelId: z.string(), name: z.string().optional(),
   _meta: z.object({ reasoningEfforts: z.array(z.object({ value: z.string() })) }).optional(),
 })) });
+const deepseekEfforts = ['low', 'high', 'max'];
 const deepseekRoutes: Record<string, string> = {
   'deepseek-flash': 'deepseek-account', 'deepseek-v4-pro': 'deepseek-account', 'deepseek-v4-flash': 'deepseek-official',
 };
@@ -68,11 +70,12 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     unavailable(agent) {
       if (agent.role !== 'executor') return 'DeepSeek 本阶段只支持执行者，不支持调度者。';
       if (!agent.model || !Object.hasOwn(deepseekRoutes, agent.model)) return `DeepSeek 不支持模型 id ${agent.model ?? '未指定'}；请指定 deepseek-flash、deepseek-v4-pro 或 deepseek-v4-flash。`;
-      if (!agent.reasoningEffort || !['low', 'high', 'max'].includes(agent.reasoningEffort)) return `DeepSeek 不支持推理强度 ${agent.reasoningEffort ?? '未指定'}；请选 low、high 或 max。`;
+      if (!agent.reasoningEffort || !deepseekEfforts.includes(agent.reasoningEffort)) return `DeepSeek 不支持推理强度 ${agent.reasoningEffort ?? '未指定'}；请选 low、high 或 max。`;
       if ((agent.home === 'dedicated') !== (deepseekRoutes[agent.model] === 'deepseek-official')) return 'DeepSeek 账号模型须用 home: shared；API 模型 deepseek-v4-flash 须用 home: agent 专用主目录。';
       if (agent.fast) return 'DeepSeek 不支持 Agent fast 档，请设为 false。';
     },
     initializationUnavailable() { return undefined; },
+    models: Object.keys(deepseekRoutes).map(id => ({ id, label: id, efforts: deepseekEfforts, defaultEffort: null })),
     sessionSettings: agent => [
       { id: 'model', value: agent.model!, apply: true, matches(value) {
         try {
@@ -92,13 +95,13 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     name: 'Grok', command: 'grok', authentication: 'cached_token',
     // Process plugins are ignored by a shared leader, so explicitly use the
     // native process when adding agent skills (grok agent --help).
-    arguments: agent => ['agent', '--effort', efforts[agent.reasoningEffort!]!,
+    arguments: agent => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []),
       ...(agent.skillsPath ? ['--no-leader', '--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
     environment: { set: { GROK_SANDBOX: 'workspace' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
     unavailable(agent) {
       if (agent.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
       if (!agent.model) return 'Grok Agent 必须指定模型 id，不能使用 CLI 默认模型。';
-      if (!agent.reasoningEffort || !Object.hasOwn(efforts, agent.reasoningEffort)) return `Grok 不支持推理强度 ${agent.reasoningEffort ?? '未指定'}；请选 low、medium、high 或 max（xhigh）。`;
+      if (!agent.reasoningEffort) return 'Grok Agent 必须指定推理强度。';
       if (agent.home !== 'shared') return 'Grok 本阶段只支持本机登录，请将 home 设为 shared 并运行 grok login。';
       if (agent.fast) return 'Grok 不支持 Agent fast 档，请设为 false。';
     },
@@ -106,12 +109,16 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       const state = modelState.safeParse(response._meta?.modelState);
       const model = state.success ? state.data.availableModels.find(model => model.modelId === agent.model) : undefined;
       if (!model) return `Grok initialize 没有公布模型 ${agent.model}，请选当前 CLI 支持的模型 id。`;
-      const effort = efforts[agent.reasoningEffort!];
-      if (!model._meta?.reasoningEfforts.some(option => option.value === effort)) return `Grok 模型 ${agent.model} 不支持推理强度 ${effort}。`;
+      if (!model._meta?.reasoningEfforts.some(option => option.value === agent.reasoningEffort)) return `Grok 模型 ${agent.model} 不支持推理强度 ${agent.reasoningEffort}。`;
+    },
+    models(response) {
+      const state = modelState.safeParse(response._meta?.modelState);
+      return state.success ? state.data.availableModels.map(model => ({ id: model.modelId, label: model.name ?? model.modelId,
+        efforts: model._meta?.reasoningEfforts.map(option => option.value) ?? [], defaultEffort: null })) : [];
     },
     sessionSettings: agent => [
       { id: 'model', value: agent.model!, apply: true },
-      { id: 'reasoning_effort', value: efforts[agent.reasoningEffort!]!, apply: false },
+      { id: 'reasoning_effort', value: agent.reasoningEffort!, apply: false },
     ],
     usage(response) {
       const usage = response._meta?.usage as Record<string, unknown> | undefined;

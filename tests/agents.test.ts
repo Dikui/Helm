@@ -170,7 +170,7 @@ test('保存拒绝非法字段、id、目录状态、角色修改和符号链接
   const cases: [object, string, RegExp][] = [
     [{ config: { ...savedConfig, model: '' } }, 'INVALID_PARAMS', /config.model/],
     [{ config: { ...savedConfig, driver: 'unknown' } }, 'INVALID_PARAMS', /config.driver/],
-    [{ config: { ...savedConfig, reasoningEffort: 'extreme' } }, 'INVALID_PARAMS', /config.reasoningEffort/],
+    [{ config: { ...savedConfig, reasoningEffort: ' ' } }, 'INVALID_PARAMS', /config.reasoningEffort/],
     [{ config: { ...savedConfig, home: 'arbitrary-path' } }, 'INVALID_PARAMS', /config.home/],
     [{ config: { ...savedConfig, fast: 'true' } }, 'INVALID_PARAMS', /config.fast/],
     [{ config: { ...savedConfig, description: ' ' } }, 'INVALID_PARAMS', /config.description/],

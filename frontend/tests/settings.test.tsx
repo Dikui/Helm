@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { App } from '../src/App.js';
 const { uiFixture }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 // jsdom has no native dialog implementation. Substitute only the platform API.
 beforeAll(() => {
@@ -237,4 +238,29 @@ test.each(['刚保存', '未保存'])('%s后复制 Agent 使用编辑器全部�
   expect(await agent('current-copy')).toMatchObject({ description: '当前职责', model: 'current-model',
     driver: 'codex', reasoningEffort: 'high', fast: true, home: 'dedicated', role: 'executor', prompt: '当前策略' });
   expect((await agent('claude-executor')).description).toBe(mode === '刚保存' ? '当前职责' : original.description);
+});
+
+test('模型和推理强度从 CLI 报出的选项中选择，换模型时只保留新模型支持的强度', async () => {
+  const codexDriver = Object.assign(new FakeDriver(), { listModels: async () => [
+    { id: null, label: 'Sol', efforts: ['low', 'ultra'], defaultEffort: 'low' },
+    { id: 'gpt-sol', label: 'Sol', efforts: ['low', 'ultra'], defaultEffort: 'low' },
+    { id: 'gpt-luna', label: 'Luna', efforts: ['low', 'medium'], defaultEffort: 'medium' },
+  ] });
+  daemon = await uiFixture([], undefined, { codexDriver });
+  window.history.replaceState(null, '', '/settings/agents/codex-executor');
+  render(<App baseUrl={daemon.url} />);
+  await screen.findByRole('form', { name: 'Agent 详情' });
+  const model = await screen.findByLabelText('模型', { selector: 'select' }) as HTMLSelectElement;
+  expect([...model.options].map(option => option.textContent)).toEqual(['驱动默认', 'gpt-6-luna · CLI 未提供', 'Sol (gpt-sol)', 'Luna (gpt-luna)']);
+  change('模型', 'gpt-sol');
+  const effort = screen.getByLabelText('推理强度', { selector: 'select' }) as HTMLSelectElement;
+  expect(effort.value).toBe('low');
+  change('推理强度', 'ultra');
+  change('模型', 'gpt-luna');
+  expect(effort.value).toBe('medium');
+  expect([...effort.options].map(option => option.value)).toEqual(['', 'low', 'medium']);
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await screen.findByText('已保存');
+  const saved = JSON.parse(await readFile(join(daemon.directory, 'agents', 'codex-executor', 'config.json'), 'utf8'));
+  expect([saved.model, saved.reasoningEffort]).toEqual(['gpt-luna', 'medium']);
 });
