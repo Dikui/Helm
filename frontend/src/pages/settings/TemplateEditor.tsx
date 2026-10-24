@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { OperationError } from '../../shared/api.js';
 import { useData } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
@@ -7,14 +7,16 @@ import { UnsavedChanges } from './UnsavedChanges.js';
 import { AgentInstall } from '../../shared/AgentInstall.js';
 import { useRouter } from '../../shared/router.js';
 import type { TemplateConfig, TemplateEntry } from './types.js';
+import { ActionDialog } from '../work/ActionDialog.js';
+import '../work/work-actions.css';
 
 function draft(source?: TemplateEntry) {
   return { id: source?.id ?? '', config: { role: source?.role ?? 'executor', driver: source?.driver ?? 'claude-sdk',
     model: source?.model ?? null, reasoningEffort: source?.reasoningEffort ?? null, fast: source?.fast ?? false,
     home: source?.home ?? 'shared', description: source?.description ?? '' } as TemplateConfig, prompt: source?.prompt ?? '' };
 }
-export function TemplateEditor({ source, creating = false, initialSaved = false, onSaved, onDuplicate }: {
-  source?: TemplateEntry; creating?: boolean; initialSaved?: boolean; onSaved: (template: TemplateEntry) => void; onDuplicate?: (source: TemplateEntry) => void;
+export function TemplateEditor({ source, creating = false, initialSaved = false, onSaved, onDuplicate, onDeleted }: {
+  source?: TemplateEntry; creating?: boolean; initialSaved?: boolean; onSaved: (template: TemplateEntry) => void; onDuplicate?: (source: TemplateEntry) => void; onDeleted?: () => void;
 }) {
   const { t } = useI18n();
   const { api } = useData();
@@ -26,6 +28,8 @@ export function TemplateEditor({ source, creating = false, initialSaved = false,
   const [error, setError] = useState<Error>();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(initialSaved);
+  const [deleting, setDeleting] = useState(false);
+  const deleteButton = useRef<HTMLButtonElement>(null);
   const config = <K extends keyof TemplateConfig>(key: K, next: TemplateConfig[K]) => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, [key]: next } })); };
   const conflict = error instanceof OperationError && error.failure.code === 'TEMPLATE_CONFLICT';
   const labels: Record<string, MessageKey | 'prompt.md'> = { id: 'templateId', role: 'role', driver: 'driver', model: 'model', reasoningEffort: 'reasoning', fast: 'fastMode', home: 'billing', description: 'description', prompt: 'prompt.md' };
@@ -71,6 +75,16 @@ export function TemplateEditor({ source, creating = false, initialSaved = false,
     } catch (failure) { setError(failure as Error); }
     finally { setPending(false); }
   }
+  async function remove() {
+    if (pending) return;
+    setPending(true); setError(undefined);
+    try {
+      await api.call('delete-agent-template', { id: source!.id });
+      setBaseline(JSON.stringify(value)); setDeleting(false); onDeleted?.();
+      navigate('/settings/templates');
+    } catch (failure) { setError(failure as Error); }
+    finally { setPending(false); }
+  }
   return <form className="settings-editor" aria-label={t('templateDetails')} onSubmit={save} noValidate aria-busy={pending}>
     <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} />
     <div className="settings-detail-head"><h2>{creating ? t('newTemplate') : source!.id}</h2><p className="muted">{t('nextDispatch')}</p></div>
@@ -95,8 +109,13 @@ export function TemplateEditor({ source, creating = false, initialSaved = false,
       <div><h3>{t('skills')} · skills/</h3><p className="muted">{t('skillsReadOnly')}</p>
         {!creating && source?.skills?.length ? <ul className="settings-files">{source.skills.map(file => <li key={file}><code>{file}</code></li>)}</ul> : <p className="muted">{t('noSkills')}</p>}</div>
     </fieldset>
-    <div className="settings-feedback">{error && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadTemplate')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
+    <div className="settings-feedback">{error && !deleting && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadTemplate')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
     <div className="settings-actions">{!creating && <button type="button" className="btn" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateTemplate')}</button>}
+      {!creating && <button ref={deleteButton} type="button" className="btn work-danger" disabled={pending} onClick={() => { setError(undefined); setDeleting(true); }}>{t('deleteTemplate')}</button>}
       <button className="btn primary" disabled={pending || conflict}>{t('save')}</button></div>
+    {deleting && <ActionDialog title={t('deleteTemplate')} description={`${source!.id} · ${t('deleteTemplateConsequence')}`} busy={pending} onClose={() => setDeleting(false)} returnFocus={deleteButton}>
+      {error && <ErrorNotice error={error} />}
+      <button type="button" className="btn work-danger" disabled={pending} onClick={() => void remove()}>{t('confirmDeleteTemplate')}</button>
+    </ActionDialog>}
   </form>;
 }

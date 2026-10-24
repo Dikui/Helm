@@ -1,10 +1,15 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { App } from '../src/App.js';
 const { uiFixture }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
+// jsdom has no native dialog implementation. Substitute only the platform API.
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; localStorage.clear(); });
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label, { selector: 'input,select,textarea' }), { target: { value } });
 const template = async (id: string) => (await daemon!.call('list-agent-templates')).result.find((item: any) => item.id === id);
@@ -58,7 +63,27 @@ test('设置页按角色显示可用性与使用数，保存模板并以新 id �
   expect(copy.billing).toBe('api');
   expect(copy.role).toBe('coordinator');
   expect(copy.skills).toEqual([]);
-  expect(screen.queryByRole('button', { name: '删除' })).toBeNull();
+});
+
+test('删除模板须二次确认，删除后回到列表；项目默认调度者的模板拒绝删除并显示原因', async () => {
+  daemon = await uiFixture();
+  window.history.replaceState(null, '', '/settings/templates/claude-executor');
+  render(<App baseUrl={daemon.url} />);
+  await screen.findByRole('form', { name: '模板详情' });
+  fireEvent.click(screen.getByRole('button', { name: '删除模板' }));
+  const dialog = await screen.findByRole('dialog', { name: '删除模板' });
+  expect(await template('claude-executor')).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认删除模板' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/settings/templates'));
+  expect(await template('claude-executor')).toBeUndefined();
+  await waitFor(() => expect(screen.queryByText('claude-executor')).toBeNull());
+  window.history.pushState(null, '', '/settings/templates/claude-coordinator');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+  await screen.findByRole('heading', { name: 'claude-coordinator' });
+  fireEvent.click(screen.getByRole('button', { name: '删除模板' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: '删除模板' })).getByRole('button', { name: '确认删除模板' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('1 个项目的默认调度者');
+  expect(await template('claude-coordinator')).toBeTruthy();
 });
 
 test('不可用原因直接显示，字段错误不清空输入，文件冲突须重新载入后保存', async () => {

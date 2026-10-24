@@ -37,7 +37,7 @@ export function TemplatesSection({ templateId, creating = false }: { templateId?
       })}
     </div>
     {creating ? <TemplateEditor key="create-template" source={copy} creating onSaved={result => { setCopy(undefined); saveFinished(result); }} />
-      : selected ? <TemplateEditor key={`template:${selected.id}`} source={selected} initialSaved={lastSaved?.id === selected.id} onSaved={saveFinished} onDuplicate={source => { setCopy(source); navigate('/settings/new-template'); }} />
+      : selected ? <TemplateEditor key={`template:${selected.id}`} source={selected} initialSaved={lastSaved?.id === selected.id} onSaved={saveFinished} onDeleted={() => { setLastSaved(undefined); reload(); }} onDuplicate={source => { setCopy(source); navigate('/settings/new-template'); }} />
       : data && templateId && <p>{t('templateMissing')}</p>}
   </div>;
 }

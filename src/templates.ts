@@ -87,6 +87,15 @@ export class TemplateCatalog {
     }
   }
 
+  // The agent home under ~/.helm/agent-homes/ is kept: it holds the user's credentials.
+  remove(id: string) {
+    if (id === '.' || id === '..' || /[/\\\0]/.test(id)) throw new RuleError('INVALID_PARAMS', 'id: 模板 id 必须是目录名。', 400);
+    const directory = join(this.directory, id);
+    if (!existsSync(directory)) throw new RuleError('TEMPLATE_NOT_FOUND', `模板 ${id} 的目录不存在。`, 404);
+    if (!lstatSync(directory).isDirectory()) throw new RuleError('INVALID_TEMPLATE_PATH', '模板目录必须是实际目录，不能是符号链接。', 400);
+    rmSync(directory, { recursive: true });
+  }
+
   monitor(checker: (template: AgentTemplate) => Promise<TemplateAvailability>, report: (id: string, result: TemplateAvailability) => void) {
     this.checker = checker;
     this.report = report;

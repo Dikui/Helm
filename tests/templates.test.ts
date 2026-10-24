@@ -569,3 +569,25 @@ test('派给坏模板、缺失模板和 Claude fast 模板返回结构化错误�
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].templateId, 'healthy');
 });
+
+test('删除模板移除目录；仍被项目默认调度者使用、不存在或 id 非法时拒绝', async t => {
+  const daemon = await fixture(t);
+  await daemon.writeTemplate('file-coordinator', { role: 'coordinator' });
+  await daemon.writeTemplate('file-executor');
+  await mkdir(join(daemon.templateDir, 'file-executor', 'skills'));
+  const repo = join(daemon.directory, 'project');
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  const project = (await daemon.call('register-project', { path: repo })).result;
+  ok(await daemon.call('set-project-coordinator-template', { projectId: project.id, templateId: 'file-coordinator' }));
+  ok(await daemon.call('delete-agent-template', { id: 'file-executor' }));
+  assert.deepEqual(await readdir(daemon.templateDir), ['file-coordinator']);
+  assert.deepEqual((await daemon.call('list-agent-templates')).result.map((item: any) => item.id), ['file-coordinator']);
+  const events = (await daemon.call('get-events', {})).result;
+  assert.ok(events.some((event: any) => event.action === 'agent-template-deleted' && event.object.id === 'file-executor'), JSON.stringify(events));
+  const inUse = await daemon.call('delete-agent-template', { id: 'file-coordinator' });
+  assert.equal(inUse.error.code, 'TEMPLATE_IN_USE');
+  assert.match(inUse.error.reason, /1 个项目的默认调度者/);
+  assert.deepEqual(await readdir(daemon.templateDir), ['file-coordinator']);
+  assert.equal((await daemon.call('delete-agent-template', { id: 'file-executor' })).error.code, 'TEMPLATE_NOT_FOUND');
+  assert.equal((await daemon.call('delete-agent-template', { id: '..' })).error.code, 'INVALID_PARAMS');
+});

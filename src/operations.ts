@@ -118,6 +118,22 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
+    name: 'delete-agent-template', description: '删除文件中的 Agent 模板；仍被未结束的工作、排队或运行中的派单、项目默认调度者使用时拒绝', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ id: z.string().min(1) }).strict(),
+    execute({ store, actor }, { id }) {
+      const usage = store.db.prepare(`SELECT
+        (SELECT count(*) FROM works WHERE coordinator_template_id = ? AND status NOT IN ('completed', 'cancelled')) AS works,
+        (SELECT count(*) FROM dispatches WHERE template_id = ? AND status IN ('queued', 'running')) AS dispatches,
+        (SELECT count(*) FROM projects WHERE default_coordinator_template_id = ?) AS projects`).get(id, id, id)!;
+      const [works, dispatches, projects] = [Number(usage.works), Number(usage.dispatches), Number(usage.projects)];
+      if (works || dispatches || projects) throw new RuleError('TEMPLATE_IN_USE',
+        `模板 ${id} 仍在使用：${works} 个未结束的工作、${dispatches} 个排队或运行中的派单、${projects} 个项目的默认调度者。`, 409, { templateId: id });
+      store.appendEvent(actor, { type: 'agent-template', id }, 'agent-template-deleted', {});
+      store.templates.remove(id);
+      return { id, deleted: true };
+    },
+  }),
+  operation({
     name: 'list-agent-templates', description: '读取文件中的 Agent 模板、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => agentTemplates(store),
   }),
