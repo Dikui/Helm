@@ -6,9 +6,17 @@
 
 **Status:** ready-for-agent
 
-- [ ] 新增 `get-round-output`（调用方 `user`），按步骤读取调度轮次输出，分页方式与 `get-dispatch-output` 一致；照常进 MCP 和命令行
-- [ ] 泳道和色块由派单起止时间和用途得出，运行中的派单随时间延伸
-- [ ] 调度者状态由 `list-rounds` 和工作状态得出；笔记版本来自 `get-coordinator-notes`
-- [ ] 事件筛选使用 `get-events` 的筛选参数；点事件打开检查器并定位到对应输出步骤
-- [ ] HTTP 接口测试覆盖 `get-round-output`；jsdom 整页测试覆盖泳道数量与打回段、轮次输出查看、笔记版本切换、事件筛选与跳转
+- [x] 新增 `get-round-output`（调用方 `user`），按步骤读取调度轮次输出，分页方式与 `get-dispatch-output` 一致；照常进 MCP 和命令行
+- [x] 泳道和色块由派单起止时间和用途得出，运行中的派单随时间延伸
+- [x] 调度者状态由 `list-rounds` 和工作状态得出；笔记版本来自 `get-coordinator-notes`
+- [x] 事件筛选使用 `get-events` 的筛选参数；点事件打开检查器并定位到对应输出步骤
+- [x] HTTP 接口测试覆盖 `get-round-output`；jsdom 整页测试覆盖泳道数量与打回段、轮次输出查看、笔记版本切换、事件筛选与跳转
 - [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+
+## Comments
+
+2026-10-24：实现图 / 时间线 / 调度者 / 事件四个标签，复用原卡片检查器、`useResource`、POST API 和共享 SSE。泳道按实际派单起止时间绘制执行与验收段，每秒更新运行段和现在竖线，沿用卡片图的打回判定。调度者标签展示状态、历史轮次及按 20 个步骤分页的输出、token 和笔记版本；`get-coordinator-notes` 保留当前全文并追加历史版本列表。新增仅 user 可调用的 `get-round-output`，支持范围校验、工作归属、压缩输出及已删除标记，自动进入 MCP 与 CLI。
+
+事件的卡片 / 派单 / 执行方筛选直接传入 `get-events`；点派单事件选择对应卡片及历史派单，从事件步骤读取并聚焦该步骤，标签切换保留检查器选择。新增 HTTP / MCP / CLI 测试和 jsdom 整页测试，覆盖泳道、打回、历史轮次、笔记版本、筛选跳转、SSE 状态更新、连败暂停、错误重试及删除输出。真实浏览器和真实冒烟按本单执行约束未运行，最后一项保持未勾选，交调度者事后验收。Status 保持不变。
+
+验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 完整运行通过（456 项 Node 测试、45 项 jsdom 整页测试及构建）。

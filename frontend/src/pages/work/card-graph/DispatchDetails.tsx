@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
@@ -7,7 +7,7 @@ import { conclusionLabels, DispatchStatus, endLabels } from './labels.js';
 import type { Artifact, ArtifactContent, Dispatch, DispatchOutput } from './types.js';
 
 const pageSize = 20;
-export function DispatchDetails({ workId, dispatchId, lastStep }: { workId: string; dispatchId: string; lastStep?: number }) {
+export function DispatchDetails({ workId, dispatchId, lastStep, initialStep }: { workId: string; dispatchId: string; lastStep?: number; initialStep?: number }) {
   const { t } = useI18n();
   const affects = useCallback((event: HelmEvent) => event.workId === workId && (!event.dispatchId || event.dispatchId === dispatchId), [workId, dispatchId]);
   const detail = useResource<Dispatch>('get-dispatch', { workId, dispatchId }, affects);
@@ -21,23 +21,31 @@ export function DispatchDetails({ workId, dispatchId, lastStep }: { workId: stri
       </dl>
       {detail.data.failure && <p className="error">{detail.data.failure}</p>}
       {detail.data.status === 'ended' && <section aria-label={t('graphFinalAnswer')}><h3>{t('graphFinalAnswer')}</h3><p className="cg-prose">{detail.data.finalAnswer || t('graphNoFinalAnswer')}</p></section>}
-      {detail.data.outputStatus === 'deleted' ? <p>{t('graphDeleted')}</p> : <DispatchSteps workId={workId} dispatchId={dispatchId} lastStep={lastStep} affects={affects} />}
+      {detail.data.outputStatus === 'deleted' ? <p>{t('graphDeleted')}</p> : <OutputSteps workId={workId} dispatchId={dispatchId} lastStep={lastStep} initialStep={initialStep} affects={affects} />}
       <DispatchArtifacts workId={workId} dispatchId={dispatchId} affects={affects} />
     </>}
   </section>;
 }
-function DispatchSteps({ workId, dispatchId, lastStep, affects }: {
-  workId: string; dispatchId: string; lastStep?: number; affects: (event: HelmEvent) => boolean;
-}) {
+export function OutputSteps({ workId, dispatchId, roundId, lastStep, initialStep, affects }: {
+  workId: string; lastStep?: number; initialStep?: number; affects: (event: HelmEvent) => boolean;
+} & ({ dispatchId: string; roundId?: never } | { roundId: string; dispatchId?: never })) {
   const { t } = useI18n();
-  const [fromStep, setFromStep] = useState(1);
-  const [targetStep, setTargetStep] = useState('1');
+  const [fromStep, setFromStep] = useState(initialStep ?? 1);
+  const [targetStep, setTargetStep] = useState(String(initialStep ?? 1));
   const [invalid, setInvalid] = useState(false);
+  const errorId = useId();
+  const target = useRef<HTMLLIElement>(null);
   const toStep = fromStep + pageSize - 1;
-  const output = useResource<DispatchOutput>('get-dispatch-output', { workId, dispatchId, fromStep, toStep }, affects);
+  const output = useResource<DispatchOutput>(roundId ? 'get-round-output' : 'get-dispatch-output', { workId, ...(roundId ? { roundId } : { dispatchId }), fromStep, toStep }, affects);
+  useEffect(() => {
+    if (initialStep && target.current) {
+      target.current.focus({ preventScroll: true });
+      target.current.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [initialStep, Boolean(output.data)]);
   const changePage = (step: number) => { setFromStep(step); setTargetStep(String(step)); setInvalid(false); };
-  return <section className="cg-output" aria-label={t('graphOutput')}>
-    <h3>{t('graphOutput')}</h3>
+  return <section className="cg-output" aria-label={t(roundId ? 'structureRoundOutput' : 'graphOutput')}>
+    <h3>{t(roundId ? 'structureRoundOutput' : 'graphOutput')}</h3>
     <div className="cg-pagination">
       <button className="btn sm" disabled={fromStep === 1 || !output.data} onClick={() => changePage(Math.max(1, fromStep - pageSize))}>{t('graphPreviousSteps')}</button>
       <span className="mono">{t('graphStep')} {fromStep}–{toStep}</span>
@@ -49,13 +57,13 @@ function DispatchSteps({ workId, dispatchId, lastStep, affects }: {
       if (!Number.isSafeInteger(step) || step < 1 || step > Number.MAX_SAFE_INTEGER - pageSize) { setInvalid(true); return; }
       changePage(step);
     }}>
-      <label>{t('graphFromStep')}<input type="number" min="1" step="1" value={targetStep} aria-invalid={invalid} aria-describedby={invalid ? 'cg-step-error' : undefined} onChange={event => setTargetStep(event.target.value)} /></label>
+      <label>{t('graphFromStep')}<input type="number" min="1" step="1" value={targetStep} aria-invalid={invalid} aria-describedby={invalid ? errorId : undefined} onChange={event => setTargetStep(event.target.value)} /></label>
       <button className="btn sm" type="submit">{t('graphGoStep')}</button>
-      {invalid && <p className="error" id="cg-step-error" role="alert">{t('graphInvalidStep')}</p>}
+      {invalid && <p className="error" id={errorId} role="alert">{t('graphInvalidStep')}</p>}
     </form>
     {output.error && <ErrorNotice error={output.error} retry={output.reload} />}
     {!output.data ? <p role="status">{output.error ? '' : t('loading')}</p> : !Array.isArray(output.data) ? <p>{t('graphDeleted')}</p> : output.data.length === 0 ? <p className="muted">{t('graphEmptySteps')}</p> : <ol className="cg-steps">
-      {output.data.map(step => <li key={step.step}>
+      {output.data.map(step => <li key={step.step} ref={step.step === initialStep ? target : undefined} tabIndex={step.step === initialStep ? -1 : undefined} aria-current={step.step === initialStep ? 'step' : undefined}>
         <span className="cg-step-number">{t('graphStep')} {step.step}</span>
         {step.type === 'output' ? <pre>{step.text}</pre> : step.type === 'artifact' ? <p className="cg-prose">{t('graphArtifact')} · {step.path}</p> : step.type === 'compaction' ? <p>{t('graphCompaction')}</p> : <p>{t('graphEnd')} · {t(endLabels[step.reason])}</p>}
         <details><summary>{t('graphRawStep')}</summary><pre>{JSON.stringify(step, null, 2)}</pre></details>

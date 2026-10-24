@@ -26,6 +26,6 @@ function SelectedWork({ route }: { route: RouteParams }) {
       {work && <WorkActions work={work} reload={reload} />}</header>
     {error && <ErrorNotice error={error} retry={reload} />}
     {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : work && (view === 'chat' ? <ConversationView work={work} />
-      : view === 'brief' ? <BriefView work={work} /> : <CardGraphView key={work.id} workId={work.id} />)}
+      : view === 'brief' ? <BriefView work={work} /> : <CardGraphView key={work.id} work={work} />)}
   </>;
 }

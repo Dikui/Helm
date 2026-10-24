@@ -15,7 +15,7 @@ import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWa
 import { pendingTemplates } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
-import { listRounds } from './round-reads.js';
+import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -338,6 +338,11 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, { workId }) => listRounds(store, workId, actor.type === 'user'),
   }),
   operation({
+    name: 'get-round-output', description: '按步骤读取调度轮次输出', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), roundId: z.string().min(1), fromStep: z.number().int().positive().optional(), toStep: z.number().int().positive().optional() }).strict(),
+    execute: ({ store }, params) => roundOutput(store, params),
+  }),
+  operation({
     name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ store }, { workId }) => store.conversation(workId).map(item => reviewDetails(store, confirmationDetails(store, item))),
@@ -443,7 +448,7 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'get-coordinator-notes', description: '读取调度笔记全文与版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.notes(workId),
+    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => coordinatorNotes(store, workId),
   }),
   operation({
     name: 'write-coordinator-notes', description: '整份改写调度笔记', callers: ['coordinator-round'], keyed: false, mutates: true,

@@ -7,10 +7,10 @@ import { conclusionLabels, DispatchStatus } from './labels.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
 import type { CardNode, Dispatch } from './types.js';
 
-export function CardInspector({ card, dispatches }: { card: CardNode; dispatches?: Dispatch[] }) {
+export function CardInspector({ card, dispatches, initialDispatchId, initialStep }: { card: CardNode; dispatches?: Dispatch[]; initialDispatchId?: string; initialStep?: number }) {
   const { t, language } = useI18n();
   const now = useClock();
-  const [chosen, choose] = useState<string | null>(null);
+  const [chosen, choose] = useState<string | null>(initialDispatchId ?? null);
   const selected = dispatches?.find(dispatch => dispatch.id === chosen) ?? dispatches?.at(-1);
   const loops = sendBackDispatchIds(dispatches ?? []);
   return <>
@@ -27,7 +27,7 @@ export function CardInspector({ card, dispatches }: { card: CardNode; dispatches
         </li>
       </Fragment>)}
     </ol>}
-    {selected && <DispatchDetails key={selected.id} workId={card.workId} dispatchId={selected.id} lastStep={selected.id === card.latestDispatchId ? card.currentStep : undefined} />}
+    {selected && <DispatchDetails key={selected.id} workId={card.workId} dispatchId={selected.id} initialStep={selected.id === initialDispatchId ? initialStep : undefined} lastStep={selected.id === card.latestDispatchId ? card.currentStep : undefined} />}
     {card.cardBranch && <dl className="cg-kv"><dt>{t('graphBranch')}</dt><dd className="mono">{card.cardBranch}</dd></dl>}
     {card.workPath && <><dl className="cg-kv"><dt>{t('graphCopy')}</dt><dd className="mono">{card.workPath}</dd></dl><p className="cg-copy-warning">{t('graphCopyWarning')}</p></>}
     <CardActions card={card} />

@@ -238,7 +238,9 @@ test('确认后的工作说明修订需新关卡，旧版继续生效直到用�
   versions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   assert.deepEqual(versions.map((version: any) => version.status), ['superseded', 'active']);
   assert.equal((await daemon.call('list-pending')).result.length, 0);
-  assert.deepEqual((await daemon.call('get-coordinator-notes', { workId: work.id })).result, { body: '笔记第二版，等用户确认', version: 2 });
+  const notes = (await daemon.call('get-coordinator-notes', { workId: work.id })).result;
+  assert.deepEqual({ body: notes.body, version: notes.version }, { body: '笔记第二版，等用户确认', version: 2 });
+  assert.deepEqual(notes.versions.map((note: any) => note.body), ['笔记第一版', '笔记第二版，等用户确认']);
   const events = await daemon.events(work.id);
   assert.deepEqual(events.filter(event => event.action === 'coordinator-notes-written').map(event => event.details.body), ['笔记第一版', '笔记第二版，等用户确认']);
   assert.equal(events.filter(event => event.action === 'gate-decided').length, 2);
