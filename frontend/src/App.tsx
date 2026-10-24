@@ -3,9 +3,10 @@ import { I18nProvider } from './shared/i18n.js';
 import { Router, RouteOutlet } from './shared/router.js';
 import type { Fetch } from './shared/api.js';
 import { Inbox } from './pages/inbox/Inbox.js';
+import { OutputWarning } from './pages/work/OutputWarning.js';
 import { routes } from './routes.js';
 export function App({ baseUrl, transport }: { baseUrl?: string; transport?: Fetch }) {
   return <I18nProvider><DataProvider baseUrl={baseUrl} transport={transport}><Router>
-    <div className="shell"><Inbox /><main className="inset"><RouteOutlet routes={routes} /></main></div>
+    <div className="shell"><Inbox /><main className="inset"><OutputWarning /><RouteOutlet routes={routes} /></main></div>
   </Router></DataProvider></I18nProvider>;
 }

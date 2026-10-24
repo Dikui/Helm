@@ -1,3 +1,4 @@
+import { WorkActions } from './WorkActions.js';
 import { useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
@@ -13,7 +14,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
   const { t } = useI18n();
   const { data: work, error, reload } = useResource<Work>('get-work', { workId: route.workId });
   return <>
-    <header className="top"><span className="muted">{t('work')} /</span><h1>{work?.title || t('loading')}</h1>{work && <span className="pill">{t(work.status)}</span>}</header>
+    <header className="top"><span className="muted">{t('work')} /</span><h1>{work?.title || t('loading')}</h1>{work && <span className="pill">{t(work.status)}</span>}{work && <WorkActions work={work} reload={reload} />}</header>
     {error && <ErrorNotice error={error} retry={reload} />}
     {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : <div className="page-body">
       {work && <><h2>{t('overview')}</h2><p className="muted">{t('pagePending')}</p></>}

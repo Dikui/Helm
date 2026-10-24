@@ -209,6 +209,8 @@ export const operations: readonly Operation[] = [
       roundTotalTimeoutMs: store.db.prepare('SELECT round_total_timeout_ms FROM settings WHERE id = 1').get()!.round_total_timeout_ms,
       roundIdleTimeoutMs: store.db.prepare('SELECT round_idle_timeout_ms FROM settings WHERE id = 1').get()!.round_idle_timeout_ms,
       outputThresholdBytes: store.db.prepare('SELECT output_threshold_bytes FROM settings WHERE id = 1').get()!.output_threshold_bytes,
+      outputTotalBytes: store.db.prepare('SELECT output_total_bytes FROM settings WHERE id = 1').get()!.output_total_bytes,
+      outputThresholdExceeded: Boolean(store.db.prepare('SELECT output_threshold_exceeded FROM settings WHERE id = 1').get()!.output_threshold_exceeded),
       runningDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'running'`).get()!.count,
       queuedDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'queued'`).get()!.count,
     }),
