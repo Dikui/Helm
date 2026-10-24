@@ -25,8 +25,11 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
     ['grok-executor', 'HELM_GROK_EXECUTOR_REAL'],
     ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
+    ['ui', 'HELM_UI_REAL'],
   ] as const) {
-    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
+    const smokeEnv = { ...env, [flag]: '1' };
+    if (file === 'ui' && parent.HELM_UI_REAL_HOME !== undefined) smokeEnv.HELM_UI_REAL_HOME = parent.HELM_UI_REAL_HOME;
+    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: smokeEnv });
     if (result.error || result.signal || result.status !== 0) return result.status || 1;
   }
   return 0;
