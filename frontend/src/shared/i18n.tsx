@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    conversationViews: '工作视图', conversationWholeWork: '整项工作', conversationCard: '卡片', conversationGate: '关卡', conversationAbout: '关于',
+    conversationRound: '轮次', conversationIdle: '空闲', conversationInterrupt: '打断本轮', conversationSteps: '本轮步骤', conversationQueue: '下一轮处理',
+    conversationRoundElapsed: '本轮用时', conversationStepGap: '输出间隔', conversationStepSince: '距本步输出', conversationOutput: '调度者输出', conversationWaitingOutput: '等待调度者输出…', conversationCompaction: '上下文已压缩',
+    conversationPlaceholder: '给调度者留言…', conversationNewline: '换行', conversationScopeUnavailable: '范围已失效，请重新选择',
+    conversationDecided: '已决定', conversationWithdrawn: '已撤回', conversationClosed: '已关闭', conversationRuntime: '运行层',
     coordinatorRole: '调度者', executorTemplates: '执行者模板', unrecognizedTemplates: '无法识别角色',
     available: '可用', unavailable: '不可用', dispatchCount: '个运行中派单', workCount: '项未结束工作', projectWorkCount: '项工作',
     templateHelp: '按角色配置 Agent，改动从下一次派单或调度轮次生效。', newTemplate: '新建模板',
@@ -54,6 +59,11 @@ export const messages = {
     projects: '项目', templates: 'Agent 模板', runtime: '运行', chat: '对话', structure: '调度结构', brief: '工作说明',
   },
   en: {
+    conversationViews: 'Work views', conversationWholeWork: 'Whole work', conversationCard: 'Card', conversationGate: 'Gate', conversationAbout: 'About',
+    conversationRound: 'Round', conversationIdle: 'Idle', conversationInterrupt: 'Interrupt round', conversationSteps: 'Current round steps', conversationQueue: 'Queued for next round',
+    conversationRoundElapsed: 'Round elapsed', conversationStepGap: 'Output interval', conversationStepSince: 'Time since output', conversationOutput: 'Coordinator output', conversationWaitingOutput: 'Waiting for coordinator output…', conversationCompaction: 'Context compacted',
+    conversationPlaceholder: 'Message the coordinator…', conversationNewline: 'new line', conversationScopeUnavailable: 'Scope unavailable. Choose again.',
+    conversationDecided: 'Decided', conversationWithdrawn: 'Withdrawn', conversationClosed: 'Closed', conversationRuntime: 'Runtime',
     coordinatorRole: 'Coordinators', executorTemplates: 'Executor templates', unrecognizedTemplates: 'Unrecognized role',
     available: 'Available', unavailable: 'Unavailable', dispatchCount: 'running dispatches', workCount: 'active works', projectWorkCount: 'works',
     templateHelp: 'Configure Agents by role. Changes apply from the next dispatch or round.', newTemplate: 'New template',

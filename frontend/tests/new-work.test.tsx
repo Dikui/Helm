@@ -93,6 +93,7 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   expect(within(brief).queryByText('验证码十分钟过期')).toBeNull();
   expect((within(brief).getByRole('button', { name: '确认这一版' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(versions, { target: { value: '2' } });
+  await waitFor(() => expect((within(brief).getByRole('button', { name: '确认这一版' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(within(brief).getByRole('button', { name: '确认这一版' }));
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'executing');
   await waitFor(() => expect(within(screen.getByRole('main')).getByText('执行中')).toBeTruthy());

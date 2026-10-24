@@ -37,7 +37,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     coordinatorNotes: String(store.notes(workId).body),
     // Executor steps can number thousands per round; outcomes arrive as dispatch-ended, steps stay readable via get-dispatch-output.
     newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
-      .filter(event => event.action !== 'dispatch-step')
+      .filter(event => event.action !== 'dispatch-step' && event.action !== 'round-step')
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
     recentConversation: store.conversation(workId).slice(-20),
@@ -226,7 +226,10 @@ export class RoundScheduler {
         previousStep = event.step;
         clearTimeout(idleTimer);
         idleTimer = setTimeout(() => stop('timed-out'), Number(settings.round_idle_timeout_ms));
-        appendFileSync(outputPath, `${JSON.stringify(event)}\n`);
+        appendFileSync(outputPath, `${JSON.stringify({ ...event, time: new Date().toISOString() })}\n`);
+        if (event.type !== 'end') this.store.transaction(() => {
+          this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-step', { step: event.step }, { workId });
+        });
         if (event.type === 'compaction') this.store.transaction(() => {
           this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'context-compacted', { step: event.step }, { workId });
         });

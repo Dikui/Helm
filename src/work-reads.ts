@@ -11,6 +11,7 @@ export function readWork(store: TaskStore, id: string) {
 const eventLabels: Record<string, string> = {
   'work-created': '开始对齐', 'work-description-drafted': '工作说明草稿已更新',
   'round-started': '调度者正在处理', 'round-ended': '调度轮次结束',
+  'round-step': '调度者正在处理',
   'round-template-loaded': '调度者已就绪', 'coordinator-notes-written': '调度笔记已更新',
   'gate-created': '有待决定的关卡', 'gate-updated': '关卡已更新', 'gate-decided': '关卡已决定', 'gate-withdrawn': '关卡已撤回',
   'card-created': '卡片已创建', 'card-updated': '卡片已更新', 'card-ready': '卡片等待派单',
