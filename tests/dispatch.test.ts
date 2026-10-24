@@ -350,7 +350,16 @@ test('看门狗记录执行者 pgid 和启动时间，SIGTERM 后等 5 秒再杀
 
 test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果、成果并唤醒调度者', async t => {
   let token = '';
-  let brief: StartupBrief | undefined;
+  const briefs: StartupBrief[] = [];
+  let releaseExecutor!: () => void;
+  const cardReadyHandled = new Promise<void>(resolve => { releaseExecutor = resolve; });
+  t.after(() => releaseExecutor());
+  const observeBrief: FakeScript = ctx => {
+    const brief: StartupBrief = JSON.parse(ctx.input);
+    briefs.push(brief);
+    if (brief.wakeEvents.some(event => event.action === 'card-ready')) releaseExecutor();
+    return [];
+  };
   const daemon = await fixture(t, [create, dispatch()], [ctx => {
     token = ctx.options.mcpServers.helm!.headers.Authorization!;
     assert.equal(ctx.options.sandbox.mode, 'workspace-write');
@@ -360,9 +369,11 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
       { type: 'output', text: '检查结果\n第二行' },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'blocked', reason: '尚未检查' }, check: ok },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '检查通过' }, check: ok },
+      // Force card-ready to wake its own round before dispatch-ended can be recorded.
+      { type: 'hang', until: cardReadyHandled },
       { type: 'end', reason: 'completed', finalAnswer: '实现已完成', usage: { inputTokens: 11, outputTokens: 7 } },
     ];
-  }], { after: ctx => { brief = JSON.parse(ctx.input); return []; } });
+  }], { after: observeBrief, additionalRounds: [observeBrief] });
   await daemon.finished();
   const ended = await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
   const event = ended.find(event => event.action === 'dispatch-ended');
@@ -394,12 +405,16 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   assert.equal((await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: file.id })).result.content, '实现完成\n');
   assert.equal((await daemon.call('submit-conclusion', { conclusion: 'completed', reason: '用户不能代答' })).error.code, 'FORBIDDEN');
   assert.equal((await daemon.call('submit-conclusion', { conclusion: 'completed', reason: '结束后令牌失效' }, token)).status, 401);
-  await until(daemon.events, events => events.some(event => event.action === 'round-started' && event.details.eventIds.includes(eventId(ended))));
-  function eventId(events: any[]) { return events.find(event => event.action === 'dispatch-ended').id; }
-  assert.ok(brief?.cardGraph.some((node: any) => node.id === card.id));
+  await until(daemon.events, events => events.some(round => round.action === 'round-started' && round.details.eventIds.includes(event.id)));
+  // round-started is persisted before the driver receives the corresponding brief.
+  const brief = await until(async () => briefs.find(value => value.wakeEvents.some(wake => wake.id === event.id)), value => value !== undefined);
+  assert.ok(brief);
+  assert.ok(briefs[0]!.wakeEvents.some(event => event.action === 'card-ready'));
+  assert.equal(briefs[0]!.newEvents.some(event => event.action === 'dispatch-ended'), false);
+  assert.ok(brief.cardGraph.some((node: any) => node.id === card.id));
   assert.ok(ended.some(event => event.action === 'dispatch-step'));
-  assert.ok(brief!.newEvents.some(event => event.action === 'dispatch-ended'));
-  assert.equal(brief!.newEvents.some(event => event.action === 'dispatch-step'), false);
+  assert.ok(brief.newEvents.some(value => value.id === event.id && value.action === 'dispatch-ended'));
+  assert.equal(brief.newEvents.some(event => event.action === 'dispatch-step'), false);
 });
 
 test('同一卡片续跑复用副本和原模板会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
