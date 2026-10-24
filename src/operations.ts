@@ -15,6 +15,7 @@ import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWa
 import { pendingTemplates } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
+import { listRounds } from './round-reads.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -269,6 +270,7 @@ export const operations: readonly Operation[] = [
     schema: z.object({
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
+      cardId: z.string().min(1).optional(),
       coordinatorTemplateId: z.string().min(1).optional(),
     }).strict().refine(params => Boolean(params.projectId) !== Boolean(params.workId), '必须且只能提供 projectId 或 workId。')
       .refine(params => !params.coordinatorTemplateId || Boolean(params.projectId), 'coordinatorTemplateId 只能在创建工作时指定；已有工作请用 change-coordinator-template。'),
@@ -298,14 +300,15 @@ export const operations: readonly Operation[] = [
       const existing = store.message(workId, params.key);
       if (existing) return { work, message: existing };
       if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
+      if (params.cardId) cardDetails(store, workId, params.cardId);
       if (params.gateId) {
         const gate = store.db.prepare('SELECT id FROM gates WHERE id = ? AND work_id = ?').get(params.gateId, workId);
         if (!gate) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
       }
       const id = randomUUID();
-      const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null }, { workId });
-      store.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-        id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id,
+      const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null, cardId: params.cardId ?? null }, { workId, cardId: params.cardId });
+      store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id, params.cardId ?? null,
       );
       if (actor.type === 'user') store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
       if (isNew) {
@@ -328,6 +331,11 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'get-work', description: '读取工作', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => readWork(store, workId),
+  }),
+  operation({
+    name: 'list-rounds', description: '读取调度轮次、运行中步骤和排队待下一轮处理的用户消息', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, { workId }) => listRounds(store, workId, actor.type === 'user'),
   }),
   operation({
     name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,

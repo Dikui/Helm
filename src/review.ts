@@ -182,7 +182,7 @@ export function completeReviewedWork(store: TaskStore, workId: string, gateId: s
       const id = randomUUID();
       const body = notices.join('\n');
       const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body, gateId }, { workId });
-      store.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, workId, 'runtime', body, `review-result:${gateId}`, gateId, event.time, event.id);
+      store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, workId, 'runtime', body, `review-result:${gateId}`, gateId, event.time, event.id);
     }
     store.db.prepare(`UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?`).run(workId);
     if (!savedResult('work-completed')) store.appendEvent(runtime, { type: 'work', id: workId }, 'work-completed', { gateId, merge, push, cleanupFailure }, { workId });

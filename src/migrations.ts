@@ -175,4 +175,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE dispatches ADD COLUMN sqlite_path TEXT;
   `,
+  `
+  ALTER TABLE messages ADD COLUMN card_id TEXT REFERENCES cards(id);
+  `,
 ];

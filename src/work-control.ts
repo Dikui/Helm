@@ -18,7 +18,7 @@ export function pauseWorkFromRuntime(store: TaskStore, workId: string, roundId: 
   const id = randomUUID();
   const body = `工作已由运行层暂停：${reason}。请手动恢复工作。`;
   const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body }, { workId });
-  store.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+  store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(id, workId, 'runtime', body, `runtime-pause:${roundId}`, null, event.time, event.id);
   store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'runtime-pause', reason, roundId }, { workId });
 }

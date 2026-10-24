@@ -166,19 +166,19 @@ COMMIT;`);
   }
 
   message(workId: string, key: string) {
-    return this.db.prepare(`SELECT id, work_id AS workId, sender, body, key, gate_id AS gateId,
+    return this.db.prepare(`SELECT id, work_id AS workId, sender, body, key, gate_id AS gateId, card_id AS cardId,
       created_at AS createdAt, sequence FROM messages WHERE work_id = ? AND key = ?`).get(workId, key);
   }
 
   conversation(workId: string) {
     this.work(workId);
     return this.db.prepare(`
-      SELECT 'message' AS type, id, work_id AS workId, sender, body, gate_id AS gateId,
+      SELECT 'message' AS type, id, work_id AS workId, sender, body, gate_id AS gateId, card_id AS cardId,
         NULL AS kind, NULL AS status, NULL AS question, created_at AS createdAt, sequence,
         NULL AS descriptionId, NULL AS decision
       FROM messages WHERE work_id = ?
       UNION ALL
-      SELECT 'gate', id, work_id, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision
+      SELECT 'gate', id, work_id, NULL, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision
       FROM gates WHERE work_id = ? ORDER BY sequence
     `).all(workId, workId).map(item => item.type === 'gate' ? { ...item, ...this.gate(workId, String(item.id)) } : item);
   }

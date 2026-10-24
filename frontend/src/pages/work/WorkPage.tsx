@@ -8,6 +8,7 @@ import { AligningWork } from './aligning/AligningWork.js';
 import { Link } from '../../shared/router.js';
 import { CardGraphView } from './card-graph/CardGraphView.js';
 import { BriefView } from './brief/BriefView.js';
+import { ConversationView } from './conversation/ConversationView.js';
 
 export function WorkPage({ route }: { route: RouteParams }) {
   const { t } = useI18n();
@@ -16,17 +17,15 @@ export function WorkPage({ route }: { route: RouteParams }) {
 function SelectedWork({ route }: { route: RouteParams }) {
   const { t } = useI18n();
   const { data: work, error, reload } = useResource<Work>('get-work', { workId: route.workId });
-  const showGraph = work?.status !== 'aligning' && (route.view === 'structure' || route.view === 'graph' || !route.view);
+  const view = route.view === 'structure' || route.view === 'graph' ? 'structure' : route.view === 'brief' ? 'brief' : 'chat';
   return <>
-    <header className="top"><span className="muted">{t('work')} /</span><h1>{work?.title || t('loading')}</h1>{work && <span className="pill">{t(work.status)}</span>}{work && <WorkActions work={work} reload={reload} />}</header>
+    <header className="top"><span className="muted">{t('work')} /</span><h1>{work?.title || t('loading')}</h1>{work && <span className="pill">{t(work.status)}</span>}
+      {work && work.status !== 'aligning' && <nav className="seg conversation-view-switch" aria-label={t('conversationViews')}>
+        {(['chat', 'structure', 'brief'] as const).map(item => <Link key={item} href={`/works/${work.id}/${item}`} aria-current={view === item ? 'page' : undefined}>{t(item)}</Link>)}
+      </nav>}
+      {work && <WorkActions work={work} reload={reload} />}</header>
     {error && <ErrorNotice error={error} retry={reload} />}
-    {work && work.status !== 'aligning' && <nav className="cg-work-nav" aria-label={t('work')}>
-      <Link href={`/works/${work.id}/chat`} aria-current={route.view === 'chat' ? 'page' : undefined}>{t('chat')}</Link>
-      <Link href={`/works/${work.id}/structure`} aria-current={showGraph ? 'page' : undefined}>{t('structure')}</Link>
-      <Link href={`/works/${work.id}/brief`} aria-current={route.view === 'brief' ? 'page' : undefined}>{t('brief')}</Link>
-    </nav>}
-    {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : work && route.view === 'brief' ? <BriefView work={work} /> : work && showGraph ? <CardGraphView key={work.id} workId={work.id} /> : <div className="page-body">
-      {work && <><h2>{t('overview')}</h2><p className="muted">{t('pagePending')}</p></>}
-    </div>}
+    {work?.status === 'aligning' ? <AligningWork workId={work.id} /> : work && (view === 'chat' ? <ConversationView work={work} />
+      : view === 'brief' ? <BriefView work={work} /> : <CardGraphView key={work.id} workId={work.id} />)}
   </>;
 }

@@ -1,6 +1,3 @@
-.cg-work-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border); }
-.cg-work-nav a { color: var(--muted); text-decoration: none; }
-.cg-work-nav a:hover, .cg-work-nav a[aria-current] { color: var(--text); }
 .cg-view { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
 .cg-errors { grid-column: 1 / -1; }
 .cg-errors:empty { display: none; }
