@@ -22,3 +22,5 @@
 最终 `npm run check --cache /private/tmp/helm-npm-cache` 通过；完整 `npm test --cache /private/tmp/helm-npm-cache` 的 Node 测试为 450/451，唯一失败是用户已预告的 `dispatch.test.ts`“执行派单经 MCP 写卡片副本…”偶发项（简报暂未包含 dispatch-ended），单独复跑第一次仍失败、第二次 1/1 通过。因完整命令退出 1，未把“npm test 通过”一项勾上；随后显式补跑全部整页测试，5 文件 31/31 通过。自行完成 diff-review，Standards / Spec 各已审 10/10，无未解决代码问题。
 
 - [ ] 真实浏览器冒烟、截图和视觉验收由调度者后续另派；本轮未执行。
+
+2026-10-24：修复真实冒烟 F4：工作状态传入共享 GateDecision，取消/完成时审核与收件箱隐藏决定按钮和意见输入，保留报告并显示终态，不把未决定审核显示成退回。整页测试覆盖进入页面前已取消、打开后 SSE 取消，以及既有接受后完成路径，先失败后审核页 8/8 通过；另核对公共 invoke 已对取消工作未决审核拒绝 TERMINAL_WORK，保留已接受审核的幂等重试，本单未改运行层规则。

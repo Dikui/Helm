@@ -1,7 +1,7 @@
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { useI18n } from '../../../shared/i18n.js';
 import type { Message, Round, RoundStep } from './types.js';
-import { outputSummary } from './output-summary.js';
+import { outputSummary } from '../../../../../src/output-summary.js';
 
 export function RoundSteering({ round, steps, queue, interrupt, busy, reference, pauseReason }: {
   round?: Round; steps: RoundStep[]; queue: Message[]; interrupt: () => void; busy: boolean;

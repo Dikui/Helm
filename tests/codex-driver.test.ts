@@ -93,6 +93,8 @@ for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默
     assert.deepEqual(requests.filter(r => r.method === 'turn/start').at(-1).params.input, [{ type: 'text', text: '保留输入原文' }]);
     const prompt = requests.filter(r => r.method === 'thread/start' || r.method === 'thread/resume').at(-1).params.developerInstructions;
     const requirements = role === 'coordinator' ? [
+      /用户.*提问、说明和进展摘要.*send-message.*稳定.*key/,
+      /最终回答.*用户看不到/,
       /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
       /不要只写“按卡片说明实现”/,
       /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,

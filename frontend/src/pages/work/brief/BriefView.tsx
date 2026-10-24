@@ -16,7 +16,7 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
   const active = versions.find(item => item.status === 'active');
   const shown = version === undefined ? active : versions.find(item => item.version === version);
   return <div className="page-body brief-view">
-    <WorkReview workId={work.id} />
+    <WorkReview work={work} />
     <section className="brief-document" aria-label={t('brief')}>
       <header className="row"><h2>{t('brief')}</h2>{shown && <>
         <span className={`pill ${shown.status === 'active' ? 'ok' : ''}`}>{t(shown.status === 'active' ? 'briefActive' : shown.status === 'draft' ? 'alignmentUnconfirmed' : 'briefHistorical')}</span>
