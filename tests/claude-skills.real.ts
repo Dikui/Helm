@@ -171,6 +171,23 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
           skills: role === 'executor' ? ['helm-library-probe'] : [], mcp: role === 'executor' ? ['library-probe', 'stdio-probe'] : [] } });
       assert.equal(agent.available, true, agent.reason ?? 'Agent 不可用');
     }
+    // Settings consumes these same summaries and structured deletion errors.
+    // Check the real-smoke setup exposes references without returning credentials.
+    const library = await call('list-library');
+    assert.deepEqual(library, [
+      { type: 'skill', name: 'helm-library-probe', agents: ['library-executor'] },
+      { type: 'mcp', name: 'library-probe', transport: 'http', url: `http://127.0.0.1:${address.port}/mcp`, headerKeys: ['Authorization'], agents: ['library-executor'] },
+      { type: 'mcp', name: 'stdio-probe', transport: 'stdio', command: process.execPath, envKeys: ['HELM_LIBRARY_MCP_SECRET'], agents: ['library-executor'] },
+    ]);
+    assert.ok(!JSON.stringify(library).includes(authorization));
+    assert.ok(!JSON.stringify(library).includes(stdioSecret));
+    for (const [type, name] of [['skill', 'helm-library-probe'], ['mcp', 'library-probe'], ['mcp', 'stdio-probe']]) {
+      const response: Response = await fetch(`${daemon.url}/api/delete-library-entry`, { method: 'POST', body: JSON.stringify({ type, name }) });
+      const failure = await response.json() as any;
+      assert.equal(response.status, 409);
+      assert.equal(failure.error.code, 'LIBRARY_ENTRY_IN_USE');
+      assert.deepEqual(failure.error.details.agents, ['library-executor']);
+    }
     // Construct the warning in a temporary HOME without changing the user's global skills.
     // Restore the host HOME before the real CLI checks login or starts a dispatch.
     const globalHome = join(root, 'global-home');

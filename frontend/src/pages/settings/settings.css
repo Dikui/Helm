@@ -51,4 +51,8 @@
 .settings-tool-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
 .settings-tool-head > span { font-size: var(--text-sm); }
 .settings-ok { color: var(--success); }
+.settings-library-field { display: grid; gap: 6px; min-width: 0; }
+.settings-library-input { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.settings-library-input input { flex: 1 1 10rem; }
+.settings-library-input button { flex-shrink: 0; }
 .settings-box code { overflow-wrap: anywhere; }

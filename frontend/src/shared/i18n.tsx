@@ -1,6 +1,15 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    library: '库', libraryHelp: '统一安装 skill 和登记 MCP，供 Agent 按名字引用。',
+    libraryRegisterMcp: '登记 MCP', libraryMcpHelp: '请求头和环境变量填写 JSON 对象，值须为字符串；参数填写 JSON 字符串数组。可选项留空即可。',
+    libraryMcpName: 'MCP 名字', libraryMcpTransport: '传输方式', libraryMcpUrl: 'URL', libraryMcpHeaders: '请求头（JSON 对象，可选）',
+    libraryMcpCommand: '命令', libraryMcpArgs: '参数（JSON 字符串数组，可选）', libraryMcpEnv: '环境变量（JSON 对象，可选）',
+    libraryShowHeaders: '显示请求头', libraryHideHeaders: '隐藏请求头', libraryShowEnv: '显示环境变量', libraryHideEnv: '隐藏环境变量',
+    libraryInvalidUrl: '请输入以 http:// 或 https:// 开头的有效 URL。', libraryInvalidMap: '请输入 JSON 对象，所有值须为字符串，例如 {"KEY":"value"}。', libraryInvalidArgs: '请输入 JSON 字符串数组，例如 ["--port","3000"]。',
+    libraryInstallSkill: '安装 skill', librarySkillHelp: '填写运行 helmd 的本机目录，目录须包含 SKILL.md。省略名字时使用目录名。', librarySkillPath: '本地目录路径', librarySkillName: 'skill 名字（可选）',
+    emptyLibrary: '库里还没有条目。安装一个 skill 或登记一个 MCP 开始使用。',
+    libraryAgents: '引用它的 Agent', libraryUnused: '未被引用', libraryHeaderKeys: '请求头键名', libraryEnvKeys: '环境变量键名', libraryDelete: '删除',
     reviewTitle: '审核', reviewReport: '汇总报告', reviewRejected: '被拒绝的操作', reviewUndeclared: '未声明结论的派单',
     reviewVerification: '整体验收', reviewNoVerification: '暂无整体验收结论。', reviewPassed: '通过', reviewFailed: '不通过', reviewNotDeclared: '未声明',
     reviewCard: '卡片', reviewDispatch: '派单', reviewDiff: '工作分支相对基准的 diff', reviewViewDiff: '查看 diff', reviewNoDiff: '没有代码差异。',
@@ -96,6 +105,15 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
+    library: 'Library', libraryHelp: 'Install skills and register MCP servers for Agents to reference by name.',
+    libraryRegisterMcp: 'Register MCP', libraryMcpHelp: 'Headers and environment variables take JSON objects with string values. Arguments take a JSON array of strings. Optional fields may be left blank.',
+    libraryMcpName: 'MCP name', libraryMcpTransport: 'Transport', libraryMcpUrl: 'URL', libraryMcpHeaders: 'Headers (JSON object, optional)',
+    libraryMcpCommand: 'Command', libraryMcpArgs: 'Arguments (JSON string array, optional)', libraryMcpEnv: 'Environment variables (JSON object, optional)',
+    libraryShowHeaders: 'Show headers', libraryHideHeaders: 'Hide headers', libraryShowEnv: 'Show environment variables', libraryHideEnv: 'Hide environment variables',
+    libraryInvalidUrl: 'Enter a valid URL starting with http:// or https://.', libraryInvalidMap: 'Enter a JSON object with string values, such as {"KEY":"value"}.', libraryInvalidArgs: 'Enter a JSON array of strings, such as ["--port","3000"].',
+    libraryInstallSkill: 'Install skill', librarySkillHelp: 'Use a directory on the machine running helmd, containing SKILL.md. The directory name is used if no name is given.', librarySkillPath: 'Local directory path', librarySkillName: 'Skill name (optional)',
+    emptyLibrary: 'The library is empty. Install a skill or register an MCP server to get started.',
+    libraryAgents: 'Referenced by Agents', libraryUnused: 'Unused', libraryHeaderKeys: 'Header keys', libraryEnvKeys: 'Environment variable keys', libraryDelete: 'Delete',
     reviewTitle: 'Review', reviewReport: 'Summary report', reviewRejected: 'Rejected operations', reviewUndeclared: 'Dispatches without a verdict',
     reviewVerification: 'Overall verification', reviewNoVerification: 'No overall verification verdict yet.', reviewPassed: 'Passed', reviewFailed: 'Failed', reviewNotDeclared: 'Undeclared',
     reviewCard: 'Card', reviewDispatch: 'Dispatch', reviewDiff: 'Work branch diff against base', reviewViewDiff: 'View diff', reviewNoDiff: 'No code changes.',
