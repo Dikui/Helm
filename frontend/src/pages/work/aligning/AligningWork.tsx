@@ -1,0 +1,90 @@
+import { useRef, useState } from 'react';
+import { useData, useResource } from '../../../shared/data.js';
+import { ErrorNotice } from '../../../shared/feedback.js';
+import { useI18n } from '../../../shared/i18n.js';
+import { GateDecision } from '../../inbox/GateActions.js';
+import { useSendMessage } from '../../new-work/useSendMessage.js';
+import type { ConversationItem, WorkDescription } from './types.js';
+import './aligning.css';
+
+export function AligningWork({ workId }: { workId: string }) {
+  const { api } = useData();
+  const { t } = useI18n();
+  const conversation = useResource<ConversationItem[]>('get-conversation', { workId });
+  const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
+  const [version, setVersion] = useState<number>();
+  const [confirming, setConfirming] = useState(false);
+  const confirmationBusy = useRef(false);
+  const [confirmError, setConfirmError] = useState<Error>();
+  const [body, setBody] = useState('');
+  const input = useRef<HTMLTextAreaElement>(null);
+  const submission = useSendMessage();
+  const versions = descriptions.data ?? [];
+  const latest = versions.at(-1);
+  const shown = version === undefined ? latest : versions.find(item => item.version === version);
+  const previous = versions.find(item => item.version === (shown?.version ?? 0) - 1);
+  const gate = conversation.data?.find(item => item.type === 'gate' && item.kind === 'work-confirmation' && item.status === 'pending');
+  const canConfirm = Boolean(shown && gate?.type === 'gate' && gate.descriptionId === shown.id && latest?.id === shown.id
+    && !confirming && !conversation.error && !descriptions.error);
+  // Both visible entry points decide exactly the version currently shown in the brief panel.
+  const confirm = async () => {
+    if (!canConfirm || !shown || !gate || confirmationBusy.current) return;
+    confirmationBusy.current = true; setConfirming(true); setConfirmError(undefined);
+    try { await api.call('decide-gate', { workId, gateId: gate.id, descriptionId: shown.id, decision: 'confirm' }); }
+    catch (error) { setConfirmError(error as Error); }
+    finally { confirmationBusy.current = false; setConfirming(false); }
+  };
+  const send = async () => {
+    if (!body.trim()) return;
+    if (await submission.send({ workId, body: body.trim() })) setBody('');
+  };
+  const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
+  return <div className="aligning-work">
+    <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming}>
+      <div className="aligning-thread">
+        <h2>{t('chat')}</h2>
+        {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
+        {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
+        {conversation.data?.map(item => item.type === 'message'
+          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><p>{item.body}</p></article>
+          : item.kind === 'work-confirmation'
+            ? item.status === 'pending' && <div className="aligning-gate" key={item.id}>
+              <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
+              <div className="row">{confirmButton}<button className="btn" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}</button></div>
+            </div>
+            : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
+        {confirmError && <ErrorNotice error={confirmError} />}
+      </div>
+      <form className="aligning-composer" noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
+        <label>{t('alignmentMessage')}<textarea ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
+          onChange={event => setBody(event.target.value)} onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
+          }} /></label>
+        <button className="btn primary" disabled={submission.pending || !body.trim()}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+        {submission.error && <ErrorNotice error={submission.error} />}
+        {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
+      </form>
+    </section>
+    <aside className="aligning-brief" aria-label={t('brief')} aria-busy={confirming}>
+      <header><h2>{t('brief')}</h2>{shown && <><span className="pill att">{t('alignmentUnconfirmed')}</span><label>{t('alignmentVersion')}<select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
+        {[...versions].reverse().map(item => <option key={item.id} value={item.version}>v{item.version}</option>)}
+      </select></label></>}</header>
+      <div className="aligning-brief-body">
+        {descriptions.error && <ErrorNotice error={descriptions.error} retry={descriptions.reload} />}
+        {!descriptions.data && !descriptions.error && <p role="status">{t('loading')}</p>}
+        {descriptions.data && !shown && <p>{t('noDescription')}</p>}
+        {shown && <>
+          {(['requirements', 'boundary', 'criteria'] as const).map(field => {
+            const oldLines = previous?.[field].split(/\r?\n/) ?? [];
+            return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
+              <li key={index}>{previous && !oldLines.includes(line) ? <mark>{line}</mark> : line}</li>)}</ul></section>;
+          })}
+          <section className="aligning-base"><h3>{t('newWorkBase')}</h3><p className="mono">{shown.baseRef} <span title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></p></section>
+          <p className="muted">{t('alignmentNewEntriesHint')}</p>
+          {latest?.id !== shown.id && <p>{t('alignmentHistoricalDraft')}</p>}
+        </>}
+      </div>
+      <footer>{confirmButton}</footer>
+    </aside>
+  </div>;
+}

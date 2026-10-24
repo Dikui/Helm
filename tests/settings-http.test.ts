@@ -12,7 +12,7 @@ test('模板使用数只统计运行中派单和未结束的调度者工作，�
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '卡片' }), saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', templateId: 'claude-executor' }) },
-  ]], undefined, [[{ type: 'hang' }]]);
+  ]], undefined, { executorScripts: [[{ type: 'hang' }]] });
   t.after(() => daemon.close());
   const templates = async () => (await daemon.call('list-agent-templates')).result;
   const initial = await templates();

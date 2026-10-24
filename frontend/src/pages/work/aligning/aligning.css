@@ -1,0 +1,29 @@
+.aligning-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 38%); flex: 1; min-height: 0; }
+.aligning-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.aligning-thread { flex: 1; overflow: auto; padding: var(--space-5); display: grid; align-content: start; gap: var(--space-5); scrollbar-gutter: stable; }
+.aligning-work h2 { font-size: var(--text-md); }
+.aligning-message { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius); }
+.aligning-message.me { background: var(--surface-soft); margin-left: var(--space-5); }
+.aligning-message b { color: var(--muted); font-size: var(--text-sm); }
+.aligning-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.aligning-gate { display: grid; gap: var(--space-3); border: 1px solid var(--attention-line); background: var(--attention-soft); border-radius: var(--radius); padding: var(--space-4); }
+.aligning-gate .pill { justify-self: start; }
+.aligning-composer { padding: var(--space-4); border-top: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-3); }
+.aligning-composer label { display: grid; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+.aligning-composer textarea { resize: none; min-height: 110px; max-height: 35dvh; width: 100%; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-md); }
+.aligning-composer .error, .aligning-composer .hint { grid-column: 1 / -1; }
+.aligning-composer .btn { min-width: 100px; }
+.aligning-brief { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); }
+.aligning-brief > header { padding: var(--space-4); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.aligning-brief label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.aligning-brief select { padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
+.aligning-brief select:hover { border-color: var(--border-strong); }
+.aligning-brief-body { flex: 1; overflow: auto; padding: var(--space-5); display: grid; align-content: start; gap: var(--space-5); scrollbar-gutter: stable; overflow-wrap: anywhere; }
+.aligning-brief h3 { color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-2); }
+.aligning-brief ul { margin: 0; padding-left: var(--space-4); white-space: pre-wrap; }
+.aligning-brief li { margin-bottom: var(--space-2); }
+.aligning-brief mark { background: var(--success-soft); color: var(--success); border-radius: var(--radius-sm); padding: 2px; }
+.aligning-brief > footer { padding: var(--space-4); border-top: 1px solid var(--border); }
+.aligning-brief > footer .btn { width: 100%; }
+.aligning-work .btn:active { transform: translateY(1px); }
+@media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); overflow: auto; } .aligning-chat, .aligning-brief { min-height: auto; } .aligning-brief { border-left: 0; border-top: 1px solid var(--border); } .aligning-thread, .aligning-brief-body { overflow: visible; } }

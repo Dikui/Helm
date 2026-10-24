@@ -6,7 +6,7 @@ import { FakeDriver, type FakeScript } from '../src/driver.js';
 import { copyTemplates, startTestHelmd } from './helmd-fixture.js';
 
 // Shared HTTP / whole-app boundary. Every driver is fake, and HOME is disposable.
-export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, executorScripts: FakeScript[] = []) {
+export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, options: { registerProject?: boolean; templateDir?: string; executorScripts?: FakeScript[] } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-')));
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
@@ -20,16 +20,16 @@ export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, 
     const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
     git('add', 'README.md');
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
-    const templateDir = await copyTemplates(directory);
+    const templateDir = options.templateDir ?? await copyTemplates(directory);
     daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), templateDir,
-      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(executorScripts), ...(staticDir ? { staticDir } : {}) });
+      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []), ...(staticDir ? { staticDir } : {}) });
     const url = daemon.url;
     const call = async (name: string, params: object = {}) => {
       const response = await fetch(`${url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
       return { status: response.status, ...await response.json() as any };
     };
-    const project = (await call('register-project', { path: repo })).result;
-    return { url, call, project, directory, async close() {
+    const project = options.registerProject === false ? null : (await call('register-project', { path: repo })).result;
+    return { url, call, project, directory, repo, async close() {
       await daemon!.close();
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
