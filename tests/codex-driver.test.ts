@@ -95,6 +95,7 @@ for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默
     const requirements = role === 'coordinator' ? [
       /用户.*提问、说明和进展摘要.*send-message.*稳定.*key/,
       /最终回答.*用户看不到/,
+      /收到用户消息先在对话里回应.*新版工作说明.*调整卡片和派单.*决策关卡/,
       /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
       /不要只写“按卡片说明实现”/,
       /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,
