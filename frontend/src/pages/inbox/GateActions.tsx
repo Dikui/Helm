@@ -2,12 +2,12 @@ import { useRef, useState } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
-import type { Gate } from '../../shared/types.js';
+import type { Gate, Work, WorkStatus } from '../../shared/types.js';
 import { Link } from '../../shared/router.js';
 import { ReviewDetails } from '../work/brief/ReviewDetails.js';
 import type { ReviewGate } from '../work/brief/types.js';
 
-export function GateDecision({ gate, detailedReview = false }: { gate: ReviewGate; detailedReview?: boolean }) {
+export function GateDecision({ gate, workStatus, detailedReview = false }: { gate: ReviewGate; workStatus?: WorkStatus; detailedReview?: boolean }) {
   const { api } = useData();
   const { t } = useI18n();
   const [answer, setAnswer] = useState('');
@@ -16,8 +16,10 @@ export function GateDecision({ gate, detailedReview = false }: { gate: ReviewGat
   const [error, setError] = useState<Error>();
   const [decided, setDecided] = useState(false);
   const busy = useRef(false);
+  const ended = workStatus === 'completed' || workStatus === 'cancelled';
+  const readOnly = ended || gate.status !== 'pending';
   const decide = async (decision: string) => {
-    if (busy.current || decided || (gate.kind === 'review' && decision === 'return' && !comment.trim())) return;
+    if (readOnly || busy.current || decided || (gate.kind === 'review' && decision === 'return' && !comment.trim())) return;
     busy.current = true;
     setPending(true); setError(undefined);
     try {
@@ -41,25 +43,26 @@ export function GateDecision({ gate, detailedReview = false }: { gate: ReviewGat
       <dt>{t('criteria')}</dt><dd>{gate.description.criteria}</dd>
     </dl>}
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
-    {gate.kind === 'review' && <><label>{t('comment')}<textarea disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
-    <div className="acts">
+    {ended && <p className="pill">{t(workStatus)}</p>}
+    {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
+    {!readOnly && <div className="acts">
       {gate.kind === 'work-confirmation'
         ? <button className="btn sm primary" disabled={pending || !gate.descriptionId} onClick={() => void decide('confirm')}>{t('confirm')}</button>
         : gate.options.map(option => <button className="btn sm" key={option} disabled={pending || (gate.kind === 'review' && option === 'return' && !comment.trim())}
           onClick={() => void decide(option)}>{gate.kind === 'review' ? t(option as 'accept' | 'return') : option}</button>)}
-    </div>
-    {gate.kind === 'general' && <form noValidate onSubmit={event => { event.preventDefault(); void decide(answer.trim()); }}>
+    </div>}
+    {!readOnly && gate.kind === 'general' && <form noValidate onSubmit={event => { event.preventDefault(); void decide(answer.trim()); }}>
       <label>{t('answer')}<input value={answer} onChange={e => setAnswer(e.target.value)} /></label>
       <button className="btn sm" disabled={pending || !answer.trim()}>{t('decide')}</button>
     </form>}
     {error && <ErrorNotice error={error} />}
   </section>;
 }
-export function InboxDetails({ workId }: { workId: string }) {
+export function InboxDetails({ work }: { work: Pick<Work, 'id' | 'status'> }) {
   const { t } = useI18n();
-  const { data, error, reload } = useResource<(Gate & { type: string })[]>('get-conversation', { workId });
+  const { data, error, reload } = useResource<(Gate & { type: string })[]>('get-conversation', { workId: work.id });
   return <>{error && <ErrorNotice error={error} retry={reload} />}
     {!data && !error && <p role="status">{t('loading')}</p>}
-    {data?.filter(item => item.type === 'gate' && item.status === 'pending').map(gate => <GateDecision key={gate.id} gate={gate} />)}
+    {data?.filter(item => item.type === 'gate' && item.status === 'pending').map(gate => <GateDecision key={gate.id} gate={gate} workStatus={work.status} />)}
   </>;
 }

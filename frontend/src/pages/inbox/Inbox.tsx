@@ -30,7 +30,7 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
         <time aria-label={t(category === 'ended' ? 'duration' : 'elapsed')} dateTime={work.statusSince}> · {category === 'ended' ? elapsed(work.createdAt, Date.parse(work.statusSince)) : elapsed(work.statusSince, now)}</time>
       </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title="tokens">◇ {work.usage.inputTokens + work.usage.outputTokens}</span></span></span>
     </summary>
-    {expanded && <div className="more"><InboxDetails workId={work.id} /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('open')}</Link></div>}
+    {expanded && <div className="more"><InboxDetails work={work} /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('open')}</Link></div>}
   </details>;
 }
 export function Inbox() {

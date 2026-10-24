@@ -172,3 +172,44 @@ test('新建模板使用独立路由，允许 id 为 new；离开未保存模板
   expect((screen.getByLabelText('角色') as HTMLSelectElement).disabled).toBe(true);
   expect((await template('new')).prompt).toBe('新策略');
 });
+
+
+test.each(['刚保存', '未保存'])('%s后复制模板使用编辑器全部当前值，副本保存不回退', async mode => {
+  daemon = await uiFixture();
+  const original = await template('claude-executor');
+  // Keep the list stale after saving to exercise copying before its refresh arrives.
+  const entries = (await daemon.call('list-agent-templates')).result;
+  const transport: typeof fetch = (input, init) => String(input).endsWith('/api/list-agent-templates')
+    ? Promise.resolve(new Response(JSON.stringify({ ok: true, result: entries }), { headers: { 'content-type': 'application/json' } }))
+    : fetch(input, init);
+  window.history.replaceState(null, '', '/settings/templates/claude-executor');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  const editor = await screen.findByRole('form', { name: '模板详情' });
+  change('职责说明', '当前职责'); change('模型', 'current-model'); change('驱动', 'codex');
+  change('推理强度', 'high'); change('计费方式', 'template'); change('prompt.md', '当前策略');
+  fireEvent.click(screen.getByLabelText('fast'));
+  if (mode === '刚保存') {
+    const save = within(editor).getByRole('button', { name: '保存' }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await within(editor).findByText('已保存');
+  }
+  const duplicate = within(editor).getByRole('button', { name: '复制为新模板' }) as HTMLButtonElement;
+  await waitFor(() => expect(duplicate.disabled).toBe(false));
+  fireEvent.click(duplicate);
+  await waitFor(() => expect(window.location.pathname).toBe('/settings/new-template'));
+  for (const [label, value] of [['职责说明', '当前职责'], ['模型', 'current-model'], ['驱动', 'codex'],
+    ['推理强度', 'high'], ['计费方式', 'template'], ['角色', 'executor'], ['prompt.md', '当前策略']]) {
+    expect((screen.getByLabelText(label!) as HTMLInputElement).value).toBe(value);
+  }
+  expect((screen.getByLabelText('fast') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('模板 id') as HTMLInputElement).value).toBe('');
+  change('模板 id', 'current-copy');
+  const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
+  await waitFor(() => expect(save.disabled).toBe(false));
+  fireEvent.click(save);
+  await waitFor(() => expect(window.location.pathname).toBe('/settings/templates/current-copy'));
+  expect(await template('current-copy')).toMatchObject({ description: '当前职责', model: 'current-model',
+    driver: 'codex', reasoningEffort: 'high', fast: true, home: 'template', role: 'executor', prompt: '当前策略' });
+  expect((await template('claude-executor')).description).toBe(mode === '刚保存' ? '当前职责' : original.description);
+});

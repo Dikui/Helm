@@ -94,7 +94,7 @@ export function TemplateEditor({ source, creating = false, initialSaved = false,
         {!creating && source?.skills?.length ? <ul className="settings-files">{source.skills.map(file => <li key={file}><code>{file}</code></li>)}</ul> : <p className="muted">{t('noSkills')}</p>}</div>
     </fieldset>
     <div className="settings-feedback">{error && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadTemplate')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
-    <div className="settings-actions">{!creating && <button type="button" className="btn" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value, revision: revision ?? null })}>{t('duplicateTemplate')}</button>}
+    <div className="settings-actions">{!creating && <button type="button" className="btn" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateTemplate')}</button>}
       <button className="btn primary" disabled={pending || conflict}>{t('save')}</button></div>
   </form>;
 }

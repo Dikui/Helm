@@ -157,6 +157,9 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，工作
   expect(within(screen.getByRole('region', { name: '等你处理' })).queryByText('工作说明与审核')).toBeNull();
   await waitFor(() => expect(within(review).getByText('已决定 · 接受')).toBeTruthy());
   expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
+  expect(within(review).queryByRole('button', { name: '退回' })).toBeNull();
+  expect(within(review).queryByLabelText('意见')).toBeNull();
+  expect(within(review).getByText('已完成')).toBeTruthy();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('accept');
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
@@ -211,4 +214,54 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
   fireEvent.click(within(review).getByRole('button', { name: '查看 diff' }));
   expect(within(review).getByText('没有代码差异。')).toBeTruthy();
   expect(within(review).queryByLabelText('Diff 内容')).toBeNull();
+});
+
+
+test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只读，保留报告并显示终态', async timing => {
+  daemon = await uiFixture([[draft(1)], [
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', body: '终态仍可读取的汇总报告' }), check: ok },
+  ]]);
+  const work = await createWork();
+  await confirmVersion(work.id, 1);
+  await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds.at(-1)?.status === 'ended' && value.result.rounds.length === 2);
+  if (timing === '打开时已取消') ok(await daemon.call('cancel-work', { workId: work.id }));
+  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  render(<App baseUrl={daemon.url} />);
+  const review = await screen.findByRole('region', { name: '审核' });
+  const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
+  if (timing === '打开后取消') {
+    const gate = await within(review).findByRole('group', { name: '审核' });
+    const accept = within(gate).getByRole('button', { name: '接受' }) as HTMLButtonElement;
+    await waitFor(() => expect(accept.disabled).toBe(false));
+    const row = within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核').closest('details')!;
+    fireEvent.click(row.querySelector('summary')!);
+    await within(row).findByRole('group', { name: '审核' });
+    fireEvent.change(within(gate).getByLabelText('意见'), { target: { value: '取消前输入' } });
+    ok(await daemon.call('cancel-work', { workId: work.id }));
+  }
+  await waitFor(() => expect(within(top).getByText('已取消')).toBeTruthy());
+  await waitFor(() => expect(within(review).queryByRole('button', { name: '接受' })).toBeNull());
+  expect(within(review).queryByRole('button', { name: '退回' })).toBeNull();
+  expect(within(review).queryByLabelText('意见')).toBeNull();
+  expect(within(review).queryByText('已决定 · 退回')).toBeNull();
+  expect(within(review).getByText('已取消')).toBeTruthy();
+  expect(within(review).getByText('终态仍可读取的汇总报告')).toBeTruthy();
+  const ended = await screen.findByRole('region', { name: '已结束' });
+  const row = await within(ended).findByText('工作说明与审核');
+  const details = row.closest('details')!;
+  if (!details.open) fireEvent.click(details.querySelector('summary')!);
+  const gate = await within(details).findByRole('group', { name: '审核' });
+  expect(within(gate).getByText('终态仍可读取的汇总报告')).toBeTruthy();
+  expect(within(gate).getByText('已取消')).toBeTruthy();
+  expect(within(gate).queryByRole('button', { name: '接受' })).toBeNull();
+  expect(within(gate).queryByRole('button', { name: '退回' })).toBeNull();
+  expect(within(gate).queryByLabelText('意见')).toBeNull();
+  const saved = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
+  expect(saved.status).toBe('pending');
+  expect(saved.decision).toBeNull();
+  for (const decision of ['accept', 'return']) {
+    const result = await daemon.call('decide-gate', { workId: work.id, gateId: saved.id, decision, comment: '终态决定应拒绝' });
+    expect(result.error.code).toBe('TERMINAL_WORK');
+  }
+  expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('cancelled');
 });

@@ -11,6 +11,7 @@ import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { refreshVerificationCopy, resetVerificationCopy } from './verification.js';
 import { checkOutputUsage } from './outputs.js';
+import { outputSummary } from './output-summary.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -24,7 +25,7 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function stepSummary(event: DriverEvent) {
-  const text = event.type === 'output' ? event.text : event.type === 'end' ? (event.reason === 'completed' ? event.finalAnswer ?? '' : event.reason)
+  const text = event.type === 'output' ? outputSummary(event.text) : event.type === 'end' ? (event.reason === 'completed' ? event.finalAnswer ?? '' : event.reason)
     : event.type === 'artifact' ? event.path : '上下文压缩';
   return text.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 200) ?? '';
 }
@@ -153,6 +154,7 @@ export class ExecutionRunner {
       eventDrainTimer = setTimeout(() => eventStop.abort(stop.signal.reason), 3000);
     };
     stop.signal.addEventListener('abort', drainEvents, { once: true });
+    let latestSummary = card.latestStepSummary ?? '';
     let events: AsyncIterator<DriverEvent> | undefined;
     this.stops.set(dispatch.id, stop);
     const watchdog = this.store.db.prepare('SELECT dispatch_wall_timeout_ms, dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!;
@@ -239,7 +241,8 @@ export class ExecutionRunner {
           if (!Number.isSafeInteger(event.step) || event.step <= previousStep) throw new Error('Driver step numbers must increase');
           previousStep = event.step;
           writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
-          const summary = stepSummary(event);
+          const summary = stepSummary(event) || latestSummary;
+          latestSummary = summary;
           const artifact = event.type === 'artifact' ? reportedArtifact(workPath, event.path) : undefined;
           this.store.transaction(() => {
             this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
