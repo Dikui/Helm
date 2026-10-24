@@ -229,7 +229,7 @@ export class ExecutionRunner {
         }
         this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
-        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, content: dispatch.content })), stop.signal);
+        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, content: dispatch.content })), stop.signal);
         let previousStep = 0;
         events = session.events[Symbol.asyncIterator]();
         for (;;) {

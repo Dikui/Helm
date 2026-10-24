@@ -185,6 +185,20 @@ test('SSE 实时推送已提交的变化和需要用户处理的事件，支持�
   replay.close();
 });
 
+test('SSE 积压超过写缓冲时等待读取而不断开；不带游标只推送新事件', async t => {
+  const daemon = await fixture(t);
+  const project = (await daemon.call('register-project', { path: daemon.repo })).body.result;
+  for (let i = 0; i < 8; i++) await daemon.call('send-message', { projectId: project.id, body: 'x'.repeat(500_000), key: `backlog-${i}` });
+  const history = (await daemon.call('get-events')).body.result;
+  const replay = await stream(t, daemon.url, { after: 0 });
+  for (const event of history) assert.equal((await replay.next()).id, event.id);
+  replay.close();
+  const live = await stream(t, daemon.url);
+  await daemon.call('set-concurrency', { limit: 3 });
+  assert.equal((await live.next()).action, 'concurrency-set');
+  live.close();
+});
+
 test('约束失败返回结构化错误并记录拒绝事件，事务回滚且固定关卡不能撤回', async t => {
   const daemon = await fixture(t);
   const invalidProject = await daemon.call('register-project', { path: daemon.directory });

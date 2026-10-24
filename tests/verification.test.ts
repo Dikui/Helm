@@ -106,12 +106,16 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
   }, ctx => {
     assert.equal(ctx.options.cwd, executionPath);
     assert.equal(ctx.options.resumeSessionId, undefined);
-    const content = JSON.parse(ctx.input).content;
+    const { content, purpose } = JSON.parse(ctx.input);
+    assert.equal(purpose, 'verification');
     assert.ok(content.includes('按卡片标准验收'));
     assert.ok(content.indexOf('按卡片标准验收') < content.indexOf('请检查成果'));
     assert.ok(!content.includes('派单后修改的说明'));
     return [
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '验收不能报完成' }, check: code('INVALID_PARAMS') },
+      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '验收不能报完成' }, check: value => {
+        code('INVALID_PARAMS')(value);
+        assert.match((value as any).error.reason, /验收派单.*passed.*failed/);
+      } },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '第一次不通过' }, check: ok },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '复查通过' }, check: ok },
     ];

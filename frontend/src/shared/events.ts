@@ -35,10 +35,8 @@ export async function readEvents(api: ApiClient, signal: AbortSignal,
           buffer = buffer.slice(boundary.index + boundary[0].length);
           const lines = frame.split(/\r?\n/);
           const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
-          if (!data) continue;
-          const event = JSON.parse(data) as HelmEvent;
           const id = lines.find(line => line.startsWith('id:'))?.slice(3).trim();
-          await receive(event);
+          if (data) await receive(JSON.parse(data) as HelmEvent);
           if (id) lastId = id;
         }
       }

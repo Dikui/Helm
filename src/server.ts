@@ -70,6 +70,10 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
       if (path === '/events') {
         let filter = input;
         const lastId = request.headers['last-event-id'];
+        // Without a cursor the stream starts at the current tail, like standard SSE; replay needs an explicit after.
+        if (lastId === undefined && input && typeof input === 'object' && !Array.isArray(input) && !('after' in input)) {
+          filter = { ...input, after: Number(store.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM events').get()!.id) };
+        }
         if (lastId !== undefined) {
           if (typeof lastId !== 'string' || !/^\d+$/.test(lastId) || !Number.isSafeInteger(Number(lastId))) {
             throw new RuleError('INVALID_PARAMS', 'Last-Event-ID 必须是非负整数。', 400);
@@ -138,16 +142,20 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
 
 function streamEvents(store: TaskStore, response: ServerResponse, filter: EventFilter) {
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-  response.write(': connected\n\n');
   let after = filter.after ?? 0;
+  // The opening id lets a client that reconnects before any event resume from here.
+  response.write(`: connected\nid: ${after}\n\n`);
+  let draining = false;
   const publish = () => {
+    if (draining) return;
     try {
       for (const event of store.events({ ...filter, after })) {
         after = event.id;
         if (!response.write(`id: ${event.id}\nevent: ${event.action}\ndata: ${JSON.stringify(event)}\n\n`)) {
-          // Slow consumers reconnect with Last-Event-ID; never buffer an unbounded timeline.
-          response.destroy();
-          break;
+          // Wait for the reader instead of buffering the whole timeline; drain resumes from the cursor.
+          draining = true;
+          response.once('drain', () => { draining = false; publish(); });
+          return;
         }
       }
     } catch { response.destroy(); }

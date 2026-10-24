@@ -196,7 +196,9 @@ export function activeDispatch(store: TaskStore, actor: Actor) {
 export function submitConclusion(store: TaskStore, actor: Actor, params: { conclusion: Exclude<Dispatch['conclusion'], 'undeclared'>; reason: string }) {
   const dispatch = activeDispatch(store, actor);
   const allowed = dispatch.purpose === 'verification' ? ['passed', 'failed'] : ['completed', 'blocked'];
-  if (!allowed.includes(params.conclusion)) throw new RuleError('INVALID_PARAMS', '结论必须符合派单用途：执行报完成或受阻，验收报通过或不通过。', 400);
+  if (!allowed.includes(params.conclusion)) {
+    throw new RuleError('INVALID_PARAMS', `这是${dispatch.purpose === 'verification' ? '验收' : '执行'}派单，结论只能是 ${allowed.join(' 或 ')}。`, 400);
+  }
   if (dispatch.conclusion === params.conclusion && dispatch.conclusionReason === params.reason) return { conclusion: params.conclusion, reason: params.reason };
   store.db.prepare('UPDATE dispatches SET conclusion = ?, conclusion_reason = ? WHERE id = ?').run(params.conclusion, params.reason, dispatch.id);
   store.appendEvent(actor, { type: 'dispatch', id: dispatch.id }, 'conclusion-submitted', params,
