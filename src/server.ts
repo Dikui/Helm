@@ -15,6 +15,7 @@ import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
 import { TemplateCatalog } from './templates.js';
 import { monitorTemplateAvailability } from './availability.js';
+import { defaultStaticDir, serveStatic, staticPath } from './static-files.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -35,7 +36,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; templateDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
   const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
   const store = new TaskStore(options.dataDir ?? join(homedir(), '.helm'), new TemplateCatalog(options.templateDir, Object.keys(drivers)));
   let scheduler: RoundScheduler;
@@ -55,6 +56,12 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
         // MCP transport probes are not business operations; no standalone GET stream is offered.
         response.setHeader('allow', 'POST');
         return json(response, 405, { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null });
+      }
+      if (request.method === 'GET') {
+        const decoded = staticPath(request.url ?? '/');
+        if (!/^\/(api(?:\/|$)|events(?:\/|$)|mcp(?:\/|$))/.test(decoded)) {
+          return await serveStatic(options.staticDir ?? defaultStaticDir, decoded, response);
+        }
       }
       if (request.headers.authorization !== undefined) actor = executions.authenticate(request.headers.authorization) ?? scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);

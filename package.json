@@ -11,9 +11,9 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
-    "build": "tsc",
-    "check": "tsc --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "build": "tsc && vite build --config frontend/vite.config.ts",
+    "check": "tsc --noEmit && tsc -p frontend/tsconfig.json",
+    "test": "npm run build && node --test dist/tests/*.test.js && npm run test:ui",
     "test:real": "npm run build && node dist/tests/real-smoke-runner.js",
     "browser:install": "node node_modules/@playwright/mcp/cli.js install-browser chromium --no-shell",
     "test:browser": "npm run build && HELM_BROWSER_REAL=1 node --test dist/tests/browser.real.js",
@@ -21,7 +21,9 @@
     "test:claude-coordinator": "npm run build && HELM_CLAUDE_COORDINATOR_REAL=1 node --test dist/tests/claude-coordinator.real.js",
     "test:codex-executor": "npm run build && HELM_CODEX_EXECUTOR_REAL=1 node --test dist/tests/codex-executor.real.js",
     "test:codex-coordinator": "npm run build && HELM_CODEX_COORDINATOR_REAL=1 node --test dist/tests/codex-coordinator.real.js",
-    "start": "node dist/src/cli.js"
+    "start": "node dist/src/cli.js",
+    "test:ui": "tsc && vitest run --config frontend/vitest.config.ts",
+    "dev:ui": "vite --config frontend/vite.config.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.0.2",
@@ -29,10 +31,19 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "@playwright/mcp": "0.0.83",
     "fzstd": "0.1.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/node": "22.20.5",
-    "typescript": "5.9.3"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
   }
 }

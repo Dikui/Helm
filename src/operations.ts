@@ -13,6 +13,7 @@ import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
 import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingTemplates } from './availability.js';
+import { listWorks, readWork } from './work-reads.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -306,15 +307,11 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'list-works', description: '列出工作及状态和待决定关卡', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({ projectId: z.string().min(1).optional() }).strict(),
-    execute: ({ store }, { projectId }) => store.db.prepare(`SELECT id, project_id AS projectId, status, created_at AS createdAt,
-      runtime_pause_reason AS runtimePauseReason, coordinator_template_id AS coordinatorTemplateId,
-      (status NOT IN ('completed', 'cancelled') AND EXISTS(SELECT 1 FROM gates WHERE gates.work_id = works.id AND gates.status = 'pending')) AS hasPendingGate
-      FROM works WHERE (? IS NULL OR project_id = ?) ORDER BY created_at, id`).all(projectId ?? null, projectId ?? null)
-      .map(work => ({ ...work, hasPendingGate: Boolean(work.hasPendingGate), usage: store.workUsage(String(work.id)) })),
+    execute: ({ store }, { projectId }) => listWorks(store, projectId),
   }),
   operation({
     name: 'get-work', description: '读取工作', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.work(workId),
+    schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => readWork(store, workId),
   }),
   operation({
     name: 'get-conversation', description: '按时间读取消息和关卡', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
