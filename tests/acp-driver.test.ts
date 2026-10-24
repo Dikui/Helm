@@ -7,6 +7,77 @@ import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
 
+test('ACP 将会话创建前后拆包的普通 stdout 行记入派单输出，继续完成派单', async t => {
+  const ctx = await acpFixture(t, {
+    stdoutBefore: { 'session/new': ['  [任意插件] 日', '志 loaded 2 models\r\n'] },
+    stdoutAfter: { 'session/new': ['其他 stdout 日志\n'] },
+  });
+  const session = await ctx.driver.start(ctx.options);
+  t.after(() => session.cancel());
+  await session.send('执行派单');
+  const events = await collect(session.events);
+  assert.equal(events.at(-1)?.type === 'end' && (events.at(-1) as any).reason, 'completed');
+  const logs = events.filter(e => e.type === 'output').map(e => JSON.parse(e.text)).filter(m => m.method === 'agent/stdout-log');
+  assert.deepEqual(logs.map(m => m.params.text), ['  [任意插件] 日志 loaded 2 models\r\n', '其他 stdout 日志\n']);
+});
+
+test('ACP 续跑时同包 stdout 日志与 JSON、跨 chunk 空白行首都正确分流', async t => {
+  const notification = JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'previous',
+    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '续跑回答' } } } });
+  const ctx = await acpFixture(t, {
+    stdoutBefore: { 'session/resume': ['续跑启动日志\n'], 'session/prompt': [
+      '\n\t日志\r\n  ', `\t\u2003${notification}\n尾随日志\n`,
+    ] },
+    stdoutAfter: { 'session/resume': ['续跑就绪日志\n'] }, updates: [],
+  });
+  const session = await ctx.driver.start({ ...ctx.options, resumeSessionId: 'previous' });
+  await session.send('续跑');
+  const events = await collect(session.events);
+  assert.equal(events.at(-1)?.type === 'end' && (events.at(-1) as any).finalAnswer, '续跑回答');
+  const logs = events.filter(e => e.type === 'output').map(e => JSON.parse(e.text)).filter(m => m.method === 'agent/stdout-log');
+  assert.deepEqual(logs.map(m => m.params.text), ['续跑启动日志\n', '续跑就绪日志\n', '\n', '\t日志\r\n', '尾随日志\n']);
+});
+
+test('ACP 拆在 UTF-8 字符内部的长 JSON 不受 stdout 日志分流影响', async t => {
+  const text = '中文🙂'.repeat(12_000);
+  const bytes = Buffer.from(`\u2003${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'session-scripted',
+    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } })}\n`);
+  const chunks = [];
+  // Split the leading Unicode space and then many message code points.
+  chunks.push({ base64: bytes.subarray(0, 1).toString('base64') });
+  for (let start = 1; start < bytes.length; start += 4093) chunks.push({ base64: bytes.subarray(start, start + 4093).toString('base64') });
+  const ctx = await acpFixture(t, { stdoutBefore: { 'session/prompt': ['普通日志\n', ...chunks] }, updates: [] });
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('长回答');
+  const events = await collect(session.events);
+  assert.equal(events.at(-1)?.type === 'end' && (events.at(-1) as any).finalAnswer, text);
+});
+
+test('ACP JSON 行尚未换行就交给 SDK 执行消息大小限制', { timeout: 10_000 }, async t => {
+  const ctx = await acpFixture(t, { stdoutBefore: { 'session/prompt': ['{' + 'x'.repeat(32 * 1024 * 1024)] }, hangOn: 'session/prompt' });
+  const controller = new AbortController();
+  const session = await ctx.driver.start({ ...ctx.options, signal: controller.signal });
+  const timer = setTimeout(() => controller.abort(), 5000);
+  t.after(() => { clearTimeout(timer); session.cancel(); });
+  await session.send('检查流式限制');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type === 'end' && end.reason, 'error');
+  assert.match(end.type === 'end' && end.failure || '', /exceeds the configured .* byte limit/);
+  assert.equal(controller.signal.aborted, false);
+});
+
+for (const method of ['session/new', 'session/prompt']) test(`ACP 日志之后以左花括号开头的畸形 JSON 仍失败：${method}`, async t => {
+  const ctx = await acpFixture(t, { stdoutBefore: { [method]: ['可以保留的日志\n', '  {invalid-json\n'] } });
+  if (method === 'session/new') await assert.rejects(ctx.driver.start(ctx.options), /ACP protocol error: Parse error/);
+  else {
+    const session = await ctx.driver.start(ctx.options);
+    await session.send('派单');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type === 'end' && end.reason, 'error');
+    assert.match(end.type === 'end' && end.failure || '', /ACP protocol error: Parse error/);
+  }
+});
+
 test('Grok 在 session/new 后从配置选项设置模板模型，核对模型和推理强度后才发送派单', async t => {
   const ctx = await acpFixture(t);
   const session = await ctx.driver.start({ ...ctx.options, template: { ...ctx.template, model: 'grok-4.5' } });

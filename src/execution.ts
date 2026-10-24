@@ -143,6 +143,16 @@ export class ExecutionRunner {
     const workPath = card.workPath!;
     const processes: ManagedProcess[] = [];
     const stop = new AbortController();
+    const eventStop = new AbortController();
+    let eventDrainTimer: NodeJS.Timeout | undefined;
+    const drainEvents = () => {
+      this.tokens.delete(token);
+      // Keep consuming the driver's terminal event before process cleanup.
+      // ACP cancellation and session/close each have a one-second deadline;
+      // allow time for both and usage reading, but bound uncooperative drivers.
+      eventDrainTimer = setTimeout(() => eventStop.abort(stop.signal.reason), 3000);
+    };
+    stop.signal.addEventListener('abort', drainEvents, { once: true });
     let events: AsyncIterator<DriverEvent> | undefined;
     this.stops.set(dispatch.id, stop);
     const watchdog = this.store.db.prepare('SELECT dispatch_wall_timeout_ms, dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!;
@@ -221,7 +231,7 @@ export class ExecutionRunner {
         let previousStep = 0;
         events = session.events[Symbol.asyncIterator]();
         for (;;) {
-          const next = await abortable(events.next(), stop.signal);
+          const next = await abortable(events.next(), eventStop.signal);
           if (next.done) break;
           const event = next.value;
           clearTimeout(idleTimer);
@@ -253,6 +263,8 @@ export class ExecutionRunner {
     finally {
       clearTimeout(wallTimer);
       clearTimeout(idleTimer);
+      clearTimeout(eventDrainTimer);
+      stop.signal.removeEventListener('abort', drainEvents);
       this.stops.delete(dispatch.id);
       if (timedOut) reason = 'timed-out';
       this.tokens.delete(token);

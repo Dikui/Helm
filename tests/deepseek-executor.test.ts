@@ -261,6 +261,48 @@ test('DeepSeek 取消发送一次 session/cancel，关闭会话后保留用量�
   assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
 });
 
+for (const mode of ['first', 'resume', 'ignores-cancel', 'timeout'] as const)
+test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdout 日志：${mode}`, async t => {
+  const previous = { type: 'assistant/message', data: { usage: { inputTokens: 100, outputTokens: 8 } } };
+  const turn = { type: 'assistant/message', data: { interrupted: true, usage: { inputTokens: 6778, outputTokens: 204 } } };
+  const script = { configOptions, sessionLog: logSample([...(mode === 'resume' ? [previous] : []), turn]).toString('base64'),
+    holdPrompt: true, ignoreCancel: mode === 'ignores-cancel', closeDelayMs: 50,
+    stdoutBefore: { 'session/new': ['[llm-deepseek-account] model listing from fixture loaded 2 model(s)\n'],
+      'session/resume': ['续跑日志\n'] } };
+  const acp = await acpFixture(t, mode === 'resume'
+    ? { configOptions, sessionLog: logSample([previous]).toString('base64') } : script, false, 'deepseek');
+  const daemon = await acpExecutorFixture(t, acp.driver, { agent: 'deepseek' });
+  if (mode === 'timeout') ok(await daemon.call('set-dispatch-watchdog', { wallTimeoutMs: 30_000, idleTimeoutMs: 3000 }));
+  await daemon.confirm();
+  if (mode === 'resume') {
+    const [first] = await daemon.ended();
+    assert.deepEqual(first.usage, { inputTokens: 100, outputTokens: 8 });
+    await until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
+    await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), ...script }));
+    daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
+      templateId: 'deepseek-executor', key: 'resume', resumeSessionId: first.sessionId, content: '续跑后中止' }, check: ok }]);
+    ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '续跑' }));
+  }
+  const count = mode === 'resume' ? 2 : 1;
+  await until(acp.requests, requests => requests.filter(r => r.method === 'session/prompt').length === count);
+  const running = (await daemon.dispatches())[count - 1];
+  if (mode !== 'timeout') ok(await daemon.call('pause-card', { workId: daemon.work.id, cardId: running.cardId }));
+  const ended = (await daemon.ended(count))[count - 1];
+  assert.equal(ended.endReason, mode === 'timeout' ? 'timed-out' : 'aborted');
+  assert.equal(ended.abortReason, mode === 'timeout' ? null : '卡片暂停');
+  assert.equal(ended.finalAnswer, null);
+  assert.deepEqual(ended.usage, { inputTokens: 6778, outputTokens: 204 });
+  const output = await daemon.output(ended.id);
+  assert.ok(output.some(e => e.type === 'output' && JSON.parse(e.text).method === 'agent/stdout-log'));
+  assert.deepEqual(output.find(e => e.type === 'end').usage, ended.usage);
+  const event = (await daemon.events()).find(e => e.action === 'dispatch-ended' && e.dispatchId === ended.id);
+  assert.deepEqual(event.details.usage, ended.usage);
+  const requests = await acp.requests();
+  assert.equal(requests.filter(r => r.method === 'session/close').length, count);
+  assert.equal(requests.filter(r => r.method === 'session/cancel').length, 1);
+  assert.throws(() => process.kill(running.pgid, 0), { code: 'ESRCH' });
+});
+
 test('DeepSeek 普通权限只放行一次，拒绝工具通过 sandbox_permissions 扩大卡片沙箱', async t => {
   const kinds = ['allow_always', 'allow_once', 'reject_once'];
   const permissions = Array.from({ length: 3 }, () => kinds.map(kind => ({ kind, name: kind, optionId: kind })));

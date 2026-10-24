@@ -5,6 +5,46 @@ import type { SessionOptions } from './driver.js';
 
 export interface AcpCommand { file: string; args: string[] }
 
+function protocolStdout(input: ReadableStream<Uint8Array>, log: (text: string) => void) {
+  let mode: 'prefix' | 'json' | 'log' = 'prefix';
+  let pending: Uint8Array[] = [];
+  let decoder = new TextDecoder();
+  return input.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      let start = 0;
+      while (start < chunk.length) {
+        const newline = chunk.indexOf(10, start);
+        const end = newline < 0 ? chunk.length : newline + 1;
+        const part = chunk.subarray(start, end);
+        if (mode === 'json') controller.enqueue(part);
+        else {
+          pending.push(part);
+          if (mode === 'prefix') {
+            const text = decoder.decode(part, { stream: true }).trimStart();
+            if (text) mode = text.startsWith('{') ? 'json' : 'log';
+            if (mode === 'json') {
+              // Preserve bytes (including split UTF-8) and stream JSON as soon
+              // as its first non-whitespace character is known.
+              for (const bytes of pending) controller.enqueue(bytes);
+              pending = [];
+            }
+          }
+        }
+        if (newline >= 0) {
+          if (mode !== 'json') log(Buffer.concat(pending).toString('utf8'));
+          mode = 'prefix';
+          pending = [];
+          decoder = new TextDecoder();
+        }
+        start = end;
+      }
+    },
+    flush() {
+      if (pending.length) log(Buffer.concat(pending).toString('utf8'));
+    },
+  }));
+}
+
 // Official SDK stable v1 over CLI stdio. The command is the replaceable boundary.
 export class AcpClient {
   readonly connection: ClientConnection;
@@ -27,7 +67,8 @@ export class AcpClient {
     // Do not expose client filesystem or terminal handlers: all writes must go
     // through the agent's own sandbox, never through unsandboxed helmd.
     // @types/node 22 and lib.dom describe the same Web Streams differently.
-    const input = Readable.toWeb(this.child.stdout) as ReadableStream<Uint8Array>;
+    const input = protocolStdout(Readable.toWeb(this.child.stdout) as ReadableStream<Uint8Array>,
+      text => handlers.output({ method: 'agent/stdout-log', params: { text } }));
     const writer = Writable.toWeb(this.child.stdin).getWriter();
     const stream = ndJsonStream(new WritableStream<Uint8Array>({
       write(chunk) {

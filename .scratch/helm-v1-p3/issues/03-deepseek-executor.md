@@ -27,3 +27,9 @@
 验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 最终 423/423 通过。DeepSeek 定向测试及 Node 22.13 兼容测试各 34/34 通过，覆盖账号/API 路线、配置核对、用量与续跑增量、权限与提权拒绝、额度/溢出/普通错误、崩溃、取消、反问、自报结论、同端点 MCP 和浏览器工具替身、卡片提交及用量汇总。测试均使用临时 HOME；zstd 样本自行构造，未读取真实会话内容。
 
 最后一项暂不勾选：`tests/deepseek-executor.real.ts` 已写并接入真实冒烟入口，覆盖一轮、同端点结论/浏览器/令牌、越界写入拒绝、token、账号模型与低推理强度、新进程续跑记忆及进行中取消；本轮按用户明确要求只编译、不运行任何真实冒烟或真实模型会话，也未启动浏览器。需在沙箱外用已登录的 dsh 和有界面的 Chromium 运行 `npm run test:real --cache /private/tmp/helm-npm-cache`（或构建后单独运行 `HELM_DEEPSEEK_EXECUTOR_REAL=1 node --test dist/tests/deepseek-executor.real.js`），检查输出的 deepseek.png、first.json、resume.json、cancel.json；随后在 dsh web 账户页确认账号路线的实际计费方式，追加到本 Comments。账号路线并不作为免费或订阅计费的证明；计费方式尚未实测。状态 ready-for-human，等待这些验收。
+
+2026-10-23 冒烟问题修复：诊断报告确认 dsh 账号插件通过 `console.info` 将模型目录加载日志写进 ACP stdout，SDK 因非 JSON 行产生 Parse error。通用 `AcpClient` 现在按行首首个非空白字符分流：不以 `{` 开头的行作为 `agent/stdout-log` 派单输出保留原文（含换行），所有 ACP agent 都适用，不设档案白名单；以 `{` 开头则逐 chunk 原样透传，畸形 JSON 仍失败。假 ACP 回归覆盖 session/new 前后、同包与拆包、续跑日志、UTF-8 字符内部拆包的长 JSON，以及未换行 JSON 的 SDK 大小限制。
+
+取消用量漏记的根因在运行层：abort 立即打断事件读取并清理进程，抢在 ACP 驱动 `session/close` 刷盘、读取会话文件和发出带用量的结束事件之前结束派单。现改为中止时立即废除工具令牌，最多继续收取驱动事件 3 秒，收到结束事件后再清理进程；不响应的驱动仍有截止时间。沿用现有 ACP 取消等待、关闭刷盘和会话文件用量读取，续跑仍减去派单开始前累计。派单 API 回归验证首次、续跑、忽略取消与看门狗超时均保存 6778/204，本轮之前的 100/8 不重复记账，派单输出和 dispatch-ended 事件用量一致。
+
+本轮验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 441/441 通过，已知偶发的派单 MCP 测试本轮通过。全部新增测试使用临时 HOME 与假 ACP agent；按本次任务要求没有启动浏览器、真实模型会话或任何真实冒烟。上述为假 agent 回归结果，原真实验收待办与状态保持不变。

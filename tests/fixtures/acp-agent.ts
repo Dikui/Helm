@@ -9,6 +9,13 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const script = JSON.parse(readFileSync(process.argv[2]!, 'utf8'));
 if (script.stubborn) { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 const emit = (message: object) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+async function writeChunks(chunks: (string | { base64: string })[]) {
+  for (const chunk of chunks) {
+    const bytes = typeof chunk === 'string' ? chunk : Buffer.from(chunk.base64, 'base64');
+    await new Promise<void>(resolve => process.stdout.write(bytes, () => resolve()));
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  }
+}
 const modelState = { currentModelId: 'grok-4.7', availableModels: [
   { modelId: 'grok-4.7', _meta: { reasoningEfforts: ['low', 'medium', 'high', 'xhigh'].map(value => ({ value })) } },
   { modelId: 'grok-4.5', _meta: { reasoningEfforts: ['low', 'medium', 'high'].map(value => ({ value })) } },
@@ -38,6 +45,7 @@ async function handle(line: string) {
   const message = JSON.parse(line);
   appendFileSync(script.record, `${line}\n`);
   if (!message.method) { pending.get(message.id)?.(message.result ?? message.error); pending.delete(message.id); return; }
+  await writeChunks(script.stdoutBefore?.[message.method] ?? []);
   if (message.method === script.exitOn) process.exit(2);
   if (message.method === script.hangOn) return;
   if (message.method === 'session/cancel' && promptId !== undefined && !script.ignoreCancel) {
@@ -51,6 +59,7 @@ async function handle(line: string) {
   }
   // Persist only at close, as dsh's session/close drains and flushes the log.
   if (message.method === 'session/close' && script.sessionLog) {
+    if (script.closeDelayMs) await new Promise(resolve => setTimeout(resolve, script.closeDelayMs));
     const root = join(process.env.DSH_HOME ?? join(process.env.HOME!, '.dsh'), 'sessions', '--fixture-project--', sessionId);
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'session.v4.jsonl.zstd'), Buffer.from(script.sessionLog, 'base64'));
@@ -111,4 +120,5 @@ async function handle(line: string) {
       usage: { inputTokens: 120, outputTokens: 9, cachedReadTokens: 80 } } };
   }
   emit({ id: message.id, result });
+  await writeChunks(script.stdoutAfter?.[message.method] ?? []);
 }
