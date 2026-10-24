@@ -98,7 +98,7 @@ const authStatus: AuthStatus = async (executable, options) => {
 interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery; authStatus?: AuthStatus }
 
 export class ClaudeDriver implements Driver {
-  install = { executable: 'claude', command: 'npm install -g @anthropic-ai/claude-code' };
+  install = { executable: 'claude', command: 'npm install -g @anthropic-ai/claude-code', login: 'claude auth login' };
   constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
 
   async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {

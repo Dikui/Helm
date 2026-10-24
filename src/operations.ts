@@ -275,9 +275,13 @@ export const operations: readonly Operation[] = [
     execute: ({ userOperations }, { driver }) => userOperations.checkAgent(driver),
   }),
   operation({
-    name: 'install-agent', description: '在本机运行驱动对应 CLI 的官方安装命令（登录仍需在终端完成）', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ driver: z.string().min(1) }).strict(),
-    execute: ({ actor, userOperations }, { driver }) => userOperations.installAgent(actor, driver),
+    name: 'check-environment', description: '检查各驱动 CLI 和浏览器检查用的 Chromium 是否已安装，返回版本、安装命令和登录命令', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({}).strict(), execute: ({ userOperations }) => userOperations.checkEnvironment(),
+  }),
+  operation({
+    name: 'install-tool', description: '在本机运行驱动 CLI 或浏览器（browser）的固定安装命令（登录仍需在终端完成）', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ name: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { name }) => userOperations.installTool(actor, name),
   }),
   operation({
     name: 'set-concurrency', description: '设置全局执行者并发上限', callers: ['user'], keyed: false, mutates: true,

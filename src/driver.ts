@@ -35,8 +35,8 @@ export interface DriverSession {
 }
 export interface AgentAvailability { available: boolean; reason?: string; command?: string }
 export interface Driver {
-  // The official install command for the CLI, which the user may run from the UI.
-  install?: { executable: string; command: string };
+  // The official install and login commands for the CLI; the user runs install from the UI and login in a terminal.
+  install?: { executable: string; command: string; login: string };
   checkAvailability(agent: AgentConfig): Promise<AgentAvailability>;
   start(options: SessionOptions): Promise<DriverSession>;
 }

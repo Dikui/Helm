@@ -20,7 +20,7 @@ function quotaExhausted(error: any) {
 }
 
 export class CodexDriver implements Driver {
-  install = { executable: 'codex', command: 'npm install -g @openai/codex' };
+  install = { executable: 'codex', command: 'npm install -g @openai/codex', login: 'codex login' };
   constructor(private config: { command?: CodexCommand } = {}, private role?: 'coordinator' | 'executor') {}
 
   async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {

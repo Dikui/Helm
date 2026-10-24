@@ -8,7 +8,7 @@ import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { completeReviewedWork, decideReview } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
-import { checkAgent, installAgent } from './availability.js';
+import { checkAgent, checkEnvironment, installTool } from './availability.js';
 import type { DriverRegistry } from './driver.js';
 
 export class UserOperations {
@@ -17,7 +17,9 @@ export class UserOperations {
 
   checkAgent(driver: string) { return checkAgent(this.drivers, driver); }
 
-  installAgent(actor: Actor, driver: string) { return installAgent(this.store, this.drivers, actor, driver); }
+  checkEnvironment() { return checkEnvironment(this.drivers); }
+
+  installTool(actor: Actor, name: string) { return installTool(this.store, this.drivers, actor, name); }
 
   async decideReview(actor: Actor, params: { workId: string; gateId: string; decision: string; comment?: string }) {
     const gate = decideReview(this.store, actor, params);

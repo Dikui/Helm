@@ -4,7 +4,7 @@ import { useData } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
-import { AgentInstall } from '../../shared/AgentInstall.js';
+import { CliStatus } from '../../shared/CliStatus.js';
 import { useRouter } from '../../shared/router.js';
 import type { AgentSettings, AgentEntry } from './types.js';
 import { ActionDialog } from '../work/ActionDialog.js';
@@ -95,7 +95,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
         <label htmlFor="agent-driver">{t('driver')}<select {...fieldProps('driver')} value={value.config.driver} onChange={event => config('driver', event.target.value as AgentSettings['driver'])}>
           {['claude-sdk', 'codex', 'grok', 'deepseek'].map(driver => <option key={driver}>{driver}</option>)}</select>{fieldError('driver')}</label>
       </div>
-      <AgentInstall key={value.config.driver} driver={value.config.driver} />
+      <CliStatus key={value.config.driver} driver={value.config.driver} />
       <label htmlFor="agent-model">{t('model')}<input {...fieldProps('model')} value={value.config.model ?? ''} placeholder={t('driverDefault')} onChange={event => config('model', event.target.value)} />{fieldError('model')}</label>
       <label htmlFor="agent-reasoningEffort">{t('reasoning')}<select {...fieldProps('reasoningEffort')} value={value.config.reasoningEffort ?? ''} onChange={event => config('reasoningEffort', event.target.value as AgentSettings['reasoningEffort'] || null)}>
         <option value="">{t('driverDefault')}</option>{['low', 'medium', 'high', 'max'].map(effort => <option key={effort}>{effort}</option>)}</select>{fieldError('reasoningEffort')}</label>

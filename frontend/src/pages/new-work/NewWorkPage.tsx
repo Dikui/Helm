@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
-import { AgentInstall } from '../../shared/AgentInstall.js';
+import { CliStatus } from '../../shared/CliStatus.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { CoordinatorAgent, Project } from './types.js';
 import { useSendMessage } from './useSendMessage.js';
@@ -61,7 +61,7 @@ export function NewWorkPage() {
         </div>
         {agents.data && coordinators.length === 0 ? <p className="hint">{t('newWorkNoCoordinator')} <Link href="/settings/new-agent">{t('newAgent')}</Link></p>
           : !available && agents.data && <p className="hint">{chosen?.reason} {t('newWorkChooseAvailableAgent')}</p>}
-        {chosen?.driver && <AgentInstall key={chosen.driver} driver={chosen.driver} onInstalled={agents.reload} />}
+        {chosen?.driver && <CliStatus key={chosen.driver} driver={chosen.driver} />}
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>

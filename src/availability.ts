@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import type { DriverRegistry, AgentAvailability } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
+import { playwrightCommand } from './browser.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
@@ -37,21 +39,52 @@ export async function checkAgent(drivers: DriverRegistry, name: string) {
   return { installed, install: installed ? null : install.command };
 }
 
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const browserArgs = [...playwrightCommand.args, 'install-browser', 'chromium'];
+const browserInstall = [playwrightCommand.file, ...browserArgs, '--no-shell'].map(quote).join(' ');
+const run = promisify(execFile);
+
+async function version(path: string) {
+  try {
+    const { stdout, stderr } = await run(path, ['--version'], { env: runtimeEnvironment(), timeout: 10_000, killSignal: 'SIGKILL' });
+    return (stdout || stderr).trim().split('\n')[0] || null;
+  } catch { return null; }
+}
+
+// Playwright prints where it would install Chrome for Testing; the browser is ready when that directory exists.
+async function browserInstalled() {
+  try {
+    const { stdout } = await run(playwrightCommand.file, [...browserArgs, '--dry-run'], { env: runtimeEnvironment(), timeout: 20_000, killSignal: 'SIGKILL' });
+    const location = stdout.match(/Install location:\s+(.+)/)?.[1]?.trim();
+    return Boolean(location && existsSync(location));
+  } catch { return false; }
+}
+
+// Everything outside npm that Helm runs: each driver's CLI plus the browser used for page checks.
+export async function checkEnvironment(drivers: DriverRegistry) {
+  const tools = await Promise.all(Object.entries(drivers).flatMap(([name, driver]) => driver.install ? [{ name, ...driver.install }] : [])
+    .map(async ({ name, executable, command, login }) => {
+      const path = await findExecutable(executable, runtimeEnvironment());
+      return { name, executable, installed: Boolean(path), version: path ? await version(path) : null, install: command, login };
+    }));
+  return [...tools, { name: 'browser', executable: 'chromium', installed: await browserInstalled(), version: null, install: browserInstall, login: null }];
+}
+
 const installing = new Map<string, Promise<{ output: string }>>();
 
-// Runs only the driver's fixed install command; the request names the driver, never the command.
-export function installAgent(store: TaskStore, drivers: DriverRegistry, actor: Actor, name: string) {
-  const command = Object.hasOwn(drivers, name) ? drivers[name]!.install?.command : undefined;
-  if (!command) throw new RuleError('NOT_FOUND', `驱动 ${name} 没有可用的安装命令。`, 404);
+// Runs only a fixed install command; the request names the tool, never the command.
+export function installTool(store: TaskStore, drivers: DriverRegistry, actor: Actor, name: string) {
+  const command = name === 'browser' ? browserInstall : Object.hasOwn(drivers, name) ? drivers[name]!.install?.command : undefined;
+  if (!command) throw new RuleError('NOT_FOUND', `${name} 没有可用的安装命令。`, 404);
   let running = installing.get(name);
   if (!running) {
-    running = promisify(execFile)('/bin/sh', ['-c', command], {
+    running = run('/bin/sh', ['-c', command], {
       cwd: homedir(), env: runtimeEnvironment(), timeout: 15 * 60_000, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024,
     }).then(({ stdout, stderr }) => {
-      store.appendEvent(actor, { type: 'agent-driver', id: name }, 'agent-installed', { command });
+      store.appendEvent(actor, { type: 'tool', id: name }, 'tool-installed', { command });
       return { output: (stdout + stderr).slice(-8000) };
     }, (error: { stdout?: string; stderr?: string; message: string }) => {
-      store.appendEvent(actor, { type: 'agent-driver', id: name }, 'agent-install-failed', { command });
+      store.appendEvent(actor, { type: 'tool', id: name }, 'tool-install-failed', { command });
       throw new RuleError('INSTALL_FAILED', `安装命令失败：${command}\n${((error.stdout ?? '') + (error.stderr ?? '') || error.message).slice(-8000)}`, 500);
     }).finally(() => installing.delete(name));
     installing.set(name, running);

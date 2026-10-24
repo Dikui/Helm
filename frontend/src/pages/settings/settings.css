@@ -48,3 +48,7 @@
 @media (max-width: 1100px) { .settings-page { grid-template-columns: minmax(0, 1fr); } .settings-page .settings-nav { position: static; display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); } .settings-agents, .settings-simple { border-left: 0; } }
 @media (max-width: 760px) { .settings-agent-row { grid-template-columns: 32px minmax(0, 1fr); } .settings-agent-status { grid-column: 2; justify-items: start; } .settings-two { grid-template-columns: minmax(0, 1fr); } }
 .settings-leave { display: grid; gap: var(--space-3); margin: var(--space-4); padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface-soft); }
+.settings-tool-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.settings-tool-head > span { font-size: var(--text-sm); }
+.settings-ok { color: var(--success); }
+.settings-box code { overflow-wrap: anywhere; }

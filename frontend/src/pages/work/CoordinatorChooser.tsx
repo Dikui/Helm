@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
-import { AgentInstall } from '../../shared/AgentInstall.js';
+import { CliStatus } from '../../shared/CliStatus.js';
 
 interface CoordinatorAgent { id: string; role: string | null; driver: string | null; available: boolean; reason: string | null; description: string | null }
 export function CoordinatorChooser({ current, busy, onSubmit }: { current?: string; busy: boolean; onSubmit: (id: string) => void }) {
@@ -20,7 +20,7 @@ export function CoordinatorChooser({ current, busy, onSubmit }: { current?: stri
       {agents.map(agent => <label key={agent.id} className="coordinator-option"><input type="radio" name="coordinator" value={agent.id}
         checked={selected === agent.id} onChange={() => setSelected(agent.id)} /><span><b>{agent.id}</b><span className="muted">{agent.description}</span>{!agent.available && <span className="settings-reason">{agent.reason}</span>}</span></label>)}
     </fieldset>}
-    {chosen?.driver && <AgentInstall key={chosen.driver} driver={chosen.driver} onInstalled={reload} />}
+    {chosen?.driver && <CliStatus key={chosen.driver} driver={chosen.driver} />}
     <button className="btn primary" disabled={busy || Boolean(error) || !chosen?.available}>{t('applyCoordinator')}</button>
   </form>;
 }

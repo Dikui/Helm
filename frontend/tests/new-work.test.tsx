@@ -217,7 +217,7 @@ test('项目切换重选默认 Agent，不可用 Agent 显示原因且不能开�
   expect(screen.getByText(/Choose an available coordinator agent/)).toBeTruthy();
 });
 
-test('选中 CLI 未安装的调度者 Agent 时才检查，确认后下载安装，装好即可开始', async () => {
+test('选中 CLI 未安装的调度者 Agent 时提示去「环境」，在环境页安装后显示已安装', async () => {
   agentDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-install-'));
   const bin = join(agentDirectory, 'bin');
   const cli = join(bin, 'helm-fake-codex');
@@ -226,21 +226,28 @@ test('选中 CLI 未安装的调度者 Agent 时才检查，确认后下载安�
   try {
     const command = `mkdir -p '${bin}' && printf '#!/bin/sh\\n' > '${cli}' && chmod +x '${cli}'`;
     const codexDriver = Object.assign(new FakeDriver([], () => existsSync(cli) ? { available: true } : { available: false, reason: 'Codex 未安装' }),
-      { install: { executable: 'helm-fake-codex', command } });
+      { install: { executable: 'helm-fake-codex', command, login: 'helm-fake-codex login' } });
     daemon = await uiFixture([], undefined, { codexDriver });
     window.history.replaceState(null, '', '/new');
-    render(<App baseUrl={daemon.url} />);
+    const view = render(<App baseUrl={daemon.url} />);
     const agents = await screen.findByLabelText('调度者 Agent');
     await waitFor(() => expect((agents as HTMLSelectElement).value).toBe('claude-coordinator'));
-    expect(screen.queryByRole('group', { name: /未检测到/ })).toBeNull();
+    expect(screen.queryByText(/未检测到这个驱动的 CLI/)).toBeNull();
     fireEvent.change(agents, { target: { value: 'codex-coordinator' } });
-    const prompt = await screen.findByRole('group', { name: /未检测到/ });
-    expect(within(prompt).getByText(command)).toBeTruthy();
+    expect(await screen.findByText(/未检测到这个驱动的 CLI/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '去「环境」安装' }).getAttribute('href')).toBe('/settings/environment');
     fireEvent.change(screen.getByLabelText('需求'), { target: { value: '安装后开始' } });
     expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(within(prompt).getByRole('button', { name: '下载安装' }));
-    expect(await screen.findByText('已安装，请在终端登录。')).toBeTruthy();
+    view.unmount();
+    window.history.replaceState(null, '', '/settings/environment');
+    render(<App baseUrl={daemon.url} />);
+    const row = await screen.findByRole('group', { name: 'Codex' });
+    expect(within(row).getByText('未安装')).toBeTruthy();
+    expect(within(row).getByText(command)).toBeTruthy();
+    expect(within(row).getByText('helm-fake-codex login')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: '下载安装' }));
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Codex' })).getByText(/^已安装/)).toBeTruthy());
     expect(existsSync(cli)).toBe(true);
-    await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole('group', { name: 'Chromium（浏览器检查）' })).toBeTruthy();
   } finally { process.env.PATH = path; }
 });
