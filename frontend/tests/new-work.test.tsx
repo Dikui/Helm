@@ -123,13 +123,15 @@ test('无项目时直接登记，非 git 路径保留输入并显示原始原因
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} />);
   expect(await screen.findByRole('heading', { name: '先登记一个项目' })).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('项目路径'), { target: { value: daemon.directory } });
+  const empty = join(daemon.directory, 'empty');
+  await mkdir(empty);
+  fireEvent.change(screen.getByLabelText('项目路径'), { target: { value: empty } });
   fireEvent.click(screen.getByRole('button', { name: '登记' }));
-  expect((await screen.findByRole('alert')).textContent).toContain('项目路径必须位于本机 git 工作树中。');
-  expect((screen.getByLabelText('项目路径') as HTMLInputElement).value).toBe(daemon.directory);
-  fireEvent.change(screen.getByLabelText('项目路径'), { target: { value: daemon.repo } });
-  fireEvent.click(screen.getByRole('button', { name: '登记' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('这个目录还不是 git 仓库。');
+  expect((screen.getByLabelText('项目路径') as HTMLInputElement).value).toBe(empty);
+  fireEvent.click(screen.getByRole('button', { name: '初始化为 git 仓库并登记' }));
   expect(await screen.findByLabelText('需求')).toBeTruthy();
+  expect(execFileSync('git', ['-C', empty, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('1');
   const trigger = screen.getByRole('button', { name: '登记项目' });
   trigger.focus(); fireEvent.click(trigger);
   const dialog = screen.getByRole('dialog', { name: '登记项目' });
@@ -148,6 +150,7 @@ test('无项目时直接登记，非 git 路径保留输入并显示原始原因
   fireEvent.change(within(reopened).getByLabelText('项目路径'), { target: { value: `${daemon.repo}/.git` } });
   fireEvent.click(within(reopened).getByRole('button', { name: '登记' }));
   expect((await within(reopened).findByRole('alert')).textContent).toContain('项目路径必须位于本机 git 工作树中。');
+  expect(within(reopened).queryByRole('button', { name: '初始化为 git 仓库并登记' })).toBeNull();
   const second = join(daemon.directory, 'second');
   execFileSync('git', ['clone', daemon.repo, second], { stdio: 'ignore' });
   await mkdir(join(second, 'nested'));

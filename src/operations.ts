@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
@@ -200,13 +200,27 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional() }).strict(),
+    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), initGit: z.boolean().optional() }).strict(),
     execute({ store, actor }, params) {
-      let path: string;
+      let candidate: string;
       try {
-        const candidate = realpathSync(resolve(params.path));
-        path = realpathSync(execFileSync('git', ['-C', candidate, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
-      } catch { throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400); }
+        candidate = realpathSync(resolve(params.path));
+        if (!statSync(candidate).isDirectory()) throw new Error();
+      } catch { throw new RuleError('INVALID_PROJECT', '项目路径不存在或不是目录。', 400); }
+      const git = (...args: string[]) => execFileSync('git', ['-C', candidate, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      let path: string;
+      try { path = realpathSync(git('rev-parse', '--show-toplevel')); } catch {
+        let insideGit = true;
+        try { git('rev-parse', '--git-dir'); } catch { insideGit = false; }
+        if (insideGit) throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400);
+        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '这个目录还不是 git 仓库。Helm 需要用 git 记录开工起点并开工作分支。', 400, { initializable: true });
+        // Helm needs a commit to fix the base on; an empty one leaves the user's files untouched.
+        try {
+          git('init');
+          git('-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Initial commit');
+        } catch (error) { throw new RuleError('INVALID_PROJECT', `git 初始化失败：${(error as Error).message}`, 400); }
+        path = candidate;
+      }
       const existing = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE path = ?`).get(path);
       if (existing) return existing;
       const id = randomUUID();

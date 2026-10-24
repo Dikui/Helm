@@ -17,22 +17,24 @@ export function RegisterProjectForm({ onRegistered, onCancel, onPendingChange }:
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (error && !pending) input.current?.focus(); }, [error, pending]);
   const invalidPath = error instanceof OperationError && error.failure.code === 'INVALID_PROJECT';
-  return <form noValidate className="project-registration" aria-busy={pending} onSubmit={async event => {
-    event.preventDefault();
+  const initializable = error instanceof OperationError && Boolean(error.failure.details?.initializable);
+  const register = async (initGit: boolean) => {
     if (busy.current) return;
     if (!path.trim()) { input.current?.focus(); return; }
     busy.current = true; setPending(true); onPendingChange?.(true); setError(undefined);
     try {
-      const project = await api.call<{ id: string }>('register-project', { path: path.trim() });
+      const project = await api.call<{ id: string }>('register-project', { path: path.trim(), ...(initGit ? { initGit } : {}) });
       onRegistered(project.id);
     } catch (error) { setError(error as Error); }
     finally { busy.current = false; setPending(false); onPendingChange?.(false); }
-  }}>
+  };
+  return <form noValidate className="project-registration" aria-busy={pending} onSubmit={event => { event.preventDefault(); void register(false); }}>
     <p id="project-path-help" className="muted">{t('newWorkRegisterHint')}</p>
     <label>{t('newWorkProjectPath')}<input ref={input} value={path} disabled={pending} placeholder="/Users/you/code/web-app"
       aria-invalid={invalidPath || undefined} aria-describedby={`project-path-help${error ? ' project-register-error' : ''}`}
-      onChange={event => setPath(event.target.value)} /></label>
+      onChange={event => { setPath(event.target.value); setError(undefined); }} /></label>
     {error && <div id="project-register-error"><ErrorNotice error={error} /></div>}
+    {initializable && <p className="muted">{t('newWorkInitGitHint')} <button type="button" className="btn" disabled={pending} onClick={() => void register(true)}>{t('newWorkInitGit')}</button></p>}
     <div className="acts">{onCancel && <button type="button" className="btn" disabled={pending} onClick={onCancel}>{t('newWorkCancel')}</button>}
       <button className="btn primary" disabled={pending || !path.trim()}>{t('newWorkRegister')}</button></div>
   </form>;

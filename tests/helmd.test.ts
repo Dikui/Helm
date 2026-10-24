@@ -206,6 +206,7 @@ test('约束失败返回结构化错误并记录拒绝事件，事务回滚且�
   const invalidProject = await daemon.call('register-project', { path: daemon.directory });
   assert.equal(invalidProject.status, 400);
   assert.equal(invalidProject.body.error.code, 'INVALID_PROJECT');
+  assert.equal(invalidProject.body.error.details.initializable, true);
   assert.ok(invalidProject.body.error.reason);
   assert.ok(invalidProject.body.error.allowedOperations.includes('register-project'));
   assert.deepEqual((await daemon.call('list-projects')).body.result, []);
