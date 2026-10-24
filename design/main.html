@@ -1,0 +1,621 @@
+<!--
+页面：主界面（工作收件箱 | 工作页：对齐中，或执行中的 对话 / 调度结构 / 工作说明）
+用途：前端开发参照，确认结构、交互方式、视觉风格和文案长度
+风格：shadcn/ui 基础 + affectUI 的智能体交互
+  左栏 = Agent Inbox：按"等你处理 / 进行中 / 已结束"分组；每行一句"正在做什么"、实时计时、计数；展开看最近步骤，关卡和审核可在列表里直接决定
+  主区顶栏切换两个视图：
+  对话 = 消息与关卡 + Agent Steering：本轮步骤实时显示；轮次运行中发的消息排进"下一轮处理"，⌘⏎ 立即打断本轮
+  调度结构 = 图 / 时间线 / 调度者 / 事件 + 右侧检查器
+    图：卡片图自上而下分层，同一层可并行，连线表示依赖并汇合；关卡是节点；取消的卡片虚线保留；打回次数标 ↺
+    时间线（Agent Lanes）：每张卡片一条泳道，执行和验收派单是色块；重叠 = 并行；"验收 ✗ → ↺ 执行 → 验收"表示打回；竖线 = 现在
+    检查器：选中卡片的派单历史，打回回路和不通过的理由
+  工作说明 = 已确认的生效版本，可看历史版本；要改就在对话里让调度者起草新版
+数据：
+  工作：标题、状态、一句话摘要（取自最新事件）、计时、卡片完成数 / 总数、token 合计、最近步骤、未决关卡
+  对话：消息、关卡（问题、选项、是否已决定）
+  调度轮次：轮次号、模板、起止时间、步骤列表（状态、用时）、待下一轮处理的消息
+  卡片：序号、标题、状态、依赖（多对多）、后续、打回次数、用时、token、派单列表
+  派单：序号、用途（执行 / 验收）、起止时间、状态或结束方式、自报结论及理由、步骤
+  全局：执行者并发 / 上限、排队数
+状态：default（执行中）/ aligning（对齐中：对话 + 工作说明草稿与确认关卡，从 new-work.html 发送后进入）/ empty
+交互：侧栏底部 中 / EN 切换语言（纯 CSS 演示，开发用 i18n）；顶栏"对话 / 调度结构 / 工作说明"切换（设计稿默认停在调度结构）；收件箱行与本轮步骤用 details 展开；结构视图标签；"操作"菜单
+开发时补（设计稿不演示）：图的自动分层布局（如 dagre / ELK）、平移缩放、点节点切换检查器、悬停高亮上下游；计时每秒走；行在分组间滑动过渡；排队消息被下一轮取走时滑入步骤列表
+已确定：琥珀只给"等你处理"；进行中蓝色转圈 + 流动连线；状态前的 ✦ 按状态着色；同层 = 可并行
+示意（占位）：全部工作、消息、步骤、数字和图的坐标
+更新：2026-10-24 定稿；对齐中时收件箱当前行显示对齐中
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helm · 主界面</title>
+  <link rel="stylesheet" href="kit/tokens.css">
+  <link rel="stylesheet" href="kit/mockup.css">
+  <script src="kit/mockup.js" defer></script>
+  <link rel="stylesheet" href="kit/app.css">
+</head>
+<body>
+<div class="shell">
+
+  <!-- 左栏：工作收件箱 -->
+  <aside class="sb">
+    <div class="sb-head">
+      <span class="logo">H</span><b>Helm</b>
+      <a class="btn sm primary" href="new-work.html"><span lang="zh">＋ 新建</span><span lang="en">＋ New</span></a>
+    </div>
+    <div class="search" role="button" tabindex="0"><span><span lang="zh">搜索工作</span><span lang="en">Search work</span></span><span class="kbd">⌘K</span></div>
+
+    <div class="inbox inbox-full">
+      <div class="sect"><span lang="zh">等你处理</span><span lang="en">Needs you</span><span class="count">2</span></div>
+
+      <details class="irow current when-aligning" open>
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">工作说明草稿 v2 已写好，等你确认</span><span lang="en">Brief draft v2 is ready for you</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">对齐中 · 2 分钟</span><span lang="en">Aligning · 2m</span></span></span>
+        </summary>
+      </details>
+
+      <details class="irow current when-running" open>
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">调度者问：旧的密码登录保留多久？</span><span lang="en">Coordinator asks: how long to keep password login?</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你决定 · 4 分钟</span><span lang="en">Your call · 4m</span></span><span class="stats"><span class="stat" title="卡片 / Cards">▦ 2/5</span><span class="stat" title="tokens">◇ 184k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">卡片 2 合并进工作分支</span><span lang="en">Card 2 merged</span><time>9m</time></li>
+            <li><span lang="zh">卡片 3 开始验收</span><span lang="en">Card 3 verification started</span><time>6m</time></li>
+            <li class="last"><span lang="zh">卡片 4 需要你决定</span><span lang="en">Card 4 needs your call</span><time>4m</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">直接删除</span><span lang="en">Remove now</span></button>
+            <button class="btn sm"><span lang="zh">一直保留</span><span lang="en">Keep it</span></button>
+            <button class="btn sm primary"><span lang="zh">保留一周</span><span lang="en">One week</span></button>
+          </div>
+        </div>
+      </details>
+
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">修复导出失败</span><span lang="en">Fix export failure</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">4 张卡片全部通过，整体验收通过，等你审核。</span><span lang="en">All 4 cards passed and the work passed verification. Ready for review.</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你审核 · 1 小时</span><span lang="en">Review · 1h</span></span><span class="stats"><span class="stat">▦ 4/4</span><span class="stat">◇ 96k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">被拒绝的操作</span><span lang="en">Rejected operations</span><span class="num">0</span></li>
+            <li><span lang="zh">未声明结论的派单</span><span lang="en">Dispatches without a verdict</span><span class="num">1</span></li>
+            <li class="last"><span lang="zh">+184 −37，6 个文件</span><span lang="en">+184 −37 in 6 files</span><time>1h</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">看 diff</span><span lang="en">View diff</span></button>
+            <button class="btn sm"><span lang="zh">退回</span><span lang="en">Send back</span></button>
+            <button class="btn sm primary"><span lang="zh">接受</span><span lang="en">Accept</span></button>
+          </div>
+        </div>
+      </details>
+
+      <div class="sect"><span lang="zh">进行中</span><span lang="en">Running</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark run">✦</span><span><span lang="zh">2048 网页版</span><span lang="en">2048 web game</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">卡片 2 正在写合并动画的测试。</span><span lang="en">Card 2 is writing tests for the merge animation.</span></span>
+          <span class="f"><span class="pill run"><span class="spin"></span><span lang="zh">执行中 · 12:40</span><span lang="en">Running · 12:40</span></span><span class="stats"><span class="stat">▦ 1/3</span><span class="stat">◇ 61k</span></span></span>
+        </summary>
+        <div class="more"><hr>
+          <ol class="tl"><li><span lang="zh">卡片 1 完成</span><span lang="en">Card 1 done</span><time>20m</time></li><li class="last"><span lang="zh">卡片 2 第 9 步 · 写测试</span><span lang="en">Card 2 step 9 · writing tests</span><time><span lang="zh">刚刚</span><span lang="en">now</span></time></li></ol>
+          <div class="acts"><button class="btn sm"><span lang="zh">暂停</span><span lang="en">Pause</span></button><button class="btn sm"><span lang="zh">打开</span><span lang="en">Open</span></button></div>
+        </div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark">✦</span><span><span lang="zh">升级依赖</span><span lang="en">Upgrade dependencies</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">你在卡片 1 执行时暂停了它。</span><span lang="en">You paused it during card 1.</span></span>
+          <span class="f"><span class="pill idle"><span lang="zh">已暂停</span><span lang="en">Paused</span></span><span class="stats"><span class="stat">▦ 0/2</span><span class="stat">◇ 8k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm primary"><span lang="zh">恢复</span><span lang="en">Resume</span></button></div></div>
+      </details>
+
+      <div class="sect"><span lang="zh">已结束</span><span lang="en">Ended</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark ok">✦</span><span><span lang="zh">整理 README</span><span lang="en">Tidy README</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill ok bare"><span lang="zh">用时 38 分钟完成</span><span lang="en">Done in 38m</span></span><span class="stats"><span class="stat">▦ 3/3</span><span class="stat">◇ 42k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button><button class="btn sm"><span lang="zh">删除输出</span><span lang="en">Delete outputs</span></button></div></div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t" style="color: var(--faint)"><span class="spark">✦</span><span><span lang="zh">试用 Codex 驱动</span><span lang="en">Try Codex driver</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill bare"><span lang="zh">已取消</span><span lang="en">Cancelled</span></span><span class="stats"><span class="stat">◇ 3k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button></div></div>
+      </details>
+    </div>
+    <div class="inbox inbox-empty"><p class="hint" style="padding: var(--space-4) var(--space-2)"><span lang="zh">还没有工作。</span><span lang="en">No work yet.</span></p></div>
+
+    <div class="usage">
+      <div class="row"><span class="muted"><span lang="zh">执行者</span><span lang="en">Executors</span></span><b class="num">3 / 10 <span class="muted" style="font-weight: 400">· <span lang="zh">排队 2</span><span lang="en">2 queued</span></span></b></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="sb-foot">
+      <span class="seg" role="radiogroup" aria-label="语言 / Language">
+        <input type="radio" name="lang" id="lang-zh" checked><label for="lang-zh">中文</label>
+        <input type="radio" name="lang" id="lang-en"><label for="lang-en">EN</label>
+      </span>
+      <a class="btn ghost sm" href="settings.html"><span lang="zh">设置</span><span lang="en">Settings</span></a>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main class="inset work" data-state="default">
+    <header class="top">
+      <nav class="crumb" aria-label="breadcrumb">
+        <span class="c1"><span lang="zh">工作</span><span lang="en">Work</span></span><span class="c1">/</span>
+        <span class="c2"><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span>
+        <span class="pill run"><span class="spin"></span><span lang="zh">执行中 · 46:12</span><span lang="en">Running · 46:12</span></span>
+      </nav>
+      <div class="right">
+        <span class="seg view-seg" role="radiogroup" aria-label="视图 / View">
+          <input type="radio" name="view" id="v-chat"><label for="v-chat"><span lang="zh">对话</span><span lang="en">Chat</span></label>
+          <input type="radio" name="view" id="v-tree" checked><label for="v-tree"><span lang="zh">调度结构</span><span lang="en">Structure</span> <span class="count">9</span></label>
+          <input type="radio" name="view" id="v-brief"><label for="v-brief"><span lang="zh">工作说明</span><span lang="en">Brief</span></label>
+        </span>
+        <span class="stats"><span class="stat">▦ 2/5</span><span class="stat">◇ 184k</span></span>
+        <div class="menu-wrap">
+          <button class="btn sm" data-toggle="#work-menu"><span lang="zh">操作</span><span lang="en">Actions</span> <span class="muted">⌄</span></button>
+          <div class="menu pop" id="work-menu" hidden>
+            <button data-close><span lang="zh">暂停工作</span><span lang="en">Pause work</span></button>
+            <button data-close><span lang="zh">换调度者模板</span><span lang="en">Change coordinator</span></button>
+            <hr>
+            <button data-close class="danger-text"><span lang="zh">取消工作</span><span lang="en">Cancel work</span></button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="chat">
+      <div class="scroll">
+        <div class="thread">
+          <div class="me"><span lang="zh">登录改成邮箱 + 验证码，旧的密码登录先保留。</span><span lang="en">Switch login to email + code. Keep password login for now.</span></div>
+          <div class="sys"><span><span class="ok">✓</span> <span lang="zh">已确认工作说明 v2 · 10:12</span><span lang="en">Brief v2 confirmed · 10:12</span></span></div>
+          <div class="bot">
+            <span class="spark run">✦</span>
+            <div>
+              <div class="who"><b><span lang="zh">调度者</span><span lang="en">Coordinator</span></b>10:31</div>
+              <p><span lang="zh">拆成 5 张卡片。卡片 1、2 已完成，卡片 3 在验收。</span><span lang="en">Split into 5 cards. Cards 1–2 done, card 3 in verification.</span></p>
+            </div>
+          </div>
+          <div class="bot">
+            <span class="spark att">✦</span>
+            <div style="display: grid; gap: var(--space-3)">
+              <div class="who"><b><span lang="zh">调度者</span><span lang="en">Coordinator</span></b>10:48 <span class="ref"><span lang="zh">卡片 4</span><span lang="en">Card 4</span></span></div>
+              <div class="gate shine" role="group" aria-label="关卡 / Gate">
+                <span class="pill att" style="justify-self: start">▲ <span lang="zh">待你决定 · 4 分钟</span><span lang="en">Your call · 4m</span></span>
+                <p class="q"><span lang="zh">旧的密码登录保留多久？</span><span lang="en">How long to keep password login?</span></p>
+                <div class="opts">
+                  <button class="btn sm primary"><span lang="zh">保留一周</span><span lang="en">One week</span></button>
+                  <button class="btn sm"><span lang="zh">一直保留</span><span lang="en">Keep it</span></button>
+                  <button class="btn sm"><span lang="zh">直接删除</span><span lang="en">Remove now</span></button>
+                </div>
+                <p class="hint"><span lang="zh">或在下方直接回复。</span><span lang="en">Or reply below.</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 引导面板（affectUI Agent Steering） -->
+      <div class="steer">
+        <details class="round" open>
+          <summary>
+            <span class="spark run">✦</span>
+            <span class="ttl"><b><span lang="zh">调度者 · 第 7 轮</span><span lang="en">Coordinator · round 7</span></b><small>claude-coordinator · <span lang="zh">第 3 / 4 步</span><span lang="en">step 3 of 4</span></small></span>
+            <span class="pill run"><span class="spin"></span>3:12</span>
+            <button class="icon-btn" aria-label="打断本轮 / Interrupt round" title="打断本轮 / Interrupt round">❚❚</button>
+            <span class="chev">⌄</span>
+          </summary>
+          <ol class="steps">
+            <li class="done"><span class="i">✓</span><span lang="zh">读取卡片 3 的派单结果</span><span lang="en">Read card 3 dispatch result</span><time>4.1s</time></li>
+            <li class="done"><span class="i">✓</span><span lang="zh">改写调度笔记 v4</span><span lang="en">Rewrote notes v4</span><time>6.8s</time></li>
+            <li class="now"><span class="i"><span class="spin"></span></span><span lang="zh">派卡片 3 的验收</span><span lang="en">Dispatch verification for card 3</span><time>2:58</time></li>
+            <li class="todo"><span class="i"></span><span lang="zh">汇报进度</span><span lang="en">Report progress</span><time></time></li>
+          </ol>
+        </details>
+        <div class="queue">
+          <div class="sect"><span lang="zh">下一轮处理</span><span lang="en">Queued for next round</span><span class="count">1</span></div>
+          <div class="qitem"><span><span lang="zh">卡片 5 用真实浏览器跑一遍</span><span lang="en">Run card 5 in a real browser</span></span><button class="now-btn">⚡ <span lang="zh">立即</span><span lang="en">Now</span></button><button class="now-btn" aria-label="撤回 / Remove">✕</button></div>
+        </div>
+        <div class="input">
+          <div class="line">
+            <textarea lang="zh" placeholder="给调度者留言…" aria-label="消息"></textarea>
+            <textarea lang="en" placeholder="Message the coordinator…" aria-label="Message"></textarea>
+            <button class="send" aria-label="发送 / Send">↑</button>
+          </div>
+          <div class="hints">
+            <span><span class="kbd">⏎</span><span lang="zh">下一轮处理</span><span lang="en">next round</span></span>
+            <span><span class="kbd">⌘⏎</span><span lang="zh">打断本轮</span><span lang="en">interrupt now</span></span>
+            <select aria-label="关于 / About"><option>整项工作 / Whole work</option><option>卡片 4 / Card 4</option><option>关卡 / Gate</option></select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 调度结构视图 -->
+    <section class="struct">
+      <div class="struct-main" data-tabs>
+        <div class="struct-bar">
+          <div class="tabs">
+            <button data-tab><span lang="zh">图</span><span lang="en">Graph</span></button>
+            <button data-tab><span lang="zh">时间线</span><span lang="en">Timeline</span></button>
+            <button data-tab><span lang="zh">调度者</span><span lang="en">Coordinator</span></button>
+            <button data-tab><span lang="zh">事件</span><span lang="en">Events</span></button>
+          </div>
+          <div class="summary">
+            <span><b>9</b> <span lang="zh">张卡片</span><span lang="en">cards</span></span>
+            <span><b>2</b> <span lang="zh">并行中</span><span lang="en">in parallel</span></span>
+            <span><b>1</b> <span lang="zh">次打回</span><span lang="en">send-back</span></span>
+            <span><b>1</b> <span lang="zh">张取消</span><span lang="en">cancelled</span></span>
+          </div>
+        </div>
+
+        <!-- 图 -->
+        <div data-panel id="p-graph" style="display: flex; flex-direction: column; flex: 1; min-height: 0">
+          <div class="canvas-wrap">
+            <div class="canvas">
+              <svg viewBox="0 0 620 512" width="620" height="512" aria-hidden="true">
+                <path class="e" d="M310 64 C310 88,70 88,70 112"/>
+                <path class="e" d="M310 64 C310 88,230 88,230 112"/>
+                <path class="e" d="M310 64 C310 88,390 88,390 112"/>
+                <path class="e cut" d="M310 64 C310 88,550 88,550 112"/>
+                <path class="e flow" d="M70 176 C70 200,150 200,150 224"/>
+                <path class="e flow" d="M230 176 C230 200,150 200,150 224"/>
+                <path class="e flow" d="M390 176 L390 224"/>
+                <path class="e todo" d="M150 288 C150 312,470 312,470 336"/>
+                <path class="e att" d="M550 288 C550 312,470 312,470 336"/>
+                <path class="e todo" d="M150 288 C150 400,310 400,310 448"/>
+                <path class="e todo" d="M390 288 C390 400,310 400,310 448"/>
+                <path class="e todo" d="M470 400 C470 424,310 424,310 448"/>
+              </svg>
+
+              <button class="g" style="left: 240px; top: 0">
+                <span class="n"><span class="spark ok">✦</span><span>1 · <span lang="zh">接口设计</span><span lang="en">API design</span></span></span>
+                <span class="m"><span class="pill ok bare"><span lang="zh">完成</span><span lang="en">Done</span></span><span>8m</span></span>
+              </button>
+              <button class="g" style="left: 0; top: 112px">
+                <span class="n"><span class="spark ok">✦</span><span>2 · <span lang="zh">验证码接口</span><span lang="en">Code API</span></span></span>
+                <span class="m"><span class="pill ok bare"><span lang="zh">完成</span><span lang="en">Done</span></span><span>13m</span></span>
+              </button>
+              <button class="g" style="left: 160px; top: 112px">
+                <span class="n"><span class="spark ok">✦</span><span>3 · <span lang="zh">登录表单</span><span lang="en">Login form</span></span></span>
+                <span class="m"><span class="pill ok bare"><span lang="zh">完成</span><span lang="en">Done</span></span><span>11m</span></span>
+              </button>
+              <button class="g" style="left: 320px; top: 112px">
+                <span class="n"><span class="spark ok">✦</span><span>4 · <span lang="zh">邮件模板</span><span lang="en">Email template</span></span></span>
+                <span class="m"><span class="pill ok bare"><span lang="zh">完成</span><span lang="en">Done</span></span><span>7m</span></span>
+              </button>
+              <button class="g cut" style="left: 480px; top: 112px">
+                <span class="n"><span class="spark">✦</span><span>9 · <span lang="zh">短信登录</span><span lang="en">SMS login</span></span></span>
+                <span class="m"><span><span lang="zh">已取消 · 改计划</span><span lang="en">Cancelled · replanned</span></span></span>
+              </button>
+              <button class="g sel" style="left: 80px; top: 224px">
+                <span class="n"><span class="spark run">✦</span><span>5 · <span lang="zh">接通验证码登录</span><span lang="en">Wire up code login</span></span></span>
+                <span class="m"><span class="pill run"><span class="spin"></span><span lang="zh">验收</span><span lang="en">Verify</span></span><span class="rw" title="打回 1 次 / Sent back once">↺ 1</span></span>
+              </button>
+              <button class="g" style="left: 320px; top: 224px">
+                <span class="n"><span class="spark run">✦</span><span>6 · <span lang="zh">发信限流</span><span lang="en">Send rate limit</span></span></span>
+                <span class="m"><span class="pill run"><span class="spin"></span><span lang="zh">执行</span><span lang="en">Execute</span></span><span>11m</span></span>
+              </button>
+              <button class="g gate" style="left: 480px; top: 224px">
+                <span class="n"><span class="spark att">▲</span><span><span lang="zh">关卡 · 旧登录留多久</span><span lang="en">Gate · keep old login?</span></span></span>
+                <span class="m"><span class="pill att"><span lang="zh">待你决定</span><span lang="en">Your call</span></span><span>4m</span></span>
+              </button>
+              <button class="g todo" style="left: 400px; top: 336px">
+                <span class="n"><span class="spark">✦</span><span>7 · <span lang="zh">移除旧登录</span><span lang="en">Remove old login</span></span></span>
+                <span class="m"><span class="pill idle"><span lang="zh">待开始</span><span lang="en">Waiting</span></span></span>
+              </button>
+              <button class="g todo" style="left: 240px; top: 448px">
+                <span class="n"><span class="spark">✦</span><span>8 · <span lang="zh">端到端检查</span><span lang="en">End-to-end check</span></span></span>
+                <span class="m"><span class="pill idle"><span lang="zh">待开始</span><span lang="en">Waiting</span></span></span>
+              </button>
+            </div>
+          </div>
+          <div class="legend">
+            <span><svg viewBox="0 0 22 6"><path class="e" d="M0 3 H22"/></svg><span lang="zh">依赖已满足</span><span lang="en">Dependency met</span></span>
+            <span><svg viewBox="0 0 22 6"><path class="e flow" d="M0 3 H22"/></svg><span lang="zh">正在进行</span><span lang="en">In progress</span></span>
+            <span><svg viewBox="0 0 22 6"><path class="e todo" d="M0 3 H22"/></svg><span lang="zh">还在等</span><span lang="en">Waiting</span></span>
+            <span><svg viewBox="0 0 22 6"><path class="e att" d="M0 3 H22"/></svg><span lang="zh">等你决定</span><span lang="en">Needs you</span></span>
+            <span><span class="rw" style="height: 16px; font-size: 10px">↺ 1</span><span lang="zh">打回次数</span><span lang="en">Send-backs</span></span>
+            <span class="hint"><span lang="zh">同一行 = 可以并行</span><span lang="en">Same row = can run in parallel</span></span>
+          </div>
+        </div>
+
+        <!-- 时间线 -->
+        <div data-panel id="p-lanes" class="scroll">
+          <div class="lanes">
+            <div class="axis"><span></span><div class="ticks"><span style="left: 0">10:00</span><span style="left: 25%">10:15</span><span style="left: 50%">10:30</span><span style="left: 75%">10:45</span><span style="left: 100%">11:00</span></div></div>
+            <div class="lane"><span class="lb"><span class="spark run">✦</span><span lang="zh">调度者</span><span lang="en">Coordinator</span></span>
+              <div class="track">
+                <span class="nowline" data-label="10:52"></span>
+                <span class="blk rd" style="left: 0; width: 3.33%"></span><span class="blk rd" style="left: 20%; width: 3.33%"></span><span class="blk rd" style="left: 33.33%; width: 3.33%"></span><span class="blk rd" style="left: 51.67%; width: 3.33%"></span><span class="blk rd" style="left: 66.67%; width: 1.67%"></span><span class="blk rd" style="left: 75%; width: 3.33%"></span><span class="blk rd run" style="left: 81.67%; width: 5%"></span>
+              </div>
+            </div>
+            <div class="lane"><span class="lb"><span class="spark ok">✦</span>1 · <span lang="zh">接口设计</span><span lang="en">API design</span></span>
+              <div class="track"><span class="nowline"></span><span class="blk" style="left: 3.33%; width: 13.33%"><span lang="zh">执行</span><span lang="en">Exec</span></span><span class="blk v ok" style="left: 16.67%; width: 3.33%">✓</span></div></div>
+            <div class="lane"><span class="lb"><span class="spark ok">✦</span>2 · <span lang="zh">验证码接口</span><span lang="en">Code API</span></span>
+              <div class="track"><span class="nowline"></span><span class="blk" style="left: 23.33%; width: 16.67%"><span lang="zh">执行</span><span lang="en">Exec</span></span><span class="blk v ok" style="left: 40%; width: 5%">✓</span></div></div>
+            <div class="lane"><span class="lb"><span class="spark ok">✦</span>3 · <span lang="zh">登录表单</span><span lang="en">Login form</span></span>
+              <div class="track"><span class="nowline"></span><span class="blk" style="left: 23.33%; width: 13.33%"><span lang="zh">执行</span><span lang="en">Exec</span></span><span class="blk v ok" style="left: 36.67%; width: 5%">✓</span></div></div>
+            <div class="lane"><span class="lb"><span class="spark ok">✦</span>4 · <span lang="zh">邮件模板</span><span lang="en">Email template</span></span>
+              <div class="track"><span class="nowline"></span><span class="blk" style="left: 23.33%; width: 8.33%"><span lang="zh">执行</span><span lang="en">Exec</span></span><span class="blk v ok" style="left: 31.67%; width: 3.33%">✓</span></div></div>
+            <div class="lane"><span class="lb" style="color: var(--faint)"><span class="spark">✦</span><s>9 · <span lang="zh">短信登录</span><span lang="en">SMS login</span></s></span>
+              <div class="track"><span class="nowline"></span><span class="blk cut" style="left: 23.33%; width: 6.67%"><span lang="zh">取消</span><span lang="en">Cut</span></span></div></div>
+            <div class="lane sel"><span class="lb"><span class="spark run">✦</span>5 · <span lang="zh">接通验证码登录</span><span lang="en">Wire up code login</span></span>
+              <div class="track"><span class="nowline"></span>
+                <span class="blk" style="left: 45%; width: 13.33%"><span lang="zh">执行</span><span lang="en">Exec</span></span>
+                <span class="blk v bad" style="left: 58.33%; width: 5%">✗</span>
+                <span class="blk" style="left: 65%; width: 11.67%">↺ <span lang="zh">执行</span><span lang="en">Exec</span></span>
+                <span class="blk v run" style="left: 78.33%; width: 8.33%"><span lang="zh">验收</span><span lang="en">Verify</span></span>
+              </div></div>
+            <div class="lane"><span class="lb"><span class="spark run">✦</span>6 · <span lang="zh">发信限流</span><span lang="en">Send rate limit</span></span>
+              <div class="track"><span class="nowline"></span><span class="blk run" style="left: 68.33%; width: 18.33%"><span lang="zh">执行</span><span lang="en">Exec</span></span></div></div>
+            <div class="lane"><span class="lb"><span class="spark">✦</span>7 · <span lang="zh">移除旧登录</span><span lang="en">Remove old login</span></span>
+              <div class="track"><span class="nowline"></span><span class="mark" style="left: 80%">▲ <span lang="zh">关卡</span><span lang="en">Gate</span></span><span class="todo-blk" style="left: 87.5%; width: 12.5%"></span></div></div>
+            <div class="lane"><span class="lb"><span class="spark">✦</span>8 · <span lang="zh">端到端检查</span><span lang="en">End-to-end check</span></span>
+              <div class="track"><span class="nowline"></span><span class="todo-blk" style="left: 87.5%; width: 12.5%"></span></div></div>
+          </div>
+          <div class="legend" style="border-top: 0">
+            <span><span class="blk" style="position: static; width: 28px; height: 14px"></span><span lang="zh">执行派单</span><span lang="en">Execute</span></span>
+            <span><span class="blk v ok" style="position: static; width: 20px; height: 14px">✓</span><span lang="zh">验收通过</span><span lang="en">Verified</span></span>
+            <span><span class="blk v bad" style="position: static; width: 20px; height: 14px">✗</span><span lang="zh">验收不通过 → 打回</span><span lang="en">Failed → sent back</span></span>
+            <span class="hint"><span lang="zh">上下重叠 = 同时在跑</span><span lang="en">Overlap = running at once</span></span>
+          </div>
+        </div>
+
+        <!-- 调度者 -->
+        <div data-panel id="p-coord" class="scroll">
+          <div class="sec">
+            <div class="sect" style="padding: 0"><span lang="zh">轮次</span><span lang="en">Rounds</span><span class="count">7</span></div>
+            <ul class="rounds">
+              <li><span class="mono">#7</span><span class="pill run"><span class="spin"></span>3:12</span></li>
+              <li><span class="mono">#6</span><span class="pill ok bare"><span lang="zh">正常结束 · 1:48</span><span lang="en">Finished · 1:48</span></span></li>
+              <li><span class="mono">#5</span><span class="pill bad bare"><span lang="zh">超时 · 30:00</span><span lang="en">Timed out · 30:00</span></span></li>
+            </ul>
+          </div>
+          <div class="sec">
+            <div class="sect" style="padding: 0"><span lang="zh">调度笔记</span><span lang="en">Notes</span><span class="count">v4</span></div>
+            <p class="note"><span lang="zh">卡片 3 通过后再派卡片 4；卡片 4 等用户决定保留时长。</span><span lang="en">Dispatch card 4 after card 3 passes; wait for the user's call on retention.</span></p>
+          </div>
+        </div>
+
+        <!-- 事件 -->
+        <div data-panel id="p-events" class="scroll">
+          <div class="filters">
+            <select aria-label="执行方 / Actor"><option>全部执行方 / All actors</option><option>用户 / User</option><option>调度轮次 / Round</option><option>派单 / Dispatch</option><option>运行层 / Runtime</option></select>
+            <select aria-label="卡片 / Card"><option>全部卡片 / All cards</option><option>卡片 3 / Card 3</option></select>
+          </div>
+          <ol class="events">
+            <li><time>10:52</time><span>dispatch-step · card 3 · #6</span></li>
+            <li><time>10:48</time><span>gate-opened · card 4</span></li>
+            <li><time>10:47</time><span>dispatch-started · card 3 · verify</span></li>
+            <li><time>10:46</time><span>card-merged · card 2</span></li>
+            <li><time>10:31</time><span>round-ended · #6 · completed</span></li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- 检查器：卡片 5 -->
+      <aside class="insp">
+        <div class="insp-h">
+          <small class="hint"><span lang="zh">卡片</span><span lang="en">Card</span> 5</small>
+          <h2><span lang="zh">接通验证码登录</span><span lang="en">Wire up code login</span></h2>
+          <div class="row" style="gap: 6px">
+            <span class="pill run"><span class="spin"></span><span lang="zh">验收中 · 5:12</span><span lang="en">Verifying · 5:12</span></span>
+            <span class="rw">↺ <span lang="zh">打回 1 次</span><span lang="en">sent back once</span></span>
+          </div>
+        </div>
+        <div class="insp-b">
+          <dl class="kvs">
+            <dt><span lang="zh">依赖</span><span lang="en">After</span></dt><dd><span class="ref">2</span><span class="ref">3</span></dd>
+            <dt><span lang="zh">后续</span><span lang="en">Unblocks</span></dt><dd><span class="ref">7</span><span class="ref">8</span></dd>
+            <dt><span lang="zh">用量</span><span lang="en">Usage</span></dt><dd class="num">◇ 71k · 19m</dd>
+          </dl>
+
+          <div class="sect" style="padding: 0"><span lang="zh">派单</span><span lang="en">Dispatches</span><span class="count">4</span></div>
+          <ol class="hist">
+            <li><span class="i ok">✓</span><div>
+              <div class="row1"><span>#1 · <span lang="zh">执行</span><span lang="en">Execute</span></span><span class="pill ok bare">8m</span></div>
+              <div class="sub">codex-executor · <span lang="zh">自报完成</span><span lang="en">reported done</span></div></div></li>
+            <li><span class="i bad">✗</span><div>
+              <div class="row1"><span>#2 · <span lang="zh">验收</span><span lang="en">Verify</span></span><span class="pill bad bare"><span lang="zh">不通过</span><span lang="en">Failed</span></span></div>
+              <div class="sub">claude-executor · 3m</div>
+              <div class="why"><span lang="zh">过期的验证码仍能登录。</span><span lang="en">Expired codes still log in.</span></div></div></li>
+            <li class="loop"><span class="i">↺</span><span class="sub"><span lang="zh">调度者打回，同一张卡片重新执行</span><span lang="en">Coordinator sent it back for another run</span></span></li>
+            <li><span class="i ok">✓</span><div>
+              <div class="row1"><span>#3 · <span lang="zh">执行</span><span lang="en">Execute</span></span><span class="pill ok bare">7m</span></div>
+              <div class="sub">codex-executor · <span lang="zh">自报完成</span><span lang="en">reported done</span></div></div></li>
+            <li><span class="i run"><span class="spin"></span></span><div>
+              <div class="row1"><span>#4 · <span lang="zh">验收</span><span lang="en">Verify</span></span><span class="pill run">5:12</span></div>
+              <div class="sub">claude-executor · <span lang="zh">第 6 步</span><span lang="en">step 6</span></div>
+              <ol class="log" style="margin-top: 8px">
+                <li><span class="n">4</span>read src/login.ts</li>
+                <li><span class="n">5</span>edit tests/login.test.ts</li>
+                <li class="now"><span class="n">6</span>bash npm test</li>
+              </ol></div></li>
+          </ol>
+
+          <dl class="kv">
+            <dt><span lang="zh">分支</span><span lang="en">Branch</span></dt><dd class="mono">helm/2d3a76a7/card-5</dd>
+          </dl>
+          <p class="warn"><span>!</span><span><span lang="zh">别在副本目录开终端，看代码去工作分支。</span><span lang="en">Don't open a terminal in the copy — read code on the work branch.</span></span></p>
+          <div class="row" style="gap: var(--space-2)">
+            <button class="btn sm"><span lang="zh">暂停卡片</span><span lang="en">Pause card</span></button>
+            <button class="btn sm danger"><span lang="zh">取消卡片</span><span lang="en">Cancel card</span></button>
+          </div>
+        </div>
+      </aside>
+    </section>
+    <!-- 工作说明视图：执行中随时回看已确认的版本 -->
+    <section class="briefview">
+      <div class="brief-doc">
+        <div class="row spread">
+          <h2 style="font-size: 18px"><span lang="zh">工作说明</span><span lang="en">Brief</span></h2>
+          <div class="row" style="gap: 6px">
+            <span class="pill ok bare"><span lang="zh">已确认 · 10:12</span><span lang="en">Confirmed · 10:12</span></span>
+            <select class="ver" aria-label="版本 / Version"><option>v2 · 生效中 / in effect</option><option>v1</option></select>
+          </div>
+        </div>
+        <section>
+          <div class="sect" style="padding: 0"><span lang="zh">需求</span><span lang="en">Requirements</span></div>
+          <ul>
+            <li><span lang="zh">登录改为邮箱 + 6 位验证码</span><span lang="en">Log in with email + 6-digit code</span></li>
+            <li><span lang="zh">验证码 10 分钟过期，单次有效</span><span lang="en">Codes expire in 10 minutes, single use</span></li>
+            <li><span lang="zh">密码登录移到"其他方式"</span><span lang="en">Password login moves under "Other options"</span></li>
+          </ul>
+        </section>
+        <section>
+          <div class="sect" style="padding: 0"><span lang="zh">边界</span><span lang="en">Boundary</span></div>
+          <ul>
+            <li><span lang="zh">不改注册流程</span><span lang="en">Sign-up flow unchanged</span></li>
+            <li><span lang="zh">不接短信</span><span lang="en">No SMS</span></li>
+          </ul>
+        </section>
+        <section>
+          <div class="sect" style="padding: 0"><span lang="zh">标准</span><span lang="en">Criteria</span></div>
+          <ul>
+            <li><span lang="zh">新用户能用邮箱验证码登录</span><span lang="en">A new user can log in with an email code</span></li>
+            <li><span lang="zh">过期或用过的验证码被拒绝</span><span lang="en">Expired or used codes are rejected</span></li>
+            <li><span lang="zh">密码登录仍可用</span><span lang="en">Password login still works</span></li>
+          </ul>
+        </section>
+        <div class="base">
+          <div class="row"><span class="muted"><span lang="zh">基准</span><span lang="en">Base</span></span><span><span class="ref">main</span> <span class="ref">f69b7b3</span></span></div>
+          <div class="row"><span class="muted"><span lang="zh">工作分支</span><span lang="en">Work branch</span></span><span class="ref">helm/2d3a76a7</span></div>
+        </div>
+        <p class="hint"><span lang="zh">要改：在对话里告诉调度者，它会起草新版本请你确认；确认前旧版继续有效。</span><span lang="en">To change it, tell the coordinator in chat. It drafts a new version for you to confirm; the current one stays in effect until then.</span></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- 对齐中 -->
+  <main class="inset" data-state="aligning">
+    <header class="top">
+      <nav class="crumb" aria-label="breadcrumb">
+        <span class="c1"><span lang="zh">工作</span><span lang="en">Work</span></span><span class="c1">/</span>
+        <span class="c2"><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span>
+        <span class="pill att">▲ <span lang="zh">对齐中 · 待你确认</span><span lang="en">Aligning · confirm brief</span></span>
+      </nav>
+      <div class="right">
+        <span class="ref">web-app</span>
+        <button class="btn sm"><span lang="zh">取消工作</span><span lang="en">Cancel work</span></button>
+      </div>
+    </header>
+    <div class="align">
+      <section class="chat">
+        <div class="scroll">
+          <div class="thread">
+            <div class="me"><span lang="zh">登录改成邮箱 + 验证码，旧的密码登录先保留。</span><span lang="en">Switch login to email + code. Keep password login for now.</span></div>
+            <div class="bot">
+              <span class="spark run">✦</span>
+              <div>
+                <div class="who"><b><span lang="zh">调度者</span><span lang="en">Coordinator</span></b>10:03</div>
+                <p><span lang="zh">先确认两点：</span><span lang="en">Two things first:</span></p>
+                <ol style="margin: 6px 0 0; padding-left: 20px">
+                  <li><span lang="zh">验证码多久过期？</span><span lang="en">How long should a code stay valid?</span></li>
+                  <li><span lang="zh">"保留"是指两种登录并存，还是旧登录藏到次要入口？</span><span lang="en">Does "keep" mean both side by side, or old login behind a secondary link?</span></li>
+                </ol>
+              </div>
+            </div>
+            <div class="me"><span lang="zh">10 分钟过期。旧登录放到"其他方式"里。</span><span lang="en">10 minutes. Put old login under "Other options".</span></div>
+            <div class="bot">
+              <span class="spark att">✦</span>
+              <div style="display: grid; gap: var(--space-3)">
+                <div class="who"><b><span lang="zh">调度者</span><span lang="en">Coordinator</span></b>10:08</div>
+                <div class="gate shine" role="group" aria-label="关卡 / Gate">
+                  <span class="pill att" style="justify-self: start">▲ <span lang="zh">确认工作说明 · v2</span><span lang="en">Confirm brief · v2</span></span>
+                  <p class="q"><span lang="zh">工作说明草稿 v2 已写好，确认后开始执行。</span><span lang="en">Brief draft v2 is ready. Work starts once you confirm.</span></p>
+                  <div class="opts">
+                    <button class="btn sm primary"><span lang="zh">确认这一版</span><span lang="en">Confirm this version</span></button>
+                    <button class="btn sm"><span lang="zh">还要改</span><span lang="en">Needs changes</span></button>
+                  </div>
+                  <p class="hint"><span lang="zh">从 main@f69b7b3 开出 helm/2d3a76a7。</span><span lang="en">Branches helm/2d3a76a7 from main@f69b7b3.</span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="steer simple-input">
+          <div class="input" style="border-top: 0">
+            <div class="line">
+              <textarea lang="zh" placeholder="回答调度者，或说明要改哪里…" aria-label="消息"></textarea>
+              <textarea lang="en" placeholder="Answer, or say what to change…" aria-label="Message"></textarea>
+              <button class="send" aria-label="发送 / Send">↑</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="brief">
+        <div class="brief-h">
+          <b><span lang="zh">工作说明</span><span lang="en">Brief</span></b>
+          <div class="row" style="gap: 6px">
+            <span class="pill att"><span lang="zh">未确认</span><span lang="en">Unconfirmed</span></span>
+            <select aria-label="版本 / Version"><option>v2 · 10:08</option><option>v1 · 10:04</option></select>
+          </div>
+        </div>
+        <div class="brief-b">
+          <section>
+            <div class="sect" style="padding: 0"><span lang="zh">需求</span><span lang="en">Requirements</span></div>
+            <ul>
+              <li><span lang="zh">登录改为邮箱 + 6 位验证码</span><span lang="en">Log in with email + 6-digit code</span></li>
+              <li class="new"><span lang="zh">验证码 10 分钟过期，单次有效</span><span lang="en">Codes expire in 10 minutes, single use</span></li>
+              <li class="new"><span lang="zh">密码登录移到"其他方式"</span><span lang="en">Password login moves under "Other options"</span></li>
+            </ul>
+          </section>
+          <section>
+            <div class="sect" style="padding: 0"><span lang="zh">边界</span><span lang="en">Boundary</span></div>
+            <ul>
+              <li><span lang="zh">不改注册流程</span><span lang="en">Sign-up flow unchanged</span></li>
+              <li><span lang="zh">不接短信</span><span lang="en">No SMS</span></li>
+            </ul>
+          </section>
+          <section>
+            <div class="sect" style="padding: 0"><span lang="zh">标准</span><span lang="en">Criteria</span></div>
+            <ul>
+              <li><span lang="zh">新用户能用邮箱验证码登录</span><span lang="en">A new user can log in with an email code</span></li>
+              <li><span lang="zh">过期或用过的验证码被拒绝</span><span lang="en">Expired or used codes are rejected</span></li>
+              <li><span lang="zh">密码登录仍可用</span><span lang="en">Password login still works</span></li>
+            </ul>
+          </section>
+          <div class="base">
+            <div class="row"><span class="muted"><span lang="zh">基准</span><span lang="en">Base</span></span><span><span class="ref">main</span> <span class="ref">f69b7b3</span></span></div>
+            <div class="row"><span class="muted"><span lang="zh">工作分支</span><span lang="en">Work branch</span></span><span class="ref">helm/2d3a76a7</span></div>
+          </div>
+          <p class="warn"><span>!</span><span><span lang="zh">2 个未提交改动不会进入工作分支。</span><span lang="en">2 uncommitted changes won't be included.</span></span></p>
+          <p class="hint"><span lang="zh">绿色底 = 比上一版新增。</span><span lang="en">Green = new since previous version.</span></p>
+        </div>
+        <div class="brief-f">
+          <button class="btn primary"><span lang="zh">确认这一版</span><span lang="en">Confirm this version</span></button>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <main class="inset" data-state="empty">
+    <div class="empty-main">
+      <div style="display: grid; gap: var(--space-3); justify-items: center">
+        <span class="spark" style="font-size: 28px">✦</span>
+        <p style="font-weight: 600"><span lang="zh">还没有工作</span><span lang="en">No work yet</span></p>
+        <p class="hint"><span lang="zh">说说你要做什么，调度者会和你对齐。</span><span lang="en">Describe what you need; the coordinator will align with you.</span></p>
+        <button class="btn primary"><span lang="zh">新建工作</span><span lang="en">New work</span></button>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

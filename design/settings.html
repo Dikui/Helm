@@ -1,0 +1,351 @@
+<!--
+页面：设置（Agent 模板 / 项目 / 运行）
+用途：前端开发参照，确认调度者和执行者模板的查看、编辑方式，以及其他设置项
+数据：
+  Agent 模板（list-agent-templates）：id、role（coordinator / executor）、driver（claude-sdk / codex / grok / deepseek）、model、reasoningEffort（null / low / medium / high / max）、fast、home（shared = 订阅 / template = API）、billing、description、available 与原因；prompt.md 原文；skills/ 目录
+  使用情况：正在用该模板的派单数和调度者数（由派单记录汇总）
+  项目：名称、路径、基准分支、工作数
+  运行：并发上限、派单看门狗（墙钟 / 无输出）、轮次看门狗（总时长 / 无输出）、输出提示阈值
+状态：default（模板列表 + claude-executor 详情）
+交互：左侧分区切换；点模板看详情（设计稿固定选中 claude-executor）；"新建模板"复制所选模板；中 / EN 切换
+后端：保存和"复制为新模板"调用新操作 save-agent-template，写回 templates/<id>/ 的 config.json 和 prompt.md（任务单 .scratch/helm-ui/issues/01-save-agent-template.md）；保存带 revision，文件被编辑器改过时提示冲突；编辑已有模板时角色不可改
+已确定：模板按角色分组；可用性和原因直接显示在列表；改动从下一次派单或调度轮次生效
+示意（占位）：使用数、路径、项目
+更新：2026-10-24 定稿；去掉误留的空状态
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helm · 设置</title>
+  <link rel="stylesheet" href="kit/tokens.css">
+  <link rel="stylesheet" href="kit/mockup.css">
+  <link rel="stylesheet" href="kit/app.css">
+  <script src="kit/mockup.js" defer></script>
+  <style>
+    .set { flex: 1; display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 0; }
+    .subnav { display: grid; align-content: start; gap: 2px; padding: var(--space-3); border-right: 1px solid var(--border); }
+    .subnav [data-tab] { display: flex; justify-content: space-between; align-items: center; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-md); background: var(--clear); color: var(--muted); font-size: var(--text-md); font-weight: 500; text-align: left; }
+    .subnav [data-tab]:hover { background: var(--surface-soft); color: var(--text); }
+    .subnav [data-tab][aria-selected="true"] { background: var(--surface-soft); color: var(--text); }
+    .pane { min-height: 0; overflow: auto; }
+    .tpl { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 100%; }
+    .tpl-list { padding: var(--space-4) var(--space-5) var(--space-6); display: grid; align-content: start; gap: var(--space-2); }
+    .tpl-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
+    .tpl-head h2 { font-size: 16px; }
+    .tpl-head p { font-size: var(--text-sm); color: var(--muted); margin-top: 2px; }
+    .trow { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; transition: border-color .15s; }
+    .trow:hover { border-color: var(--border-strong); }
+    .trow.sel { border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring); }
+    .trow.off { background: var(--clear); }
+    .drv { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface-soft); font: 700 12px var(--mono); }
+    .trow .nm { display: grid; gap: 3px; min-width: 0; }
+    .trow .nm b { font-family: var(--mono); font-size: var(--text-md); font-weight: 600; }
+    .trow .nm .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: var(--text-sm); color: var(--muted); }
+    .trow .nm .desc { font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .trow .r { display: grid; justify-items: end; gap: 4px; font-size: var(--text-sm); color: var(--muted); }
+    .bill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); font-size: 11px; font-weight: 500; color: var(--muted); }
+    .reason { font-size: var(--text-sm); color: var(--danger); }
+
+    .detail { border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+    .detail-h { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--border); }
+    .detail-h .t { flex: 1; display: grid; gap: 2px; }
+    .detail-h b { font-family: var(--mono); font-size: 15px; }
+    .detail-b { flex: 1; overflow: auto; padding: var(--space-4); display: grid; align-content: start; gap: var(--space-4); }
+    .f { display: grid; gap: 6px; font-size: var(--text-md); }
+    .f > span:first-child { font-size: var(--text-sm); font-weight: 500; color: var(--muted); }
+    .f .hint { font-size: var(--text-sm); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+    .seg.wide { display: flex; }
+    .seg.wide label { flex: 1; text-align: center; padding: 4px 0; }
+    .opt { display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
+    .opt:has(input:checked) { border-color: var(--ring); background: var(--surface-soft); }
+    .opt input { margin-top: 2px; }
+    .opt b { font-size: var(--text-md); font-weight: 500; }
+    .opt small { display: block; color: var(--muted); font-size: var(--text-sm); }
+    .sw { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+    .sw small { display: block; color: var(--muted); font-size: var(--text-sm); }
+    .toggle { appearance: none; width: 34px !important; height: 20px !important; border-radius: 9999px; background: var(--border-strong); position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; }
+    .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .15s; box-shadow: var(--shadow-xs); }
+    .toggle:checked { background: var(--accent); }
+    .toggle:checked::after { transform: translateX(14px); background: var(--on-accent); }
+    .prompt { margin: 0; max-height: 180px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); font: 12px/1.6 var(--mono); white-space: pre-wrap; color: var(--muted); }
+    .files { display: flex; flex-wrap: wrap; gap: 6px; }
+    .detail-f { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); }
+    .detail-f .hint { flex: 1; font-size: var(--text-sm); }
+
+    .simple { padding: var(--space-4) var(--space-5) var(--space-6); display: grid; gap: var(--space-4); max-width: 640px; }
+    .simple h2 { font-size: 16px; }
+    .plist { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .plist > div { display: grid; grid-template-columns: 1fr auto auto; gap: var(--space-3); align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: var(--text-md); }
+    .plist > div:last-child { border-bottom: 0; }
+    .plist small { display: block; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .numf { display: grid; grid-template-columns: 1fr 120px; gap: var(--space-3); align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .numf:last-child { border-bottom: 0; }
+    .numf small { display: block; color: var(--muted); font-size: var(--text-sm); }
+    .numf .unit { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--muted); }
+
+    @media (max-width: 1240px) { .tpl { grid-template-columns: minmax(0, 1fr); } .detail { border-left: 0; border-top: 1px solid var(--border); } .detail-b { overflow: visible; } }
+    .tpl-head .btn { white-space: nowrap; }
+    @media (max-width: 1240px) { .set { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } .subnav { grid-auto-flow: column; justify-content: start; border-right: 0; border-bottom: 1px solid var(--border); } }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sb">
+    <div class="sb-head">
+      <span class="logo">H</span><b>Helm</b>
+      <a class="btn sm primary" href="new-work.html"><span lang="zh">＋ 新建</span><span lang="en">＋ New</span></a>
+    </div>
+    <div class="search" role="button" tabindex="0"><span><span lang="zh">搜索工作</span><span lang="en">Search work</span></span><span class="kbd">⌘K</span></div>
+
+    <div class="inbox">
+      <div class="sect"><span lang="zh">等你处理</span><span lang="en">Needs you</span><span class="count">2</span></div>
+
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">调度者问：旧的密码登录保留多久？</span><span lang="en">Coordinator asks: how long to keep password login?</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你决定 · 4 分钟</span><span lang="en">Your call · 4m</span></span><span class="stats"><span class="stat" title="卡片 / Cards">▦ 2/5</span><span class="stat" title="tokens">◇ 184k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">卡片 2 合并进工作分支</span><span lang="en">Card 2 merged</span><time>9m</time></li>
+            <li><span lang="zh">卡片 3 开始验收</span><span lang="en">Card 3 verification started</span><time>6m</time></li>
+            <li class="last"><span lang="zh">卡片 4 需要你决定</span><span lang="en">Card 4 needs your call</span><time>4m</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">直接删除</span><span lang="en">Remove now</span></button>
+            <button class="btn sm"><span lang="zh">一直保留</span><span lang="en">Keep it</span></button>
+            <button class="btn sm primary"><span lang="zh">保留一周</span><span lang="en">One week</span></button>
+          </div>
+        </div>
+      </details>
+
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">修复导出失败</span><span lang="en">Fix export failure</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">4 张卡片全部通过，整体验收通过，等你审核。</span><span lang="en">All 4 cards passed and the work passed verification. Ready for review.</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你审核 · 1 小时</span><span lang="en">Review · 1h</span></span><span class="stats"><span class="stat">▦ 4/4</span><span class="stat">◇ 96k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">被拒绝的操作</span><span lang="en">Rejected operations</span><span class="num">0</span></li>
+            <li><span lang="zh">未声明结论的派单</span><span lang="en">Dispatches without a verdict</span><span class="num">1</span></li>
+            <li class="last"><span lang="zh">+184 −37，6 个文件</span><span lang="en">+184 −37 in 6 files</span><time>1h</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">看 diff</span><span lang="en">View diff</span></button>
+            <button class="btn sm"><span lang="zh">退回</span><span lang="en">Send back</span></button>
+            <button class="btn sm primary"><span lang="zh">接受</span><span lang="en">Accept</span></button>
+          </div>
+        </div>
+      </details>
+
+      <div class="sect"><span lang="zh">进行中</span><span lang="en">Running</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark run">✦</span><span><span lang="zh">2048 网页版</span><span lang="en">2048 web game</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">卡片 2 正在写合并动画的测试。</span><span lang="en">Card 2 is writing tests for the merge animation.</span></span>
+          <span class="f"><span class="pill run"><span class="spin"></span><span lang="zh">执行中 · 12:40</span><span lang="en">Running · 12:40</span></span><span class="stats"><span class="stat">▦ 1/3</span><span class="stat">◇ 61k</span></span></span>
+        </summary>
+        <div class="more"><hr>
+          <ol class="tl"><li><span lang="zh">卡片 1 完成</span><span lang="en">Card 1 done</span><time>20m</time></li><li class="last"><span lang="zh">卡片 2 第 9 步 · 写测试</span><span lang="en">Card 2 step 9 · writing tests</span><time><span lang="zh">刚刚</span><span lang="en">now</span></time></li></ol>
+          <div class="acts"><button class="btn sm"><span lang="zh">暂停</span><span lang="en">Pause</span></button><button class="btn sm"><span lang="zh">打开</span><span lang="en">Open</span></button></div>
+        </div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark">✦</span><span><span lang="zh">升级依赖</span><span lang="en">Upgrade dependencies</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">你在卡片 1 执行时暂停了它。</span><span lang="en">You paused it during card 1.</span></span>
+          <span class="f"><span class="pill idle"><span lang="zh">已暂停</span><span lang="en">Paused</span></span><span class="stats"><span class="stat">▦ 0/2</span><span class="stat">◇ 8k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm primary"><span lang="zh">恢复</span><span lang="en">Resume</span></button></div></div>
+      </details>
+
+      <div class="sect"><span lang="zh">已结束</span><span lang="en">Ended</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark ok">✦</span><span><span lang="zh">整理 README</span><span lang="en">Tidy README</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill ok bare"><span lang="zh">用时 38 分钟完成</span><span lang="en">Done in 38m</span></span><span class="stats"><span class="stat">▦ 3/3</span><span class="stat">◇ 42k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button><button class="btn sm"><span lang="zh">删除输出</span><span lang="en">Delete outputs</span></button></div></div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t" style="color: var(--faint)"><span class="spark">✦</span><span><span lang="zh">试用 Codex 驱动</span><span lang="en">Try Codex driver</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill bare"><span lang="zh">已取消</span><span lang="en">Cancelled</span></span><span class="stats"><span class="stat">◇ 3k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button></div></div>
+      </details>
+    </div>
+
+    <div class="usage">
+      <div class="row"><span class="muted"><span lang="zh">执行者</span><span lang="en">Executors</span></span><b class="num">3 / 10 <span class="muted" style="font-weight: 400">· <span lang="zh">排队 2</span><span lang="en">2 queued</span></span></b></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="sb-foot">
+      <span class="seg" role="radiogroup" aria-label="语言 / Language">
+        <input type="radio" name="lang" id="lang-zh" checked><label for="lang-zh">中文</label>
+        <input type="radio" name="lang" id="lang-en"><label for="lang-en">EN</label>
+      </span>
+      <a class="btn ghost sm" href="settings.html"><span lang="zh">设置</span><span lang="en">Settings</span></a>
+    </div>
+  </aside>
+
+  <main class="inset" data-state="default">
+    <header class="top">
+      <nav class="crumb" aria-label="breadcrumb"><span class="c2"><span lang="zh">设置</span><span lang="en">Settings</span></span></nav>
+    </header>
+    <div class="set" data-tabs>
+      <nav class="subnav">
+        <button data-tab><span><span lang="zh">Agent 模板</span><span lang="en">Agent templates</span></span><span class="count">6</span></button>
+        <button data-tab><span><span lang="zh">项目</span><span lang="en">Projects</span></span><span class="count">3</span></button>
+        <button data-tab><span lang="zh">运行</span><span lang="en">Runtime</span></button>
+      </nav>
+
+      <!-- Agent 模板 -->
+      <div data-panel id="s-tpl" class="pane">
+        <div class="tpl">
+          <div class="tpl-list">
+            <div class="tpl-head">
+              <div>
+                <h2><span lang="zh">Agent 模板</span><span lang="en">Agent templates</span></h2>
+                <p><span lang="zh">每个模板是 templates/ 下的一个目录。改动从下一次派单或调度轮次生效。</span><span lang="en">Each template is a folder under templates/. Changes apply from the next dispatch or round.</span></p>
+              </div>
+              <button class="btn sm"><span lang="zh">＋ 新建模板</span><span lang="en">＋ New template</span></button>
+            </div>
+
+            <div class="sect"><span lang="zh">调度者</span><span lang="en">Coordinators</span><span class="count">2</span></div>
+            <button class="trow">
+              <span class="drv">C</span>
+              <span class="nm"><b>claude-coordinator</b><span class="meta">claude-sdk · haiku · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="desc">对齐工作说明，拆卡、派单、安排验收并发起审核</span></span>
+              <span class="r"><span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span><span><span lang="zh">2 项工作在用</span><span lang="en">2 works</span></span></span>
+            </button>
+            <button class="trow">
+              <span class="drv">X</span>
+              <span class="nm"><b>codex-coordinator</b><span class="meta">codex · gpt-6-luna · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="desc">对齐工作说明，拆卡、派单、安排验收并发起审核</span></span>
+              <span class="r"><span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span><span><span lang="zh">未使用</span><span lang="en">Unused</span></span></span>
+            </button>
+
+            <div class="sect"><span lang="zh">执行者</span><span lang="en">Executors</span><span class="count">4</span></div>
+            <button class="trow sel">
+              <span class="drv">C</span>
+              <span class="nm"><b>claude-executor</b><span class="meta">claude-sdk · haiku · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="desc">在卡片副本中执行或验收派单，报告检查过程和证据</span></span>
+              <span class="r"><span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span><span class="pill run"><span class="spin"></span><span lang="zh">2 个派单</span><span lang="en">2 running</span></span></span>
+            </button>
+            <button class="trow">
+              <span class="drv">X</span>
+              <span class="nm"><b>codex-executor</b><span class="meta">codex · gpt-6-luna · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="desc">在卡片副本中使用 Codex 执行或验收派单，报告检查过程和证据</span></span>
+              <span class="r"><span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span><span class="pill run"><span class="spin"></span><span lang="zh">1 个派单</span><span lang="en">1 running</span></span></span>
+            </button>
+            <button class="trow">
+              <span class="drv">G</span>
+              <span class="nm"><b>grok-executor</b><span class="meta">grok · grok-4.7 · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="desc">在卡片副本中使用 Grok 本机登录执行或验收派单，报告检查过程和证据</span></span>
+              <span class="r"><span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span><span><span lang="zh">未使用</span><span lang="en">Unused</span></span></span>
+            </button>
+            <button class="trow off">
+              <span class="drv">D</span>
+              <span class="nm"><b>deepseek-executor</b><span class="meta">deepseek · deepseek-flash · low <span class="bill"><span lang="zh">订阅</span><span lang="en">Subscription</span></span></span><span class="reason"><span lang="zh">不可用：dsh 未登录，运行 dsh login</span><span lang="en">Unavailable: dsh not logged in — run dsh login</span></span></span>
+              <span class="r"><span class="pill bad bare"><span lang="zh">不可用</span><span lang="en">Unavailable</span></span></span>
+            </button>
+          </div>
+
+          <!-- 详情：claude-executor -->
+          <aside class="detail">
+            <div class="detail-h">
+              <span class="drv">C</span>
+              <span class="t"><b>claude-executor</b><small class="hint mono">templates/claude-executor/</small></span>
+              <span class="pill ok bare"><span lang="zh">可用</span><span lang="en">Ready</span></span>
+            </div>
+            <div class="detail-b">
+              <div class="two">
+                <label class="f"><span><span lang="zh">角色</span><span lang="en">Role</span></span>
+                  <select disabled><option>执行者 / Executor</option></select></label>
+                <label class="f"><span><span lang="zh">驱动</span><span lang="en">Driver</span></span>
+                  <select><option>claude-sdk</option><option>codex</option><option>grok</option><option>deepseek</option></select></label>
+              </div>
+              <label class="f"><span><span lang="zh">模型</span><span lang="en">Model</span></span>
+                <input class="mono" value="haiku">
+                <span class="hint"><span lang="zh">留空 = 用 CLI 默认模型</span><span lang="en">Empty = CLI default</span></span></label>
+              <div class="f"><span><span lang="zh">推理强度</span><span lang="en">Reasoning effort</span></span>
+                <span class="seg wide" role="radiogroup">
+                  <input type="radio" name="eff" id="e0"><label for="e0"><span lang="zh">默认</span><span lang="en">Default</span></label>
+                  <input type="radio" name="eff" id="e1" checked><label for="e1">low</label>
+                  <input type="radio" name="eff" id="e2"><label for="e2">medium</label>
+                  <input type="radio" name="eff" id="e3"><label for="e3">high</label>
+                  <input type="radio" name="eff" id="e4"><label for="e4">max</label>
+                </span></div>
+              <label class="sw">
+                <span><span lang="zh">Fast 档</span><span lang="en">Fast mode</span><small><span lang="zh">Claude 订阅下开启会计入 extra usage，模板将标为不可用</span><span lang="en">On a Claude subscription this bills extra usage; the template becomes unavailable</span></small></span>
+                <input type="checkbox" class="toggle" aria-label="Fast">
+              </label>
+              <div class="f"><span><span lang="zh">计费方式</span><span lang="en">Billing</span></span>
+                <label class="opt"><input type="radio" name="home" checked><span><b><span lang="zh">订阅</span><span lang="en">Subscription</span></b><small><span lang="zh">沿用终端里 claude auth login 的登录、个人设置和技能</span><span lang="en">Uses your terminal login (claude auth login), settings and skills</span></small></span></label>
+                <label class="opt"><input type="radio" name="home"><span><b>API</b><small class="mono">~/.helm/agent-homes/claude-executor/</small></span></label>
+              </div>
+              <label class="f"><span><span lang="zh">职责说明</span><span lang="en">Description</span></span>
+                <textarea style="min-height: 64px">在卡片副本中执行或验收派单，报告检查过程和证据</textarea>
+                <span class="hint"><span lang="zh">调度者派单时据此选模板</span><span lang="en">The coordinator picks templates by this</span></span></label>
+              <div class="f">
+                <span class="row spread"><span><span lang="zh">策略</span><span lang="en">Policy</span> · prompt.md</span><button class="btn ghost sm"><span lang="zh">在编辑器打开</span><span lang="en">Open in editor</span></button></span>
+                <pre class="prompt"># 执行者策略（占位示意）
+你在卡片副本里完成派单内容……
+完成后调用"提交结论"工具……</pre>
+                <span class="hint"><span lang="zh">端口、提交结论、清理等运行约定由 Helm 追加在策略之后</span><span lang="en">Helm appends runtime rules (ports, verdict, cleanup) after the policy</span></span>
+              </div>
+              <div class="f"><span><span lang="zh">技能</span><span lang="en">Skills</span> · skills/</span>
+                <span class="files"><span class="hint"><span lang="zh">无。用户自己的技能照常加载。</span><span lang="en">None. Your own skills still load.</span></span></span></div>
+            </div>
+            <div class="detail-f">
+              <span class="hint"><span lang="zh">下一次派单生效</span><span lang="en">Applies from the next dispatch</span></span>
+              <button class="btn sm"><span lang="zh">复制为新模板</span><span lang="en">Duplicate</span></button>
+              <button class="btn sm primary"><span lang="zh">保存</span><span lang="en">Save</span></button>
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <!-- 项目 -->
+      <div data-panel id="s-proj" class="pane">
+        <div class="simple">
+          <div class="row spread"><h2><span lang="zh">项目</span><span lang="en">Projects</span></h2><button class="btn sm"><span lang="zh">＋ 登记项目</span><span lang="en">＋ Register project</span></button></div>
+          <div class="plist">
+            <div><span>web-app<small>~/code/web-app</small></span><span class="ref">main</span><span class="hint"><span lang="zh">4 项工作</span><span lang="en">4 works</span></span></div>
+            <div><span>helm<small>~/Project/Helm</small></span><span class="ref">main</span><span class="hint"><span lang="zh">1 项工作</span><span lang="en">1 work</span></span></div>
+            <div><span>docs-site<small>~/code/docs-site</small></span><span class="ref">master</span><span class="hint"><span lang="zh">1 项工作</span><span lang="en">1 work</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 运行 -->
+      <div data-panel id="s-run" class="pane">
+        <div class="simple">
+          <h2><span lang="zh">运行</span><span lang="en">Runtime</span></h2>
+          <div class="sect" style="padding: 0"><span lang="zh">并发</span><span lang="en">Concurrency</span></div>
+          <div class="plist">
+            <div class="numf"><span><span lang="zh">执行者并发上限</span><span lang="en">Executor limit</span><small><span lang="zh">满了按创建顺序排队；调度轮次不占名额</span><span lang="en">Extra dispatches queue in order; rounds don't count</span></small></span><input type="number" value="10"></div>
+          </div>
+          <div class="sect" style="padding: 0"><span lang="zh">超时</span><span lang="en">Timeouts</span></div>
+          <div class="plist">
+            <div class="numf"><span><span lang="zh">派单总时长</span><span lang="en">Dispatch wall time</span></span><span class="unit"><input type="number" value="30"><span lang="zh">分钟</span><span lang="en">min</span></span></div>
+            <div class="numf"><span><span lang="zh">派单无输出</span><span lang="en">Dispatch idle</span></span><span class="unit"><input type="number" value="10"><span lang="zh">分钟</span><span lang="en">min</span></span></div>
+            <div class="numf"><span><span lang="zh">调度轮次总时长</span><span lang="en">Round total</span></span><span class="unit"><input type="number" value="30"><span lang="zh">分钟</span><span lang="en">min</span></span></div>
+            <div class="numf"><span><span lang="zh">调度轮次无输出</span><span lang="en">Round idle</span></span><span class="unit"><input type="number" value="10"><span lang="zh">分钟</span><span lang="en">min</span></span></div>
+          </div>
+          <div class="sect" style="padding: 0"><span lang="zh">输出</span><span lang="en">Outputs</span></div>
+          <div class="plist">
+            <div class="numf"><span><span lang="zh">提示阈值</span><span lang="en">Warn above</span><small><span lang="zh">~/.helm/ 下输出超过时提示一次</span><span lang="en">Warn once when ~/.helm/ outputs exceed this</span></small></span><span class="unit"><input type="number" value="10">GB</span></div>
+          </div>
+          <div class="row" style="justify-content: flex-end"><button class="btn sm primary"><span lang="zh">保存</span><span lang="en">Save</span></button></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

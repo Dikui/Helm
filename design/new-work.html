@@ -1,0 +1,241 @@
+<!--
+页面：新建工作（填写第一句需求；发送后进入 main.html 的"对齐中"）
+用途：前端开发参照，确认新建工作和对齐阶段的界面
+数据：
+  项目：名称、路径（归一到 git 工作树根）、基准 ref、基准提交、未提交改动数
+  调度者模板：id、是否可用及原因
+  首条消息：正文、项目内唯一 key（前端生成，重试不重复建工作）
+状态：default（填写需求）/ no-project（还没登记项目）
+交互：项目选择菜单；"登记项目"弹窗；调度者模板下拉；中 / EN 切换
+已确定：新建 = 选项目 + 写一句需求，其余由调度者在 main.html 的对齐中里问；确认工作说明后才开工作分支
+示意（占位）：项目、路径、提交号、草稿内容
+更新：2026-10-24 定稿；交接说明去掉已移到 main.html 的对齐内容，去掉误留的空状态
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helm · 新建工作</title>
+  <link rel="stylesheet" href="kit/tokens.css">
+  <link rel="stylesheet" href="kit/mockup.css">
+  <link rel="stylesheet" href="kit/app.css">
+  <script src="kit/mockup.js" defer></script>
+  <style>
+    .compose { flex: 1; overflow: auto; display: grid; align-content: center; justify-items: center; gap: var(--space-5); padding: var(--space-6) var(--space-5); }
+    .compose h1 { font-size: 26px; letter-spacing: -0.02em; text-align: center; }
+    .compose .lead { margin-top: 6px; color: var(--muted); text-align: center; }
+    .big { width: min(100%, 680px); border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); transition: border-color .15s, box-shadow .15s; }
+    .big:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 25%, transparent); }
+    .big textarea { display: block; min-height: 112px; padding: 16px 18px 8px; border: 0; background: var(--clear); box-shadow: none; resize: none; outline: none; font-size: 15px; }
+    .big .tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: 8px 10px 10px 12px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9999px; background: var(--surface); color: var(--text); font-size: var(--text-sm); font-weight: 500; }
+    .chip:hover { background: var(--surface-soft); }
+    .chip .mono { color: var(--muted); font-size: 11px; }
+    .big select.chip { width: auto; min-height: 30px; padding: 0 10px; box-shadow: none; }
+    .big .send { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; }
+    .ctx { width: min(100%, 680px); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+    .ctx .card { display: grid; gap: 6px; padding: 12px 14px; }
+    .ctx .card .sect { padding: 0; }
+    .ctx .warn { margin: 0; }
+    .tips { width: min(100%, 680px); display: flex; gap: var(--space-4); flex-wrap: wrap; justify-content: center; font-size: var(--text-sm); color: var(--muted); }
+    .tips b { color: var(--text); font-weight: 600; }
+    .menu-wrap.proj .menu.pop { left: 0; right: auto; top: 36px; min-width: 300px; }
+    .menu.pop .p { display: grid; gap: 2px; height: auto; padding: 8px; }
+    .menu.pop .p small { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .menu.pop .p.on { background: var(--surface-soft); }
+
+
+    .reg { width: min(100%, 520px); display: grid; gap: var(--space-4); padding: var(--space-5); }
+    @media (max-width: 1180px) { .ctx { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sb">
+    <div class="sb-head">
+      <span class="logo">H</span><b>Helm</b>
+      <a class="btn sm primary" href="new-work.html"><span lang="zh">＋ 新建</span><span lang="en">＋ New</span></a>
+    </div>
+    <div class="search" role="button" tabindex="0"><span><span lang="zh">搜索工作</span><span lang="en">Search work</span></span><span class="kbd">⌘K</span></div>
+
+    <div class="inbox">
+      <div class="sect"><span lang="zh">等你处理</span><span lang="en">Needs you</span><span class="count">2</span></div>
+
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">登录页改版</span><span lang="en">Login page redesign</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">调度者问：旧的密码登录保留多久？</span><span lang="en">Coordinator asks: how long to keep password login?</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你决定 · 4 分钟</span><span lang="en">Your call · 4m</span></span><span class="stats"><span class="stat" title="卡片 / Cards">▦ 2/5</span><span class="stat" title="tokens">◇ 184k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">卡片 2 合并进工作分支</span><span lang="en">Card 2 merged</span><time>9m</time></li>
+            <li><span lang="zh">卡片 3 开始验收</span><span lang="en">Card 3 verification started</span><time>6m</time></li>
+            <li class="last"><span lang="zh">卡片 4 需要你决定</span><span lang="en">Card 4 needs your call</span><time>4m</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">直接删除</span><span lang="en">Remove now</span></button>
+            <button class="btn sm"><span lang="zh">一直保留</span><span lang="en">Keep it</span></button>
+            <button class="btn sm primary"><span lang="zh">保留一周</span><span lang="en">One week</span></button>
+          </div>
+        </div>
+      </details>
+
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark att">✦</span><span><span lang="zh">修复导出失败</span><span lang="en">Fix export failure</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">4 张卡片全部通过，整体验收通过，等你审核。</span><span lang="en">All 4 cards passed and the work passed verification. Ready for review.</span></span>
+          <span class="f"><span class="pill att">▲ <span lang="zh">待你审核 · 1 小时</span><span lang="en">Review · 1h</span></span><span class="stats"><span class="stat">▦ 4/4</span><span class="stat">◇ 96k</span></span></span>
+        </summary>
+        <div class="more">
+          <hr>
+          <ol class="tl">
+            <li><span lang="zh">被拒绝的操作</span><span lang="en">Rejected operations</span><span class="num">0</span></li>
+            <li><span lang="zh">未声明结论的派单</span><span lang="en">Dispatches without a verdict</span><span class="num">1</span></li>
+            <li class="last"><span lang="zh">+184 −37，6 个文件</span><span lang="en">+184 −37 in 6 files</span><time>1h</time></li>
+          </ol>
+          <div class="acts">
+            <button class="btn sm"><span lang="zh">看 diff</span><span lang="en">View diff</span></button>
+            <button class="btn sm"><span lang="zh">退回</span><span lang="en">Send back</span></button>
+            <button class="btn sm primary"><span lang="zh">接受</span><span lang="en">Accept</span></button>
+          </div>
+        </div>
+      </details>
+
+      <div class="sect"><span lang="zh">进行中</span><span lang="en">Running</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark run">✦</span><span><span lang="zh">2048 网页版</span><span lang="en">2048 web game</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">卡片 2 正在写合并动画的测试。</span><span lang="en">Card 2 is writing tests for the merge animation.</span></span>
+          <span class="f"><span class="pill run"><span class="spin"></span><span lang="zh">执行中 · 12:40</span><span lang="en">Running · 12:40</span></span><span class="stats"><span class="stat">▦ 1/3</span><span class="stat">◇ 61k</span></span></span>
+        </summary>
+        <div class="more"><hr>
+          <ol class="tl"><li><span lang="zh">卡片 1 完成</span><span lang="en">Card 1 done</span><time>20m</time></li><li class="last"><span lang="zh">卡片 2 第 9 步 · 写测试</span><span lang="en">Card 2 step 9 · writing tests</span><time><span lang="zh">刚刚</span><span lang="en">now</span></time></li></ol>
+          <div class="acts"><button class="btn sm"><span lang="zh">暂停</span><span lang="en">Pause</span></button><button class="btn sm"><span lang="zh">打开</span><span lang="en">Open</span></button></div>
+        </div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark">✦</span><span><span lang="zh">升级依赖</span><span lang="en">Upgrade dependencies</span></span><span class="chev">⌄</span></span>
+          <span class="d"><span lang="zh">你在卡片 1 执行时暂停了它。</span><span lang="en">You paused it during card 1.</span></span>
+          <span class="f"><span class="pill idle"><span lang="zh">已暂停</span><span lang="en">Paused</span></span><span class="stats"><span class="stat">▦ 0/2</span><span class="stat">◇ 8k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm primary"><span lang="zh">恢复</span><span lang="en">Resume</span></button></div></div>
+      </details>
+
+      <div class="sect"><span lang="zh">已结束</span><span lang="en">Ended</span><span class="count">2</span></div>
+      <details class="irow">
+        <summary>
+          <span class="t"><span class="spark ok">✦</span><span><span lang="zh">整理 README</span><span lang="en">Tidy README</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill ok bare"><span lang="zh">用时 38 分钟完成</span><span lang="en">Done in 38m</span></span><span class="stats"><span class="stat">▦ 3/3</span><span class="stat">◇ 42k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button><button class="btn sm"><span lang="zh">删除输出</span><span lang="en">Delete outputs</span></button></div></div>
+      </details>
+      <details class="irow">
+        <summary>
+          <span class="t" style="color: var(--faint)"><span class="spark">✦</span><span><span lang="zh">试用 Codex 驱动</span><span lang="en">Try Codex driver</span></span><span class="chev">⌄</span></span>
+          <span class="f"><span class="pill bare"><span lang="zh">已取消</span><span lang="en">Cancelled</span></span><span class="stats"><span class="stat">◇ 3k</span></span></span>
+        </summary>
+        <div class="more"><hr><div class="acts"><button class="btn sm"><span lang="zh">导出</span><span lang="en">Export</span></button></div></div>
+      </details>
+    </div>
+
+    <div class="usage">
+      <div class="row"><span class="muted"><span lang="zh">执行者</span><span lang="en">Executors</span></span><b class="num">3 / 10 <span class="muted" style="font-weight: 400">· <span lang="zh">排队 2</span><span lang="en">2 queued</span></span></b></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="sb-foot">
+      <span class="seg" role="radiogroup" aria-label="语言 / Language">
+        <input type="radio" name="lang" id="lang-zh" checked><label for="lang-zh">中文</label>
+        <input type="radio" name="lang" id="lang-en"><label for="lang-en">EN</label>
+      </span>
+      <a class="btn ghost sm" href="settings.html"><span lang="zh">设置</span><span lang="en">Settings</span></a>
+    </div>
+  </aside>
+
+  <!-- 填写需求 -->
+  <main class="inset" data-state="default">
+    <header class="top">
+      <nav class="crumb" aria-label="breadcrumb"><span class="c1"><span lang="zh">工作</span><span lang="en">Work</span></span><span class="c1">/</span><span class="c2"><span lang="zh">新建</span><span lang="en">New</span></span></nav>
+    </header>
+    <div class="compose">
+      <div>
+        <h1><span lang="zh">要做什么？</span><span lang="en">What do you need?</span></h1>
+        <p class="lead"><span lang="zh">说清目标就行，细节调度者会和你对齐。</span><span lang="en">State the goal. The coordinator will align the details with you.</span></p>
+      </div>
+
+      <div class="big">
+        <textarea lang="zh" placeholder="例如：登录改成邮箱 + 验证码，旧的密码登录先保留。" aria-label="需求"></textarea>
+        <textarea lang="en" placeholder="e.g. Switch login to email + code. Keep password login for now." aria-label="Request"></textarea>
+        <div class="tools">
+          <div class="menu-wrap proj">
+            <button class="chip" data-toggle="#proj-menu">▣ web-app <span class="mono">main</span> <span class="muted">⌄</span></button>
+            <div class="menu pop" id="proj-menu" hidden>
+              <button class="p on" data-close><span>web-app</span><small>~/code/web-app · main</small></button>
+              <button class="p" data-close><span>helm</span><small>~/Project/Helm · main</small></button>
+              <button class="p" data-close><span>docs-site</span><small>~/code/docs-site · master</small></button>
+              <hr>
+              <button data-toggle="#reg-modal"><span lang="zh">＋ 登记项目…</span><span lang="en">＋ Register project…</span></button>
+            </div>
+          </div>
+          <select class="chip" aria-label="调度者模板 / Coordinator template">
+            <option>✦ claude-coordinator</option>
+            <option>✦ codex-coordinator</option>
+          </select>
+          <a class="send" href="main.html?state=aligning" aria-label="开始 / Start" style="text-decoration: none">↑</a>
+        </div>
+      </div>
+
+      <div class="ctx">
+        <div class="card">
+          <div class="sect"><span lang="zh">基准</span><span lang="en">Base</span></div>
+          <div class="row" style="gap: 6px"><span class="ref">main</span><span class="ref">f69b7b3</span></div>
+          <small class="hint"><span lang="zh">确认工作说明时固定这个提交，从它开工作分支。</span><span lang="en">Pinned when you confirm the brief; the work branch starts here.</span></small>
+        </div>
+        <p class="warn"><span>!</span><span><span lang="zh">有 2 个未提交改动，不会进入工作分支。先提交，或接受不带它们。</span><span lang="en">2 uncommitted changes won't be in the work branch. Commit them first, or go without.</span></span></p>
+      </div>
+
+      <div class="tips">
+        <span><span class="kbd">⏎</span> <span lang="zh">开始</span><span lang="en">start</span></span>
+        <span><span class="kbd">⇧⏎</span> <span lang="zh">换行</span><span lang="en">new line</span></span>
+        <span><span lang="zh">接下来：调度者提问 → 起草工作说明 → <b>你确认</b> → 开始执行</span><span lang="en">Next: coordinator asks → drafts a brief → <b>you confirm</b> → work starts</span></span>
+      </div>
+    </div>
+  </main>
+
+  <!-- 还没登记项目 -->
+  <main class="inset" data-state="no-project">
+    <header class="top">
+      <nav class="crumb" aria-label="breadcrumb"><span class="c1"><span lang="zh">工作</span><span lang="en">Work</span></span><span class="c1">/</span><span class="c2"><span lang="zh">新建</span><span lang="en">New</span></span></nav>
+    </header>
+    <div class="compose">
+      <div class="card reg">
+        <div>
+          <h2 style="font-size: 18px"><span lang="zh">先登记一个项目</span><span lang="en">Register a project first</span></h2>
+          <p class="hint" style="margin-top: 4px"><span lang="zh">Helm 在本机 git 仓库里干活。路径会归一到仓库根目录。</span><span lang="en">Helm works in a local git repo. The path is normalized to the repo root.</span></p>
+        </div>
+        <label class="field"><span lang="zh">仓库路径</span><span lang="en">Repository path</span>
+          <input class="mono" placeholder="/Users/you/code/web-app">
+        </label>
+        <button class="btn primary"><span lang="zh">登记</span><span lang="en">Register</span></button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 登记项目弹窗 -->
+<div class="modal" id="reg-modal" role="dialog" aria-modal="true" aria-label="登记项目 / Register project" hidden>
+  <div class="modal-panel stack">
+    <div class="row spread"><h2 style="font-size: 16px"><span lang="zh">登记项目</span><span lang="en">Register project</span></h2><button class="btn ghost icon" data-close aria-label="关闭 / Close">✕</button></div>
+    <label class="field"><span lang="zh">仓库路径</span><span lang="en">Repository path</span>
+      <input class="mono" placeholder="/Users/you/code/web-app">
+      <span class="hint"><span lang="zh">已登记过的路径会直接返回原项目。</span><span lang="en">An already registered path returns the existing project.</span></span>
+    </label>
+    <div class="row" style="justify-content: flex-end; gap: var(--space-2)"><button class="btn" data-close><span lang="zh">取消</span><span lang="en">Cancel</span></button><button class="btn primary" data-close><span lang="zh">登记</span><span lang="en">Register</span></button></div>
+  </div>
+</div>
+</body>
+</html>

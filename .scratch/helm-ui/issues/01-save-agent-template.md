@@ -4,7 +4,7 @@
 
 **Blocked by:** 无
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 ## 背景
 
