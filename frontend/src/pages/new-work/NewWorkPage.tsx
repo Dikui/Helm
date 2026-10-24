@@ -50,7 +50,7 @@ export function NewWorkPage() {
           }} /></label>
         <div className="new-tools">
           <label>{t('projects')}<select value={project.id} disabled={locked} onChange={event => { setProjectId(event.target.value); setAgentId(undefined); }}>
-            {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.path}</option>)}
           </select></label>
           <button type="button" className="btn" disabled={locked} onClick={() => setRegistering(true)}>{t('newWorkRegisterProject')}</button>
           <label>{t('newWorkCoordinatorAgent')}<select value={selectedAgent} disabled={locked} onChange={event => setAgentId(event.target.value)}>

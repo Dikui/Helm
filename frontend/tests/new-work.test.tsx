@@ -209,7 +209,7 @@ test('项目切换重选默认 Agent，不可用 Agent 显示原因且不能开�
   const second = join(daemon.directory, 'second');
   execFileSync('git', ['clone', daemon.repo, second], { stdio: 'ignore' });
   const project = (await daemon.call('register-project', { path: second })).result;
-  await within(screen.getByLabelText('项目')).findByRole('option', { name: 'second' });
+  await within(screen.getByLabelText('项目')).findByRole('option', { name: /^second · / });
   fireEvent.change(screen.getByLabelText('项目'), { target: { value: project.id } });
   expect((agents as HTMLSelectElement).value).toBe('claude-coordinator');
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
