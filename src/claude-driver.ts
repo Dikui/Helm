@@ -179,8 +179,8 @@ export class ClaudeDriver implements Driver {
         // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
         permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] },
       },
-      // The agent directory is the plugin root; Claude discovers its skills/.
-      ...(agent.skillsPath ? { plugins: [{ type: 'local', path: resolve(agent.directory), skipMcpDiscovery: true }] } : {}),
+      // Claude discovers skills/ under this dispatch or coordinator round's copy.
+      ...(agent.skillsPath ? { plugins: [{ type: 'local', path: resolve(agent.skillsPath, '..'), skipMcpDiscovery: true }] } : {}),
       skills: 'all',
       systemPrompt: agentPrompt(agent),
       permissionMode: 'default', abortController: controller,

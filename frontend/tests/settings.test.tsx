@@ -20,6 +20,13 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   const skills = join(daemon.directory, 'agents', 'claude-executor', 'skills');
   await mkdir(skills);
   await writeFile(join(skills, 'SKILL.md'), '技能正文');
+  const source = join(daemon.directory, 'library-skill');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '共享技能');
+  expect((await daemon.call('install-skill', { path: source })).ok).toBe(true);
+  const original = await agent('claude-executor');
+  expect((await daemon.call('save-agent', { id: original.id, mode: 'update', baseRevision: original.revision,
+    config: { ...original.config, skills: ['library-skill'] }, prompt: original.prompt })).ok).toBe(true);
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
   const editor = await screen.findByRole('form', { name: 'Agent 详情' });
@@ -45,6 +52,7 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   expect(saved.reasoningEffort).toBe('high');
   expect(saved.driver).toBe('codex');
   expect(saved.fast).toBe(true);
+  expect(saved.config.skills).toEqual(['library-skill']);
   expect(saved.revision).not.toBe(revision);
   fireEvent.click(screen.getByRole('button', { name: '复制为新 Agent' }));
   change('Agent id', 'claude-executor');
@@ -64,6 +72,7 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   expect(copy.billing).toBe('api');
   expect(copy.role).toBe('coordinator');
   expect(copy.skills).toEqual([]);
+  expect(copy.config.skills).toEqual(['library-skill']);
 });
 
 test('删除 Agent 须二次确认，删除后回到列表；项目默认调度者的 Agent 拒绝删除并显示原因', async () => {

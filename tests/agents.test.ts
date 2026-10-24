@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -76,7 +76,87 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
 });
 
 const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', reasoningEffort: 'high', fast: false,
-  home: 'shared', description: '界面保存的执行者' };
+  home: 'shared', description: '界面保存的执行者', skills: [] };
+
+test('用户经 CLI 安装库 skill，HTTP 每次读取目录，删除记事件', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'source-skill');
+  await mkdir(join(source, 'references'), { recursive: true });
+  await writeFile(join(source, 'SKILL.md'), '库 skill 正文');
+  await writeFile(join(source, 'references', 'guide.md'), '附加资料');
+  const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)),
+    'install-skill', '--url', daemon.url, '--path', source]);
+  ok(JSON.parse(stdout));
+  const library = join(daemon.directory, 'data', 'library', 'skills');
+  assert.equal(await readFile(join(library, 'source-skill', 'references', 'guide.md'), 'utf8'), '附加资料');
+  assert.deepEqual((await daemon.call('list-library')).result, [{ type: 'skill', name: 'source-skill', agents: [] }]);
+  await mkdir(join(library, 'manual'));
+  await writeFile(join(library, 'manual', 'SKILL.md'), '手动放入');
+  assert.deepEqual((await daemon.call('list-library')).result.map((entry: any) => entry.name), ['manual', 'source-skill']);
+  ok(await daemon.call('delete-library-entry', { type: 'skill', name: 'source-skill' }));
+  assert.deepEqual(await readdir(library), ['manual']);
+  const events = (await daemon.call('get-events')).result.filter((event: any) => event.action.startsWith('library-'));
+  assert.deepEqual(events.map((event: any) => [event.action, event.actor.type, event.details.name]),
+    [['library-skill-installed', 'user', 'source-skill'], ['library-entry-deleted', 'user', 'source-skill']]);
+});
+
+test('库 skill 安装拒绝重名、缺 SKILL.md、非法名字和符号链接，拒绝不改文件', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '原文');
+  ok(await daemon.call('install-skill', { path: source, name: 'valid' }));
+  await writeFile(join(source, 'SKILL.md'), '新文');
+  assert.equal((await daemon.call('install-skill', { path: source, name: 'valid' })).error.code, 'LIBRARY_ENTRY_EXISTS');
+  const library = join(daemon.directory, 'data', 'library', 'skills');
+  assert.equal(await readFile(join(library, 'valid', 'SKILL.md'), 'utf8'), '原文');
+  for (const name of ['../escape', 'Upper', '', '-bad', 'a'.repeat(65)]) {
+    assert.equal((await daemon.call('install-skill', { path: source, name })).error.code, 'INVALID_PARAMS');
+  }
+  const missing = join(daemon.directory, 'missing');
+  await mkdir(missing);
+  assert.equal((await daemon.call('install-skill', { path: missing })).error.code, 'INVALID_SKILL_PATH');
+  const linked = join(daemon.directory, 'linked');
+  await symlink(source, linked);
+  assert.equal((await daemon.call('install-skill', { path: linked })).error.code, 'INVALID_SKILL_PATH');
+  await symlink(join(source, 'SKILL.md'), join(source, 'link'));
+  assert.equal((await daemon.call('install-skill', { path: source, name: 'nested-link' })).error.code, 'INVALID_SKILL_PATH');
+  await rm(join(source, 'link'));
+  await rm(join(source, 'SKILL.md'));
+  await symlink(join(library, 'valid', 'SKILL.md'), join(source, 'SKILL.md'));
+  assert.equal((await daemon.call('install-skill', { path: source, name: 'linked-skill' })).error.code, 'INVALID_SKILL_PATH');
+  assert.deepEqual(await readdir(library), ['valid']);
+  assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
+});
+
+test('Agent 保存和复制保留库 skill 引用，列表显示引用，拒绝删除被引用条目', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'shared-skill');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '共享 skill');
+  ok(await daemon.call('install-skill', { path: source }));
+  const created = await daemon.call('save-agent', { id: 'first', mode: 'create',
+    config: { ...savedConfig, skills: ['shared-skill'] }, prompt: '附加要求' });
+  ok(created);
+  assert.deepEqual(created.result.config.skills, ['shared-skill']);
+  const copy = await daemon.call('save-agent', { id: 'copy', mode: 'create', config: { ...created.result.config, fast: true }, prompt: created.result.prompt });
+  ok(copy);
+  assert.equal(copy.result.available, false);
+  assert.deepEqual(JSON.parse(await readFile(join(daemon.agentDir, 'copy', 'config.json'), 'utf8')).skills, ['shared-skill']);
+  assert.deepEqual((await daemon.call('list-library')).result[0].agents, ['copy', 'first']);
+  const denied = await daemon.call('delete-library-entry', { type: 'skill', name: 'shared-skill' });
+  assert.equal(denied.error.code, 'LIBRARY_ENTRY_IN_USE');
+  assert.deepEqual(denied.error.details.agents, ['copy', 'first']);
+  assert.equal(await readFile(join(daemon.directory, 'data', 'library', 'skills', 'shared-skill', 'SKILL.md'), 'utf8'), '共享 skill');
+  for (const id of ['first', 'copy']) {
+    const current = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === id);
+    ok(await daemon.call('save-agent', { id, mode: 'update', baseRevision: current.revision,
+      config: { ...current.config, skills: [] }, prompt: current.prompt }));
+  }
+  ok(await daemon.call('delete-library-entry', { type: 'skill', name: 'shared-skill' }));
+  const events = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'agent-saved');
+  assert.deepEqual(events.map((event: any) => event.details.skills), [['shared-skill'], ['shared-skill'], [], []]);
+});
 
 test('用户经 HTTP、CLI 和 MCP 保存 Agent，写入文件、检查可用性并记录事件', async t => {
   const checked: string[] = [];
@@ -232,6 +312,13 @@ async function startWork(daemon: Awaited<ReturnType<typeof fixture>>) {
 const forbiddenSave: FakeStep = { type: 'tool', name: 'save-agent',
   arguments: { id: 'agent-must-not-create', config: savedConfig, prompt: '越权写 Agent', mode: 'create' },
   check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') };
+
+const forbiddenLibrary: FakeStep[] = [
+  { type: 'tool', name: 'install-skill', arguments: { path: '/must-not-install', name: 'shared' },
+    check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
+  { type: 'tool', name: 'delete-library-entry', arguments: { type: 'skill', name: 'shared' },
+    check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
+];
 
 test('保存调度者 Agent 只在下一轮生效，调度者不能经 MCP 保存 Agent', async t => {
   let release!: () => void;
@@ -416,6 +503,74 @@ const alignment = (ctx: FakeContext): FakeStep[] => [
   { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: 'Agent 文件生效', boundary: '本机', criteria: '快照和驱动一致' }, check: ok },
 ];
 
+test('派单和调度轮次复制自带与库 skill，排队在启动时组装，运行中的副本不受库变动影响', async t => {
+  let releaseFirst!: () => void;
+  let releaseSecond!: () => void;
+  const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const second = new Promise<void>(resolve => { releaseSecond = resolve; });
+  t.after(() => { releaseFirst(); releaseSecond(); });
+  const seen: FakeContext['options'][] = [];
+  const executors = new FakeDriver([first, second].map(hold => ctx => {
+    seen.push(ctx.options);
+    return [...forbiddenLibrary, { type: 'hang', until: hold }];
+  }));
+  const roundOptions: FakeContext['options'][] = [];
+  const rounds = new FakeDriver([ctx => { roundOptions.push(ctx.options); return [...forbiddenLibrary, ...alignment(ctx)]; }, ctx => {
+    roundOptions.push(ctx.options);
+    return ['first', 'queued'].flatMap(key => [
+      { type: 'tool' as const, name: 'create-card', arguments: { workId: workIdOf(ctx), key, content: key }, saveAs: key, check: ok },
+      { type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get(key) as any).result.id, key, agentId: 'file-executor' }), check: ok },
+    ]);
+  }]);
+  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }),
+    start: options => (options.agent.role === 'coordinator' ? rounds : executors).start(options) } });
+  const source = join(daemon.directory, 'shared');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '库 skill 第一版');
+  ok(await daemon.call('install-skill', { path: source }));
+  for (const [id, role] of [['claude-coordinator', 'coordinator'], ['file-executor', 'executor']]) {
+    await daemon.writeAgent(id!, { role, skills: ['shared'] });
+    const own = join(daemon.agentDir, id!, 'skills', 'own');
+    await mkdir(own, { recursive: true });
+    await writeFile(join(own, 'SKILL.md'), `${role} 自带 skill`);
+  }
+  ok(await daemon.call('set-concurrency', { limit: 1 }));
+  const { work, events } = await startWork(daemon);
+  const gate = (await daemon.call('list-pending')).result[0];
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
+  const dispatches = async (): Promise<any[]> => (await daemon.call('list-dispatches', { workId: work.id })).result;
+  const queued = await until(dispatches, values => values.length === 2 && values[0].status === 'running' && values[1].status === 'queued' && seen.length === 1);
+  for (const options of [...roundOptions, seen[0]!]) {
+    assert.equal(options.agent.skillsPath, join(options.dataDir!, 'skills'));
+    assert.deepEqual(await readdir(options.agent.skillsPath!), ['own', 'shared']);
+    assert.equal((await lstat(join(options.agent.skillsPath!, 'shared'))).isSymbolicLink(), false);
+    assert.equal(await readFile(join(options.agent.skillsPath!, 'shared', 'SKILL.md'), 'utf8'), '库 skill 第一版');
+    assert.equal(await readFile(join(options.agent.skillsPath!, 'own', 'SKILL.md'), 'utf8'), `${options.agent.role} 自带 skill`);
+  }
+  await assert.rejects(lstat(join(queued[1].outputPath, '..', 'skills')), { code: 'ENOENT' });
+  const libraryPath = join(daemon.directory, 'data', 'library', 'skills', 'shared');
+  await writeFile(join(libraryPath, 'SKILL.md'), '库 skill 第二版');
+  await writeFile(join(daemon.agentDir, 'file-executor', 'skills', 'own', 'SKILL.md'), '自带 skill 第二版');
+  releaseFirst();
+  await until(dispatches, values => values[1]?.status === 'running' && seen.length === 2);
+  assert.equal(await readFile(join(seen[1]!.agent.skillsPath!, 'shared', 'SKILL.md'), 'utf8'), '库 skill 第二版');
+  assert.equal(await readFile(join(seen[1]!.agent.skillsPath!, 'own', 'SKILL.md'), 'utf8'), '自带 skill 第二版');
+  assert.equal(await readFile(join(seen[0]!.agent.skillsPath!, 'own', 'SKILL.md'), 'utf8'), 'executor 自带 skill');
+  for (const id of ['claude-coordinator', 'file-executor']) {
+    const entry = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === id);
+    ok(await daemon.call('save-agent', { id, mode: 'update', baseRevision: entry.revision, config: { ...entry.config, skills: [] }, prompt: entry.prompt }));
+  }
+  ok(await daemon.call('delete-library-entry', { type: 'skill', name: 'shared' }));
+  assert.equal(await readFile(join(seen[0]!.agent.skillsPath!, 'shared', 'SKILL.md'), 'utf8'), '库 skill 第一版');
+  assert.equal(await readFile(join(seen[1]!.agent.skillsPath!, 'shared', 'SKILL.md'), 'utf8'), '库 skill 第二版');
+  releaseSecond();
+  const ended = await until(dispatches, values => values.length === 2 && values.every(value => value.status === 'ended'));
+  assert.equal(ended[0].agent.skillsPath, seen[0]!.agent.skillsPath);
+  assert.equal(ended[1].agent.skillsPath, seen[1]!.agent.skillsPath);
+  assert.ok((await events()).filter(event => event.action === 'round-agent-loaded').every(event => event.details.agent.skillsPath === null
+    || event.details.agent.skillsPath === join(daemon.directory, 'data', 'rounds', event.object.id, 'skills')));
+});
+
 test('每次派单和调度轮次读取文件并留快照，下一轮按文件中的驱动路由，无须重启', async t => {
   const seen: { driver: string; agent: any }[] = [];
   const jobs = ['first'];
@@ -448,7 +603,9 @@ test('每次派单和调度轮次读取文件并留快照，下一轮按文件�
   assert.equal(first.agent.model, 'executor-v1');
   assert.equal(first.agent.prompt, '执行策略一');
   assert.equal(first.agent.fast, false);
-  assert.equal(first.agent.skillsPath, join(daemon.agentDir, 'file-executor', 'skills'));
+  assert.equal(first.agent.skillsPath, null);
+  await assert.rejects(lstat(join(first.outputPath, '..', 'skills')), { code: 'ENOENT' });
+  assert.ok(seen.filter(value => value.agent.role === 'coordinator').every(value => value.agent.skillsPath === null));
   for (const [id, role, model, prompt] of [
     ['claude-coordinator', 'coordinator', 'coordinator-v2', '调度策略二'],
     ['file-executor', 'executor', 'executor-v2', '执行策略二'],
@@ -474,7 +631,7 @@ test('每次派单和调度轮次读取文件并留快照，下一轮按文件�
 });
 
 test('排队派单在实际启动时重读 Agent，已经运行的派单保留原快照', async t => {
-  for (const change of ['valid', 'broken'] as const) await t.test(change, async t => {
+  for (const change of ['valid', 'broken', 'missing-skill'] as const) await t.test(change, async t => {
     let release!: () => void;
     const hold = new Promise<void>(resolve => { release = resolve; });
     t.after(() => release());
@@ -498,9 +655,10 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     const dispatches = async (): Promise<any[]> => (await daemon.call('list-dispatches', { workId: work.id })).result;
     const queued = await until(dispatches, values => values.length === 2 && values[0].status === 'running' && values[1].status === 'queued');
     const card = (await daemon.call('get-card', { workId: work.id, cardId: queued[1].cardId })).result;
-    if (change === 'broken') {
+    if (change !== 'valid') {
       await writeFile(join(card.workPath, 'unstarted.txt'), '派单尚未开始');
-      await writeFile(join(daemon.agentDir, 'file-executor', 'config.json'), '{');
+      if (change === 'broken') await writeFile(join(daemon.agentDir, 'file-executor', 'config.json'), '{');
+      else await daemon.writeAgent('file-executor', { skills: ['absent'] });
     } else {
       const current = (await daemon.call('list-agents')).result.find((item: any) => item.id === 'file-executor');
       ok(await daemon.call('save-agent', { id: 'file-executor', mode: 'update', baseRevision: current.revision,
@@ -514,7 +672,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     assert.equal(values[0].agent.model, 'before-queue');
     const denied = (await events()).find(event => event.action === 'operation-rejected' && event.actor.type === 'dispatch' && event.actor.id === values[0].id);
     assert.equal(denied?.details.code, 'FORBIDDEN');
-    if (change === 'broken') {
+    if (change !== 'valid') {
       assert.equal(values[1].endReason, 'error');
       assert.equal(values[1].startCommit, null);
       assert.equal(values[1].endCommit, null);
@@ -522,6 +680,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
       assert.match(execFileSync('git', ['-C', card.workPath, 'status', '--porcelain'], { encoding: 'utf8' }), /unstarted.txt/);
       const ended = (await events()).find(value => value.action === 'dispatch-ended' && value.dispatchId === values[1].id);
       assert.equal(ended.details.error.code, 'AGENT_UNAVAILABLE');
+      if (change === 'missing-skill') assert.match(ended.details.error.reason, /absent/);
       return;
     }
     assert.equal(values[1].agent.model, 'after-queue');
@@ -548,7 +707,7 @@ test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', a
 test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，健康 Agent 仍能派单', async t => {
   const rounds = new FakeDriver([alignment, ctx => [
     { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '检查不可用 Agent' }, saveAs: 'card', check: ok },
-    ...['broken', 'missing', 'fast', '../outside'].map(agentId => ({
+    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill'].map(agentId => ({
       type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: agentId, agentId }),
       check: (value: any) => {
         assert.equal(value.ok, false, JSON.stringify(value));
@@ -564,11 +723,28 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   await daemon.writeAgent('fast', { fast: true });
   await daemon.writeAgent('broken');
   await writeFile(join(daemon.agentDir, 'broken', 'config.json'), '{');
+  await daemon.writeAgent('missing-skill', { skills: ['absent'] });
+  await daemon.writeAgent('clashing-skill', { skills: ['shared'] });
+  const library = join(daemon.directory, 'data', 'library', 'skills', 'shared');
+  await mkdir(library, { recursive: true });
+  await writeFile(join(library, 'SKILL.md'), '库 skill');
+  await mkdir(join(daemon.agentDir, 'clashing-skill', 'skills', 'shared'), { recursive: true });
+  const agents = (await daemon.call('list-agents')).result;
+  for (const [id, reason] of [['missing-skill', /absent/], ['clashing-skill', /同名.*shared/]] as const) {
+    const agent = agents.find((entry: any) => entry.id === id);
+    assert.equal(agent.available, false);
+    assert.match(agent.reason, reason);
+  }
+  const repaired = join(daemon.directory, 'data', 'library', 'skills', 'absent');
+  await mkdir(repaired);
+  await writeFile(join(repaired, 'SKILL.md'), '补回缺失条目');
+  assert.equal((await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'missing-skill').available, true);
+  await rm(repaired, { recursive: true });
   const { work, events } = await startWork(daemon);
   const gate = (await daemon.call('list-pending')).result[0];
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const values = await until(events, values => values.some(value => value.action === 'dispatch-ended'));
-  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 4);
+  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 6);
   const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].agentId, 'healthy');

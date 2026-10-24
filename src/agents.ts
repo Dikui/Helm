@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
 import type { AgentAvailability } from './driver.js';
 import { acpAgents } from './acp-agents.js';
+import { libraryName, SkillLibrary } from './library.js';
 
 export const agentSettings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
@@ -14,6 +15,7 @@ export const agentSettings = z.object({
   reasoningEffort: z.string().trim().min(1).nullable(),
   fast: z.boolean().default(false), home: z.enum(['shared', 'dedicated']),
   description: z.string().trim().min(1),
+  skills: z.array(libraryName).default([]),
 }).strict();
 
 export const saveAgentSchema = z.object({
@@ -22,8 +24,8 @@ export const saveAgentSchema = z.object({
   mode: z.enum(['update', 'create']), baseRevision: z.string().min(1).optional(),
 }).strict();
 
-export interface AgentConfig extends z.infer<typeof agentSettings> {
-  id: string; prompt: string; directory: string; skillsPath: string | null;
+export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills'> {
+  id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[];
 }
 
 function revision(config: Buffer, prompt: Buffer) {
@@ -37,7 +39,8 @@ export class AgentCatalog {
   private checker?: (agent: AgentConfig) => Promise<AgentAvailability>;
   private report?: (id: string, result: AgentAvailability) => void;
 
-  constructor(readonly directory: string, private drivers: readonly string[] = ['claude-sdk']) {}
+  constructor(readonly directory: string, private drivers: readonly string[] = ['claude-sdk'],
+    readonly library = new SkillLibrary(join(directory, '..', 'library', 'skills'))) {}
 
   save(input: z.infer<typeof saveAgentSchema>) {
     const { id, config, prompt, mode, baseRevision } = saveAgentSchema.parse(input);
@@ -142,7 +145,7 @@ export class AgentCatalog {
     return this.list();
   }
 
-  private read(id: string): AgentConfig & { revision: string } {
+  private read(id: string): AgentConfig & { revision: string; config: z.infer<typeof agentSettings> } {
     if (!id || id === '.' || id === '..' || /[/\\\0]/.test(id)) throw new Error('Agent id 必须是目录名。');
     const directory = join(this.directory, id);
     const configFile = readFileSync(join(directory, 'config.json'));
@@ -150,14 +153,30 @@ export class AgentCatalog {
     const config = agentSettings.parse(JSON.parse(configFile.toString('utf8')));
     const prompt = promptFile.toString('utf8');
     const skillsPath = join(directory, 'skills');
-    return { id, ...config, prompt, revision: revision(configFile, promptFile), directory,
+    return { id, ...config, config, prompt, revision: revision(configFile, promptFile), directory,
       skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
   }
 
   private unavailable(agent: AgentConfig) {
     if (agent.driver === 'claude-sdk' && agent.fast) return 'Claude fast 在订阅下要开 extra usage 并计入 extra usage';
     if (!this.drivers.includes(agent.driver)) return `驱动 ${agent.driver} 未登记。`;
+    for (const name of agent.skills ?? []) {
+      try { this.library.read(name); }
+      catch (error) { return `库 skill ${name} 不可用：${error instanceof Error ? error.message : String(error)}`; }
+      if (agent.skillsPath && readdirSync(agent.skillsPath).includes(name)) return `Agent 自带 skill 与库 skill 同名：${name}`;
+    }
     return acpAgents[agent.driver as keyof typeof acpAgents]?.unavailable(agent) ?? null;
+  }
+
+  // Keep references even when another setting makes the Agent unavailable.
+  skillReferences(name: string) {
+    if (!existsSync(this.directory)) return [];
+    return readdirSync(this.directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().filter(id => {
+      try {
+        const config = JSON.parse(readFileSync(join(this.directory, id, 'config.json'), 'utf8'));
+        return Array.isArray(config.skills) && config.skills.includes(name);
+      } catch { return false; }
+    });
   }
 
   get(id: string, role?: AgentConfig['role']): AgentConfig {
@@ -172,6 +191,27 @@ export class AgentCatalog {
     const reason = this.unavailable(agent) ?? (role && agent.role !== role ? `Agent 角色必须为 ${role}。` : null);
     if (reason) throw new RuleError('AGENT_UNAVAILABLE', reason, 409, { agentId: id });
     return agent;
+  }
+
+  // Each dispatch or coordinator round owns a fixed copy, assembled only at startup.
+  snapshot(agent: AgentConfig, dataDir: string): AgentConfig {
+    const skillsPath = join(dataDir, 'skills');
+    try {
+      const ownEntries = agent.skillsPath ? readdirSync(agent.skillsPath) : [];
+      const selected = [...new Set(agent.skills ?? [])].map(name => ({ name, path: this.library.read(name) }));
+      if (!ownEntries.length && !selected.length) return { ...agent, skillsPath: null };
+      for (const { name } of selected) if (ownEntries.includes(name)) {
+        throw new Error(`Agent 自带 skill 与库 skill 同名：${name}`);
+      }
+      mkdirSync(dataDir, { recursive: true });
+      if (ownEntries.length) cpSync(agent.skillsPath!, skillsPath, { recursive: true, dereference: true });
+      else mkdirSync(skillsPath);
+      for (const { name, path } of selected) cpSync(path, join(skillsPath, name), { recursive: true, dereference: true });
+      return { ...agent, skillsPath };
+    } catch (error) {
+      rmSync(skillsPath, { recursive: true, force: true });
+      throw new RuleError('AGENT_UNAVAILABLE', `Agent ${agent.id} 的 skill 无法组装：${error instanceof Error ? error.message : String(error)}`, 409, { agentId: agent.id });
+    }
   }
 
   list() {
@@ -198,7 +238,7 @@ export class AgentCatalog {
 }
 
 // The built-in templates that shipped before agents moved to the data directory.
-const legacyAgents: Record<string, z.infer<typeof agentSettings>> = {
+const legacyAgents: Record<string, z.input<typeof agentSettings>> = {
   'claude-coordinator': { role: 'coordinator', driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared',
     description: '对齐工作说明，拆卡、派单、安排验收并发起审核' },
   'claude-executor': { role: 'executor', driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared',

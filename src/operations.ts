@@ -16,6 +16,7 @@ import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
+import { deleteLibraryEntry, installSkill, libraryName, listLibrary } from './library.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -49,6 +50,20 @@ const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSch
 const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id AS defaultCoordinatorAgentId';
 
 export const operations: readonly Operation[] = [
+  operation({
+    name: 'list-library', description: '列出库条目及引用它们的 Agent', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({}).strict(), execute: ({ store }) => listLibrary(store),
+  }),
+  operation({
+    name: 'install-skill', description: '从本地目录安装 skill 到库，可指定名字', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ path: z.string().min(1), name: libraryName.optional() }).strict(),
+    execute: ({ store, actor }, { path, name }) => installSkill(store, actor, path, name),
+  }),
+  operation({
+    name: 'delete-library-entry', description: '删除未被 Agent 引用的库条目', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ type: z.literal('skill'), name: libraryName }).strict(),
+    execute: ({ store, actor }, { name }) => deleteLibraryEntry(store, actor, name),
+  }),
   operation({
     name: 'export-outputs', description: '导出已结束工作的全部输出、成果文件和任务库记录为 .tar.gz', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), targetPath: z.string().min(1) }).strict(),
@@ -110,7 +125,7 @@ export const operations: readonly Operation[] = [
     async execute({ store, actor }, params) {
       const agent = store.agents.save(params);
       store.transaction(() => store.appendEvent(actor, { type: 'agent', id: agent.id }, 'agent-saved',
-        { mode: params.mode, revision: agent.revision }));
+        { mode: params.mode, revision: agent.revision, skills: agent.skills }));
       try { await store.agents.check(agent.id); }
       catch (error) { if (!(error instanceof RuleError)) throw error; }
       const saved = store.agents.list().find(item => item.id === agent.id)!;

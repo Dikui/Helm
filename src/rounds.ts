@@ -189,8 +189,9 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const agent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
+      const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
+      const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent }, { workId });

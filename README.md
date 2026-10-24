@@ -70,6 +70,18 @@ API Agent 仍各用 `~/.helm/agent-homes/<Agent id>/`，Claude 设置 `CLAUDE_CO
 
 修改文件后下一次派单或调度轮次即生效，排队派单在实际启动时重读；已有运行不受影响。`list-agents` 显示配置、计费方式 `billing`（`subscription` / `api`）、是否可用及原因。坏 Agent 独立报错，使用时返回 `AGENT_UNAVAILABLE`；创建工作时就校验调度者 Agent，不存在或不可用直接拒绝。派单详情的 `agent` 和 `round-agent-loaded` 事件中的 `agent` 保留当次解析快照（包含附加提示词），用户及调度者均可读取。内置角色规则在前，附加提示词其次，端口段、提交结论、清理、截图路径、不推送及验收说明快照等运行约定由代码追加在最后。
 
+共享 skill 安装在 `<dataDir>/library/skills/<名字>/`，默认是 `~/.helm/library/skills/`。目录必须含普通文件 `SKILL.md`，安装拒绝符号链接和同名条目；名字为 1–64 位小写字母、数字或连字符，以字母或数字开头。用户可以直接放入目录，也可以通过 CLI（或同名 HTTP 操作）管理：
+
+```sh
+helm install-skill --path /absolute/path/to/skill --name shared-skill
+helm list-library
+helm delete-library-entry --type skill --name shared-skill
+```
+
+Agent 的 `config.json` 用 `"skills": ["shared-skill"]` 引用库 skill，省略时为空数组。`list-agents` 的 `config` 可直接用于 `save-agent --config`，保存和复制会带上库引用；原有 `skills` 列表仍表示 Agent 自带 `skills/` 的目录条目。`list-library` 返回每个条目的 `type`、`name` 和引用它的 Agent id 列表 `agents`。仍被引用的条目不能删除，错误详情含引用列表；缺失引用或自带 skill 与库 skill 同名会使 Agent 不可用。安装、删除及 Agent 保存均记录事件。
+
+派单和调度轮次在实际启动时把自带和选中的库 skill 复制到各自数据目录的 `skills/`，当次 Agent 快照的 `skillsPath` 指向这份副本。没有 skill 时不创建目录；库和 Agent 文件的后续变动不影响已启动运行。Claude 从副本的上一级加载插件，其余驱动沿用现有 skills 接法。
+
 调度轮次失败会新开会话重投未处理事件，连续失败三次或调度者额度用完时暂停工作。`list-pending`、`list-works` 和 SSE `needs-user-attention` 展示运行层暂停原因，用户以 `helm resume-work --workId <工作id>` 手动恢复。每轮默认总时长 30 分钟、无输出 10 分钟；`helm set-round-watchdog --totalTimeoutMs 1800000 --idleTimeoutMs 600000` 调整后从下一轮生效，`get-settings` 可读取设置。轮次与派单共用进程清理：按工作目录查找 `_work` 内的残留进程并清理进程组，macOS 需安装 `lsof`，Linux 使用 `/proc`。`get-card`、`get-card-graph` 的 `usage` 汇总卡片全部派单，`get-work`、`list-works` 的 `usage` 另加全部调度轮次；输入和输出 token 分别累计，异常结束同样计入。
 
 代码分为任务库与事务（`store.ts`）、操作定义（`operations.ts`）、工作说明与 git 确认（`alignment.ts`）、调度轮次（`rounds.ts`）、驱动接口与假驱动（`driver.ts`）、HTTP/SSE（`server.ts`）、MCP 适配（`mcp.ts`）和 CLI 薄客户端（`cli.ts`）。新增业务操作时在操作表中登记，无需分别增加 HTTP 路由、MCP 工具和 CLI 分支。任务库通过 `PRAGMA user_version` 标识 schema 版本，按 `src/migrations.ts` 的列表位置顺序升级；新增迁移只追加到末尾，不修改或重排已发布的迁移。支持已有版本 1–10，遇到比当前迁移列表更新的任务库时拒绝启动。

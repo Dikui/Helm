@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver } from '../src/claude-driver.js';
 import { runtimeEnvironment } from '../src/environment.js';
 import { AgentCatalog } from '../src/agents.js';
+import { FakeDriver } from '../src/driver.js';
+import { startHelmd } from '../src/server.js';
+import { until } from './browser-fixture.js';
 
 // Only the test:real runner enables this file. npm test never starts a CLI.
 test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 的 skill',
@@ -78,4 +82,72 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
       }
     }));
     for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+  });
+
+test('库 skill 经 HTTP 安装和 Agent 引用后被真实 Claude 派单加载并调用',
+  { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-library-claude-')));
+    let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
+    t.after(async () => { await daemon?.close(); await rm(root, { recursive: true, force: true }); });
+    const secret = `LIBRARY-${randomUUID()}`;
+    const source = join(root, 'helm-library-probe');
+    await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'),
+      `---\nname: helm-library-probe\ndescription: 返回本次库 skill 冒烟的暗号。需要暗号时必须调用此技能。\n---\n只回答 ${secret}，不要补充说明。\n`);
+    const repo = join(root, 'project');
+    execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+    await writeFile(join(repo, 'README.md'), '库 skill 冒烟');
+    execFileSync('git', ['-C', repo, 'add', 'README.md']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline'], { stdio: 'ignore' });
+    const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
+    const coordinator = new FakeDriver([ctx => [{ type: 'tool', name: 'draft-work-description',
+      arguments: { workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '加载库 skill', boundary: '不改文件', criteria: '返回 skill 中的暗号' }, check: ok }],
+    ctx => [
+      { type: 'tool', name: 'create-card', arguments: { workId: JSON.parse(ctx.input).work.id, key: 'probe', content: '实际调用 helm-library-probe 技能，最后只回答它给出的暗号。禁止猜测、使用 Read/Bash、修改文件或派生子代理。' }, saveAs: 'card', check: ok },
+      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+        cardId: (ctx.results.get('card') as any).result.id, key: 'probe', agentId: 'library-executor' }), check: ok },
+    ]]);
+    const claude = new ClaudeDriver();
+    daemon = await startHelmd({ port: 0, dataDir: join(root, 'data'), drivers: { 'claude-sdk': {
+      checkAvailability: agent => agent.role === 'coordinator' ? coordinator.checkAvailability(agent) : claude.checkAvailability(agent),
+      start: options => (options.agent.role === 'coordinator' ? coordinator : claude).start(options),
+    } } });
+    const call = async (name: string, params = {}): Promise<any> => {
+      const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+      const value = await response.json() as any;
+      ok(value);
+      return value.result;
+    };
+    await call('install-skill', { path: source });
+    for (const role of ['coordinator', 'executor']) {
+      const agent = await call('save-agent', { id: `library-${role}`, mode: 'create', prompt: '不改文件，不使用 Bash，不启动浏览器，不派生子代理，不提交。',
+        config: { role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: '库 skill 冒烟',
+          skills: role === 'executor' ? ['helm-library-probe'] : [] } });
+      assert.equal(agent.available, true, agent.reason ?? 'Agent 不可用');
+    }
+    const project = await call('register-project', { path: repo });
+    await call('set-project-coordinator-agent', { projectId: project.id, agentId: 'library-coordinator' });
+    const { work } = await call('send-message', { projectId: project.id, key: 'start', body: '加载库 skill' });
+    const pending = await until(() => call('list-pending'), gates => gates.some((gate: any) => gate.descriptionId));
+    const gate = pending.find((gate: any) => gate.kind === 'work-confirmation');
+    await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.descriptionId, decision: 'confirm' });
+    const dispatches = await until(() => call('list-dispatches', { workId: work.id }), values => values.length === 1 && values[0].status === 'ended', 180_000);
+    const dispatch = dispatches[0];
+    assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? '派单未正常结束');
+    assert.equal(dispatch.finalAnswer?.trim(), secret);
+    assert.equal(dispatch.agent.skillsPath, join(dirname(dispatch.outputPath), 'skills'));
+    assert.ok((await readFile(join(dispatch.agent.skillsPath, 'helm-library-probe', 'SKILL.md'), 'utf8')).includes(secret));
+    const output = await call('get-dispatch-output', { workId: work.id, dispatchId: dispatch.id });
+    const messages: SDKMessage[] = output.filter((event: any) => event.type === 'output').map((event: any) => JSON.parse(event.text));
+    const init = messages.find(message => message.type === 'system' && message.subtype === 'init');
+    assert.ok(init && init.type === 'system' && init.subtype === 'init', '须保留真实 init');
+    const skill = init.skills.find(name => name.endsWith(':helm-library-probe'));
+    assert.ok(skill, JSON.stringify(init.skills));
+    assert.ok(init.plugins.some(plugin => plugin.path === dirname(dispatch.agent.skillsPath)), '须加载派单目录中的插件');
+    const calls = messages.flatMap(message => message.type === 'assistant' ? message.message.content
+      .filter(block => block.type === 'tool_use').filter(block => block.name === 'Skill' && (block.input as { skill: string }).skill === skill) : []);
+    assert.ok(calls.length > 0, '须实际调用库 skill');
+    assert.ok(calls.some(call => messages.some(message => message.type === 'user' && Array.isArray(message.message.content)
+      && message.message.content.some(block => block.type === 'tool_result' && block.tool_use_id === call.id && !block.is_error))), '库 Skill 调用须成功');
+    t.diagnostic(`库 skill ${skill} 已由真实 Claude 派单加载并调用，暗号验证通过`);
   });

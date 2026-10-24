@@ -72,13 +72,16 @@ test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent�
       role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: 'Test agent',
     }));
     await writeFile(join(directory, 'prompt.md'), 'Test strategy');
-    const agent = new AgentCatalog(base.cwd).get(id);
+    const original = new AgentCatalog(base.cwd).get(id);
+    const runtimeDirectory = join(base.cwd, `run-${role}`);
+    await mkdir(join(runtimeDirectory, 'skills'), { recursive: true });
+    const agent = { ...original, skillsPath: join(runtimeDirectory, 'skills') };
     let inspected = false;
     const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
       query: args => ({ close() {}, async *[Symbol.asyncIterator]() {
         inspected = true;
         const sdk = args.options!;
-        assert.deepEqual(sdk.plugins, [{ type: 'local', path: directory, skipMcpDiscovery: true }]);
+        assert.deepEqual(sdk.plugins, [{ type: 'local', path: runtimeDirectory, skipMcpDiscovery: true }]);
         assert.equal(sdk.skills, 'all');
         assert.ok((sdk.tools as string[]).includes('Skill'));
         assert.equal((await sdk.canUseTool!('Skill', { skill: `${id}:passphrase` }, context))?.behavior, 'allow');

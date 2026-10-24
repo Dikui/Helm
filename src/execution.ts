@@ -169,8 +169,9 @@ export class ExecutionRunner {
     const wallTimer = setTimeout(() => timeout('wall'), Number(watchdog.dispatch_wall_timeout_ms));
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
-      const agent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
+      const configuredAgent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
       if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
+      const agent = this.store.agents.snapshot(configuredAgent, join(dispatch.outputPath, '..'));
       if (dispatch.resumeSessionId && (dispatch.agent.driver ?? 'claude-sdk') !== agent.driver) {
         throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
