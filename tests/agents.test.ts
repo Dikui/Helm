@@ -66,6 +66,7 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
   assert.match(fast.reason, /Claude fast 在订阅下要开 extra usage 并计入 extra usage/);
   const broken = agents.find((item: any) => item.id === 'broken-executor');
   assert.equal(broken.available, false);
+  assert.deepEqual(broken.warnings, []);
   assert.match(broken.reason, /config.json/);
   assert.match(agents.find((item: any) => item.id === 'unregistered-executor').reason, /codex.*未登记/);
   assert.equal(agents.find((item: any) => item.id === 'invalid-settings').available, false);
@@ -77,6 +78,84 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
 
 const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', reasoningEffort: 'high', fast: false,
   home: 'shared', description: '界面保存的执行者', skills: [] };
+
+test('订阅 Agent 的库 skill 与全局目录同名只返回警告，API 和未选中的 skill 不警告，目录变化立即生效', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'shared-skill');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '库 skill');
+  ok(await daemon.call('install-skill', { path: source }));
+  await daemon.writeAgent('subscription', { skills: ['shared-skill'] });
+  await daemon.writeAgent('api', { home: 'dedicated', skills: ['shared-skill'] });
+  await daemon.writeAgent('unselected');
+  const list = async () => {
+    const value = await daemon.call('list-agents');
+    ok(value);
+    return value.result;
+  };
+  assert.deepEqual((await list()).map((agent: any) => agent.warnings), [[], [], []]);
+  const global = join(process.env.HOME!, '.claude', 'skills', 'shared-skill');
+  await mkdir(global, { recursive: true }); // No SKILL.md: compare directory names, not contents.
+  const agents = await list();
+  const subscription = agents.find((agent: any) => agent.id === 'subscription');
+  assert.equal(subscription.available, true);
+  assert.equal(subscription.reason, null);
+  assert.equal(subscription.warnings.length, 1);
+  assert.match(subscription.warnings[0], /shared-skill.*全局.*同名.*冲突/);
+  assert.ok(subscription.warnings[0].includes(global));
+  assert.deepEqual(agents.find((agent: any) => agent.id === 'api').warnings, []);
+  assert.deepEqual(agents.find((agent: any) => agent.id === 'unselected').warnings, []);
+  await rm(global, { recursive: true });
+  await writeFile(global, '同名普通文件不是 skill 目录');
+  assert.deepEqual((await list()).find((agent: any) => agent.id === 'subscription').warnings, []);
+});
+
+test('全局重名按驱动检查默认目录，目录符号链接也警告，普通文件和断链不警告', async t => {
+  for (const [driver, model, roots, foreign] of [
+    ['claude-sdk', 'haiku', ['.claude'], '.codex'],
+    ['codex', 'gpt-6-luna', ['.codex', '.agents'], '.claude'],
+    ['grok', 'grok-4.7', ['.grok', '.claude', '.agents'], '.dsh'],
+    ['deepseek', 'deepseek-flash', ['.dsh', '.agents'], '.grok'],
+  ] as const) await t.test(driver, async t => {
+    const daemon = await fixture(t, { [driver]: new FakeDriver() });
+    const source = join(daemon.directory, 'source');
+    await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '库 skill');
+    for (const name of ['shared', 'alias', 'file', 'dangling']) ok(await daemon.call('install-skill', { path: source, name }));
+    await daemon.writeAgent('executor', { driver, model, skills: ['shared', 'alias', 'file', 'dangling'] });
+    const listed = async () => {
+      const value = await daemon.call('list-agents');
+      ok(value);
+      assert.equal(value.result[0].available, true, value.result[0].reason);
+      return value.result[0];
+    };
+    await mkdir(join(process.env.HOME!, foreign, 'skills', 'shared'), { recursive: true });
+    assert.deepEqual((await listed()).warnings, [], '其他驱动的全局目录不触发警告');
+    const target = join(daemon.directory, 'global-skill');
+    await mkdir(target);
+    const paths: string[] = [];
+    for (const root of roots) {
+      const directory = join(process.env.HOME!, root, 'skills');
+      await mkdir(join(directory, 'shared'), { recursive: true });
+      await writeFile(join(directory, 'shared', 'SKILL.md'), '无效内容也不解析');
+      await symlink(target, join(directory, 'alias'));
+      await writeFile(join(directory, 'file'), '普通文件');
+      await symlink(join(daemon.directory, 'absent'), join(directory, 'dangling'));
+      paths.push(join(directory, 'shared'), join(directory, 'alias'));
+    }
+    const agent = await listed();
+    assert.equal(agent.warnings.length, paths.length);
+    for (const path of paths) assert.ok(agent.warnings.some((warning: string) => warning.includes(path)), path);
+    assert.equal(agent.reason, null);
+    if (driver !== 'grok') {
+      await daemon.writeAgent('api', { driver, home: 'dedicated', model: driver === 'deepseek' ? 'deepseek-v4-flash' : model,
+        skills: ['shared', 'alias'] });
+      const api = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'api');
+      assert.equal(api.available, true, api.reason);
+      assert.deepEqual(api.warnings, []);
+    }
+  });
+});
 
 test('用户经 CLI 安装库 skill，HTTP 每次读取目录，删除记事件', async t => {
   const daemon = await fixture(t);
@@ -502,6 +581,39 @@ test('换调度者 Agent 只影响下一轮，当前运行或启动中的轮次�
 const alignment = (ctx: FakeContext): FakeStep[] => [
   { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: 'Agent 文件生效', boundary: '本机', criteria: '快照和驱动一致' }, check: ok },
 ];
+
+test('有全局重名警告的 Agent 仍可进入调度轮次并接受派单', async t => {
+  const seen: FakeContext['options'][] = [];
+  const rounds = new FakeDriver([ctx => { seen.push(ctx.options); return alignment(ctx); }, ctx => [
+    { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '验证警告不阻止派单' }, saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx),
+      cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', agentId: 'executor' }), check: ok },
+  ]]);
+  const executor = new FakeDriver([ctx => { seen.push(ctx.options); return []; }]);
+  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }),
+    start: options => (options.agent.role === 'coordinator' ? rounds : executor).start(options) } });
+  const source = join(daemon.directory, 'shared');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '派单加载库 skill');
+  ok(await daemon.call('install-skill', { path: source }));
+  await mkdir(join(process.env.HOME!, '.claude', 'skills', 'shared'), { recursive: true });
+  await daemon.writeAgent('claude-coordinator', { role: 'coordinator', skills: ['shared'] });
+  await daemon.writeAgent('executor', { skills: ['shared'] });
+  for (const agent of (await daemon.call('list-agents')).result) {
+    assert.equal(agent.available, true);
+    assert.equal(agent.warnings.length, 1);
+  }
+  const { work, events } = await startWork(daemon);
+  const gate = (await daemon.call('list-pending')).result[0];
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
+  await until(events, values => values.some(value => value.action === 'dispatch-ended'));
+  const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].agentId, 'executor');
+  assert.equal(dispatches[0].endReason, 'completed');
+  assert.deepEqual(seen.map(options => options.agent.role), ['coordinator', 'executor']);
+  for (const options of seen) assert.equal(await readFile(join(options.agent.skillsPath!, 'shared', 'SKILL.md'), 'utf8'), '派单加载库 skill');
+});
 
 test('派单和调度轮次复制自带与库 skill，排队在启动时组装，运行中的副本不受库变动影响', async t => {
   let releaseFirst!: () => void;

@@ -84,7 +84,7 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
     for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
   });
 
-test('库 skill 经 HTTP 安装和 Agent 引用后被真实 Claude 派单加载并调用',
+test('库 skill 经 HTTP 安装和 Agent 引用后验证全局重名警告，再由真实 Claude 派单加载并调用',
   { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-library-claude-')));
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
@@ -124,6 +124,23 @@ test('库 skill 经 HTTP 安装和 Agent 引用后被真实 Claude 派单加载�
         config: { role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: '库 skill 冒烟',
           skills: role === 'executor' ? ['helm-library-probe'] : [] } });
       assert.equal(agent.available, true, agent.reason ?? 'Agent 不可用');
+    }
+    // Construct the warning in a temporary HOME without changing the user's global skills.
+    // Restore the host HOME before the real CLI checks login or starts a dispatch.
+    const globalHome = join(root, 'global-home');
+    await mkdir(join(globalHome, '.claude', 'skills', 'helm-library-probe'), { recursive: true });
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = globalHome;
+      const catalog = new AgentCatalog(join(root, 'data', 'agents'));
+      const agent = catalog.list().find(agent => agent.id === 'library-executor');
+      assert.ok(agent);
+      assert.equal(agent.available, true);
+      assert.equal(agent.warnings.length, 1);
+      assert.match(agent.warnings[0]!, /helm-library-probe.*全局.*同名/);
+      assert.equal(catalog.get('library-executor', 'executor').id, 'library-executor');
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
     }
     const project = await call('register-project', { path: repo });
     await call('set-project-coordinator-agent', { projectId: project.id, agentId: 'library-coordinator' });

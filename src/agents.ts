@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { RuleError, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
@@ -168,6 +169,35 @@ export class AgentCatalog {
     return acpAgents[agent.driver as keyof typeof acpAgents]?.unavailable(agent) ?? null;
   }
 
+  private warnings(agent: AgentConfig): string[] {
+    if (agent.home !== 'shared' || !agent.skills?.length) return [];
+    // Only the CLI's default user roots: runtimeEnvironment drops home overrides.
+    // Do not inspect skill contents, plugin registries or project settings.
+    const roots = {
+      'claude-sdk': ['.claude/skills'],
+      codex: ['.codex/skills', '.agents/skills'],
+      grok: ['.grok/skills', '.claude/skills', '.agents/skills'],
+      deepseek: ['.dsh/skills', '.agents/skills'],
+    }[agent.driver];
+    const warnings: string[] = [];
+    for (const root of roots) {
+      const directory = join(process.env.HOME ?? homedir(), root);
+      try {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          if (!agent.skills.includes(entry.name)) continue;
+          const path = join(directory, entry.name);
+          // CLIs also discover skill directories reached through symlinks.
+          let isDirectory = entry.isDirectory();
+          if (entry.isSymbolicLink()) {
+            try { isDirectory = statSync(path).isDirectory(); } catch { continue; }
+          }
+          if (isDirectory) warnings.push(`库 skill ${entry.name} 与全局 skill 目录 ${path} 同名，可能存在冲突；此警告不影响 Agent 可用性。`);
+        }
+      } catch { /* Missing or unreadable global roots must not make an Agent unavailable. */ }
+    }
+    return warnings.sort();
+  }
+
   // Keep references even when another setting makes the Agent unavailable.
   skillReferences(name: string) {
     if (!existsSync(this.directory)) return [];
@@ -222,6 +252,7 @@ export class AgentCatalog {
         const reason = this.unavailable(agent);
         const availability = this.availability.get(id);
         return { ...agent, billing: agent.home === 'shared' ? 'subscription' : 'api',
+          warnings: this.warnings(agent),
           skills: agent.skillsPath ? readdirSync(agent.skillsPath, { withFileTypes: true })
             .map(entry => entry.name + (entry.isDirectory() ? '/' : '')).sort() : [],
           available: reason === null && availability?.available !== false, reason: reason ?? availability?.reason ?? null,
@@ -230,7 +261,7 @@ export class AgentCatalog {
         let fileRevision: string | null = null;
         try { fileRevision = revision(readFileSync(join(this.directory, id, 'config.json')), readFileSync(join(this.directory, id, 'prompt.md'))); }
         catch { /* Incomplete agents have no revision until both files exist. */ }
-        return { id, revision: fileRevision, role: null, driver: null, model: null, description: null, billing: null, available: false,
+        return { id, revision: fileRevision, role: null, driver: null, model: null, description: null, billing: null, available: false, warnings: [],
           reason: `config.json / prompt.md：${error instanceof Error ? error.message : String(error)}` };
       }
     });

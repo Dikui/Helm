@@ -12,6 +12,7 @@ export interface AgentEntry {
   home?: AgentSettings['home']; description: string | null; prompt?: string; directory?: string;
   skillsPath?: string | null; skills?: string[]; billing: string | null; available: boolean; reason: string | null; command?: string;
   runningDispatches: number; activeWorks: number;
+  warnings?: string[];
 }
 export interface Project { id: string; name: string; path: string; defaultCoordinatorAgentId: string }
 export interface RuntimeSettings {

@@ -80,6 +80,8 @@ helm delete-library-entry --type skill --name shared-skill
 
 Agent 的 `config.json` 用 `"skills": ["shared-skill"]` 引用库 skill，省略时为空数组。`list-agents` 的 `config` 可直接用于 `save-agent --config`，保存和复制会带上库引用；原有 `skills` 列表仍表示 Agent 自带 `skills/` 的目录条目。`list-library` 返回每个条目的 `type`、`name` 和引用它的 Agent id 列表 `agents`。仍被引用的条目不能删除，错误详情含引用列表；缺失引用或自带 skill 与库 skill 同名会使 Agent 不可用。安装、删除及 Agent 保存均记录事件。
 
+订阅 Agent（`home: "shared"`）选中的库 skill 与对应 CLI 的全局 skill 目录同名时，`list-agents` 返回 `warnings: string[]`，文案含 skill 名字和全局目录路径；无警告时为空数组。只比较目录名，不解析内容，不影响 Agent 可用性或派单；API Agent 不检查。检查默认用户目录：Claude 的 `~/.claude/skills/`，Codex 的 `~/.codex/skills/` 与 `~/.agents/skills/`，Grok 的 `~/.grok/skills/`、`~/.claude/skills/` 与 `~/.agents/skills/`，DeepSeek 的 `~/.dsh/skills/` 与 `~/.agents/skills/`。目录缺失或不可读时跳过，不检查插件或项目内的 skill 来源。
+
 派单和调度轮次在实际启动时把自带和选中的库 skill 复制到各自数据目录的 `skills/`，当次 Agent 快照的 `skillsPath` 指向这份副本。没有 skill 时不创建目录；库和 Agent 文件的后续变动不影响已启动运行。Claude 从副本的上一级加载插件，其余驱动沿用现有 skills 接法。
 
 调度轮次失败会新开会话重投未处理事件，连续失败三次或调度者额度用完时暂停工作。`list-pending`、`list-works` 和 SSE `needs-user-attention` 展示运行层暂停原因，用户以 `helm resume-work --workId <工作id>` 手动恢复。每轮默认总时长 30 分钟、无输出 10 分钟；`helm set-round-watchdog --totalTimeoutMs 1800000 --idleTimeoutMs 600000` 调整后从下一轮生效，`get-settings` 可读取设置。轮次与派单共用进程清理：按工作目录查找 `_work` 内的残留进程并清理进程组，macOS 需安装 `lsof`，Linux 使用 `/proc`。`get-card`、`get-card-graph` 的 `usage` 汇总卡片全部派单，`get-work`、`list-works` 的 `usage` 另加全部调度轮次；输入和输出 token 分别累计，异常结束同样计入。
