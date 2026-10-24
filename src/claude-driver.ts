@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { constants } from 'node:fs';
-import { access, lstat, realpath, stat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, TemplateAvailability, TokenUsage } from './driver.js';
-import { runtimeEnvironment } from './environment.js';
+import { findExecutable, runtimeEnvironment } from './environment.js';
 import { templatePrompt } from './prompts.js';
 import { TemplateCatalog, type AgentTemplate } from './templates.js';
 
@@ -19,14 +18,9 @@ function claudeHome(template: AgentTemplate, home = homedir()) {
 export type ClaudeQuery = (args: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & { close(): void };
 
 async function localClaude(env: Record<string, string>) {
-  for (const directory of (env.PATH ?? '').split(':').filter(Boolean)) {
-    const path = resolve(directory, 'claude');
-    try { await access(path, constants.X_OK); return await realpath(path); }
-    catch (error) {
-      if (!['ENOENT', 'EACCES', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-    }
-  }
-  throw new Error('Local claude executable not found on PATH; install Claude Code and log in locally.');
+  const path = await findExecutable('claude', env);
+  if (!path) throw new Error('Local claude executable not found on PATH; install Claude Code and log in locally.');
+  return path;
 }
 
 function tokenUsage(message: SDKResultMessage): TokenUsage {
@@ -104,6 +98,7 @@ const authStatus: AuthStatus = async (executable, options) => {
 interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery; authStatus?: AuthStatus }
 
 export class ClaudeDriver implements Driver {
+  install = { executable: 'claude', command: 'npm install -g @anthropic-ai/claude-code' };
   constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
 
   async checkAvailability(template: AgentTemplate): Promise<TemplateAvailability> {

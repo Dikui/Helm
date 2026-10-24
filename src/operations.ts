@@ -254,6 +254,16 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
+    name: 'check-agent', description: '检查驱动对应的 CLI 是否在 PATH 上；未安装时返回官方安装命令', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ driver: z.string().min(1) }).strict(),
+    execute: ({ userOperations }, { driver }) => userOperations.checkAgent(driver),
+  }),
+  operation({
+    name: 'install-agent', description: '在本机运行驱动对应 CLI 的官方安装命令（登录仍需在终端完成）', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ driver: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { driver }) => userOperations.installAgent(actor, driver),
+  }),
+  operation({
     name: 'set-concurrency', description: '设置全局执行者并发上限', callers: ['user'], keyed: false, mutates: true,
     schema: z.object({ limit: z.number().int().min(1) }).strict(),
     execute({ store, actor }, { limit }) {

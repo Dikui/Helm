@@ -4,6 +4,7 @@ import { useData } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
+import { AgentInstall } from '../../shared/AgentInstall.js';
 import { useRouter } from '../../shared/router.js';
 import type { TemplateConfig, TemplateEntry } from './types.js';
 
@@ -81,6 +82,7 @@ export function TemplateEditor({ source, creating = false, initialSaved = false,
         <label htmlFor="template-driver">{t('driver')}<select {...fieldProps('driver')} value={value.config.driver} onChange={event => config('driver', event.target.value as TemplateConfig['driver'])}>
           {['claude-sdk', 'codex', 'grok', 'deepseek'].map(driver => <option key={driver}>{driver}</option>)}</select>{fieldError('driver')}</label>
       </div>
+      <AgentInstall key={value.config.driver} driver={value.config.driver} />
       <label htmlFor="template-model">{t('model')}<input {...fieldProps('model')} value={value.config.model ?? ''} placeholder={t('driverDefault')} onChange={event => config('model', event.target.value)} />{fieldError('model')}</label>
       <label htmlFor="template-reasoningEffort">{t('reasoning')}<select {...fieldProps('reasoningEffort')} value={value.config.reasoningEffort ?? ''} onChange={event => config('reasoningEffort', event.target.value as TemplateConfig['reasoningEffort'] || null)}>
         <option value="">{t('driverDefault')}</option>{['low', 'medium', 'high', 'max'].map(effort => <option key={effort}>{effort}</option>)}</select>{fieldError('reasoningEffort')}</label>

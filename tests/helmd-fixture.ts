@@ -7,14 +7,14 @@ import { defaultTemplateDir } from '../src/templates.js';
 // Existing scenarios have independent scripts for each role. Register both at
 // the same CLI boundary so their queues do not depend on wake-event timing.
 export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof startHelmd>[0]>, 'drivers'> & {
-  driver?: Pick<Driver, 'start'> & Partial<Driver>; executorDriver?: Pick<Driver, 'start'> & Partial<Driver>;
+  driver?: Pick<Driver, 'start'> & Partial<Driver>; executorDriver?: Pick<Driver, 'start'> & Partial<Driver>; codexDriver?: Driver;
 } = {}) {
-  const { driver = new FakeDriver(), executorDriver = new FakeDriver(), ...runtime } = options;
+  const { driver = new FakeDriver(), executorDriver = new FakeDriver(), codexDriver = new FakeDriver(), ...runtime } = options;
   return startHelmd({ ...runtime, drivers: { 'claude-sdk': {
     // These fixtures exercise sessions; availability scenarios register their own driver.
     checkAvailability: async () => ({ available: true }),
     start: session => (session.template?.role === 'coordinator' ? driver : executorDriver).start(session),
-  }, codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() } });
+  }, codex: codexDriver, grok: new FakeDriver(), deepseek: new FakeDriver() } });
 }
 
 export async function copyTemplates(directory: string) {

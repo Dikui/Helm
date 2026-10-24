@@ -60,7 +60,7 @@ test('工作菜单暂停、恢复经 HTTP 生效；取消必须二次确认，�
   expect((within(menu).getByRole('button', { name: '换调度者模板' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-test('换调度者只列可用的调度者模板，选择后经 HTTP 更新且从下一轮生效', async () => {
+test('换调度者列出全部调度者模板，不可用的显示原因且不能应用，选择后经 HTTP 更新且从下一轮生效', async () => {
   const work = await startWork();
   const saved = await daemon!.call('save-agent-template', {
     id: 'unavailable-coordinator', mode: 'create', prompt: '不可用的调度者',
@@ -72,7 +72,8 @@ test('换调度者只列可用的调度者模板，选择后经 HTTP 更新且�
   fireEvent.click(within(actions()).getByRole('button', { name: '换调度者模板' }));
   const dialog = await screen.findByRole('dialog', { name: '换调度者模板' });
   expect(await within(dialog).findByRole('radio', { name: /codex-coordinator/ })).toBeTruthy();
-  expect(within(dialog).queryByText(/unavailable-coordinator/)).toBeNull();
+  fireEvent.click(await within(dialog).findByRole('radio', { name: /unavailable-coordinator.*extra usage/ }));
+  expect((within(dialog).getByRole('button', { name: '更换模板' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(dialog).queryByText(/claude-executor/)).toBeNull();
   expect(within(dialog).getByText('从下一调度轮次起生效。')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('radio', { name: /codex-coordinator/ }));

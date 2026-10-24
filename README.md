@@ -32,7 +32,9 @@ npm start -- --help
 
 客户端默认连接 `http://127.0.0.1:4242`，可通过 `HELM_URL` 或各子命令的 `--url` 指定。也可用 `node dist/src/cli.js` 直接运行；通过 npm 链接这个包后可使用 `helm` 命令。
 
-在已配置好 `claude`、`codex` 和代理的终端中运行 `helm service install`（或 `node dist/src/cli.js service install`），将 `helmd` 安装为用户服务并立即启动。安装是本地命令，不需要先启动 HTTP 服务。请先停止手动运行的 `helm serve`，避免占用同一个端口。
+Helm 始终使用用户 PATH 上的 Agent CLI。Claude Agent SDK 随 npm 附带的 Claude Code 二进制（约 262MB）由 `package.json` 的 `overrides` 换成空包 `stubs/no-claude-binary-0.0.0.tgz`，不会下载；升级 SDK 时核对平台包名单是否变化。路径写成 `file:../../../stubs/...` 是因为 npm 对嵌套依赖的 `file:` 覆盖按 SDK 目录解析，锁文件里记录的是仓库相对路径。Claude（`claude`）、Codex（`codex`）、Grok（`grok`）、DeepSeek（`dsh`）由用户按需自行安装；Helm 不预先检查或提示安装；用户在新建工作或换调度者时选中模板、在设置页打开模板或切换驱动时，才检查该 CLI 是否在 PATH 上（`check-agent --driver <驱动>`），没有时询问是否下载安装，确认后由 helmd 在本机运行固定的官方安装命令（`install-agent --driver <驱动>`），登录仍在终端完成。执行者由调度者选择，所需模板不可用时调度者提决策关卡，请用户到设置页处理。
+
+在已配置好所需 CLI 和代理的终端中运行 `helm service install`（或 `node dist/src/cli.js service install`），将 `helmd` 安装为用户服务并立即启动。安装是本地命令，不需要先启动 HTTP 服务。请先停止手动运行的 `helm serve`，避免占用同一个端口。
 
 macOS 配置在 `~/Library/LaunchAgents/io.helm.helmd.plist`，随用户登录加载，进程退出后自动重启。Linux 写入 `${XDG_CONFIG_HOME:-~/.config}/systemd/user/helmd.service`，执行 `systemctl --user daemon-reload`、`enable` 和 `restart`；还需运行 `loginctl enable-linger "$USER"`（必要时加 `sudo`），让用户服务在开机时启动、登出后继续运行。**Linux 未实测**，普通测试使用服务管理器替身。
 

@@ -43,8 +43,19 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "jsdom": "26.1.0",
+    "playwright": "1.64.0-alpha-1790635538000",
     "typescript": "5.9.3",
     "vite": "8.3.5",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-darwin-x64": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-linux-arm64": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-linux-x64": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-win32-arm64": "file:../../../stubs/no-claude-binary-0.0.0.tgz",
+    "@anthropic-ai/claude-agent-sdk-win32-x64": "file:../../../stubs/no-claude-binary-0.0.0.tgz"
   }
 }

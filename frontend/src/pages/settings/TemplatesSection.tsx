@@ -29,7 +29,7 @@ export function TemplatesSection({ templateId, creating = false }: { templateId?
           {entries.map(item => <Link key={item.id} href={`/settings/templates/${encodeURIComponent(item.id)}`} className="settings-template-row" aria-current={item.id === selected?.id ? 'page' : undefined}>
             <span className="settings-driver mono">{item.driver?.slice(0, 2) ?? '?'}</span>
             <span><b className="mono">{item.id}</b><span className="settings-meta">{item.driver} · {item.model ?? t('driverDefault')} · {t(item.billing === 'api' ? 'apiBilling' : 'subscription')}</span><span className="settings-meta">{item.description}</span>
-              {!item.available && <span className="settings-reason">{item.reason}</span>}</span>
+              {!item.available && <span className="settings-reason">{item.reason}{item.command && <> <code>{item.command}</code></>}</span>}</span>
             <span className="settings-template-status"><span className={`pill ${item.available ? 'ok' : 'bad'}`}>{t(item.available ? 'available' : 'unavailable')}</span>
               <span>{item.runningDispatches} {t('dispatchCount')} · {item.activeWorks} {t('workCount')}</span></span>
           </Link>)}

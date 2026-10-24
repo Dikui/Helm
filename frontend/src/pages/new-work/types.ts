@@ -4,5 +4,5 @@ export interface Project {
   uncommittedChanges: number | null; gitStatusReason: string | null;
 }
 export interface CoordinatorTemplate {
-  id: string; role: 'coordinator' | 'executor' | null; available: boolean; reason: string | null;
+  id: string; role: 'coordinator' | 'executor' | null; driver: string | null; available: boolean; reason: string | null;
 }

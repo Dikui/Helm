@@ -122,7 +122,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; tem
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, drivers, `${url}/mcp`);
   executions = new ExecutionRunner(store, drivers, `${url}/mcp`, options.browserCommand);
-  userOperations = new UserOperations(store, executions, scheduler);
+  userOperations = new UserOperations(store, executions, scheduler, drivers);
   ready = true;
   let closing: Promise<void> | undefined;
   return {

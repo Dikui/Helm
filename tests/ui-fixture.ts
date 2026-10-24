@@ -2,11 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FakeDriver, type FakeScript } from '../src/driver.js';
+import { FakeDriver, type Driver, type FakeScript } from '../src/driver.js';
 import { copyTemplates, startTestHelmd } from './helmd-fixture.js';
 
 // Shared HTTP / whole-app boundary. Every driver is fake, and HOME is disposable.
-export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, options: { registerProject?: boolean; templateDir?: string; executorScripts?: FakeScript[] } = {}) {
+export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, options: { registerProject?: boolean; templateDir?: string; executorScripts?: FakeScript[]; codexDriver?: Driver } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-')));
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
@@ -22,7 +22,8 @@ export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, 
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
     const templateDir = options.templateDir ?? await copyTemplates(directory);
     daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), templateDir,
-      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []), ...(staticDir ? { staticDir } : {}) });
+      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []),
+      ...(options.codexDriver ? { codexDriver: options.codexDriver } : {}), ...(staticDir ? { staticDir } : {}) });
     const url = daemon.url;
     const call = async (name: string, params: object = {}) => {
       const response = await fetch(`${url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });

@@ -8,10 +8,16 @@ import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { completeReviewedWork, decideReview } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
+import { checkAgent, installAgent } from './availability.js';
+import type { DriverRegistry } from './driver.js';
 
 export class UserOperations {
   private reviewCompletions = new Map<string, Promise<unknown>>();
-  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler) {}
+  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry) {}
+
+  checkAgent(driver: string) { return checkAgent(this.drivers, driver); }
+
+  installAgent(actor: Actor, driver: string) { return installAgent(this.store, this.drivers, actor, driver); }
 
   async decideReview(actor: Actor, params: { workId: string; gateId: string; decision: string; comment?: string }) {
     const gate = decideReview(this.store, actor, params);

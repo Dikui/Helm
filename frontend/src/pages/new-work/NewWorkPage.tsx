@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
+import { AgentInstall } from '../../shared/AgentInstall.js';
 import { useRouter } from '../../shared/router.js';
 import type { CoordinatorTemplate, Project } from './types.js';
 import { useSendMessage } from './useSendMessage.js';
@@ -21,7 +22,8 @@ export function NewWorkPage() {
   const project = projects.data?.find(item => item.id === projectId) ?? projects.data?.[0];
   const selectedTemplate = templateId ?? project?.defaultCoordinatorTemplateId ?? '';
   const coordinators = templates.data?.filter(item => item.role === 'coordinator' || item.role === null) ?? [];
-  const available = coordinators.some(item => item.id === selectedTemplate && item.available);
+  const chosen = coordinators.find(item => item.id === selectedTemplate);
+  const available = Boolean(chosen?.available);
   const locked = submission.pending || submission.uncertain;
   const send = async () => {
     if (!project || (!submission.uncertain && !available) || !body.trim()) return;
@@ -50,11 +52,12 @@ export function NewWorkPage() {
           <button type="button" className="btn" disabled={locked} onClick={() => setRegistering(true)}>{t('newWorkRegisterProject')}</button>
           <label>{t('newWorkCoordinatorTemplate')}<select value={selectedTemplate} disabled={locked} onChange={event => setTemplateId(event.target.value)}>
             {!coordinators.some(item => item.id === selectedTemplate) && <option value={selectedTemplate} disabled>{selectedTemplate} · {t('newWorkTemplateMissing')}</option>}
-            {coordinators.map(item => <option key={item.id} value={item.id} disabled={!item.available}>{item.id}{!item.available ? ` · ${item.reason || t('newWorkTemplateUnavailable')}` : ''}</option>)}
+            {coordinators.map(item => <option key={item.id} value={item.id}>{item.id}{!item.available ? ` · ${item.reason || t('newWorkTemplateUnavailable')}` : ''}</option>)}
           </select></label>
           <button className="btn primary" disabled={submission.pending || (!submission.uncertain && !available) || !body.trim()}>{t(submission.error ? 'newWorkRetrySend' : 'newWorkStart')}</button>
         </div>
-        {!available && templates.data && <p className="hint">{coordinators.find(item => item.id === selectedTemplate)?.reason} {t('newWorkChooseAvailableTemplate')}</p>}
+        {!available && templates.data && <p className="hint">{chosen?.reason} {t('newWorkChooseAvailableTemplate')}</p>}
+        {chosen?.driver && <AgentInstall key={chosen.driver} driver={chosen.driver} onInstalled={templates.reload} />}
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>

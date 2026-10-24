@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { App } from '../src/App.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 const { copyTemplates, configureTestTemplate }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
+const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 let templateDirectory: string | undefined;
@@ -50,7 +52,7 @@ test('选项目默认模板创建工作：响应丢失后重试沿用完整请�
   // A later availability change must not block replay of an already accepted request.
   await configureTestTemplate(templateDir, 'codex-coordinator', { driver: 'grok' });
   await daemon.call('list-agent-templates');
-  await waitFor(() => expect((within(template).getByRole('option', { name: /codex-coordinator/ }) as HTMLOptionElement).disabled).toBe(true));
+  await within(template).findByRole('option', { name: /codex-coordinator · / });
   expect((screen.getByRole('button', { name: '重试发送' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '重试发送' }));
   expect(await screen.findByRole('heading', { name: '邮箱验证码登录' })).toBeTruthy();
@@ -190,7 +192,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('aligning');
 });
 
-test('项目切换重选默认模板，不可用模板显示原因且不能选择；未提交改动提醒来自 git', async () => {
+test('项目切换重选默认模板，不可用模板显示原因且不能开始；未提交改动提醒来自 git', async () => {
   templateDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-templates-'));
   const templateDir = await copyTemplates(templateDirectory);
   await configureTestTemplate(templateDir, 'claude-coordinator', { driver: 'grok' });
@@ -200,7 +202,7 @@ test('项目切换重选默认模板，不可用模板显示原因且不能选�
   render(<App baseUrl={daemon.url} />);
   const templates = await screen.findByLabelText('调度者模板');
   const unavailable = await within(templates).findByRole('option', { name: /claude-coordinator.*Grok 本阶段只支持执行者/ });
-  expect((unavailable as HTMLOptionElement).disabled).toBe(true);
+  expect((unavailable as HTMLOptionElement).selected).toBe(true);
   expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
   expect(await screen.findByText(/1 个未提交改动不会进入工作分支/)).toBeTruthy();
   fireEvent.change(templates, { target: { value: 'codex-coordinator' } });
@@ -212,5 +214,33 @@ test('项目切换重选默认模板，不可用模板显示原因且不能选�
   expect((templates as HTMLSelectElement).value).toBe('claude-coordinator');
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByLabelText('Coordinator template')).toBeTruthy();
-  expect(screen.getByText(/Choose an available coordinator template\./)).toBeTruthy();
+  expect(screen.getByText(/Choose an available coordinator template/)).toBeTruthy();
+});
+
+test('选中 CLI 未安装的调度者模板时才检查，确认后下载安装，装好即可开始', async () => {
+  templateDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-install-'));
+  const bin = join(templateDirectory, 'bin');
+  const cli = join(bin, 'helm-fake-codex');
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    const command = `mkdir -p '${bin}' && printf '#!/bin/sh\\n' > '${cli}' && chmod +x '${cli}'`;
+    const codexDriver = Object.assign(new FakeDriver([], () => existsSync(cli) ? { available: true } : { available: false, reason: 'Codex 未安装' }),
+      { install: { executable: 'helm-fake-codex', command } });
+    daemon = await uiFixture([], undefined, { codexDriver });
+    window.history.replaceState(null, '', '/new');
+    render(<App baseUrl={daemon.url} />);
+    const templates = await screen.findByLabelText('调度者模板');
+    await waitFor(() => expect((templates as HTMLSelectElement).value).toBe('claude-coordinator'));
+    expect(screen.queryByRole('group', { name: /未检测到/ })).toBeNull();
+    fireEvent.change(templates, { target: { value: 'codex-coordinator' } });
+    const prompt = await screen.findByRole('group', { name: /未检测到/ });
+    expect(within(prompt).getByText(command)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('需求'), { target: { value: '安装后开始' } });
+    expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(prompt).getByRole('button', { name: '下载安装' }));
+    expect(await screen.findByText('已安装，请在终端登录。')).toBeTruthy();
+    expect(existsSync(cli)).toBe(true);
+    await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
+  } finally { process.env.PATH = path; }
 });

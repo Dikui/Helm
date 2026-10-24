@@ -1,3 +1,7 @@
+import { constants } from 'node:fs';
+import { access, realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 // Inherit only the host facilities needed to run a locally installed CLI.
 // Never read credential or desktop-session values, even to discard them later.
 export function runtimeEnvironment(parent: NodeJS.ProcessEnv = process.env): Record<string, string> {
@@ -16,4 +20,15 @@ export function runtimeEnvironment(parent: NodeJS.ProcessEnv = process.env): Rec
     if (value !== undefined) env[key] = value;
   }
   return env;
+}
+
+export async function findExecutable(name: string, env: Record<string, string>) {
+  for (const directory of (env.PATH ?? '').split(':').filter(Boolean)) {
+    const path = resolve(directory, name);
+    try { await access(path, constants.X_OK); return await realpath(path); }
+    catch (error) {
+      if (!['ENOENT', 'EACCES', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
+  return undefined;
 }

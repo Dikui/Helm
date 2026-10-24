@@ -17,7 +17,9 @@ export class AcpDriver implements Driver {
   private profile;
   constructor(private agent: keyof typeof acpAgents, private config: { command?: AcpCommand; timeoutMs?: number } = {}) {
     this.profile = acpAgents[agent];
+    this.install = { executable: this.profile.command, command: this.profile.installCommand };
   }
+  install;
 
   private environment(base: Record<string, string>, template: AgentTemplate) {
     const env = { ...base, ...this.profile.environment.set };

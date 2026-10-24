@@ -206,3 +206,25 @@ test('调度者不可用立即暂停且不重试；修复后手动恢复工作�
   assert.ok(daemon.started.includes('claude-coordinator'));
   assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'aligning');
 });
+
+test('check-agent 只在调用时检查 CLI 是否在 PATH 上，install-agent 只运行驱动登记的命令', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-install-')));
+  const bin = join(directory, 'bin');
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  const command = `mkdir -p '${bin}' && printf '#!/bin/sh\\n' > '${bin}/helm-fake-cli' && chmod +x '${bin}/helm-fake-cli' && echo installed`;
+  const codex = Object.assign(new FakeDriver(), { install: { executable: 'helm-fake-cli', command } });
+  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), templateDir: await copyTemplates(directory),
+    drivers: { 'claude-sdk': new FakeDriver(), codex } });
+  t.after(async () => { process.env.PATH = path; await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const call = async (name: string, params: object = {}): Promise<any> =>
+    (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json();
+  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: false, install: command });
+  assert.deepEqual((await call('check-agent', { driver: 'claude-sdk' })).result, { installed: true, install: null });
+  assert.equal((await call('install-agent', { driver: 'claude-sdk' })).error.code, 'NOT_FOUND');
+  const installed = await call('install-agent', { driver: 'codex' });
+  ok(installed);
+  assert.match(installed.result.output, /installed/);
+  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: true, install: null });
+  assert.ok((await call('get-events')).result.some((event: any) => event.action === 'agent-installed' && event.object.id === 'codex'));
+});

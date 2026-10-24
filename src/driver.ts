@@ -35,6 +35,8 @@ export interface DriverSession {
 }
 export interface TemplateAvailability { available: boolean; reason?: string; command?: string }
 export interface Driver {
+  // The official install command for the CLI, which the user may run from the UI.
+  install?: { executable: string; command: string };
   checkAvailability(template: AgentTemplate): Promise<TemplateAvailability>;
   start(options: SessionOptions): Promise<DriverSession>;
 }

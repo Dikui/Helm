@@ -1,0 +1,6 @@
+{
+  "name": "no-claude-binary",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Replaces the Claude Agent SDK's bundled Claude Code binaries: Helm always runs the user's claude from PATH."
+}
