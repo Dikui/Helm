@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — DeepSeek 执行者
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 查清 `grok agent stdio`、`dsh --profile acp` 加载 skills 的方式（一手来源或源码），结论记进本单 Comments
 - [x] 有不改用户全局配置、按会话或进程生效的办法：档案按模板 `skillsPath` 接上，两个模板的 skills 互不可见
@@ -24,3 +24,5 @@
 沙箱内验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；定向 `node --test dist/tests/acp-skills.test.js dist/tests/acp-driver.test.js dist/tests/deepseek-executor.test.js` 95 项通过；临时 HOME 下 `npm test --cache /private/tmp/helm-npm-cache` 431 项通过，0 失败、0 跳过，`.real` 仅由 TypeScript 编译。
 
 验收待沙箱外：`grok-executor.real.ts`、`deepseek-executor.real.ts` 均已添加模板技能与正文专有随机暗号，断言 `skill-proof.txt` 内容、卡片提交及最终回答中的技能名；暗号没有进入派单提示词。按用户要求，本轮不运行任何 `*.real`、`test:real`、浏览器或真实 CLI 会话。后续在本机已登录 CLI 和有界面 Chromium 的环境运行 `npm run test:real --cache /private/tmp/helm-npm-cache` 并查看截图，重点确认两家真实加载模板技能；状态保留 `ready-for-human` 等待该验收。
+
+- 2026-10-23 沙箱外完整 `test:real`（2ee3c35）18/18 通过：Grok（`--plugin-dir`）和 DeepSeek（`--patch` 临时技能提供者）执行者都读取了模板 SKILL.md 并写出只在正文里的随机暗号。关闭。

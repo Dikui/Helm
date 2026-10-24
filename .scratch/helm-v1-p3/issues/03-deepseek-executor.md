@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — ACP 派单的中止、续跑和异常结束
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 模板 `driver` 新增 `deepseek`，登记 dsh 档案（`dsh --profile acp`）；内置 `deepseek-executor` 模板用账号路线 `deepseek-flash`；调度者角色不可用
 - [x] 模型和推理强度经 `session/set_config_option` 下发；按模型 id 在 `configOptions` 里找对应取值（计费路线随之确定）；找不到的模型 id 或对方没有的档位（如 `medium`）让模板不可用并写明原因
@@ -14,7 +14,7 @@
 - [x] 文字反问后 `end_turn` 按正常完成处理，没调用"提交结论"记为未声明
 - [x] 可用性检查：命令能执行并完成 `initialize`，不可用时给出修复命令（安装或 `dsh web`）
 - [x] 假 ACP agent 测试覆盖以上行为；`npm run check`、`npm test` 通过
-- [ ] `deepseek-executor.real` 接进 `npm run test:real`，覆盖：跑完一轮、"提交结论"和浏览器工具、写副本以外被拦、记录 token、取消、续跑答对上一轮；跑完后看一眼账号路线的计费方式，记进本单 Comments
+- [x] `deepseek-executor.real` 接进 `npm run test:real`，覆盖：跑完一轮、"提交结论"和浏览器工具、写副本以外被拦、记录 token、取消、续跑答对上一轮；跑完后看一眼账号路线的计费方式，记进本单 Comments
 
 ## Comments
 
@@ -33,3 +33,5 @@
 取消用量漏记的根因在运行层：abort 立即打断事件读取并清理进程，抢在 ACP 驱动 `session/close` 刷盘、读取会话文件和发出带用量的结束事件之前结束派单。现改为中止时立即废除工具令牌，最多继续收取驱动事件 3 秒，收到结束事件后再清理进程；不响应的驱动仍有截止时间。沿用现有 ACP 取消等待、关闭刷盘和会话文件用量读取，续跑仍减去派单开始前累计。派单 API 回归验证首次、续跑、忽略取消与看门狗超时均保存 6778/204，本轮之前的 100/8 不重复记账，派单输出和 dispatch-ended 事件用量一致。
 
 本轮验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 441/441 通过，已知偶发的派单 MCP 测试本轮通过。全部新增测试使用临时 HOME 与假 ACP agent；按本次任务要求没有启动浏览器、真实模型会话或任何真实冒烟。上述为假 agent 回归结果，原真实验收待办与状态保持不变。
+
+- 2026-10-23 沙箱外完整 `test:real`（2ee3c35）18/18 通过。DeepSeek：一轮、结论与浏览器工具、家目录越界写入被拦、token（首次 123070/2350、续跑增量 25292/151、取消 33323/2345，与会话文件复算一致）、取消、续跑答对暗号。计费：dsh web Settings → Account 显示已登录 DeepSeek，有充值余额和赠送余额两个钱包，有 View usage；看起来是按钱包余额扣费而非订阅，但一次余额读取证明不了，单价和扣费顺序待用户在用量明细核对。关闭。
