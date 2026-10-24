@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -7,7 +8,7 @@ import { runtimeEnvironment } from './environment.js';
 import type { TemplateAvailability } from './driver.js';
 import { acpAgents } from './acp-agents.js';
 
-const settings = z.object({
+export const templateSettings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
   model: z.string().trim().min(1).nullable(),
   reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable(),
@@ -15,11 +16,21 @@ const settings = z.object({
   description: z.string().trim().min(1),
 }).strict();
 
-export interface AgentTemplate extends z.infer<typeof settings> {
+export const saveTemplateSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'id 须为 1–64 位小写字母、数字或连字符，以字母或数字开头。'),
+  config: templateSettings, prompt: z.string().refine(value => Boolean(value.trim()), 'prompt.md 不能为空。'),
+  mode: z.enum(['update', 'create']), baseRevision: z.string().min(1).optional(),
+}).strict();
+
+export interface AgentTemplate extends z.infer<typeof templateSettings> {
   id: string; prompt: string; directory: string; skillsPath: string | null;
 }
 
 export const defaultTemplateDir = fileURLToPath(new URL('../../templates/', import.meta.url));
+
+function revision(config: Buffer, prompt: Buffer) {
+  return createHash('sha256').update(`${config.length}:`).update(config).update(prompt).digest('hex');
+}
 
 // No cache: each use reads settings and strategy together into its own snapshot.
 export class TemplateCatalog {
@@ -29,6 +40,52 @@ export class TemplateCatalog {
   private report?: (id: string, result: TemplateAvailability) => void;
 
   constructor(readonly directory = defaultTemplateDir, private drivers: readonly string[] = ['claude-sdk']) {}
+
+  save(input: z.infer<typeof saveTemplateSchema>) {
+    const { id, config, prompt, mode, baseRevision } = saveTemplateSchema.parse(input);
+    const directory = join(this.directory, id);
+    const assertRevision = () => {
+      let current: string | undefined;
+      try { current = revision(readFileSync(join(directory, 'config.json')), readFileSync(join(directory, 'prompt.md'))); }
+      catch { /* Missing or unreadable files also conflict with the loaded revision. */ }
+      if (current !== baseRevision) throw new RuleError('TEMPLATE_CONFLICT', '模板文件已被修改，请重新载入后再保存。');
+    };
+    if (mode === 'create') {
+      mkdirSync(this.directory, { recursive: true });
+      try { mkdirSync(directory); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new RuleError('TEMPLATE_EXISTS', `模板 ${id} 的目录已存在。`);
+        throw error;
+      }
+    } else {
+      if (!baseRevision) throw new RuleError('INVALID_PARAMS', 'baseRevision: 更新模板须带回列表中的 revision。', 400);
+      if (!existsSync(directory)) throw new RuleError('TEMPLATE_NOT_FOUND', `模板 ${id} 的目录不存在。`, 404);
+      if (!lstatSync(directory).isDirectory()) throw new RuleError('INVALID_TEMPLATE_PATH', '模板目录必须是实际目录，不能是符号链接。', 400);
+      for (const file of ['config.json', 'prompt.md']) {
+        if (existsSync(join(directory, file)) && !lstatSync(join(directory, file)).isFile()) {
+          throw new RuleError('INVALID_TEMPLATE_PATH', `${file} 必须是普通文件，不能是符号链接。`, 400);
+        }
+      }
+      assertRevision();
+      if (this.read(id).role !== config.role) throw new RuleError('TEMPLATE_ROLE_IMMUTABLE', '更新不能修改 role；要换角色请新建模板。', 400);
+    }
+    const temporaryConfig = join(directory, `.config-${randomUUID()}.tmp`);
+    const temporaryPrompt = join(directory, `.prompt-${randomUUID()}.tmp`);
+    try {
+      writeFileSync(temporaryConfig, JSON.stringify(config, null, 2) + '\n', { flag: 'wx' });
+      writeFileSync(temporaryPrompt, prompt, { flag: 'wx' });
+      if (mode === 'update') assertRevision();
+      renameSync(temporaryConfig, join(directory, 'config.json'));
+      renameSync(temporaryPrompt, join(directory, 'prompt.md'));
+      return this.read(id);
+    } catch (error) {
+      if (mode === 'create') rmSync(directory, { recursive: true, force: true });
+      throw error;
+    } finally {
+      rmSync(temporaryConfig, { force: true });
+      rmSync(temporaryPrompt, { force: true });
+    }
+  }
 
   monitor(checker: (template: AgentTemplate) => Promise<TemplateAvailability>, report: (id: string, result: TemplateAvailability) => void) {
     this.checker = checker;
@@ -78,14 +135,17 @@ export class TemplateCatalog {
     return this.list();
   }
 
-  private read(id: string): AgentTemplate {
+  private read(id: string): AgentTemplate & { revision: string } {
     if (!id || id === '.' || id === '..' || /[/\\\0]/.test(id)) throw new Error('模板 id 必须是目录名。');
     const directory = join(this.directory, id);
-    const config = settings.parse(JSON.parse(readFileSync(join(directory, 'config.json'), 'utf8')));
-    const prompt = readFileSync(join(directory, 'prompt.md'), 'utf8');
+    const configFile = readFileSync(join(directory, 'config.json'));
+    const promptFile = readFileSync(join(directory, 'prompt.md'));
+    const config = templateSettings.parse(JSON.parse(configFile.toString('utf8')));
+    const prompt = promptFile.toString('utf8');
     if (!prompt.trim()) throw new Error('prompt.md 不能为空。');
     const skillsPath = join(directory, 'skills');
-    return { id, ...config, prompt, directory, skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
+    return { id, ...config, prompt, revision: revision(configFile, promptFile), directory,
+      skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
   }
 
   private unavailable(template: AgentTemplate) {
@@ -116,7 +176,10 @@ export class TemplateCatalog {
           available: reason === null && availability?.available !== false, reason: reason ?? availability?.reason ?? null,
           ...(availability?.command ? { command: availability.command } : {}) };
       } catch (error) {
-        return { id, role: null, driver: null, model: null, description: null, billing: null, available: false,
+        let fileRevision: string | null = null;
+        try { fileRevision = revision(readFileSync(join(this.directory, id, 'config.json')), readFileSync(join(this.directory, id, 'prompt.md'))); }
+        catch { /* Incomplete templates have no revision until both files exist. */ }
+        return { id, revision: fileRevision, role: null, driver: null, model: null, description: null, billing: null, available: false,
           reason: `config.json / prompt.md：${error instanceof Error ? error.message : String(error)}` };
       }
     });

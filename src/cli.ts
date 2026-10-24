@@ -57,7 +57,8 @@ async function main() {
     const field = fields[key];
     const type = field && typeof field === 'object' ? field.type : undefined;
     if (type === 'boolean' && value !== 'true' && value !== 'false') throw new Error(`${key} must be true or false`);
-    params[key] = type === 'boolean' ? value === 'true' : type === 'integer' || type === 'number' ? Number(value) : value;
+    params[key] = type === 'boolean' ? value === 'true' : type === 'integer' || type === 'number' ? Number(value)
+      : type === 'object' ? JSON.parse(value) : value;
   }
   const url = values.url ?? process.env.HELM_URL ?? 'http://127.0.0.1:4242';
   const response = await fetch(`${url}/api/${command}`, {

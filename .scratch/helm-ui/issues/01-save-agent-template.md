@@ -24,12 +24,13 @@
 
 ## Acceptance
 
-- [ ] 改已有模板：`list-agent-templates` 和下一次派单的模板快照都是新内容；正在运行的派单快照不变
-- [ ] 新建模板：生成 `config.json`、`prompt.md`，出现在列表里并做可用性检查
-- [ ] 校验失败、`id` 非法、目录已存在 / 不存在、`update` 改 `role`：分别拒绝并说明原因，磁盘文件不变
-- [ ] 文件被外部改过后再用旧 `revision` 保存：返回冲突，不覆盖
-- [ ] 测试用临时模板目录起真实 `helmd` 覆盖以上情况；`npm run check`、`npm test` 通过
+- [x] 改已有模板：`list-agent-templates` 和下一次派单的模板快照都是新内容；正在运行的派单快照不变
+- [x] 新建模板：生成 `config.json`、`prompt.md`，出现在列表里并做可用性检查
+- [x] 校验失败、`id` 非法、目录已存在 / 不存在、`update` 改 `role`：分别拒绝并说明原因，磁盘文件不变
+- [x] 文件被外部改过后再用旧 `revision` 保存：返回冲突，不覆盖
+- [x] 测试用临时模板目录起真实 `helmd` 覆盖以上情况；`npm run check`、`npm test` 通过
 
 ## Comments
 
 - 2026-10-24 由界面设计（`design/settings.html`）提出。注意：默认模板目录在 Helm 仓库里，界面保存会在 Helm 仓库留下未提交改动，提交与否由用户决定。
+- 2026-10-24 实现：操作表新增仅用户可调用的 `save-agent-template`，复用模板配置 schema，支持新建及带 `baseRevision` 的更新；列表返回两份原始文件内容的 SHA-256 revision。保存先校验字段、id、目录状态和固定角色，再分别写临时文件并 rename，拒绝目录及文件符号链接，保留 `skills/` 和 API 主目录；成功记录事件、检查可用性，API 模板返回配置主目录的提示。CLI 补充 JSON 对象参数解析，HTTP / CLI / MCP 均已验证。临时 HOME、临时模板目录、真实 `helmd` 和假驱动的测试覆盖冲突、拒绝不落盘、权限、当前派单及轮次快照不变和后续生效；`npm run check` 通过，`npm test` 445/445 通过。已自行完成 diff-review 的 Standards / Spec 两项审查，无遗留问题；按执行约定未运行浏览器或真实冒烟、未提交，Status 保持不变，等待调度者验收。

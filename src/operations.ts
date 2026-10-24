@@ -7,7 +7,7 @@ import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
-import { agentTemplates } from './templates.js';
+import { agentTemplates, saveTemplateSchema } from './templates.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
@@ -99,6 +99,19 @@ export const operations: readonly Operation[] = [
         store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
       }
       return store.work(workId);
+    },
+  }),
+  operation({
+    name: 'save-agent-template', description: '保存文件中的 Agent 模板；更新须带列表中的 revision，新建须使用新 id', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: saveTemplateSchema,
+    async execute({ store, actor }, params) {
+      const template = store.templates.save(params);
+      store.transaction(() => store.appendEvent(actor, { type: 'agent-template', id: template.id }, 'agent-template-saved',
+        { mode: params.mode, revision: template.revision }));
+      try { await store.templates.check(template.id); }
+      catch (error) { if (!(error instanceof RuleError)) throw error; }
+      const saved = store.templates.list().find(item => item.id === template.id)!;
+      return { ...saved, notice: template.home === 'template' ? `请按 CLI 格式配置 ~/.helm/agent-homes/${template.id}/ 中的接口和凭据。` : null };
     },
   }),
   operation({
