@@ -1,11 +1,12 @@
 // Outside the sandbox only, after building:
-// HELM_UI_REAL=1 HELM_UI_REAL_HOME=/private/tmp/<logged-in-home> node --test dist/tests/ui.real.js
+// Requires Claude login in the runner's HOME, like the other Claude real tests.
+// HELM_UI_REAL=1 node --test dist/tests/ui.real.js
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir, userInfo } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Browser, Locator, Page } from 'playwright';
 import { ClaudeDriver } from '../src/claude-driver.js';
@@ -69,40 +70,18 @@ function workHeader(page: Page) {
 test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Claude 与有界面 Chromium 截图',
   { skip: !enabled, timeout: 600_000 }, async t => {
     if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '请在有显示服务的沙箱外运行，禁止无头模式');
-    const hostHome = userInfo().homedir;
-    const configuredHome = process.env.HELM_UI_REAL_HOME ?? process.env.HOME;
-    assert.ok(configuredHome, '先在系统临时目录准备已登录 Claude 的专用 HOME，并设置 HELM_UI_REAL_HOME；不可使用本机家目录。');
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-real-')));
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-real-output-')));
     console.log(`UI 冒烟截图目录（保留供人工对照 design/INDEX.md）：${evidence}`);
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
     let browser: Browser | undefined;
-    const previousHome = process.env.HOME;
-    const previousBrowsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
     t.after(async () => {
       try { await browser?.close(); }
       finally {
         try { await daemon?.close(); }
-        finally {
-          if (previousHome === undefined) delete process.env.HOME;
-          else process.env.HOME = previousHome;
-          if (previousBrowsers === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
-          else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsers;
-          await rm(directory, { recursive: true, force: true });
-        }
+        finally { await rm(directory, { recursive: true, force: true }); }
       }
     });
-
-    // Claude owns its login. A scheduler can prepare a disposable HOME with `claude auth login`.
-    // Never open/copy credentials or link writable CLI settings into the user's real home.
-    const home = await realpath(configuredHome);
-    const temporaryRoots = await Promise.all([tmpdir(), '/tmp'].map(path => realpath(path)));
-    assert.ok(temporaryRoots.some(root => {
-      const suffix = relative(root, home);
-      return suffix && suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
-    }), 'HELM_UI_REAL_HOME 必须是系统临时目录下的专用 HOME（可先用 mktemp -d 创建，再以该 HOME 执行 claude auth login）');
-    assert.notEqual(home, await realpath(userInfo().homedir), '禁止把本机家目录作为冒烟 HOME');
-    process.env.HOME = home;
 
     const templateDir = join(directory, 'templates');
     for (const id of ['claude-coordinator', 'claude-executor']) {
@@ -113,7 +92,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     const claude = new ClaudeDriver();
     const availability = await claude.checkAvailability(new TemplateCatalog(templateDir).get('claude-coordinator'));
     assert.equal(availability.available, true,
-      `${availability.reason}\n先在沙箱外执行 HOME='${home}' claude auth login，再用 HELM_UI_REAL_HOME 指向该专用临时 HOME 重跑。`);
+      `${availability.reason}\n请先在沙箱外登录 Claude CLI。`);
 
     const repo = join(directory, 'project');
     const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -132,11 +111,9 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     // This is the same helmd HTTP/MCP/SSE/static server used by `helm serve`, with real drivers.
     // Limit the catalog to Claude so availability probes cannot start other agent CLIs.
     daemon = await startHelmd({ port: 0, dataDir: join(evidence, 'data'), templateDir, drivers: { 'claude-sdk': claude } });
-    // Set this before loading Playwright: its registry resolves the executable at module load.
-    process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(hostHome, process.platform === 'darwin' ? 'Library/Caches/ms-playwright' : '.cache/ms-playwright');
     const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
     const { chromium } = require('playwright') as typeof import('playwright');
-    // Use the browser bundled with Playwright, from the host cache even though HOME is disposable.
+    // Playwright's bundled Chromium, headed; never system Chrome.
     browser = await chromium.launch({ headless: false });
     const context = await browser.newContext({ viewport: { width: 1600, height: 1050 }, locale: 'zh-CN', colorScheme: 'light' });
     const page = await context.newPage();

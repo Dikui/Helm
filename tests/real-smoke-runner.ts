@@ -27,9 +27,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
     ['ui', 'HELM_UI_REAL'],
   ] as const) {
-    const smokeEnv = { ...env, [flag]: '1' };
-    if (file === 'ui' && parent.HELM_UI_REAL_HOME !== undefined) smokeEnv.HELM_UI_REAL_HOME = parent.HELM_UI_REAL_HOME;
-    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: smokeEnv });
+    const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
     if (result.error || result.signal || result.status !== 0) return result.status || 1;
   }
   return 0;

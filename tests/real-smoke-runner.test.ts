@@ -7,8 +7,7 @@ import { runRealSmoke } from './real-smoke-runner.js';
 test('真实冒烟入口按顺序在干净环境运行九套测试，失败时停止（只用进程替身）', () => {
   const parent = { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42',
     CLAUDE_CODE_DESKTOP_SESSION: 'desktop', ARBITRARY: 'secret', NODE_OPTIONS: '--inspect',
-    HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', HELM_UI_REAL: 'unexpected',
-    HELM_UI_REAL_HOME: '/tmp/helm-ui-login', npm_config_cache: '/caller/cache' };
+    HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', HELM_UI_REAL: 'unexpected', npm_config_cache: '/caller/cache' };
   const calls: { args: string[]; env: Record<string, string>; cwd: string }[] = [];
   assert.equal(runRealSmoke((args, options) => {
     calls.push({ args, ...options });
@@ -23,8 +22,7 @@ test('真实冒烟入口按顺序在干净环境运行九套测试，失败时�
   ]);
   for (const [index, call] of calls.entries()) {
     const flag = ['HELM_BROWSER_REAL', 'HELM_CLAUDE_EXECUTOR_REAL', 'HELM_CLAUDE_COORDINATOR_REAL', 'HELM_CLAUDE_SKILLS_REAL', 'HELM_CODEX_EXECUTOR_REAL', 'HELM_CODEX_COORDINATOR_REAL', 'HELM_GROK_EXECUTOR_REAL', 'HELM_DEEPSEEK_EXECUTOR_REAL', 'HELM_UI_REAL'][index]!;
-    assert.deepEqual(call.env, { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42', [flag]: '1',
-      ...(flag === 'HELM_UI_REAL' ? { HELM_UI_REAL_HOME: '/tmp/helm-ui-login' } : {}) });
+    assert.deepEqual(call.env, { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42', [flag]: '1' });
     assert.equal(call.cwd, resolve(fileURLToPath(new URL('../..', import.meta.url))));
   }
   let attempted = 0;
