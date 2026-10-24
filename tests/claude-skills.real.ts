@@ -166,11 +166,24 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
       args: [fileURLToPath(new URL('./fixtures/library-stdio-mcp.js', import.meta.url)), 'library-smoke'],
       env: { HELM_LIBRARY_MCP_SECRET: stdioSecret } } });
     for (const role of ['coordinator', 'executor']) {
-      const agent = await call('save-agent', { id: `library-${role}`, mode: 'create', prompt: '不改文件，不使用 Bash，不启动浏览器，不派生子代理，不提交。',
+      const agent = await call('save-agent', { id: role === 'executor' ? 'library-source' : 'library-coordinator', mode: 'create', prompt: '不改文件，不使用 Bash，不启动浏览器，不派生子代理，不提交。',
         config: { role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: '库 skill 冒烟',
           skills: role === 'executor' ? ['helm-library-probe'] : [], mcp: role === 'executor' ? ['library-probe', 'stdio-probe'] : [] } });
       assert.equal(agent.available, true, agent.reason ?? 'Agent 不可用');
     }
+    // Agent duplication in the editor creates a new Agent with the current config and prompt.
+    // Dispatch the copy to verify its inherited library selections reach the real Claude CLI.
+    const sourceAgent = (await call('list-agents')).find((agent: any) => agent.id === 'library-source');
+    const copiedAgent = await call('save-agent', { id: 'library-executor', mode: 'create', config: sourceAgent.config, prompt: sourceAgent.prompt });
+    assert.equal(copiedAgent.available, true, copiedAgent.reason ?? '复制的 Agent 不可用');
+    assert.deepEqual(copiedAgent.config.skills, ['helm-library-probe']);
+    assert.deepEqual(copiedAgent.config.mcp, ['library-probe', 'stdio-probe']);
+    assert.deepEqual(copiedAgent.skills, []);
+    assert.equal(copiedAgent.prompt, sourceAgent.prompt);
+    const copiedConfig = JSON.parse(await readFile(join(root, 'data', 'agents', 'library-executor', 'config.json'), 'utf8'));
+    assert.deepEqual(copiedConfig.skills, ['helm-library-probe']);
+    assert.deepEqual(copiedConfig.mcp, ['library-probe', 'stdio-probe']);
+    await call('delete-agent', { id: 'library-source' });
     // Settings consumes these same summaries and structured deletion errors.
     // Check the real-smoke setup exposes references without returning credentials.
     const library = await call('list-library');

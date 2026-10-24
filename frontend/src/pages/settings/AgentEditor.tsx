@@ -6,6 +6,7 @@ import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
 import { CliStatus } from '../../shared/CliStatus.js';
 import { ModelFields } from './ModelFields.js';
+import { AgentLibrarySelection } from './AgentLibrarySelection.js';
 import { useRouter } from '../../shared/router.js';
 import type { AgentSettings, AgentEntry } from './types.js';
 import { ActionDialog } from '../work/ActionDialog.js';
@@ -106,11 +107,14 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       <p className="muted">{value.config.home === 'dedicated' ? <>{t('apiHomeHint')} <code>~/.helm/agent-homes/{value.id || '<id>'}/</code></> : t('sharedHomeHint')}</p>
       <label htmlFor="agent-description">{t('description')}<textarea {...fieldProps('description')} rows={3} value={value.config.description} onChange={event => config('description', event.target.value)} />{fieldError('description')}</label>
       <label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
-      <div><h3>{t('skills')} · skills/</h3><p className="muted">{t('skillsReadOnly')}</p>
-        {!creating && source?.skills?.length ? <ul className="settings-files">{source.skills.map(file => <li key={file}><code>{file}</code></li>)}</ul> : <p className="muted">{t('noSkills')}</p>}</div>
+      <AgentLibrarySelection ownSkills={creating ? [] : source?.skills ?? []} settings={value.config} change={config} />
+      {!creating && !!source?.warnings?.length && <div className="settings-box" role="status" aria-label={t('agentWarnings')}>
+        <h3>{t('agentWarnings')}</h3>{source.warnings.map(warning => <p key={warning}>{warning}</p>)}
+      </div>}
     </fieldset>
     <div className="settings-feedback">{error && !deleting && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadAgent')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
-    <div className="settings-actions">{!creating && <button type="button" className="btn" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
+    {(!creating || source) && <p className="settings-duplicate-hint muted" id="agent-duplicate-hint">{t('duplicateAgentHint')}</p>}
+    <div className="settings-actions">{!creating && <button type="button" className="btn" aria-describedby="agent-duplicate-hint" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
       {!creating && <button ref={deleteButton} type="button" className="btn work-danger" disabled={pending} onClick={() => { setError(undefined); setDeleting(true); }}>{t('deleteAgent')}</button>}
       <button className="btn primary" disabled={pending || conflict}>{t('save')}</button></div>
     {deleting && <ActionDialog title={t('deleteAgent')} description={`${source!.id} · ${t('deleteAgentConsequence')}`} busy={pending} onClose={() => setDeleting(false)} returnFocus={deleteButton}>

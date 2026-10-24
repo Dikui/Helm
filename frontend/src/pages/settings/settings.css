@@ -30,11 +30,15 @@
 .settings-page .settings-checkbox { display: flex; align-items: center; gap: var(--space-2); }
 .settings-checkbox input { width: auto; }
 .settings-fields h3 { font-size: var(--text-sm); font-weight: 500; }
+.settings-capabilities { display: grid; gap: var(--space-2); min-width: 0; border: 0; margin: 0; padding: 0; }
+.settings-capabilities legend { margin-bottom: var(--space-2); font-size: var(--text-sm); font-weight: 500; }
+.settings-capabilities label { overflow-wrap: anywhere; }
 .settings-fields p { overflow-wrap: anywhere; font-size: var(--text-sm); }
 .settings-files { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0; list-style: none; }
 .settings-files li { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px; overflow-wrap: anywhere; }
 .settings-feedback { display: grid; gap: var(--space-2); padding: 0 var(--space-4); min-height: 24px; font-size: var(--text-sm); }
 .settings-feedback [role='status'] { color: var(--success); }
+.settings-duplicate-hint { padding: var(--space-3) var(--space-4); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); }
 .settings-simple { display: grid; align-content: start; gap: var(--space-4); max-width: 740px; min-width: 0; padding: var(--space-4) var(--space-5); border-left: 1px solid var(--border); }
 .settings-box { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: grid; gap: var(--space-3); min-width: 0; }

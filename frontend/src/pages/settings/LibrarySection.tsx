@@ -8,12 +8,7 @@ import { useSettingsSave } from './useSettingsSave.js';
 import { InstallSkillForm } from './InstallSkillForm.js';
 import { RegisterMcpForm } from './RegisterMcpForm.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
-
-type LibraryEntry = { name: string; agents: string[] } & (
-  { type: 'skill' } |
-  { type: 'mcp'; transport: 'http'; url: string; headerKeys: string[] } |
-  { type: 'mcp'; transport: 'stdio'; command: string; envKeys: string[] }
-);
+import type { LibraryEntry } from './types.js';
 export function LibrarySection() {
   const { t } = useI18n();
   const library = useResource<LibraryEntry[]>('list-library');

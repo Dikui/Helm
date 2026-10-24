@@ -1,4 +1,9 @@
 export type AgentRole = 'coordinator' | 'executor';
+export type LibraryEntry = { name: string; agents: string[] } & (
+  { type: 'skill' } |
+  { type: 'mcp'; transport: 'http'; url: string; headerKeys: string[] } |
+  { type: 'mcp'; transport: 'stdio'; command: string; envKeys: string[] }
+);
 export interface AgentSettings {
   role: AgentRole; driver: 'claude-sdk' | 'codex' | 'grok' | 'deepseek'; model: string | null;
   reasoningEffort: string | null; fast: boolean;
