@@ -139,7 +139,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await visible(main.getByRole('heading', { name: '新建工作', level: 1, exact: true }));
     await main.getByLabel('项目路径', { exact: true }).fill(repo);
     await click(main.getByRole('button', { name: '登记', exact: true }));
-    await main.getByLabel('调度者模板', { exact: true }).selectOption('claude-coordinator');
+    await main.getByRole('combobox', { name: '调度者模板', exact: true }).selectOption('claude-coordinator');
     await main.getByLabel('需求', { exact: true }).fill(`${title}\n只新增 smoke.txt，内容恰好是 helm-ui-smoke 加一个换行，其他文件不改。请直接起草工作说明，确认后交真实 Claude 执行和整体验收。完成后发 ${readyMessage} 并等待下一条用户消息再审核。`);
     await screenshot('02-new-work', main.getByRole('button', { name: '开始', exact: true }), main.getByText(repo, { exact: true }));
     await click(main.getByRole('button', { name: '开始', exact: true }));
