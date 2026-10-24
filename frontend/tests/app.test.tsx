@@ -93,7 +93,9 @@ test('行内确认和一般关卡决定经 HTTP 生效，工作在等你处理�
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '关卡工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
   fireEvent.click((await screen.findByText('关卡工作')).closest('summary')!);
-  fireEvent.click(await screen.findByRole('button', { name: '确认这一版' }));
+  const confirm = await screen.findByRole('button', { name: '确认这一版' });
+  await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(confirm);
   await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('关卡工作')).toBeTruthy());
   await waitFor(() => expect(screen.getByText('▦ 0/1')).toBeTruthy());
   release();

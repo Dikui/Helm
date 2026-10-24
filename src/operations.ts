@@ -14,6 +14,7 @@ import { requestReview, reviewDetails } from './review.js';
 import { checkOutputUsage, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingTemplates } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
+import { projectGitStatus } from './project-reads.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -181,7 +182,7 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'list-projects', description: '列出项目', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
-    execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all(),
+    execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all().map(projectGitStatus),
   }),
   operation({
     name: 'set-project-coordinator-template', description: '设置项目默认调度者模板，仅影响之后创建的工作', callers: ['user'], keyed: false, mutates: true,

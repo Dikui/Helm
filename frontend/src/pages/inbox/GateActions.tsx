@@ -4,7 +4,7 @@ import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
 import type { Gate } from '../../shared/types.js';
 
-function GateDecision({ gate }: { gate: Gate }) {
+export function GateDecision({ gate }: { gate: Gate }) {
   const { api } = useData();
   const { t } = useI18n();
   const [answer, setAnswer] = useState('');

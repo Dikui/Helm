@@ -1,0 +1,24 @@
+.new-work { display: grid; align-content: safe center; justify-items: center; gap: var(--space-5); }
+.new-work-content { width: min(100%, 720px); display: grid; gap: var(--space-5); }
+.new-work-content > div:first-child { text-align: center; }
+.new-work-content h2 { font-size: var(--text-xl); margin-bottom: var(--space-2); }
+.new-compose { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); padding: var(--space-3); display: grid; gap: var(--space-3); }
+.new-request, .new-tools label { display: grid; gap: var(--space-2); font-size: var(--text-sm); color: var(--muted); }
+.new-request textarea { min-height: 160px; max-height: 45dvh; resize: none; overflow: auto; width: 100%; border: 0; padding: var(--space-2); background: var(--clear); color: var(--text); font: inherit; font-size: var(--text-md); }
+.new-tools { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+.new-tools label { flex: 1; min-width: 0; }
+.new-work select { width: 100%; min-width: 0; max-width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.new-work select:hover { border-color: var(--border-strong); }
+.new-work select:disabled { cursor: not-allowed; }
+.new-base { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
+.new-base h3 { font-size: var(--text-sm); color: var(--muted); }
+.new-warning { color: var(--attention); background: var(--attention-soft); padding: var(--space-3); border-radius: var(--radius-sm); }
+.new-tools .btn { min-width: 100px; }
+.project-registration { display: grid; gap: var(--space-4); }
+.project-registration label { display: grid; gap: var(--space-2); }
+.project-registration input { min-width: 0; width: 100%; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-family: var(--mono); }
+.register-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: var(--space-5); background: var(--overlay); }
+.register-dialog { width: min(100%, 480px); max-height: calc(100dvh - 48px); overflow: auto; display: grid; gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-float); }
+.register-dialog h2 { font-size: var(--text-lg); }
+.new-work .btn:active { transform: translateY(1px); }
+@media (max-width: 900px) { .new-tools label { flex-basis: 100%; } }
