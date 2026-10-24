@@ -39,6 +39,31 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
 
+test('Codex 两种角色将 HTTP 和 stdio MCP 写入会话配置，保留 command、args、env 和省略项', async t => {
+  for (const role of ['coordinator', 'executor'] as const) {
+    for (const home of ['shared', 'dedicated'] as const) {
+      const ctx = await fixture(t, [completed()], {}, role);
+      const mcpServers = {
+        ...ctx.options.mcpServers,
+        local: { type: 'stdio', command: 'node', args: ['server.js', '--stdio'], env: { TOKEN: 'local-secret' } },
+        minimal: { type: 'stdio', command: 'local-mcp' },
+        empty: { type: 'stdio', command: 'empty-mcp', args: [], env: {} },
+      } satisfies SessionOptions['mcpServers'];
+      const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, home }, mcpServers });
+      t.after(() => session.cancel());
+      await session.send('调用所选 MCP');
+      assert.equal((await collect(session.events)).at(-1)?.type, 'end');
+      const thread = (await ctx.requests()).find(request => request.method === 'thread/start');
+      assert.deepEqual(thread.params.config.mcp_servers, {
+        helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' },
+        local: { command: 'node', args: ['server.js', '--stdio'], env: { TOKEN: 'local-secret' }, default_tools_approval_mode: 'approve' },
+        minimal: { command: 'local-mcp', default_tools_approval_mode: 'approve' },
+        empty: { command: 'empty-mcp', args: [], env: {}, default_tools_approval_mode: 'approve' },
+      });
+    }
+  }
+});
+
 test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并记录 total token，等 turn/completed 才结束', async t => {
   const ctx = await fixture(t, [
     notification('item/completed', { item: { id: 'comment', type: 'agentMessage', text: '仍在执行', phase: 'commentary' } }),

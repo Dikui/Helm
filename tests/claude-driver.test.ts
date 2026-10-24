@@ -56,6 +56,32 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
+test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参数及环境变量和省略项', async t => {
+  for (const role of ['coordinator', 'executor'] as const) {
+    const options = await fixture(t, role);
+    const mcpServers = {
+      ...options.mcpServers,
+      local: { type: 'stdio', command: 'node', args: ['server.js', '--stdio'], env: { TOKEN: 'local-secret' } },
+      minimal: { type: 'stdio', command: 'local-mcp' },
+      empty: { type: 'stdio', command: 'empty-mcp', args: [], env: {} },
+    } satisfies SessionOptions['mcpServers'];
+    for (const home of ['shared', 'dedicated'] as const) {
+      let inspected = false;
+      await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result()], args => {
+        inspected = true;
+        assert.deepEqual(args.options!.mcpServers, {
+          helm: { type: 'http', url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } },
+          local: { type: 'stdio', command: 'node', args: ['server.js', '--stdio'], env: { TOKEN: 'local-secret' } },
+          minimal: { type: 'stdio', command: 'local-mcp' },
+          empty: { type: 'stdio', command: 'empty-mcp', args: [], env: {} },
+        });
+        assert.equal(Object.hasOwn(args.options!, 'strictMcpConfig'), false);
+      }) }), { ...options, agent: { ...options.agent, home }, mcpServers });
+      assert.equal(inspected, true);
+    }
+  }
+});
+
 test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent、用户和内置 skill', async t => {
   const base = await fixture(t);
   const context = { signal: new AbortController().signal, toolUseID: 'skill', requestId: 'skill' };

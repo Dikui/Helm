@@ -115,7 +115,9 @@ export class CodexDriver implements Driver {
           ...(agent.fast ? { service_tier: 'fast' } : {}),
           ...(!coordinator ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
-            url: server.url, http_headers: server.headers, default_tools_approval_mode: 'approve',
+            ...(server.type === 'stdio' ? { command: server.command, args: server.args, env: server.env }
+              : { url: server.url, http_headers: server.headers }),
+            default_tools_approval_mode: 'approve',
           }])),
         },
       });

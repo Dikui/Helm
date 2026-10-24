@@ -208,6 +208,46 @@ test('库 skill 安装拒绝重名、缺 SKILL.md、非法名字和符号链接�
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
 });
 
+test('用户经 HTTP 和 CLI 登记 stdio MCP，文件保留命令参数及环境变量，列表和事件只返回环境变量键名', async t => {
+  const daemon = await fixture(t);
+  const config = { type: 'stdio', command: 'node', args: ['local-mcp.js', '--mode', 'tools'],
+    env: { TOKEN: 'stdio-secret', ACCOUNT: 'private-account' } };
+  const registered = await daemon.call('register-mcp', { name: 'local', config });
+  ok(registered);
+  const path = join(daemon.directory, 'data', 'library', 'mcp', 'local.json');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), config);
+  assert.equal((await lstat(path)).mode & 0o777, 0o600);
+  const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)),
+    'register-mcp', '--url', daemon.url, '--name', 'minimal', '--config', JSON.stringify({ type: 'stdio', command: 'local-mcp' })]);
+  ok(JSON.parse(stdout));
+  assert.deepEqual((await daemon.call('list-library')).result, [
+    { type: 'mcp', name: 'local', transport: 'stdio', command: 'node', envKeys: ['ACCOUNT', 'TOKEN'], agents: [] },
+    { type: 'mcp', name: 'minimal', transport: 'stdio', command: 'local-mcp', envKeys: [], agents: [] },
+  ]);
+  const events = (await daemon.call('get-events')).result;
+  assert.deepEqual(events.filter((event: any) => event.action === 'library-mcp-registered').map((event: any) => event.details), [
+    { type: 'mcp', name: 'local', transport: 'stdio', command: 'node', envKeys: ['ACCOUNT', 'TOKEN'] },
+    { type: 'mcp', name: 'minimal', transport: 'stdio', command: 'local-mcp', envKeys: [] },
+  ]);
+  for (const value of [registered, JSON.parse(stdout), await daemon.call('list-library'), events]) {
+    assert.ok(!JSON.stringify(value).includes('stdio-secret'));
+    assert.ok(!JSON.stringify(value).includes('private-account'));
+    assert.ok(!JSON.stringify(value).includes('local-mcp.js'), '列表和事件不返回参数');
+  }
+  for (const invalid of [
+    { type: 'stdio' }, { type: 'stdio', command: '' }, { type: 'stdio', command: '   ' },
+    { type: 'stdio', command: 42 }, { type: 'stdio', command: 'node', args: 'server.js' },
+    { type: 'stdio', command: 'node', args: [42] }, { type: 'stdio', command: 'node', env: { TOKEN: 42 } },
+    { ...config, url: 'https://mixed.example.invalid' }, { ...config, headers: { Authorization: 'secret' } },
+  ]) {
+    const rejected = await daemon.call('register-mcp', { name: 'invalid', config: invalid });
+    assert.equal(rejected.error.code, 'INVALID_PARAMS');
+    assert.equal(rejected.status, 400);
+  }
+  await assert.rejects(lstat(join(daemon.directory, 'data', 'library', 'mcp', 'invalid.json')), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), config);
+});
+
 test('用户经 HTTP 和 CLI 登记 HTTP MCP，库文件私密且列表和事件不回显请求头值，删除记事件', async t => {
   const daemon = await fixture(t);
   const config = { type: 'http', url: 'https://tools.example.invalid/mcp', headers: { Authorization: 'Bearer library-secret', 'X-Account': 'private-account' } };
@@ -230,7 +270,7 @@ test('用户经 HTTP 和 CLI 登记 HTTP MCP，库文件私密且列表和事件
   for (const name of ['../escape', 'Upper', '', '-bad', 'a'.repeat(65)]) {
     assert.equal((await daemon.call('register-mcp', { name, config })).error.code, 'INVALID_PARAMS');
   }
-  for (const invalid of [{ type: 'stdio', command: 'tool' }, { type: 'http', url: 'file:///secret' }, { type: 'http', url: 'invalid' },
+  for (const invalid of [{ type: 'http', url: 'file:///secret' }, { type: 'http', url: 'invalid' },
     { type: 'http', url: config.url, headers: { Authorization: 42 } }]) {
     assert.equal((await daemon.call('register-mcp', { name: 'invalid', config: invalid })).error.code, 'INVALID_PARAMS');
   }
@@ -771,8 +811,17 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
     || event.details.agent.skillsPath === join(daemon.directory, 'data', 'rounds', event.object.id, 'skills')));
 });
 
-test('四个驱动的派单及支持的调度轮次合并所选 HTTP MCP，排队在启动时读取且运行中的配置保持不变', async t => {
-  for (const driver of ['claude-sdk', 'codex', 'grok', 'deepseek'] as const) await t.test(driver, async t => {
+test('派单及调度轮次合并所选 HTTP 或 stdio MCP，排队在启动时读取且运行中的配置保持不变', async t => {
+  for (const [driver, transport] of [
+    ['claude-sdk', 'http'], ['codex', 'http'], ['grok', 'http'], ['deepseek', 'http'],
+    ['claude-sdk', 'stdio'], ['codex', 'stdio'],
+  ] as const) await t.test(`${driver}/${transport}`, async t => {
+    const remoteV1 = transport === 'http'
+      ? { url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } }
+      : { type: 'stdio' as const, command: 'node', args: ['remote-v1.js'], env: { TOKEN: 'remote-secret-v1' } };
+    const remoteV2 = transport === 'http'
+      ? { url: 'https://remote.example.invalid/v2', headers: { Authorization: 'Bearer remote-secret-v2' } }
+      : { type: 'stdio' as const, command: 'node', args: ['remote-v2.js'], env: { TOKEN: 'remote-secret-v2' } };
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
     const first = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -795,7 +844,7 @@ test('四个驱动的派单及支持的调度轮次合并所选 HTTP MCP，排�
     const router: Driver = { checkAvailability: async () => ({ available: true }),
       start: options => (options.agent.role === 'coordinator' ? rounds : executor).start(options) };
     const daemon = await fixture(t, { 'claude-sdk': router, [driver]: router });
-    ok(await daemon.call('register-mcp', { name: 'remote', config: { type: 'http', url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } } }));
+    ok(await daemon.call('register-mcp', { name: 'remote', config: { type: transport, ...remoteV1 } }));
     for (const name of ['public', 'unused']) ok(await daemon.call('register-mcp', { name, config: { type: 'http', url: 'https://public.example.invalid/mcp' } }));
     const coordinatorDriver = driver === 'codex' ? 'codex' : 'claude-sdk';
     await daemon.writeAgent('claude-coordinator', { role: 'coordinator', driver: coordinatorDriver, mcp: ['remote', 'public'] });
@@ -809,30 +858,30 @@ test('四个驱动的派单及支持的调度轮次合并所选 HTTP MCP，排�
     await until(dispatches, values => values.length === 2 && values[0].status === 'running' && values[1].status === 'queued' && seen.length === 1);
     for (const options of [...roundOptions, seen[0]!]) {
       assert.deepEqual(Object.keys(options.mcpServers).sort(), ['helm', 'public', 'remote']);
-      assert.deepEqual(options.mcpServers.remote, { url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } });
+      assert.deepEqual(options.mcpServers.remote, remoteV1);
       assert.deepEqual(options.mcpServers.public, { url: 'https://public.example.invalid/mcp', headers: {} });
       assert.equal(options.mcpServers.helm!.url, `${daemon.url}/mcp`);
       assert.match(options.mcpServers.helm!.headers.Authorization!, /^Bearer \S+$/);
     }
     await writeFile(join(daemon.directory, 'data', 'library', 'mcp', 'remote.json'),
-      JSON.stringify({ type: 'http', url: 'https://remote.example.invalid/v2', headers: { Authorization: 'Bearer remote-secret-v2' } }));
+      JSON.stringify({ type: transport, ...remoteV2 }));
     releaseFirst();
     await until(dispatches, values => values[1]?.status === 'running' && seen.length === 2);
-    assert.deepEqual(seen[1]!.mcpServers.remote, { url: 'https://remote.example.invalid/v2', headers: { Authorization: 'Bearer remote-secret-v2' } });
-    assert.deepEqual(seen[0]!.mcpServers.remote, { url: 'https://remote.example.invalid/v1', headers: { Authorization: 'Bearer remote-secret-v1' } });
+    assert.deepEqual(seen[1]!.mcpServers.remote, remoteV2);
+    assert.deepEqual(seen[0]!.mcpServers.remote, remoteV1);
     for (const id of ['claude-coordinator', 'executor']) {
       const agent = (await daemon.call('list-agents')).result.find((agent: any) => agent.id === id);
       ok(await daemon.call('save-agent', { id, mode: 'update', baseRevision: agent.revision, config: { ...agent.config, mcp: [] }, prompt: agent.prompt }));
     }
     ok(await daemon.call('delete-library-entry', { type: 'mcp', name: 'remote' }));
-    assert.equal(seen[1]!.mcpServers.remote!.url, 'https://remote.example.invalid/v2');
-    assert.equal(roundOptions[0]!.mcpServers.remote!.url, 'https://remote.example.invalid/v1');
+    assert.deepEqual(seen[1]!.mcpServers.remote, remoteV2);
+    assert.deepEqual(roundOptions[0]!.mcpServers.remote, remoteV1);
     releaseSecond();
     await until(dispatches, values => values.length === 2 && values.every(value => value.status === 'ended'));
     for (const name of ['list-agents', 'get-events', 'list-dispatches', 'list-rounds']) {
       const value = await daemon.call(name, ['list-dispatches', 'list-rounds'].includes(name) ? { workId: work.id } : {});
       ok(value);
-      assert.ok(!JSON.stringify(value).includes('remote-secret'), `${name} 不得泄露库 MCP 请求头值`);
+      assert.ok(!JSON.stringify(value).includes('remote-secret'), `${name} 不得泄露库 MCP 请求头或环境变量值`);
     }
   });
 });
@@ -979,17 +1028,22 @@ test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', a
 test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，健康 Agent 仍能派单', async t => {
   const rounds = new FakeDriver([alignment, ctx => [
     { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '检查不可用 Agent' }, saveAs: 'card', check: ok },
-    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill', 'missing-mcp', 'reserved-mcp'].map(agentId => ({
+    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill', 'missing-mcp', 'reserved-mcp', 'stdio-grok', 'stdio-deepseek'].map(agentId => ({
       type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: agentId, agentId }),
       check: (value: any) => {
         assert.equal(value.ok, false, JSON.stringify(value));
         assert.equal(value.error.code, 'AGENT_UNAVAILABLE');
         assert.equal(value.error.details.agentId, agentId);
+        if (agentId.startsWith('stdio-')) assert.match(value.error.reason, /ACP.*(grok|deepseek).*不支持 stdio.*local/);
       },
     })),
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'healthy', agentId: 'healthy' }), check: ok },
   ]]);
-  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => (options.agent?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) } });
+  const daemon = await fixture(t, {
+    'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => (options.agent?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) },
+    grok: { checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 Grok Agent 不得启动'); } },
+    deepseek: { checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 DeepSeek Agent 不得启动'); } },
+  });
   await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
   await daemon.writeAgent('healthy');
   await daemon.writeAgent('fast', { fast: true });
@@ -999,12 +1053,18 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   await daemon.writeAgent('clashing-skill', { skills: ['shared'] });
   await daemon.writeAgent('missing-mcp', { mcp: ['absent'] });
   await daemon.writeAgent('reserved-mcp', { mcp: ['helm'] });
+  ok(await daemon.call('register-mcp', { name: 'local', config: { type: 'stdio', command: 'node', env: { TOKEN: 'private-stdio-token' } } }));
+  await daemon.writeAgent('stdio-grok', { driver: 'grok', model: 'grok-4.7', mcp: ['local'] });
+  await daemon.writeAgent('stdio-deepseek', { driver: 'deepseek', model: 'deepseek-flash', mcp: ['local'] });
   const library = join(daemon.directory, 'data', 'library', 'skills', 'shared');
   await mkdir(library, { recursive: true });
   await writeFile(join(library, 'SKILL.md'), '库 skill');
   await mkdir(join(daemon.agentDir, 'clashing-skill', 'skills', 'shared'), { recursive: true });
   const agents = (await daemon.call('list-agents')).result;
-  for (const [id, reason] of [['missing-skill', /absent/], ['clashing-skill', /同名.*shared/], ['missing-mcp', /absent/], ['reserved-mcp', /helm.*冲突/]] as const) {
+  for (const [id, reason] of [
+    ['missing-skill', /absent/], ['clashing-skill', /同名.*shared/], ['missing-mcp', /absent/], ['reserved-mcp', /helm.*冲突/],
+    ['stdio-grok', /ACP.*grok.*不支持 stdio.*local/], ['stdio-deepseek', /ACP.*deepseek.*不支持 stdio.*local/],
+  ] as const) {
     const agent = agents.find((entry: any) => entry.id === id);
     assert.equal(agent.available, false);
     assert.match(agent.reason, reason);
@@ -1018,7 +1078,9 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   const gate = (await daemon.call('list-pending')).result[0];
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const values = await until(events, values => values.some(value => value.action === 'dispatch-ended'));
-  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 8);
+  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 10);
+  assert.ok(!JSON.stringify(await daemon.call('list-agents')).includes('private-stdio-token'));
+  assert.ok(!JSON.stringify(await daemon.call('get-events')).includes('private-stdio-token'));
   const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].agentId, 'healthy');

@@ -234,7 +234,12 @@ export class AgentCatalog {
       return Object.fromEntries((agent.mcp ?? []).map(name => {
         // Keep Helm's authenticated endpoint and the browser MCP names reserved.
         if (['helm', 'browser', 'playwright'].includes(name)) throw new Error(`库 MCP ${name} 与 Helm 内置 MCP 或浏览器工具名字冲突。`);
-        const { url, headers = {} } = this.mcpLibrary.read(name);
+        const config = this.mcpLibrary.read(name);
+        if (config.type === 'stdio') {
+          if (Object.hasOwn(acpAgents, agent.driver)) throw new Error(`ACP 驱动 ${agent.driver} 不支持 stdio MCP：${name}。`);
+          return [name, config];
+        }
+        const { url, headers = {} } = config;
         return [name, { url, headers }];
       }));
     } catch (error) {

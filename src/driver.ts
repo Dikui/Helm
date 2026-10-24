@@ -4,10 +4,13 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AgentConfig } from './agents.js';
+import type { McpConfig } from './library.js';
 import type { ManagedProcess } from './processes.js';
 
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 export interface TokenUsage { inputTokens: number; outputTokens: number }
+interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
+export type McpServerConfig = HttpMcpServer | Extract<McpConfig, { type: 'stdio' }>;
 export interface SessionOptions {
   agent: AgentConfig;
   cwd: string;
@@ -15,7 +18,8 @@ export interface SessionOptions {
   // Per-dispatch storage outside the writable card copy (CLI state, not code).
   dataDir?: string;
   sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
-  mcpServers: Record<string, { url: string; headers: Record<string, string> }>;
+  // The reserved Helm endpoint always uses authenticated HTTP.
+  mcpServers: Record<string, McpServerConfig> & { helm?: HttpMcpServer };
   resumeSessionId?: string;
   signal?: AbortSignal;
   // Report each detached group at spawn time, including if start() has not resolved.

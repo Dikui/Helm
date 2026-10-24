@@ -16,7 +16,7 @@ import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
-import { deleteLibraryEntry, httpMcpSchema, installSkill, libraryName, listLibrary, registerMcp } from './library.js';
+import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -60,8 +60,8 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, { path, name }) => installSkill(store, actor, path, name),
   }),
   operation({
-    name: 'register-mcp', description: '登记 HTTP MCP 到库', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ name: libraryName, config: httpMcpSchema }).strict(),
+    name: 'register-mcp', description: '登记 HTTP 或 stdio MCP 到库', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ name: libraryName, config: mcpSchema }).strict(),
     execute: ({ store, actor }, { name, config }) => registerMcp(store, actor, name, config),
   }),
   operation({

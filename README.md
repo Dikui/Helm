@@ -90,6 +90,8 @@ helm delete-library-entry --type mcp --name remote-tools
 
 Agent 在 `config.json` 用 `"mcp": ["remote-tools"]` 选择库 MCP，省略时为空数组，保存和复制保留选择。派单和调度轮次启动时，所选 MCP 与带令牌的 `helm` MCP 一起交给驱动；排队派单在实际启动时读取，改动库文件不影响已运行的配置。引用缺失或无效 MCP，或引用保留名字 `helm`、`browser`、`playwright` 时，Agent 不可用。`list-library` 的 MCP 条目返回 `type: "mcp"`、`name`、`transport: "http"`、`url`、请求头键名 `headerKeys` 和引用它的 `agents`；登记返回和事件同样只含键名。登记及删除只允许用户调用，被任何 Agent 引用时拒绝删除。
 
+本机命令行 MCP 使用 `{ "type": "stdio", "command": "node", "args": ["/absolute/path/server.js"], "env": { "TOKEN": "…" } }`，`args` 和 `env` 可省略，同样登记到库并按名字引用，例如 `helm register-mcp --name local-tools --config '{"type":"stdio","command":"local-mcp"}'`。列表、登记返回和事件只显示 `transport: "stdio"`、`command`、环境变量键名 `envKeys` 和引用关系，不返回参数或环境变量值。Claude 和 Codex 的调度者及执行者均支持 stdio MCP；ACP 驱动（Grok、DeepSeek）引用时 Agent 不可用，派单返回 `AGENT_UNAVAILABLE`。ACP 驱动还会在启动子进程前以 `UNSUPPORTED_MCP_TRANSPORT` 拒绝 stdio MCP。
+
 订阅 Agent（`home: "shared"`）选中的库 skill 与对应 CLI 的全局 skill 目录同名时，`list-agents` 返回 `warnings: string[]`，文案含 skill 名字和全局目录路径；无警告时为空数组。只比较目录名，不解析内容，不影响 Agent 可用性或派单；API Agent 不检查。检查默认用户目录：Claude 的 `~/.claude/skills/`，Codex 的 `~/.codex/skills/` 与 `~/.agents/skills/`，Grok 的 `~/.grok/skills/`、`~/.claude/skills/` 与 `~/.agents/skills/`，DeepSeek 的 `~/.dsh/skills/` 与 `~/.agents/skills/`。目录缺失或不可读时跳过，不检查插件或项目内的 skill 来源。
 
 派单和调度轮次在实际启动时把自带和选中的库 skill 复制到各自数据目录的 `skills/`，当次 Agent 快照的 `skillsPath` 指向这份副本。没有 skill 时不创建目录；库和 Agent 文件的后续变动不影响已启动运行。Claude 从副本的上一级加载插件，其余驱动沿用现有 skills 接法。

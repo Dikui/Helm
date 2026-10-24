@@ -8,6 +8,7 @@ import { AcpClient, type AcpCommand } from './acp-client.js';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption } from './driver.js';
 import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
+import { RuleError } from './store.js';
 
 type EventContent<Event = DriverEvent> = Event extends DriverEvent ? Omit<Event, 'step'> : never;
 const extensionUpdate = z.object({ sessionId: z.string(), update: z.object({ sessionUpdate: z.string() }) });
@@ -121,6 +122,12 @@ export class AcpDriver implements Driver {
 
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
+    const mcpServers = Object.entries(options.mcpServers).map(([name, server]) => {
+      if (server.type === 'stdio') throw new RuleError('UNSUPPORTED_MCP_TRANSPORT',
+        `ACP 驱动 ${this.agent} 不支持 stdio MCP：${name}。`, 400, { driver: this.agent, mcpName: name, transport: 'stdio' });
+      return { type: 'http' as const, name, url: server.url,
+        headers: Object.entries(server.headers).map(([name, value]) => ({ name, value })) };
+    });
     const agent = options.agent;
     const profile = this.profile;
     const reason = this.profile.unavailable(agent);
@@ -237,9 +244,7 @@ export class AcpDriver implements Driver {
       }
       if (cancelled) throw new Error('ACP session cancelled during startup');
       if (this.profile.authentication) await acp.connection.agent.request('authenticate', { methodId: this.profile.authentication });
-      const request: NewSessionRequest = { cwd,
-        mcpServers: Object.entries(options.mcpServers).map(([name, server]) => ({ type: 'http' as const, name, url: server.url,
-          headers: Object.entries(server.headers).map(([name, value]) => ({ name, value })) })) };
+      const request: NewSessionRequest = { cwd, mcpServers };
       let configOptions: SessionConfigOption[] | null | undefined;
       if (options.resumeSessionId !== undefined) {
         id = options.resumeSessionId;

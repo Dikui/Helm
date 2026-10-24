@@ -3,10 +3,38 @@ import { test } from 'node:test';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AcpDriver } from '../src/acp-driver.js';
+import { RuleError } from '../src/store.js';
 import { AgentCatalog, type AgentConfig } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
+
+test('ACP 收到 stdio MCP 时在启动子进程前抛出结构化错误，不泄露环境变量', async t => {
+  for (const kind of ['grok', 'deepseek'] as const) {
+    const ctx = await acpFixture(t, {}, false, kind);
+    const processes: number[] = [];
+    for (const resumeSessionId of [undefined, 'previous']) {
+      const starting = ctx.driver.start({ ...ctx.options, resumeSessionId,
+        onProcess: process => { processes.push(process.pid); },
+        mcpServers: { ...ctx.options.mcpServers,
+          local: { type: 'stdio', command: 'node', args: ['secret-server.js'], env: { TOKEN: 'private-token' } },
+        },
+      }).then(session => { t.after(() => session.cancel()); return session; });
+      await assert.rejects(starting, (error: unknown) => {
+        assert.ok(error instanceof RuleError);
+        assert.equal(error.code, 'UNSUPPORTED_MCP_TRANSPORT');
+        assert.equal(error.status, 400);
+        assert.deepEqual(error.details, { driver: kind, mcpName: 'local', transport: 'stdio' });
+        assert.match(error.message, /stdio.*local/);
+        assert.ok(!JSON.stringify(error).includes('private-token'));
+        assert.ok(!error.message.includes('secret-server.js'));
+        return true;
+      });
+    }
+    assert.deepEqual(processes, []);
+    assert.deepEqual(await ctx.requests(), []);
+  }
+});
 
 test('ACP 将会话创建前后拆包的普通 stdout 行记入派单输出，继续完成派单', async t => {
   const ctx = await acpFixture(t, {

@@ -208,7 +208,8 @@ export class ClaudeDriver implements Driver {
         filesystem: coordinator ? { disabled: false, allowWrite: [], denyWrite: [cwd] } : { disabled: false, allowWrite: [cwd] },
         network: { allowLocalBinding: true },
       },
-      mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, { type: 'http', ...server }])),
+      mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) =>
+        [name, server.type === 'stdio' ? server : { ...server, type: 'http' }])),
       ...(options.agent?.model ? { model: options.agent.model } : {}),
       ...(options.agent?.reasoningEffort ? { effort: options.agent.reasoningEffort as Options['effort'] } : {}),
       ...(options.resumeSessionId ? { resume: id } : { sessionId: id }),

@@ -5,28 +5,35 @@ import { z } from 'zod';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 
 export const libraryName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, '名字须为 1–64 位小写字母、数字或连字符，以字母或数字开头。');
-export const httpMcpSchema = z.object({
+const httpMcpSchema = z.object({
   type: z.literal('http'), url: z.url({ protocol: /^https?$/ }),
   headers: z.record(z.string(), z.string()).optional(),
 }).strict();
-export type HttpMcpConfig = z.infer<typeof httpMcpSchema>;
+const stdioMcpSchema = z.object({
+  type: z.literal('stdio'), command: z.string().min(1).refine(command => command.trim().length > 0, '命令不能为空。'),
+  args: z.array(z.string()).optional(), env: z.record(z.string(), z.string()).optional(),
+}).strict();
+export const mcpSchema = z.discriminatedUnion('type', [httpMcpSchema, stdioMcpSchema]);
+export type McpConfig = z.infer<typeof mcpSchema>;
 
-function mcpSummary(name: string, config: HttpMcpConfig) {
-  return { type: 'mcp' as const, name, transport: config.type, url: config.url, headerKeys: Object.keys(config.headers ?? {}).sort() };
+function mcpSummary(name: string, config: McpConfig) {
+  return config.type === 'http'
+    ? { type: 'mcp' as const, name, transport: config.type, url: config.url, headerKeys: Object.keys(config.headers ?? {}).sort() }
+    : { type: 'mcp' as const, name, transport: config.type, command: config.command, envKeys: Object.keys(config.env ?? {}).sort() };
 }
 
 export class McpLibrary {
   constructor(readonly directory: string) {}
 
-  read(name: string): HttpMcpConfig {
+  read(name: string): McpConfig {
     libraryName.parse(name);
     try {
       const path = join(this.directory, `${name}.json`);
       if (!lstatSync(path).isFile()) throw new Error('MCP 须为普通文件');
-      return httpMcpSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+      return mcpSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
     } catch {
       // JSON/schema errors can include file contents and credentials.
-      throw new RuleError('INVALID_MCP', `库 MCP ${name} 不存在或格式无效，须为 HTTP MCP 普通 JSON 文件。`, 400);
+      throw new RuleError('INVALID_MCP', `库 MCP ${name} 不存在或格式无效，须为 HTTP 或 stdio MCP 普通 JSON 文件。`, 400);
     }
   }
 
@@ -37,9 +44,9 @@ export class McpLibrary {
       .map(entry => entry.name.slice(0, -5)).sort();
   }
 
-  register(name: string, config: HttpMcpConfig) {
+  register(name: string, config: McpConfig) {
     libraryName.parse(name);
-    const parsed = httpMcpSchema.parse(config);
+    const parsed = mcpSchema.parse(config);
     mkdirSync(this.directory, { recursive: true });
     try { writeFileSync(join(this.directory, `${name}.json`), JSON.stringify(parsed, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); }
     catch (error) {
@@ -141,7 +148,7 @@ export function listLibrary(store: TaskStore) {
   ];
 }
 
-export function registerMcp(store: TaskStore, actor: Actor, name: string, config: HttpMcpConfig) {
+export function registerMcp(store: TaskStore, actor: Actor, name: string, config: McpConfig) {
   const entry = mcpLibrary(store).register(name, config);
   store.transaction(() => store.appendEvent(actor, { type: 'library-mcp', id: name }, 'library-mcp-registered', entry));
   return entry;
