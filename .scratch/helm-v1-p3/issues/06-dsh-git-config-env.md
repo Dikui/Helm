@@ -4,12 +4,12 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 在本机 dsh 源码里找到过滤规则并记进 Comments（文件路径、规则）
 - [x] Helm 改用不会被 dsh 过滤、且 Claude、Codex、Grok 也照常生效的方式注入禁止推送配置（对所有驱动一致，不按档案分叉，除非证据表明必须）
 - [x] 单元测试覆盖新的注入方式下本地远端推送被拦、普通 git 命令可用；`npm run check`、`npm test` 通过
-- [ ] `grok-executor.real`、`deepseek-executor.real` 增加：执行者在卡片副本里跑 `git status` 成功、`git push` 到本地远端被拦；沙箱外跑通
+- [x] `grok-executor.real`、`deepseek-executor.real` 增加：执行者在卡片副本里跑 `git status` 成功、`git push` 到本地远端被拦；沙箱外跑通
 
 ## Comments
 
@@ -20,3 +20,5 @@
 - 先扩展既有本地远端测试，模拟 dsh 过滤，复现 `git status` 的 `missing config key GIT_CONFIG_KEY_0`；修复后同时检查原环境和过滤环境中 `git status`、`git log` 成功，直接路径/命名远端显式 `pushurl` 推送被 Helm 地址重写拦截，远端无禁止引用，普通 `ls-remote` 可用。远端路径包含空格、单引号和反斜杠，验证编码不破坏路径。`npm run check --cache /private/tmp/helm-npm-cache` 退出 0；定向测试 140 项通过；`npm test --cache /private/tmp/helm-npm-cache` 441 项通过，0 失败、0 跳过（约 74.9 秒）。
 - `grok-executor.real.ts`、`deepseek-executor.real.ts` 补充已写并参与 TypeScript 编译：执行者在卡片副本原样执行 `git status`、创建副本内的临时裸远端并尝试推送；断言工具输出的真实退出码、`/dev/null/helm-push-disabled/` 拦截原因、远端引用为空，再由宿主环境对同一远端做成功推送对照。裸远端在 `.gitignore` 中排除，避免进入运行层提交。
 - 按本次用户要求，未启动浏览器、未发起任何真实 agent 会话、未运行任何 `*.real` 或 `test:real`。最后一项包含“沙箱外跑通”，因此保持未勾选。需要人工在沙箱外运行 `npm run test:real --cache /private/tmp/helm-npm-cache`，检查 Grok/DeepSeek 的 git 探针、对照推送、原有真实冒烟断言及输出截图；通过后再勾选最后一项。
+
+- 2026-10-23 沙箱外完整 `test:real`（75615c2）18/18 通过：Grok、DeepSeek 执行者在卡片副本里 `git status` 成功，推送到本地远端被 Helm 禁推配置拦截，宿主对照推送成功；Claude、Codex 套件仍通过。关闭。
