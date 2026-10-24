@@ -108,7 +108,8 @@ test('DeepSeek 账号执行者经 ACP 设置并核对模型路线和强度，强
   assert.equal(spawn.env.DEEPSEEK_API_KEY, undefined);
   assert.equal(spawn.env.DSH_PERMISSION_MODE, 'workspace-write');
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
-  assert.ok(Number(spawn.env.GIT_CONFIG_COUNT) > 0);
+  assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
+  assert.equal(spawn.env.GIT_CONFIG_COUNT, undefined);
   assert.equal(requests.some(r => r.method === 'authenticate'), false);
   assert.deepEqual(requests.filter(r => r.method === 'session/set_config_option').map(r => r.params), [
     { sessionId: session.id, configId: 'model', value: '["deepseek-account","deepseek-flash"]' },

@@ -12,13 +12,30 @@ import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 
+const gitRemote = '.helm-smoke-remote.git';
+// Keep the remote inside the card copy so a filesystem sandbox denial cannot
+// masquerade as Helm's push guard. Markers carry the actual git exit codes.
+export const executorGitProbe = `git status --porcelain; helm_git_status=$?; printf 'HELM_GIT_STATUS_EXIT=%s\\n' "$helm_git_status"; git init --bare ${gitRemote} && { git push ./${gitRemote} HEAD:refs/heads/helm-forbidden; helm_git_push=$?; printf 'HELM_GIT_PUSH_EXIT=%s\\n' "$helm_git_push"; }`;
+
+export function assertExecutorGitProbe(tools: Map<string, any[]>, cwd: string) {
+  assert.ok([...tools.values()].some(entries => {
+    const text = JSON.stringify(entries);
+    return text.includes(JSON.stringify(executorGitProbe).slice(1, -1)) && /HELM_GIT_STATUS_EXIT=0/.test(text)
+      && /HELM_GIT_PUSH_EXIT=[1-9]\d*/.test(text) && text.includes('/dev/null/helm-push-disabled/');
+  }), '必须有执行者工具输出：git status 成功，git push 因 Helm 地址重写失败');
+  const git = (...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  assert.equal(git('--git-dir', gitRemote, 'for-each-ref', '--format=%(refname)'), '', '本地远端不应收到任何推送');
+  git('push', `./${gitRemote}`, 'HEAD:refs/heads/helm-control');
+  assert.equal(git('--git-dir', gitRemote, 'rev-parse', 'refs/heads/helm-control'), git('rev-parse', 'HEAD'), '同一本地远端在宿主环境必须可推送');
+}
+
 // All daemon state, CLI state and card copies use a temporary HOME. The real
 // smoke may link the CLI-owned login; Helm never opens or copies its contents.
 export async function acpExecutorFixture(t: TestContext, executor: Driver, config: {
   agent?: 'grok' | 'deepseek';
   content?: string; secondContent?: string; needsBrowser?: boolean; realBrowser?: boolean;
   stagedAuth?: string; model?: string; purpose?: 'execution' | 'verification';
-  skills?: Record<string, string>;
+  skills?: Record<string, string>; gitProbe?: boolean;
 } = {}) {
   const agent = config.agent ?? 'grok';
   const templateId = `${agent}-executor`;
@@ -43,6 +60,10 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   await writeFile(join(repo, 'README.md'), 'baseline\n');
   git('add', 'README.md');
+  if (config.gitProbe) {
+    await writeFile(join(repo, '.gitignore'), `${gitRemote}/\n`);
+    git('add', '.gitignore');
+  }
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const templateDir = await copyTemplates(directory);
   await configureTestTemplate(templateDir, templateId, { model: config.model ?? (agent === 'grok' ? 'grok-4.7' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });

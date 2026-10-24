@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { CodexDriver, CodexCoordinatorDriver, CodexExecutorDriver } from '../src/codex-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
-import { TemplateCatalog, type AgentTemplate } from '../src/templates.js';
+import { TemplateCatalog, templateEnvironment, type AgentTemplate } from '../src/templates.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 async function fixture(t: TestContext, notifications: object[], script: object = {}, role: 'executor' | 'coordinator' = 'executor') {
@@ -45,6 +45,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
     notification('item/completed', { item: { id: 'answer', type: 'agentMessage', text: '已完成', phase: 'final_answer' } }),
     completed(),
   ]);
+  ctx.options.env = { ...templateEnvironment(ctx.options.template!), ...ctx.options.env };
   const session = await ctx.driver.start(ctx.options);
   t.after(() => session.cancel());
   await session.send('实现派单');
@@ -70,6 +71,8 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.equal(requests[4].params.effort, 'low');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
   assert.equal(Object.hasOwn(env, 'CODEX_HOME'), false);
+  assert.ok(env.GIT_CONFIG_PARAMETERS);
+  assert.equal(env.GIT_CONFIG_COUNT, undefined);
   await assert.rejects(stat(join(ctx.directory, '.helm', 'agent-homes', 'codex')), { code: 'ENOENT' });
   assert.equal(env.CODEX_SQLITE_HOME, session.sqlitePath);
   assert.equal(env.NO_PROXY, 'example.test,internal.test,127.0.0.1,localhost');

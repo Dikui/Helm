@@ -496,13 +496,21 @@ test('曾派单卡片在空闲时新增未决前置会阻塞；运行中新增�
 });
 
 test('文件模板设置模型与推理强度，清理订阅冲突环境；本地远端推送被执行者环境拦截', async t => {
-  const keys = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GH_TOKEN'];
+  const home = await mkdtemp(join(tmpdir(), 'helm-git-environment-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  t.after(async () => {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    await rm(home, { recursive: true, force: true });
+  });
+  const keys = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GH_TOKEN', 'GIT_CONFIG_PARAMETERS'];
   const previous = keys.map(key => process.env[key]);
   for (const key of keys) process.env[key] = 'helm-test-must-not-inherit';
   // Parent git commands need valid config; only the executor should replace this valid pair.
   process.env.GIT_CONFIG_COUNT = '1';
   process.env.GIT_CONFIG_KEY_0 = 'user.name';
   process.env.GIT_CONFIG_VALUE_0 = 'Parent User';
+  process.env.GIT_CONFIG_PARAMETERS = "'user.email=parent@example.invalid'";
   t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
   let options: SessionOptions | undefined;
   let release!: () => void;
@@ -519,7 +527,7 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   }], { beforeConfirm: async (call, templateDir) => {
     await configureTestTemplate(templateDir, 'claude-executor', { model: 'small-test-model', reasoningEffort: 'low' });
     const repo = (await call('list-projects')).result[0].path;
-    const remote = join(dirname(repo), 'remote.git');
+    const remote = join(dirname(repo), "remote 'quoted' \\ path.git");
     execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
     execFileSync('git', ['-C', repo, 'config', 'remote.named.url', remote]);
     execFileSync('git', ['-C', repo, 'config', 'remote.named.pushurl', remote]);
@@ -528,17 +536,30 @@ test('文件模板设置模型与推理强度，清理订阅冲突环境；本�
   await until(async () => options, value => value !== undefined);
   const templates = (await daemon.call('list-agent-templates')).result;
   assert.deepEqual(templates.map((value: any) => value.id), ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
-  const remote = join(daemon.directory, 'remote.git');
+  const remote = join(daemon.directory, "remote 'quoted' \\ path.git");
+  // dsh 0.2.1-rc.2 scrubs credential-shaped names before spawning shell tools.
+  // Exercise both the original driver environment and the environment git sees.
+  const scrubbed = Object.fromEntries(Object.entries(options!.env)
+    .filter(([key]) => !/KEY|PASSWORD|SECRET|TOKEN/i.test(key) && !key.toUpperCase().startsWith('DSH_')));
+  for (const env of [options!.env, scrubbed]) {
+    assert.equal(execFileSync('git', ['-C', options!.cwd, 'status', '--porcelain'], { env, encoding: 'utf8' }), '');
+    assert.equal(execFileSync('git', ['-C', options!.cwd, 'log', '-1', '--format=%s'], { env, encoding: 'utf8' }).trim(), 'baseline');
+  }
   execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/control'], { stdio: 'ignore' });
-  assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', remote, 'HEAD:refs/heads/forbidden'], { env: options!.env, stdio: 'pipe' }));
+  for (const env of [options!.env, scrubbed]) {
+    for (const destination of [remote, 'named']) {
+      assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', destination, 'HEAD:refs/heads/forbidden'], { env, stdio: 'pipe' }),
+        error => /\/dev\/null\/helm-push-disabled\//.test(String(error)));
+    }
+  }
   assert.throws(() => execFileSync('git', ['--git-dir', remote, 'rev-parse', '--verify', 'refs/heads/forbidden'], { stdio: 'pipe' }));
-  assert.throws(() => execFileSync('git', ['-C', options!.cwd, 'push', 'named', 'HEAD:refs/heads/forbidden-named'], { env: options!.env, stdio: 'pipe' }));
-  assert.throws(() => execFileSync('git', ['--git-dir', remote, 'rev-parse', '--verify', 'refs/heads/forbidden-named'], { stdio: 'pipe' }));
   for (const url of ['git@example.invalid:repo', 'https://example.invalid/repo', 'ssh://git@example.invalid/repo', `file://${remote}`]) {
     daemon.git('config', 'remote.test.url', url);
     const rewritten = execFileSync('git', ['-C', options!.cwd, 'remote', 'get-url', '--push', 'test'], { env: options!.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     assert.match(rewritten, /^file:\/\/\/dev\/null\/helm-push-disabled\//);
   }
+  daemon.git('config', 'remote.fetch-only.url', `file://${daemon.repo}`);
+  assert.equal(execFileSync('git', ['-C', options!.cwd, 'ls-remote', 'fetch-only', 'HEAD'], { env: scrubbed, encoding: 'utf8' }).trim(), `${daemon.git('rev-parse', 'HEAD')}\tHEAD`);
   release();
 });
 

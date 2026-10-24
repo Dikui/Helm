@@ -134,17 +134,16 @@ export function templateEnvironment(template: AgentTemplate, pushUrls: string[] 
   if (template.role === 'executor') {
     const prefixes = [...new Set(['git@', 'https://', 'ssh://', 'http://', 'git://', 'file://', '/', './', '../', ...pushUrls])];
     const explicitUrls = [...new Set(pushUrls)];
-    env.GIT_CONFIG_COUNT = String(prefixes.length + explicitUrls.length);
-    prefixes.forEach((prefix, index) => {
-      env[`GIT_CONFIG_KEY_${index}`] = 'url.file:///dev/null/helm-push-disabled/.pushInsteadOf';
-      env[`GIT_CONFIG_VALUE_${index}`] = prefix;
-    });
     // Git skips pushInsteadOf for remotes with an explicit pushurl. Cover the
     // project's resolved push destinations too, without blocking unrelated fetches.
-    explicitUrls.forEach((url, index) => {
-      env[`GIT_CONFIG_KEY_${prefixes.length + index}`] = 'url.file:///dev/null/helm-push-disabled/.insteadOf';
-      env[`GIT_CONFIG_VALUE_${prefixes.length + index}`] = url;
-    });
+    const config = [
+      ...prefixes.map(prefix => `url.file:///dev/null/helm-push-disabled/.pushInsteadOf=${prefix}`),
+      ...explicitUrls.map(url => `url.file:///dev/null/helm-push-disabled/.insteadOf=${url}`),
+    ];
+    // dsh scrubs environment names containing KEY, breaking indexed git config.
+    // Git also accepts single-quoted key=value entries in one environment value;
+    // escape embedded quotes using Git's shell-style quoting (no shell is run).
+    env.GIT_CONFIG_PARAMETERS = config.map(entry => `'${entry.replaceAll("'", "'\\''")}'`).join(' ');
     env.GH_TOKEN = 'helm-push-disabled';
   }
   return env;

@@ -67,11 +67,13 @@ for (const role of ['coordinator', 'executor'] as const) {
       assert.ok(Number(childEnv.HELM_PORT_START) >= 20000);
       assert.ok(Number(childEnv.HELM_PORT_END) > Number(childEnv.HELM_PORT_START));
       assert.equal(childEnv.GH_TOKEN, 'helm-push-disabled');
-      assert.ok(Number(childEnv.GIT_CONFIG_COUNT) > 0);
+      assert.ok(childEnv.GIT_CONFIG_PARAMETERS);
+      assert.equal(childEnv.GIT_CONFIG_COUNT, undefined);
     } else {
       assert.equal(childEnv.HELM_PORT_START, undefined);
       assert.equal(childEnv.GH_TOKEN, undefined);
       assert.equal(childEnv.GIT_CONFIG_COUNT, undefined);
+      assert.equal(childEnv.GIT_CONFIG_PARAMETERS, undefined);
     }
   });
 }

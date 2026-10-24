@@ -140,7 +140,8 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、模板提示词及�
   assert.equal(spawn.env.GROK_SANDBOX, 'workspace');
   assert.equal(spawn.env.XAI_API_KEY, undefined);
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
-  assert.ok(Number(spawn.env.GIT_CONFIG_COUNT) > 0);
+  assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
+  assert.equal(spawn.env.GIT_CONFIG_COUNT, undefined);
   assert.equal(spawn.cwd, ctx.cwd);
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/set_config_option', 'session/prompt']);
   assert.equal(requests[0].params.protocolVersion, 1);

@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { AcpDriver } from '../src/acp-driver.js';
-import { acpExecutorFixture, ok } from './acp-executor-fixture.js';
+import { acpExecutorFixture, assertExecutorGitProbe, executorGitProbe, ok } from './acp-executor-fixture.js';
 import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_DEEPSEEK_EXECUTOR_REAL === '1';
@@ -51,9 +51,10 @@ test('DeepSeek 真实账号执行者：一轮、同端点结论/浏览器、卡�
     assert.ok(address && typeof address !== 'string');
     const base = `http://127.0.0.1:${address.port}`;
     const daemon = await acpExecutorFixture(t, new AcpDriver('deepseek'), { agent: 'deepseek', stagedAuth,
-      model: 'deepseek-flash', needsBrowser: true, realBrowser: true,
+      model: 'deepseek-flash', needsBrowser: true, realBrowser: true, gitProbe: true,
       skills: { 'helm-smoke-deepseek': `把 ${skillProof} 写入卡片副本的 skill-proof.txt。最终回答列出本技能名。` },
-      content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交、不推送；不得切换模型和推理强度。
+      content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交；只允许下面一次指定的本地远端推送探针，不得向其他目标推送；不得切换模型和推理强度。
+在卡片副本原样执行一次命令 ${executorGitProbe}，git status 必须成功，git push 必须因 /dev/null/helm-push-disabled/ 失败；不得 unset 环境、覆盖 git 配置或重试，保留工具输出。本地裸远端由测试保留检查，不要清理。
 实际执行一次原样命令 ${boundaryCommand}，预期由真实沙箱拒绝副本外写入；不得提权、重试或绕过，拒绝后继续。
 在卡片副本写 inside.txt，内容 ${marker}。
 使用已加载的 helm-smoke-deepseek 模板技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他模板查找技能。
@@ -92,6 +93,7 @@ test('DeepSeek 真实账号执行者：一轮、同端点结论/浏览器、卡�
       '副本外写入必须有真实沙箱拒绝证据，不能只凭最终回答');
       await assert.rejects(readFile(outside), { code: 'ENOENT' });
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
+      assertExecutorGitProbe(tools, card.workPath);
       assert.match(first.finalAnswer, /helm-smoke-deepseek/);
       assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), skillProof, '暗号仅在模板技能正文里，必须实际加载并使用');
       assert.equal(daemon.git('show', `${card.cardBranch}:skill-proof.txt`), skillProof);
