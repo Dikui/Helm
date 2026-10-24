@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `npm run build` 同时产出 `helmd` 和前端静态产物；`helmd` 对 GET 返回静态文件，未知路径回落 `index.html`，路径穿越被拒；`/api/*`、`/mcp`、`/events` 的 POST 行为不变
 - [x] `list-works`、`get-work` 返回 `title`（第一条用户消息首行，过长截断）；`list-works` 另返回一句话摘要、当前状态起始时间、卡片完成数 / 总数、未决关卡摘要
@@ -13,7 +13,7 @@
 - [x] 计时每秒走，起点取自数据时间戳；中英切换只翻译界面文字，选择存在浏览器本地
 - [x] 设计变量迁入前端工程，不在运行时引用 `design/`；不引入 UI 组件库
 - [x] HTTP 接口测试覆盖新增字段和静态托管；jsdom 整页测试覆盖分组、SSE 推送后更新、重连补齐、操作被拒显示原因、搜索
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 ## Comments
 
@@ -30,3 +30,7 @@
 ### 2026-10-24 真实冒烟（调度者）
 
 沙箱外 Chromium 打开 `helm serve`：静态托管、深浅主题、深链接回落正常；但所有 API/SSE 请求报 `Failed to execute 'fetch' on 'Window': Illegal invocation`——`ApiClient` 默认 `transport = fetch` 被当方法调用，jsdom 注入 transport 测不出。已改为包一层箭头函数。`test:real` 另有 Codex 第二模板技能断言失败：技能只说"写入"，Codex 追加而非覆盖，属测试指令不明确，已改为"覆盖全部内容"。证据见 `.scratch/tasks/ui-02-real/`。两项修复后需重跑真实冒烟再关闭本单。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

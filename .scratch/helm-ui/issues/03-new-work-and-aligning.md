@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 界面骨架：托管、收件箱与实时更新
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `list-projects` 每个项目返回当前分支名、HEAD 提交、未提交改动数；读不到 git 状态时返回原因而不报错
 - [x] 调度者模板默认取项目默认模板；不可用的模板显示原因且不可选
@@ -12,7 +12,7 @@
 - [x] 对齐中的收件箱当前行显示"对齐中"；草稿逐版显示，新增条目高亮；两个"确认这一版"入口调用同一个 `decide-gate`
 - [x] 登记项目弹窗和无项目状态调用 `register-project`，非 git 路径显示运行层原因
 - [x] HTTP 接口测试覆盖项目 git 字段；jsdom 整页测试覆盖新建、重试不重复、对齐中草稿更新（经 SSE）、确认后进入执行、登记项目
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 
 ## Comments
@@ -24,3 +24,7 @@
 新增 HTTP 测试和 6 个 jsdom 整页测试（全部通过假驱动的真实 helmd）；登记弹窗补充初始焦点、Tab 循环、Escape、提交中锁定与焦点恢复。中英文新 key 使用 `newWork` / `alignment` 前缀，样式和类型留在页面目录，未另建数据层、SSE 或依赖。
 
 按用户要求未运行浏览器、真实会话及 `npm run test:real`，最后一项保持未勾选；Status 未改，改动未提交。完整命令与结果、自行完成的 Standards / Spec diff-review 见指定报告 `/Users/dikui/Project/Helm/.scratch/tasks/ui-03/report.md`。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

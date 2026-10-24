@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — 新建工作与对齐中
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `send-message` 接受可选 `cardId`（校验属于该工作），记录在消息上，调度者读对话时可见
 - [x] 新增 `list-rounds`（调用方 `user`、`coordinator-round`）：轮次号、模板、状态、起止时间、token、结束原因，以及排队待下一轮处理的用户消息；照常进 MCP 和命令行
@@ -12,7 +12,7 @@
 - [x] ⌘⏎ 调用 `interrupt-round`；没有运行中的轮次时不可用
 - [x] 顶栏"对话 / 调度结构 / 工作说明"切换可用（后两个视图可先为空壳）
 - [x] HTTP 接口测试覆盖 `cardId` 和 `list-rounds`；jsdom 整页测试覆盖三种范围发消息、关卡选项与自由回答、排队消息显示、打断轮次
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 ## Comments
 
@@ -23,3 +23,7 @@
 顶栏切换使用现有路由的 chat / structure / brief。structure 和 brief 保留空壳，供任务单 05、07 合并时挂载；未实现任务单 06 的历史轮次输出读取。新增 3 项 HTTP/MCP/CLI 测试、6 项 jsdom 整页测试，夹具使用临时 HOME 和假驱动。按本轮执行约束未派子代理、未启动浏览器或真实 Agent、未执行真实冒烟、未提交；最后一项 Acceptance 含真实冒烟，保留未勾选，Status 保持原值。
 
 2026-10-24：修复真实冒烟 F2：按 config.json 的 role 核对全部调度者模板（Claude、Codex），提示词要求用户可见的提问、说明和进展摘要经 send-message 携带稳定 key 发到对话，明确最终回答用户看不到。补充现有默认提示词校验，先失败后 2/2 通过；未把轮次最终回答写入对话。F3 将已有轮次摘要提取移动到 src/output-summary.ts，与派单摘要共享，原始步骤仍保留全文。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

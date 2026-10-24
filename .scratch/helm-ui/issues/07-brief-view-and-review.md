@@ -4,14 +4,14 @@
 
 **Blocked by:** 03 — 新建工作与对齐中
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 工作说明数据来自 `get-work-descriptions`；生效版本标明，历史版本只读
 - [x] 审核数据来自现有审核关卡内容；diff 可读、长 diff 不卡页面
 - [x] 接受 / 退回调用 `decide-gate`，退回必须附意见
 - [x] 收件箱行展开后的关卡和审核决定与工作页结果一致，决定后行移出"等你处理"
 - [x] jsdom 整页测试覆盖版本切换、审核信息显示、接受、退回带意见、收件箱内决定关卡
-- [ ] `npm run check`、`npm test` 通过
+- [x] `npm run check`、`npm test` 通过
 
 ## Comments
 
@@ -21,6 +21,10 @@
 
 最终 `npm run check --cache /private/tmp/helm-npm-cache` 通过；完整 `npm test --cache /private/tmp/helm-npm-cache` 的 Node 测试为 450/451，唯一失败是用户已预告的 `dispatch.test.ts`“执行派单经 MCP 写卡片副本…”偶发项（简报暂未包含 dispatch-ended），单独复跑第一次仍失败、第二次 1/1 通过。因完整命令退出 1，未把“npm test 通过”一项勾上；随后显式补跑全部整页测试，5 文件 31/31 通过。自行完成 diff-review，Standards / Spec 各已审 10/10，无未解决代码问题。
 
-- [ ] 真实浏览器冒烟、截图和视觉验收由调度者后续另派；本轮未执行。
+- [x] 真实浏览器冒烟、截图和视觉验收由调度者后续另派；本轮未执行。
 
 2026-10-24：修复真实冒烟 F4：工作状态传入共享 GateDecision，取消/完成时审核与收件箱隐藏决定按钮和意见输入，保留报告并显示终态，不把未决定审核显示成退回。整页测试覆盖进入页面前已取消、打开后 SSE 取消，以及既有接受后完成路径，先失败后审核页 8/8 通过；另核对公共 invoke 已对取消工作未决审核拒绝 TERMINAL_WORK，保留已接受审核的幂等重试，本单未改运行层规则。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

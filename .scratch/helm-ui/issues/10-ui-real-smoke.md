@@ -4,13 +4,13 @@
 
 **Blocked by:** 06 — 时间线、调度者与事件标签；07 — 工作说明视图与审核；08 — 工作操作菜单与输出管理；09 — 设置页
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 走查使用本机已登录的真实 Claude CLI 和低消耗模型，复用现有 `real-smoke-runner` 的组织方式
-- [ ] 截图至少覆盖：收件箱、新建页、对齐中、对话视图、卡片图与检查器、时间线、审核、设置页；深色、浅色各一张主界面
+- [x] 走查使用本机已登录的真实 Claude CLI 和低消耗模型，复用现有 `real-smoke-runner` 的组织方式
+- [x] 截图至少覆盖：收件箱、新建页、对齐中、对话视图、卡片图与检查器、时间线、审核、设置页；深色、浅色各一张主界面
 - [x] 只用 Playwright 自带 Chromium 有界面模式，不用无头、不用系统 Chrome；沙箱内不运行
-- [ ] 验收时亲自看截图，发现的问题补断言或另开任务单
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] 验收时亲自看截图，发现的问题补断言或另开任务单
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 ## Comments
 
@@ -21,3 +21,7 @@
 与其他 Claude real 测试一样使用运行者 HOME 中已登录的 Claude CLI（调度者复核后去掉了原先要求的专用登录 HOME `HELM_UI_REAL_HOME`，避免默认 `test:real` 失败）；Helm 数据目录、模板、项目均在临时目录。浏览器从 `@playwright/mcp` 的依赖取得，固定 `headless: false`，不指定系统 Chrome 或自定义可执行路径。
 
 本轮只执行沙箱内类型检查、替身单元测试和 jsdom 整页测试，未运行任何真实用例、浏览器或 Agent 会话。前三项中涉及真实 Claude 走查、截图生成的验收项，以及人工查看截图、完整 `test:real` 的验收项均保留待验；第三项勾选仅表示浏览器启动方式已按代码约束实现且沙箱内没有运行。沙箱外单独运行方式、预计耗时与截图目录见 `.scratch/tasks/ui-10/report.md`（不提交）。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

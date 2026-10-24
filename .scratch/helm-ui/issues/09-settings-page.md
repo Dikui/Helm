@@ -4,14 +4,14 @@
 
 **Blocked by:** 01 — 界面保存 Agent 模板；02 — 界面骨架：托管、收件箱与实时更新
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `list-agent-templates` 每个模板返回使用情况：正在运行的派单数、以它为调度者模板的未结束工作数
 - [x] 保存与复制调用 `save-agent-template`，带回 `revision`；校验失败按字段显示原因；冲突不覆盖
 - [x] 不提供删除模板；不在界面编辑 `skills/` 和 API 模板主目录
 - [x] 项目和运行参数调用 `register-project`、`set-project-coordinator-template`、`set-concurrency`、`set-dispatch-watchdog`、`set-round-watchdog`、`set-output-threshold`
 - [x] HTTP 接口测试覆盖使用情况字段；jsdom 整页测试覆盖可用性显示、保存、复制为新模板、角色不可改、冲突提示、项目登记与默认模板、运行参数保存
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 
 ## Comments
@@ -23,3 +23,7 @@
 本轮自行完成 diff-review；检查和测试的实际结果见调度者指定报告 /Users/dikui/Project/Helm/.scratch/tasks/ui-09/report.md。按本轮指令不提交、不启动浏览器或真实会话；最后一项包含沙箱外真实冒烟，保持未勾选，留待调度者安排。
 
 2026-10-24：修复真实冒烟 F1：复制从编辑器当前 config 和 prompt 构造副本，覆盖旧列表字段。新增 App + 假驱动真实 helmd 测试，强制保存后的列表仍旧，验证刚保存立即复制、未保存编辑复制的全部表单字段及副本落盘值，原模板未保存值不被写回。设置页 7/7 通过。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。

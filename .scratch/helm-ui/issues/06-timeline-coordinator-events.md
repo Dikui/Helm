@@ -4,14 +4,14 @@
 
 **Blocked by:** 04 — 对话视图与调度者引导；05 — 卡片图与卡片检查器
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 新增 `get-round-output`（调用方 `user`），按步骤读取调度轮次输出，分页方式与 `get-dispatch-output` 一致；照常进 MCP 和命令行
 - [x] 泳道和色块由派单起止时间和用途得出，运行中的派单随时间延伸
 - [x] 调度者状态由 `list-rounds` 和工作状态得出；笔记版本来自 `get-coordinator-notes`
 - [x] 事件筛选使用 `get-events` 的筛选参数；点事件打开检查器并定位到对应输出步骤
 - [x] HTTP 接口测试覆盖 `get-round-output`；jsdom 整页测试覆盖泳道数量与打回段、轮次输出查看、笔记版本切换、事件筛选与跳转
-- [ ] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
+- [x] `npm run check`、`npm test` 通过；沙箱外 `npm run test:real` 通过
 
 ## Comments
 
@@ -20,3 +20,7 @@
 事件的卡片 / 派单 / 执行方筛选直接传入 `get-events`；点派单事件选择对应卡片及历史派单，从事件步骤读取并聚焦该步骤，标签切换保留检查器选择。新增 HTTP / MCP / CLI 测试和 jsdom 整页测试，覆盖泳道、打回、历史轮次、笔记版本、筛选跳转、SSE 状态更新、连败暂停、错误重试及删除输出。真实浏览器和真实冒烟按本单执行约束未运行，最后一项保持未勾选，交调度者事后验收。Status 保持不变。
 
 验证：`npm run check --cache /private/tmp/helm-npm-cache` 通过；`npm test --cache /private/tmp/helm-npm-cache` 完整运行通过（456 项 Node 测试、45 项 jsdom 整页测试及构建）。
+
+### 2026-10-24 验收关闭（调度者）
+
+沙箱外完整 `npm run test:real` 于 d92130e 通过（9 套 19/19，含 `ui.real` 界面全流程：新建 → 对齐 → 执行 → 审核 → 接受，10 张截图已人工查看）；沙箱内 `npm test` 457/457 + 界面 49/49。界面走查中发现的 F1–F4、T1、重复审核标题已修复并复测。证据：`.scratch/tasks/ui-real3/`、`.scratch/tasks/ui-real4/`（不入库）。真实浏览器未覆盖的分支（暂停/恢复、换模板、导出/删除、多版草稿高亮、长 diff）仅由 jsdom 整页测试覆盖；与设计稿的尺寸偏差（新建区、对齐右栏、图节点偏大）未处理。
