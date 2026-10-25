@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { projectPath } from './alignment.js';
-import { dispatchGit, listDispatches, revokeDispatch } from './dispatch.js';
+import { dispatchGit, listDispatches, revokeDispatch, verificationCommit } from './dispatch.js';
 import { cancelCard as recordCancellation, cardDetails, refreshCardReadiness, type Card } from './graph.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 
@@ -48,6 +48,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   }
   // A retry after cleanup can still merge the saved commit; the branch may already be gone.
   const branchExists = dispatchGit(work.workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
+  if (card.needsVerification && branchExists && verification!.startCommit !== verificationCommit(store, card)) {
+    throw new RuleError('VERIFICATION_OUTDATED', '最近一次验收之后卡片已有新提交，须重新验收。');
+  }
   const target = branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit;
   if (!target) throw new RuleError('GIT_ERROR', '找不到卡片的提交。');
   try {

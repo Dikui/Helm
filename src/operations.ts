@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
 import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
-import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
+import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, markOutdated, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
 import { promptNames, readPrompt, writePrompt } from './prompts.js';
 import { cancelCard, completeCard } from './completion.js';
@@ -164,7 +164,7 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => listAgents(store),
   }),
   operation({
-    name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑，验收一律新开对话', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
+    name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑并独占卡片，验收一律新开对话，同一卡片可同时跑多个验收，各自检查派单时固定的提交', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), key: z.string().min(1), agentId: z.string().min(1),
       purpose: z.enum(['execution', 'verification']).optional(), content: z.string().trim().min(1).optional(), resumeSessionId: z.string().min(1).optional(), needsBrowser: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => createDispatch(store, actor, params),
@@ -180,14 +180,14 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => submitConclusion(store, actor, params),
   }),
   operation({
-    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结果', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结果；验收派单的 startCommit 是它检查的提交，outdated=true 表示卡片已有新提交、结论已过期', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1).optional() }).strict(),
-    execute: ({ store }, { workId, cardId }) => listDispatches(store, workId, cardId),
+    execute: ({ store }, { workId, cardId }) => markOutdated(store, listDispatches(store, workId, cardId)),
   }),
   operation({
     name: 'get-dispatch', description: '读取派单详情和完整最终回答', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1) }).strict(),
-    execute: ({ store }, { workId, dispatchId }) => getDispatch(store, workId, dispatchId),
+    execute: ({ store }, { workId, dispatchId }) => markOutdated(store, [getDispatch(store, workId, dispatchId)])[0],
   }),
   operation({
     name: 'get-dispatch-output', description: '按步骤读取派单输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,

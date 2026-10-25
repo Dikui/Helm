@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
@@ -104,7 +104,8 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
     executionPath = ctx.options.cwd;
     return [{ type: 'write', path: 'result.txt', content: 'implementation\n' }];
   }, ctx => {
-    assert.equal(ctx.options.cwd, executionPath);
+    assert.notEqual(ctx.options.cwd, executionPath);
+    assert.equal(git(ctx.options.cwd, 'show', 'HEAD:result.txt'), 'implementation');
     assert.equal(ctx.options.resumeSessionId, undefined);
     const { content, purpose } = JSON.parse(ctx.input);
     assert.equal(purpose, 'verification');
@@ -144,7 +145,7 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
   assert.equal(git(daemon.repo, 'show', `helm/${daemon.work.id}:result.txt`), 'implementation');
 });
 
-test('验收结束丢弃文件改动和验收者自行提交，保留忽略的依赖缓存及检查证据', async t => {
+test('验收在一次性副本里运行，结束后整个删除，卡片副本和分支不变，保留检查证据', async t => {
   let workPath = '';
   let startCommit = '';
   let reviewerCommit = '';
@@ -159,8 +160,6 @@ test('验收结束丢弃文件改动和验收者自行提交，保留忽略的�
     return [
       { type: 'write', path: 'result.txt', content: 'uncommitted change\n' },
       { type: 'write', path: 'temporary.txt', content: 'untracked\n' },
-      { type: 'write', path: 'node_modules/kept.txt', content: 'dependency\n' },
-      { type: 'write', path: '.cache/kept.txt', content: 'cache\n' },
       { type: 'write', path: 'checks.txt', content: 'tests: passed\n' },
       { type: 'artifact', kind: 'test-output', path: 'checks.txt' },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '检查通过' }, check: ok },
@@ -173,14 +172,14 @@ test('验收结束丢弃文件改动和验收者自行提交，保留忽略的�
   assert.notEqual(reviewerCommit, startCommit);
   assert.equal(result.startCommit, startCommit);
   assert.equal(result.endCommit, startCommit);
-  assert.equal(git(workPath, 'rev-parse', 'HEAD'), startCommit);
-  assert.equal(git(workPath, 'rev-parse', (await daemon.cards())[0].cardBranch), startCommit);
-  assert.equal(git(workPath, 'status', '--porcelain'), '');
-  assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'baseline\n');
-  await assert.rejects(readFile(join(workPath, 'temporary.txt')));
-  await assert.rejects(readFile(join(workPath, 'checks.txt')));
-  assert.equal(await readFile(join(workPath, 'node_modules/kept.txt'), 'utf8'), 'dependency\n');
-  assert.equal(await readFile(join(workPath, '.cache/kept.txt'), 'utf8'), 'cache\n');
+  const [{ workPath: cardPath, cardBranch }] = await daemon.cards();
+  assert.notEqual(workPath, cardPath);
+  assert.equal(existsSync(workPath), false);
+  assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
+  assert.equal(git(cardPath, 'symbolic-ref', '--short', 'HEAD'), cardBranch);
+  assert.equal(git(cardPath, 'rev-parse', cardBranch), startCommit);
+  assert.equal(git(cardPath, 'status', '--porcelain'), '');
+  assert.equal(await readFile(join(cardPath, 'result.txt'), 'utf8'), 'baseline\n');
   const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
   const evidence = artifacts.find((item: any) => item.kind === 'test-output');
   assert.equal((await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: evidence.id })).result.content, 'tests: passed\n');
@@ -188,12 +187,13 @@ test('验收结束丢弃文件改动和验收者自行提交，保留忽略的�
   assert.ok(!artifacts.some((item: any) => item.kind === 'file'));
 });
 
-test('验收先结束副本子目录的残留进程，再重置文件和提交', async t => {
+test('验收先结束副本子目录的残留进程，再删除副本', async t => {
   const end = hold();
   let child: ChildProcess | undefined;
   let workPath = '';
   let reviewerCommit = '';
-  t.after(() => { end.release(); child?.kill('SIGKILL'); });
+  const marker = join(await realpath(await mkdtemp(join(tmpdir(), 'helm-verification-marker-'))), 'stopped.txt');
+  t.after(async () => { end.release(); child?.kill('SIGKILL'); await rm(dirname(marker), { recursive: true, force: true }); });
   const daemon = await fixture(t, [card(), dispatch('verify')], [ctx => {
     workPath = ctx.options.cwd;
     mkdirSync(join(workPath, '.cache'));
@@ -203,8 +203,7 @@ test('验收先结束副本子目录的残留进程，再重置文件和提交',
       const fs = require('fs');
       const cp = require('child_process');
       process.on('SIGTERM', () => {
-        fs.writeFileSync('stopped.txt', cp.execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }));
-        fs.writeFileSync('../result.txt', 'written during termination');
+        fs.writeFileSync(${JSON.stringify(marker)}, cp.execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }));
         process.exit(0);
       });
       fs.writeFileSync('ready', 'ready');
@@ -219,9 +218,8 @@ test('验收先结束副本子目录的残留进程，再重置文件和提交',
   await until(daemon.dispatches, values => values[0]?.status === 'ended');
   assert.equal((await daemon.dispatches())[0].endReason, 'completed', JSON.stringify(await daemon.dispatches()));
   assert.ok(child && (child.exitCode !== null || child.signalCode !== null), '残留进程必须先退出');
-  assert.equal((await readFile(join(workPath, '.cache/stopped.txt'), 'utf8')).trim(), reviewerCommit);
-  assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'baseline\n');
-  assert.equal(git(workPath, 'rev-parse', 'HEAD'), (await daemon.dispatches())[0].startCommit);
+  assert.equal((await readFile(marker, 'utf8')).trim(), reviewerCommit, '进程退出时副本必须仍在');
+  assert.equal(existsSync(workPath), false);
 });
 
 test('最近一次验收未声明、不通过或异常结束都不能沿用上次通过，取消需要验收后可完成并记事件', async t => {
@@ -302,7 +300,7 @@ test('整体验收用普通卡片依赖所有成果，只派验收单且完成�
   assert.equal(artifacts.find((value: any) => value.kind === 'branch').commitSha, checkedHead);
 });
 
-test('只派验收单的卡片新增上游成果后复验刷新副本，完成时跳过合并', async t => {
+test('只派验收单的卡片新增上游成果后旧验收过期，复验检查新的工作分支，完成时跳过合并', async t => {
   const firstVerified = hold();
   const upstreamEnded = hold();
   const reverified = hold();
@@ -320,8 +318,8 @@ test('只派验收单的卡片新增上游成果后复验刷新副本，完成�
     assert.equal(git(overallPath, 'rev-parse', 'HEAD'), git(overallPath, 'rev-parse', 'main'));
     return [passed];
   }, [{ type: 'write', path: 'upstream.txt', content: 'new upstream result\n' }], ctx => {
-    assert.equal(ctx.options.cwd, overallPath);
-    assert.equal(git(overallPath, 'show', 'HEAD:upstream.txt'), 'new upstream result');
+    assert.notEqual(ctx.options.cwd, overallPath);
+    assert.equal(git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'), 'new upstream result');
     return [passed];
   }]);
   await until(daemon.dispatches, values => values[0]?.status === 'ended');
@@ -336,14 +334,8 @@ test('只派验收单的卡片新增上游成果后复验刷新副本，完成�
   const workTip = git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`);
   assert.equal(verification.startCommit, workTip);
   assert.equal(verification.endCommit, workTip);
-  assert.equal(git(overallPath, 'rev-parse', (await daemon.cards()).find(value => value.key === 'overall').cardBranch), workTip);
-  const events = await daemon.events();
-  const refreshes = events.filter(event => event.action === 'verification-copy-refreshed');
-  assert.equal(refreshes.length, 2);
-  assert.deepEqual(refreshes.map(event => event.dispatchId), [records[0].id, verification.id]);
-  assert.equal(refreshes[1].details.previousCommit, records[0].startCommit);
-  assert.equal(refreshes[1].details.startCommit, workTip);
-  assert.ok(events.indexOf(refreshes[1]) < events.findIndex(event => event.action === 'dispatch-started' && event.dispatchId === verification.id));
+  assert.equal(records[0].outdated, true);
+  assert.equal(verification.outdated, false);
   reverified.release();
   await daemon.finished();
   assert.equal((await daemon.cards()).find(value => value.key === 'overall').status, 'completed');
@@ -384,37 +376,78 @@ test('派过执行单的卡片多次验收始终检查自己的成果，不随�
     assert.equal(verification.endCommit, executionCommit);
   }
   assert.notEqual(git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`), executionCommit);
-  assert.ok(!(await daemon.events()).some(event => event.action === 'verification-copy-refreshed'));
 });
 
-test('只验收卡片排队期间上游合入，实际启动时才对齐工作分支', async t => {
+test('验收在派单时固定提交，排队期间工作分支前进则结论过期，不能据此完成', async t => {
   const upstreamEnded = hold();
   const unblock = hold();
-  t.after(() => { upstreamEnded.release(); unblock.release(); });
+  const verified = hold();
+  t.after(() => { upstreamEnded.release(); unblock.release(); verified.release(); });
   const daemon = await fixture(t, [
     card('upstream', false), card('blocker', false), card('overall'),
     dispatch('upstream', 'execution', 'upstream'), { type: 'hang', until: upstreamEnded.promise },
     dispatch('blocker', 'execution', 'blocker'), dispatch('overall', 'verification', 'overall'), complete(ok, 'upstream'),
+    { type: 'hang', until: verified.promise }, complete(code('VERIFICATION_OUTDATED'), 'overall'),
   ], [[{ type: 'write', path: 'upstream.txt', content: 'merged while queued\n' }], [{ type: 'hang', until: unblock.promise }], ctx => {
-    assert.equal(git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'), 'merged while queued');
-    return [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '含排队期间的新成果' }, check: ok }];
+    assert.throws(() => git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'));
+    return [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '派单时的成果通过' }, check: ok }];
   }], { beforeConfirm: async call => { ok(await call('set-concurrency', { limit: 1 })); } });
   await until(daemon.dispatches, values => values[0]?.status === 'ended');
   upstreamEnded.release();
-  await daemon.finished();
+  await until(daemon.events, values => values.some(event => event.action === 'card-completed'));
+  const workTip = git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`);
+  const pinned = git(daemon.repo, 'rev-parse', `${workTip}^1`);
   const queued = (await daemon.dispatches())[2];
   assert.equal(queued.status, 'queued');
-  assert.equal(queued.startCommit, null);
-  assert.ok(!(await daemon.events()).some(event => event.action === 'verification-copy-refreshed'));
-  const workTip = git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`);
+  assert.equal(queued.startCommit, pinned);
   unblock.release();
   const verification = (await until(daemon.dispatches, values => values[2]?.status === 'ended'))[2];
   assert.equal(verification.endReason, 'completed', JSON.stringify(verification));
   assert.equal(verification.conclusion, 'passed');
-  assert.equal(verification.startCommit, workTip);
+  assert.equal(verification.startCommit, pinned);
+  assert.equal(verification.endCommit, pinned);
+  assert.equal(verification.outdated, true);
+  verified.release();
+  await daemon.finished();
+  assert.equal((await daemon.cards()).find(value => value.key === 'overall').status, 'verifying');
 });
 
-test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之后才重置', async t => {
+test('同一卡片的多个验收在各自副本里同时跑同一提交，与执行派单互斥，暂停卡片中止全部验收', async t => {
+  const executed = hold();
+  t.after(() => executed.release());
+  const paths: string[] = [];
+  const verify = (name: string): FakeScript => ctx => {
+    paths.push(ctx.options.cwd);
+    return [{ type: 'write', path: 'result.txt', content: `${name}\n` }, { type: 'write', path: `${name}.ready`, content: 'ready' }, { type: 'hang' }];
+  };
+  const daemon = await fixture(t, [card(), dispatch('execute', 'execution'), { ...dispatch('early'), check: code('DISPATCH_ACTIVE') },
+    { type: 'hang', until: executed.promise }, dispatch('one'), dispatch('two'), { ...dispatch('again', 'execution'), check: code('DISPATCH_ACTIVE') },
+  ], [[{ type: 'write', path: 'result.txt', content: 'implementation\n' }], verify('one'), verify('two')]);
+  const execution = (await until(daemon.dispatches, values => values[0]?.status === 'ended'))[0];
+  executed.release();
+  await daemon.finished();
+  await until(async () => paths.length === 2 && paths.every(path => ['one', 'two'].some(name => existsSync(join(path, `${name}.ready`)))), Boolean);
+  const running = (await daemon.dispatches()).slice(1);
+  assert.deepEqual(running.map(value => value.status), ['running', 'running']);
+  assert.deepEqual(running.map(value => value.startCommit), [execution.endCommit, execution.endCommit]);
+  assert.notEqual(paths[0], paths[1]);
+  for (const path of paths) {
+    assert.equal(git(path, 'rev-parse', 'HEAD'), execution.endCommit);
+    const name = existsSync(join(path, 'one.ready')) ? 'one' : 'two';
+    assert.equal(await readFile(join(path, 'result.txt'), 'utf8'), `${name}\n`);
+  }
+  assert.equal((await daemon.cards())[0].status, 'verifying');
+  ok(await daemon.call('pause-card', { workId: daemon.work.id, cardId: execution.cardId }));
+  const ended = (await daemon.dispatches()).slice(1);
+  assert.deepEqual(ended.map(value => [value.endReason, value.abortReason]), [['aborted', '卡片暂停'], ['aborted', '卡片暂停']]);
+  for (const path of paths) assert.equal(existsSync(path), false);
+  const [{ workPath, cardBranch }] = await daemon.cards();
+  assert.equal(git(workPath, 'rev-parse', cardBranch), execution.endCommit);
+  assert.equal(git(workPath, 'status', '--porcelain'), '');
+  assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'implementation\n');
+});
+
+test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之后才删除副本', async t => {
   const end = hold();
   const revoke = hold();
   let group = 0;
@@ -457,8 +490,7 @@ test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之
   assert.equal(result.conclusion, 'undeclared');
   assert.ok(Date.now() - before >= 5_000, '拒绝 SIGTERM 的进程必须得到五秒退出时间');
   await until(async () => { try { process.kill(childPid, 0); return false; } catch { return true; } }, Boolean);
-  assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'baseline\n');
-  assert.equal(git(workPath, 'rev-parse', 'HEAD'), result.startCommit);
+  assert.equal(existsSync(workPath), false);
 });
 
 test('验收和执行共享并发及端口段，暂停排队验收不启动执行者且恢复后仍在验收中', async t => {
@@ -503,7 +535,7 @@ test('验收和执行共享并发及端口段，暂停排队验收不启动执�
   assert.equal((await daemon.cards()).find(value => value.id === cardId).status, 'paused');
 });
 
-test('验收看门狗限制无输出和总时长，超时先清进程再重置且清除提前通过', async t => {
+test('验收看门狗限制无输出和总时长，超时先清进程再删除副本且清除提前通过', async t => {
   for (const threshold of ['idle', 'wall'] as const) await t.test(threshold, async t => {
     let workPath = '';
     let child: ChildProcess | undefined;
@@ -531,13 +563,13 @@ test('验收看门狗限制无输出和总时长，超时先清进程再重置�
     assert.equal(result.conclusion, 'undeclared');
     assert.equal(result.finalAnswer, null);
     assert.equal(result.endCommit, result.startCommit);
-    assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'baseline\n');
+    assert.equal(existsSync(workPath), false);
     assert.throws(() => process.kill(child!.pid!, 0), { code: 'ESRCH' });
     assert.equal((await daemon.events()).find(event => event.action === 'dispatch-timed-out').details.threshold, threshold);
   });
 });
 
-test('工作暂停及卡片或工作取消均中止验收，重置后再清理副本', async t => {
+test('工作暂停及卡片或工作取消均中止验收并删除验收副本', async t => {
   for (const operation of ['pause-work', 'cancel-card', 'cancel-work'] as const) await t.test(operation, async t => {
     let workPath = '';
     const daemon = await fixture(t, [card(), dispatch('verify')], [ctx => {
@@ -553,37 +585,35 @@ test('工作暂停及卡片或工作取消均中止验收，重置后再清理�
     assert.equal(result.conclusion, 'undeclared');
     assert.equal(result.endCommit, result.startCommit);
     assert.equal(result.abortReason, operation === 'pause-work' ? '工作暂停' : operation === 'cancel-card' ? '卡片取消' : '工作取消');
-    if (operation === 'pause-work') {
-      assert.equal(await readFile(join(workPath, 'result.txt'), 'utf8'), 'baseline\n');
-      assert.equal((await daemon.cards())[0].status, 'verifying');
-    } else await assert.rejects(readFile(join(workPath, 'result.txt')), { code: 'ENOENT' });
+    assert.equal(existsSync(workPath), false);
+    if (operation === 'pause-work') assert.equal((await daemon.cards())[0].status, 'verifying');
   });
 });
 
-test('验收留下 index.lock 和未完成合并时复用 git 清理并恢复起点', async t => {
+test('验收留下 index.lock 和未完成合并时仍整个删除副本，卡片分支不变', async t => {
   let workPath = '';
   const daemon = await fixture(t, [card(), dispatch('verify')], [ctx => {
     workPath = ctx.options.cwd;
     const start = git(workPath, 'rev-parse', 'HEAD');
-    const branch = git(workPath, 'branch', '--show-current');
-    writeFileSync(join(workPath, 'result.txt'), 'local side\n');
-    git(workPath, 'add', 'result.txt');
-    git(workPath, '-c', 'user.name=Reviewer', '-c', 'user.email=reviewer@example.invalid', 'commit', '-m', 'review side');
-    const other = 'verification-other';
-    git(workPath, 'checkout', '-b', other, start);
-    writeFileSync(join(workPath, 'result.txt'), 'conflicting side\n');
-    git(workPath, 'add', 'result.txt');
-    git(workPath, '-c', 'user.name=Reviewer', '-c', 'user.email=reviewer@example.invalid', 'commit', '-m', 'other side');
-    git(workPath, 'checkout', branch);
-    assert.throws(() => git(workPath, 'merge', other));
+    const commit = (content: string) => {
+      writeFileSync(join(workPath, 'result.txt'), content);
+      git(workPath, 'add', 'result.txt');
+      git(workPath, '-c', 'user.name=Reviewer', '-c', 'user.email=reviewer@example.invalid', 'commit', '-m', content);
+      return git(workPath, 'rev-parse', 'HEAD');
+    };
+    const local = commit('local side\n');
+    git(workPath, 'checkout', '--detach', start);
+    commit('conflicting side\n');
+    assert.throws(() => git(workPath, 'merge', local));
     writeFileSync(git(workPath, 'rev-parse', '--git-path', 'index.lock'), 'stale lock');
     return [];
   }]);
   const result = (await until(daemon.dispatches, values => values[0]?.status === 'ended'))[0];
   assert.equal(result.endReason, 'completed', result.failure);
   assert.equal(result.endCommit, result.startCommit);
-  assert.equal(git(workPath, 'status', '--porcelain'), '');
-  const events = await daemon.events();
-  assert.ok(events.some(event => event.action === 'dispatch-index-lock-removed'));
-  assert.ok(events.some(event => event.action === 'dispatch-git-aborted' && event.details.operation === 'merge'));
+  assert.equal(existsSync(workPath), false);
+  assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
+  const [{ workPath: cardPath, cardBranch }] = await daemon.cards();
+  assert.equal(git(cardPath, 'rev-parse', cardBranch), result.startCommit);
+  assert.equal(git(cardPath, 'status', '--porcelain'), '');
 });

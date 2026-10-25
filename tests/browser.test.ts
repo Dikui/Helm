@@ -81,8 +81,11 @@ for (const purpose of ['execution', 'verification'] as const) {
     const png = await readFile(join(browserDir, 'round-1.png'));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.equal(result.endCommit, result.startCommit);
-    assert.equal(execFileSync('git', ['-C', workPath, 'ls-tree', '-r', '--name-only', result.endCommit], { encoding: 'utf8' }), 'index.html\n');
-    assert.equal(execFileSync('git', ['-C', workPath, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+    // Verification copies are deleted at the end; the card copy must stay clean either way.
+    const cardPath = (await daemon.call('get-card', { workId: daemon.work.id, cardId: result.cardId })).result.workPath;
+    assert.equal(purpose === 'execution', cardPath === workPath);
+    assert.equal(execFileSync('git', ['-C', cardPath, 'ls-tree', '-r', '--name-only', result.endCommit], { encoding: 'utf8' }), 'index.html\n');
+    assert.equal(execFileSync('git', ['-C', cardPath, 'status', '--porcelain'], { encoding: 'utf8' }), '');
     const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
     for (const name of ['browser/screens/round-1.svg', 'browser/page.svg', 'browser/snapshot.txt']) {
       const artifact = artifacts.find((item: any) => item.name === name);
@@ -188,7 +191,7 @@ test('需要浏览器的派单只获得检查工具，截图的图像与结构�
   } finally { await user.close(); }
 });
 
-test('验收派单可在同一端点检查页面并提交通过，关闭浏览器后丢弃临时改动', async t => {
+test('验收派单可在同一端点检查页面并提交通过，关闭浏览器后删除验收副本', async t => {
   let workPath = '';
   const daemon = await fixture(t, [ctx => {
     workPath = ctx.options.cwd;
@@ -207,7 +210,9 @@ test('验收派单可在同一端点检查页面并提交通过，关闭浏览�
   assert.equal(result.endReason, 'completed', result.failure);
   assert.equal(result.conclusion, 'passed');
   assert.equal(result.endCommit, result.startCommit);
-  assert.equal(await readFile(join(workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
+  await assert.rejects(readFile(join(workPath, 'index.html')), { code: 'ENOENT' });
+  const cardPath = (await daemon.call('get-card', { workId: daemon.work.id, cardId: result.cardId })).result.workPath;
+  assert.equal(await readFile(join(cardPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
   assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
   const events = await daemon.events();
   assert.ok(events.findIndex(event => event.action === 'browser-stopped') < events.findIndex(event => event.action === 'dispatch-ended'));

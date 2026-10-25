@@ -297,24 +297,28 @@ test('终态卡片和已结束工作的残留副本与卡片分支在重启时�
   assert.equal((await daemon.call('get-card', { ...daemon.scope, cardId: card.id })).status, 'completed');
 });
 
-test('崩溃中的验收派单恢复到派单开始的提交，保留卡片分支', async t => {
+test('崩溃中的验收派单和残留的验收副本在重启时删除，卡片副本和分支不变', async t => {
   const daemon = await fixture(t, 'verification');
   const { dispatch, read } = await daemon.create();
   const running = await until(read, value => value.conclusion === 'passed');
-  const path = join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId);
+  const copies = join(daemon.dataDir, 'worktrees', daemon.work.id, 'verifications');
+  const path = join(copies, dispatch.id);
+  assert.equal(await readFile(join(path, 'progress.txt'), 'utf8'), 'saved progress\n');
   await writeFile(join(path, 'baseline.txt'), 'verifier changed this');
-  git(path, 'add', 'baseline.txt', 'progress.txt');
-  git(path, ...identity, 'commit', '-m', 'untrusted verification change');
-  git(path, 'checkout', '--detach');
+  const orphan = join(copies, 'orphan');
+  git(daemon.repo, 'worktree', 'add', '--detach', orphan, running.startCommit);
   await daemon.restart();
   const ended = await read();
   assert.equal(ended.endReason, 'aborted');
   assert.equal(ended.abortReason, '运行层重启');
   assert.equal(ended.conclusion, 'undeclared');
-  assert.equal(git(path, 'rev-parse', 'HEAD'), running.startCommit);
-  assert.match(git(path, 'symbolic-ref', '--short', 'HEAD'), /^helm-card\//);
-  assert.equal(await readFile(join(path, 'baseline.txt'), 'utf8'), 'baseline\n');
-  assert.equal(existsSync(join(path, 'progress.txt')), false);
+  assert.equal(ended.endCommit, running.startCommit);
+  assert.equal(existsSync(copies), false);
+  assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(copies));
+  const cardPath = join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId);
+  assert.match(git(cardPath, 'symbolic-ref', '--short', 'HEAD'), /^helm-card\//);
+  assert.equal(git(cardPath, 'rev-parse', 'HEAD'), running.startCommit);
+  assert.equal(git(cardPath, 'status', '--porcelain'), '');
 });
 
 test('重启保留排队派单的身份，在回收的并发与端口段上启动它', async t => {

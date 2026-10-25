@@ -200,4 +200,8 @@ export const migrations: readonly string[] = [
     '"templateId":', '"agentId":'), '"previousTemplateId":', '"previousAgentId":'), '"coordinatorTemplateId":', '"coordinatorAgentId":'),
     '"template":', '"agent":'), '"kind":"template-unavailable"', '"kind":"agent-unavailable"'), '"home":"template"', '"home":"dedicated"');
   `,
+  `
+  DROP INDEX one_active_dispatch_per_card;
+  CREATE UNIQUE INDEX one_active_execution_per_card ON dispatches(card_id) WHERE status IN ('queued', 'running') AND purpose = 'execution';
+  `,
 ];

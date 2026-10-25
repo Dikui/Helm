@@ -9,6 +9,7 @@ import { cleanupRecordedProcessGroup, cleanupWorktreeProcesses } from './process
 import { completeReviewedWork } from './review.js';
 import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
+import { removeVerificationCopy } from './verification.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -67,6 +68,8 @@ export async function reconcileStartup(store: TaskStore) {
   }
 
   for (const work of works) {
+    // No dispatch runs yet, so every verification copy left by a crash is stale.
+    if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
     const accepted = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
     if (accepted) {

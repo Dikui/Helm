@@ -1,15 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
-import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, type Dispatch } from './dispatch.js';
+import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { agentEnvironment } from './agents.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
-import { refreshVerificationCopy, resetVerificationCopy } from './verification.js';
+import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
 import { checkOutputUsage } from './outputs.js';
 import { outputSummary } from './output-summary.js';
 
@@ -33,17 +33,18 @@ function stepSummary(event: DriverEvent) {
 // Both normal shutdown and startup recovery save the same git state and artifacts.
 export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason: EndReason, abortReason?: string | null) {
   const card = cardDetails(store, dispatch.workId, dispatch.cardId);
-  const workPath = card.workPath!;
   if (dispatch.purpose === 'verification') {
-    if (dispatch.startCommit) resetVerificationCopy(store, dispatch, workPath, card.cardBranch!, dispatch.startCommit);
-  } else {
-    abortCardGit(store, dispatch, workPath, card.cardBranch!);
-    if (dispatchGit(workPath, 'status', '--porcelain')) {
-      const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-      if (names.length) dispatchGit(workPath, 'add', '--', ...names);
-      dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
-        'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}${abortReason ? ` (${abortReason})` : ''}`);
-    }
+    removeVerificationCopy(store, dispatch.workId, verificationPath(store, dispatch));
+    if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', card.cardBranch!, card.cardBranch!, dispatch.startCommit!));
+    return dispatch.startCommit;
+  }
+  const workPath = card.workPath!;
+  abortCardGit(store, dispatch, workPath, card.cardBranch!);
+  if (dispatchGit(workPath, 'status', '--porcelain')) {
+    const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+    if (names.length) dispatchGit(workPath, 'add', '--', ...names);
+    dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
+      'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}${abortReason ? ` (${abortReason})` : ''}`);
   }
   const endCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
   const files = dispatch.startCommit ? dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=ACMRT', '-z', dispatch.startCommit, endCommit).split('\0').filter(Boolean) : [];
@@ -141,7 +142,7 @@ export class ExecutionRunner {
     let startCommit: string | null = null;
     let endCommit: string | null = null;
     const card = cardDetails(this.store, dispatch.workId, dispatch.cardId);
-    const workPath = card.workPath!;
+    const workPath = dispatch.purpose === 'verification' ? verificationPath(this.store, dispatch) : card.workPath!;
     const processes: ManagedProcess[] = [];
     const stop = new AbortController();
     const eventStop = new AbortController();
@@ -177,8 +178,8 @@ export class ExecutionRunner {
         throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
       dispatch = { ...dispatch, agent };
-      prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
-      refreshVerificationCopy(this.store, dispatch, workPath, card.cardBranch!);
+      if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, dispatch.startCommit ?? verificationCommit(this.store, card));
+      else prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
@@ -304,12 +305,13 @@ export class ExecutionRunner {
       if (browserFailed) reason = 'error';
       if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
       try {
-        const cleaned = await cleanupWorktreeProcesses(workPath, processes);
+        // An aborted verification may never have created its copy, and then started no process.
+        const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes) : { pids: [] };
         if (cleaned.pids.length) this.store.transaction(() => this.store.appendEvent(runtime,
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        if (!ruleFailure || startCommit) endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+        if (!ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
           getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');

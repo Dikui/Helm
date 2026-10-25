@@ -21,6 +21,7 @@ export interface Dispatch {
   cardContentSnapshot: string | null; workDescriptionId: string | null; workDescriptionVersion: number | null;
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
   conclusion: 'completed' | 'blocked' | 'passed' | 'failed' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
+  outdated?: boolean;
 }
 
 const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, agent_id AS agentId,
@@ -48,6 +49,27 @@ export function listDispatches(store: TaskStore, workId: string, cardId?: string
   if (cardId) cardDetails(store, workId, cardId);
   return store.db.prepare(`SELECT ${dispatchColumns} FROM dispatches WHERE work_id = ? AND (? IS NULL OR card_id = ?) ORDER BY created_at, rowid`)
     .all(workId, cardId ?? null, cardId ?? null).map(row => readDispatch(row, Boolean(work.outputsDeletedAt)));
+}
+
+// A verification checks the card's own commit, or the work branch when the card is only verified.
+export function verificationCommit(store: TaskStore, card: { id: string; workId: string; cardBranch?: string | null }) {
+  const executed = store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ? AND purpose = 'execution'`).get(card.id);
+  return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${executed ? card.cardBranch : store.work(card.workId).workBranch}`);
+}
+
+// Read tools flag verification conclusions whose commit the card has since moved past.
+export function markOutdated(store: TaskStore, dispatches: Dispatch[]) {
+  const commits = new Map<string, string | null>();
+  return dispatches.map(item => {
+    if (item.purpose !== 'verification' || !item.startCommit) return item;
+    if (!commits.has(item.cardId)) {
+      const card = cardDetails(store, item.workId, item.cardId);
+      const settled = ['completed', 'cancelled'].includes(card.status) || ['completed', 'cancelled'].includes(store.work(item.workId).status);
+      commits.set(item.cardId, settled ? null : verificationCommit(store, card));
+    }
+    const commit = commits.get(item.cardId);
+    return commit ? { ...item, outdated: item.startCommit !== commit } : item;
+  });
 }
 
 export function dispatchGit(path: string, ...args: string[]) {
@@ -144,8 +166,11 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   if (!['executing', 'awaiting-review'].includes(work.status)) throw new RuleError('WORK_NOT_EXECUTING', '对齐中、暂停或终态工作不能派单。');
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、暂停或终态卡片不能派单。');
-  if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '卡片已有运行中或排队中的派单。');
   const purpose = params.purpose ?? 'execution';
+  // Verifications only use their own copies and may overlap; an execution needs the card alone.
+  if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended' && (purpose === 'execution' || item.purpose === 'execution'))) {
+    throw new RuleError('DISPATCH_ACTIVE', '执行派单独占卡片：有执行派单时不能再派单，有验收派单时不能派执行单。');
+  }
   if (purpose === 'verification' && params.resumeSessionId) throw new RuleError('INVALID_RESUME', '验收派单一律新开对话，不能续跑。');
   if (params.resumeSessionId) {
     const previous = listDispatches(store, work.id, card.id).find(item => item.sessionId === params.resumeSessionId && item.status === 'ended' && item.purpose === 'execution');
@@ -167,17 +192,19 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const cardContentSnapshot = card.content;
   content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
   const copy = cardCopy(store, work.id, card.id);
+  // Pin the commit now so verifications dispatched together check the same code.
+  const startCommit = purpose === 'verification' ? verificationCommit(store, { ...card, cardBranch: copy.cardBranch }) : null;
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
   mkdirSync(outputPath, { recursive: true });
   return store.transaction(() => {
     store.db.prepare(`INSERT INTO dispatches
       (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, resume_session_id, session_id, created_at, output_path,
-        needs_browser, card_content_snapshot, work_description_id, work_description_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)`)
+        needs_browser, card_content_snapshot, work_description_id, work_description_version, start_commit)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, work.id, card.id, params.key, purpose, agent.id, JSON.stringify(agent), content,
         params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath,
-        params.needsBrowser ? 1 : 0, cardContentSnapshot, description?.id ?? null, description?.version ?? null);
+        params.needsBrowser ? 1 : 0, cardContentSnapshot, description?.id ?? null, description?.version ?? null, startCommit);
     store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, agent_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
       .run(copy.workPath, copy.cardBranch, agent.id, id, card.id);
     const dispatch = getDispatch(store, work.id, id);

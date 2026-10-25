@@ -111,7 +111,8 @@ test('模板改名为 Agent 的迁移改写列名和事件，已有工作时一�
   const db = new DatabaseSync(join(dataDir, 'helm.db'));
   try {
     db.exec('PRAGMA foreign_keys = ON');
-    for (const [index, sql] of migrations.slice(0, -1).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    const rename = migrations.findIndex(sql => sql.includes('RENAME COLUMN template_id TO agent_id'));
+    for (const [index, sql] of migrations.slice(0, rename).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
     db.exec(`
       INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/legacy/project', '2026-01-01');
       INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_template_id)

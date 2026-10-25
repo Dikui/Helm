@@ -1,22 +1,23 @@
-import { abortCardGit, dispatchGit, listDispatches, type Dispatch } from './dispatch.js';
+import { mkdirSync, rmSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { projectPath } from './alignment.js';
+import { dispatchGit, type Dispatch } from './dispatch.js';
 import type { TaskStore } from './store.js';
 
-export function refreshVerificationCopy(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch: string) {
-  if (dispatch.purpose !== 'verification' || listDispatches(store, dispatch.workId, dispatch.cardId).some(item => item.purpose === 'execution')) return;
-  const work = store.work(dispatch.workId);
-  const previousCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
-  const startCommit = dispatchGit(workPath, 'rev-parse', `refs/heads/${work.workBranch}`);
-  dispatchGit(workPath, 'reset', '--hard', startCommit);
-  store.transaction(() => store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'dispatch', id: dispatch.id },
-    'verification-copy-refreshed', { cardBranch, workBranch: work.workBranch, previousCommit, startCommit },
-    { workId: dispatch.workId, cardId: dispatch.cardId, dispatchId: dispatch.id }));
+// Each verification gets a throwaway detached copy of its pinned commit, outside the card copy.
+export const verificationPath = (store: TaskStore, dispatch: Pick<Dispatch, 'workId' | 'id'>) =>
+  resolve(store.dataDir, 'worktrees', dispatch.workId, 'verifications', dispatch.id);
+
+// The caller has already stopped every process inside the copy.
+export function removeVerificationCopy(store: TaskStore, workId: string, path: string) {
+  rmSync(path, { recursive: true, force: true });
+  dispatchGit(projectPath(store, workId), 'worktree', 'prune');
 }
 
-// The runner has already stopped all processes before touching the copy.
-export function resetVerificationCopy(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch: string, startCommit: string) {
-  abortCardGit(store, dispatch, workPath);
-  // Tests may leave HEAD detached; restore the card branch as well as the files.
-  dispatchGit(workPath, 'symbolic-ref', 'HEAD', `refs/heads/${cardBranch}`);
-  dispatchGit(workPath, 'reset', '--hard', startCommit);
-  dispatchGit(workPath, 'clean', '-fd');
+export function createVerificationCopy(store: TaskStore, dispatch: Dispatch, commit: string) {
+  const path = verificationPath(store, dispatch);
+  // A crash during an earlier start may have left a partial copy.
+  removeVerificationCopy(store, dispatch.workId, path);
+  mkdirSync(dirname(path), { recursive: true });
+  dispatchGit(projectPath(store, dispatch.workId), 'worktree', 'add', '--detach', path, commit);
 }
