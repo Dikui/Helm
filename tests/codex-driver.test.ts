@@ -92,7 +92,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
   assert.match(thread.developerInstructions, /测试策略/);
   assert.match(thread.developerInstructions, /submit-conclusion/);
-  assert.match(thread.developerInstructions, /不要自己 git commit、不要改 git 配置/);
+  assert.match(thread.developerInstructions, /不要 git commit 或改 git 配置/);
   assert.match(thread.developerInstructions, /不要自己安装或启动浏览器/);
   assert.deepEqual(requests[4].params.sandboxPolicy, { type: 'workspaceWrite', writableRoots: [ctx.directory], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true });
   assert.equal(requests[4].params.effort, 'low');
@@ -119,31 +119,7 @@ for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默
     const requests = await ctx.requests();
     assert.deepEqual(requests.filter(r => r.method === 'turn/start').at(-1).params.input, [{ type: 'text', text: '保留输入原文' }]);
     const prompt = requests.filter(r => r.method === 'thread/start' || r.method === 'thread/resume').at(-1).params.developerInstructions;
-    const requirements = role === 'coordinator' ? [
-      /用户.*提问、说明和进展摘要.*send-message.*稳定.*key/,
-      /最终回答.*用户看不到/,
-      /收到用户消息先在对话里回应.*新版工作说明.*调整卡片和派单.*决策关卡/,
-      /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
-      /不要只写“按卡片说明实现”/,
-      /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,
-      /执行派单.*真实浏览器自查页面.*needsBrowser=true/,
-      /不要让执行者自己安装或启动浏览器/,
-      /cardId、dispatchId、gateId.*工具返回结果原样复制.*不要手打或拼接/,
-      /工具因 ID 被拒.*重新读取卡片图核对 ID.*再重试/,
-      /两家或多家验收派单.*同一张整体验收卡片.*全部通过后才用 complete-card/,
-      /不要提前完成后另开卡片/,
-    ] : [
-      /派单前附卡片说明快照/,
-      /不要自己 git commit、不要改 git 配置/,
-      /执行派单结束后由运行层提交/,
-      /不要自己安装或启动浏览器/,
-      /需要浏览器时只用注入的浏览器工具.*没有.*结论里说明/,
-      /验收判定不通过前.*复核现象是否真的违反标准.*排除符合规则的边界行为/,
-      /已经贴边时再往同方向操作没有变化/,
-      /至少一条直接证据支撑不通过结论/,
-      /submit-conclusion/,
-    ];
-    for (const requirement of requirements) assert.match(prompt, requirement);
+    for (const rule of Object.values(roleRules(role))) assert.ok(prompt.includes(rule.trim()));
   }
 });
 

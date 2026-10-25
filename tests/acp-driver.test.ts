@@ -183,7 +183,7 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   assert.equal(prompt[0].type, 'text');
   assert.match(prompt[0].text, /^你是 Helm 执行者.*\n\n测试策略\n\n/s);
   assert.match(prompt[0].text, /submit-conclusion/);
-  assert.match(prompt[0].text, /不要自己 git commit、不要改 git 配置/);
+  assert.match(prompt[0].text, /不要 git commit 或改 git 配置/);
   assert.match(prompt[0].text, /不要自己安装或启动浏览器/);
   assert.deepEqual(prompt[1], { type: 'text', text: '实现派单' });
 });

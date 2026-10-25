@@ -10,6 +10,7 @@ import type { CanUseTool, Options, SDKMessage, SDKResultMessage } from '@anthrop
 import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
 import { AgentCatalog } from '../src/agents.js';
+import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 import { claudeErrors } from './fixtures/claude-errors.js';
@@ -240,38 +241,7 @@ test('真实 Claude 驱动把默认调度规则注入 SDK 提示词，保留启�
       assert.equal(args.prompt, '派单内容');
       const prompt = args.options?.systemPrompt;
       assert.equal(typeof prompt, 'string');
-      for (const requirement of [
-        /整体验收卡片.*needsVerification.*true/s,
-        /整体验收卡片.*依赖所有其他卡片.*只派验收派单/s,
-        /验收通过后.*不再.*执行派单.*改动.*新卡片/s,
-        /冲突.*修复卡片.*repairOfCardId/s,
-        /修复卡片.*合入.*冲突卡片.*完成/s,
-        /优先.*不同驱动的 Agent.*交叉验收.*只有一家.*同家/s,
-        /验收.*卡片说明.*本卡.*边界和标准/s,
-        /整体验收卡片.*工作说明.*标准/s,
-        /派单内容.*本次具体要做什么.*验收标准和需要的证据/,
-        /不要只写“按卡片说明实现”/,
-        /卡片说明快照会自动附上.*派单内容仍要说明本次任务/,
-        /执行派单.*真实浏览器自查页面.*needsBrowser=true/,
-        /不要让执行者自己安装或启动浏览器/,
-        /cardId、dispatchId、gateId.*工具返回结果原样复制.*不要手打或拼接/,
-        /工具因 ID 被拒.*重新读取卡片图核对 ID.*再重试/,
-        /两家或多家验收派单.*同一张整体验收卡片.*全部通过后才用 complete-card/,
-        /不要提前完成后另开卡片/,
-        /额度用完.*改派.*无处可派.*关卡/s,
-        /用户.*提问、说明和进展摘要.*send-message.*稳定.*key/,
-        /最终回答.*用户看不到/,
-        /收到用户消息先在对话里回应.*新版工作说明.*调整卡片和派单.*决策关卡/,
-        /决策关卡尽量少提/,
-        /中途修改冲突太大/,
-        /密钥或凭据/,
-        /超出边界或需改工作说明/,
-        /多次返工仍失败或多个执行者受阻/,
-        /标准判断不了的取舍/,
-        /汇总报告.*逐卡.*结果.*验收是否通过.*由谁完成.*成果链接/s,
-        /调度笔记.*约 4k token/,
-        /不推送、不部署/,
-      ]) assert.match(prompt as string, requirement);
+      for (const rule of Object.values(roleRules('coordinator'))) assert.ok((prompt as string).includes(rule.trim()));
     }) });
   assert.equal((await collect(driver, options)).end?.reason, 'completed');
   assert.equal(inspected, true, '必须实际到达真实驱动的 SDK 查询边界');
@@ -287,27 +257,7 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
         assert.equal(args.prompt, '派单内容');
         const prompt = args.options?.systemPrompt;
         assert.equal(typeof prompt, 'string');
-        for (const requirement of [
-          /不推送、不部署/,
-          /派单前附卡片说明快照/,
-          /不要自己 git commit、不要改 git 配置/,
-          /执行派单结束后由运行层提交/,
-          /不要自己安装或启动浏览器/,
-          /需要浏览器时只用注入的浏览器工具.*没有.*结论里说明/,
-          /验收判定不通过前.*复核现象是否真的违反标准.*排除符合规则的边界行为/,
-          /已经贴边时再往同方向操作没有变化/,
-          /至少一条直接证据支撑不通过结论/,
-          /开发服务.*分配的端口.*HELM_PORT_START.*HELM_PORT_END/s,
-          /不要自己停止或 kill 开发服务.*派单结束时由运行层清理副本里的进程/,
-          /purpose 是派单用途.*execution.*执行派单.*verification.*验收派单/s,
-          /截图.*相对文件名.*成果 browser\/<文件名>.*最终回答/,
-          /检查过程和证据.*最终回答/,
-          /结束前必须最后调用.*提交结论.*submit-conclusion/s,
-          /只在文字中.*结论.*未声明.*不算完成/,
-          /执行派单.*completed.*blocked/s,
-          /验收派单.*passed.*failed/s,
-          /理由/,
-        ]) assert.match(prompt as string, requirement);
+        for (const rule of Object.values(roleRules('executor'))) assert.ok((prompt as string).includes(rule.trim()));
       }) });
     assert.equal((await collect(driver, { ...options, resumeSessionId })).end?.reason, 'completed');
     assert.equal(inspected, true, '必须实际到达真实驱动的 SDK 查询边界');
@@ -327,7 +277,7 @@ test('同一个 Claude 驱动按 Agent 角色选择会话权限，并在内置�
           assert.match(args.options!.systemPrompt as string, /submit-conclusion/);
           assert.match(args.options!.systemPrompt as string, /卡片说明快照/);
           assert.match(args.options!.systemPrompt as string, /browser\/<文件名>/);
-          assert.match(args.options!.systemPrompt as string, /不要自己 git commit、不要改 git 配置/);
+          assert.match(args.options!.systemPrompt as string, /不要 git commit 或改 git 配置/);
           assert.match(args.options!.systemPrompt as string, /不要自己安装或启动浏览器/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
         } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
