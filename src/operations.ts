@@ -8,6 +8,7 @@ import { confirmationDetails, confirmDescription, draftDescription } from './ali
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
+import { promptNames, readPrompt, writePrompt } from './prompts.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
@@ -277,6 +278,20 @@ export const operations: readonly Operation[] = [
       }
       checkOutputUsage(store);
       return { outputThresholdBytes: thresholdBytes };
+    },
+  }),
+  operation({
+    name: 'get-prompts', description: '读取调度者和执行者的内置规则提示词', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({}).strict(),
+    execute: ({ store }) => Object.fromEntries(promptNames.map(name => [name, readPrompt(store.agents.promptDirectory, name)])),
+  }),
+  operation({
+    name: 'set-prompt', description: '改写一段内置规则提示词，从下一次派单或调度轮次起生效', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ name: z.enum(promptNames), text: z.string() }).strict(),
+    execute({ store, actor }, { name, text }) {
+      writePrompt(store.agents.promptDirectory, name, text);
+      store.transaction(() => store.appendEvent(actor, { type: 'settings', id: 'global' }, 'prompt-set', { name }));
+      return { name, text };
     },
   }),
   operation({

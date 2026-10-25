@@ -14,7 +14,8 @@ import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
 import { AgentCatalog, migrateLegacyAgents } from './agents.js';
-import { SkillLibrary } from './library.js';
+import { McpLibrary, SkillLibrary } from './library.js';
+import { seedPrompts } from './prompts.js';
 import { monitorAgentAvailability } from './availability.js';
 import { defaultStaticDir, serveStatic, staticPath } from './static-files.js';
 
@@ -40,8 +41,10 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
   const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
   const dataDir = options.dataDir ?? join(homedir(), '.helm');
+  const library = new SkillLibrary(join(dataDir, 'library', 'skills'));
   const store = new TaskStore(dataDir, new AgentCatalog(options.agentDir ?? join(dataDir, 'agents'), Object.keys(drivers),
-    new SkillLibrary(join(dataDir, 'library', 'skills'))));
+    library, new McpLibrary(join(library.directory, '..', 'mcp')), join(dataDir, 'prompts')));
+  seedPrompts(store.agents.promptDirectory);
   migrateLegacyAgents(store);
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;

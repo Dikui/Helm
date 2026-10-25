@@ -7,6 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { CodexDriver, CodexCoordinatorDriver, CodexExecutorDriver } from '../src/codex-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
 import { AgentCatalog, agentEnvironment, type AgentConfig } from '../src/agents.js';
+import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
@@ -21,7 +22,7 @@ async function fixture(t: TestContext, notifications: object[], script: object =
   const driver = new CodexDriver({ command: { file: process.execPath,
     args: [fileURLToPath(new URL('./fixtures/codex-app-server.js', import.meta.url)), path] } });
   const agent: AgentConfig = { id: `codex-${role}`, role, driver: 'codex', model: 'test-model',
-    reasoningEffort: 'low', fast: true, home: 'shared', description: '执行', prompt: '测试策略', directory, skillsPath: join(directory, 'skills') };
+    reasoningEffort: 'low', fast: true, home: 'shared', description: '执行', prompt: '测试策略', rules: roleRules(role), directory, skillsPath: join(directory, 'skills') };
   const options: SessionOptions = { agent, cwd: directory, dataDir: join(directory, 'dispatch'),
     env: { CODEX_HOME: '/caller/must-not-use', HOME: directory, PATH: process.env.PATH!, NO_PROXY: 'example.test', no_proxy: 'internal.test' },
     sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [directory] },

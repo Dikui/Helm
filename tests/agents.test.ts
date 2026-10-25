@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
+import { agentPrompt, defaultPromptDir, seedPrompts } from '../src/prompts.js';
 
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -78,6 +79,24 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
 
 const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', reasoningEffort: 'high', fast: false,
   home: 'shared', description: '界面保存的执行者', skills: [], mcp: [] };
+
+test('规则提示词首次启动从仓库复制到数据目录，之后只读数据目录，改写后 Agent 立即带上且不被再次复制覆盖', async t => {
+  const daemon = await fixture(t);
+  const promptDir = join(daemon.directory, 'data', 'prompts');
+  for (const name of ['coordinator-role', 'coordinator-runtime', 'executor-role', 'executor-runtime']) {
+    assert.equal(await readFile(join(promptDir, `${name}.md`), 'utf8'), await readFile(join(defaultPromptDir, `${name}.md`), 'utf8'));
+  }
+  await daemon.writeAgent('executor', {}, '附加要求');
+  const read = await daemon.call('get-prompts');
+  ok(read);
+  assert.match(read.result['executor-role'], /^你是 Helm 执行者/);
+  assert.equal((await daemon.call('set-prompt', { name: 'executor-role', text: '自定义执行者规则' })).ok, true);
+  assert.equal((await daemon.call('set-prompt', { name: 'unknown', text: 'x' })).ok, false);
+  seedPrompts(promptDir);
+  assert.equal(await readFile(join(promptDir, 'executor-role.md'), 'utf8'), '自定义执行者规则');
+  const agent = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'executor');
+  assert.match(agentPrompt(agent), /^自定义执行者规则\n\n附加要求\n\n输入 JSON 的 content/);
+});
 
 test('订阅 Agent 的库 skill 与全局目录同名只返回警告，API 和未选中的 skill 不警告，目录变化立即生效', async t => {
   const daemon = await fixture(t);

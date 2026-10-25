@@ -80,7 +80,7 @@ export class AcpDriver implements Driver {
     if (Array.isArray(this.profile.models)) return this.profile.models;
     // Model and effort are left unset so the CLI starts with its defaults just to answer initialize.
     const probe: AgentConfig = { id: `${this.agent}-models`, role: 'executor', driver: this.agent, model: null, reasoningEffort: null,
-      fast: false, home: 'shared', description: '', prompt: '', directory: homedir(), skillsPath: null };
+      fast: false, home: 'shared', description: '', prompt: '', rules: { role: '', runtime: '' }, directory: homedir(), skillsPath: null };
     const { acp, close } = await this.launch(probe, { cwd: homedir() }, this.environment(agentEnvironment(probe), probe),
       { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
     const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 30_000);

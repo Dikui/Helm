@@ -6,6 +6,7 @@ import type { TestContext } from 'node:test';
 import { AcpDriver } from '../src/acp-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
 import { agentEnvironment, type AgentConfig } from '../src/agents.js';
+import { roleRules } from '../src/prompts.js';
 
 export async function acpFixture(t: TestContext, script: object = {}, manageHome = true, kind: 'grok' | 'deepseek' = 'grok') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-acp-')));
@@ -26,7 +27,7 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   const command = { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/acp-agent.js', import.meta.url)), path] };
   const driver = new AcpDriver(kind, { command, timeoutMs: 2000 });
   const agent: AgentConfig = { id: `${kind}-executor`, role: 'executor', driver: kind, model: kind === 'grok' ? 'grok-4.7' : 'deepseek-flash',
-    reasoningEffort: 'low', fast: false, home: 'shared', description: '测试执行者', prompt: '测试策略', directory, skillsPath: null };
+    reasoningEffort: 'low', fast: false, home: 'shared', description: '测试执行者', prompt: '测试策略', rules: roleRules('executor'), directory, skillsPath: null };
   const options: SessionOptions = { agent, cwd, env: { ...agentEnvironment(agent), HOME: home, XAI_API_KEY: 'must-not-inherit' },
     sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };

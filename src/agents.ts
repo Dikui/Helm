@@ -8,6 +8,7 @@ import { runtimeEnvironment } from './environment.js';
 import type { AgentAvailability, SessionOptions } from './driver.js';
 import { acpAgents } from './acp-agents.js';
 import { libraryName, McpLibrary, SkillLibrary } from './library.js';
+import { roleRules } from './prompts.js';
 
 export const agentSettings = z.object({
   role: z.enum(['coordinator', 'executor']), driver: z.enum(['claude-sdk', 'codex', 'grok', 'deepseek']),
@@ -28,6 +29,8 @@ export const saveAgentSchema = z.object({
 
 export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills' | 'mcp'> {
   id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[]; mcp?: string[];
+  // Role rules from the prompt directory, read with the Agent so each snapshot records them.
+  rules: { role: string; runtime: string };
 }
 
 function revision(config: Buffer, prompt: Buffer) {
@@ -43,7 +46,8 @@ export class AgentCatalog {
 
   constructor(readonly directory: string, private drivers: readonly string[] = ['claude-sdk'],
     readonly library = new SkillLibrary(join(directory, '..', 'library', 'skills')),
-    readonly mcpLibrary = new McpLibrary(join(library.directory, '..', 'mcp'))) {}
+    readonly mcpLibrary = new McpLibrary(join(library.directory, '..', 'mcp')),
+    readonly promptDirectory = join(directory, '..', 'prompts')) {}
 
   save(input: z.infer<typeof saveAgentSchema>) {
     const { id, config, prompt, mode, baseRevision } = saveAgentSchema.parse(input);
@@ -156,7 +160,7 @@ export class AgentCatalog {
     const config = agentSettings.parse(JSON.parse(configFile.toString('utf8')));
     const prompt = promptFile.toString('utf8');
     const skillsPath = join(directory, 'skills');
-    return { id, ...config, config, prompt, revision: revision(configFile, promptFile), directory,
+    return { id, ...config, config, prompt, rules: roleRules(config.role, this.promptDirectory), revision: revision(configFile, promptFile), directory,
       skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
   }
 
