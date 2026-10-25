@@ -21,7 +21,7 @@ const eventLabels: Record<string, string> = {
   'work-paused': '工作已暂停', 'work-resumed': '工作已恢复', 'work-cancelled': '工作已取消', 'work-completed': '工作已完成',
   'needs-user-attention': '等你处理', 'operation-rejected': '操作被拒绝', 'round-interrupted': '调度轮次已打断',
   'coordinator-agent-changed': '调度者 Agent 已更换', 'dependency-added': '卡片依赖已添加', 'dependency-removed': '卡片依赖已移除',
-  'artifact-saved': '成果已保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除',
+  'artifact-saved': '成果已保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除', 'work-deleted': '工作已删除',
   'context-compacted': '上下文已压缩', 'process-started': 'Agent 已启动', 'browser-started': '浏览器已启动', 'browser-stopped': '浏览器已停止',
 };
 

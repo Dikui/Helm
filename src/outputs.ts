@@ -7,6 +7,8 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip, gunzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { RuleError, type Actor, type TaskStore } from './store.js';
+import { projectPath } from './alignment.js';
+import { readWork } from './work-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const exec = promisify(execFile);
@@ -174,6 +176,53 @@ export function exportWorkOutputs(store: TaskStore, actor: Actor, workId: string
       store.appendEvent(actor, { type: 'work', id: workId }, 'outputs-exported', { targetPath: target }, { workId });
     });
     return { targetPath: target };
+  });
+}
+
+// Files go first and the rows last, so a deletion interrupted midway can simply be repeated.
+export function deleteWork(store: TaskStore, actor: Actor, workId: string, confirm = false) {
+  return withWorkOutputs(store, workId, async () => {
+    const work = endedWork(store, workId);
+    if (!work.outputsExportedAt && !confirm) {
+      return { requiresConfirmation: true, message: '尚未导出这项工作的输出，建议先导出。确认删除请设置 confirm: true；删除后工作无法恢复。' };
+    }
+    const title = readWork(store, workId).title;
+    for (const row of store.db.prepare('SELECT id FROM dispatches WHERE work_id = ?').all(workId)) {
+      await rm(join(store.dataDir, 'dispatches', String(row.id)), { recursive: true, force: true });
+    }
+    for (const row of store.db.prepare('SELECT id, output_path FROM coordinator_rounds WHERE work_id = ?').all(workId)) {
+      for (const path of [String(row.output_path), `${row.output_path}.gz`, join(store.dataDir, 'rounds', String(row.id))]) {
+        await rm(path, { recursive: true, force: true });
+      }
+    }
+    await rm(join(store.dataDir, 'worktrees', workId), { recursive: true, force: true });
+    // `branch -d` refuses unmerged branches, so cancelled or unmerged work keeps its code.
+    let keptBranch: string | null = null;
+    if (work.workBranch) {
+      try { await exec('git', ['-C', projectPath(store, workId), 'branch', '-d', work.workBranch]); }
+      catch (error) {
+        const missingBranch = error instanceof Error && 'stderr' in error && /not found/.test(String(error.stderr));
+        if (!missingBranch) keptBranch = work.workBranch;
+      }
+    }
+    store.transaction(() => {
+      const remove = (sql: string) => store.db.prepare(sql).run(workId);
+      remove('DELETE FROM wake_queue WHERE work_id = ?');
+      remove('DELETE FROM artifacts WHERE dispatch_id IN (SELECT id FROM dispatches WHERE work_id = ?)');
+      remove('DELETE FROM dependencies WHERE work_id = ?');
+      remove('DELETE FROM messages WHERE work_id = ?');
+      remove('DELETE FROM dispatches WHERE work_id = ?');
+      remove('DELETE FROM cards WHERE work_id = ?');
+      remove('DELETE FROM work_descriptions WHERE work_id = ?');
+      remove('DELETE FROM coordinator_rounds WHERE work_id = ?');
+      remove('DELETE FROM coordinator_notes WHERE work_id = ?');
+      remove('DELETE FROM gates WHERE work_id = ?');
+      remove('DELETE FROM events WHERE work_id = ?');
+      remove('DELETE FROM works WHERE id = ?');
+      store.appendEvent(actor, { type: 'work', id: workId }, 'work-deleted', { title, keptBranch }, { workId });
+      checkOutputUsage(store);
+    });
+    return { status: 'deleted', keptBranch };
   });
 }
 

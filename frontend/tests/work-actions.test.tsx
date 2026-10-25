@@ -196,3 +196,19 @@ test('操作菜单和确认框可用 Escape 退出，焦点返回操作按钮，
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Actions' }));
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('aligning');
 });
+
+test('删除已结束的工作须确认，删除后回到收件箱，工作不再存在', async () => {
+  const work = await startWork();
+  render(<App baseUrl={daemon!.url} />);
+  await screen.findByRole('heading', { name: '管理输出的工作' });
+  expect((within(actions()).getByRole('button', { name: '删除工作' }) as HTMLButtonElement).disabled).toBe(true);
+  await daemon!.call('cancel-work', { workId: work.id });
+  await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已取消');
+  fireEvent.click(screen.getByRole('button', { name: '操作' }));
+  fireEvent.click(within(actions()).getByRole('button', { name: '删除工作' }));
+  const dialog = await screen.findByRole('dialog', { name: '删除工作' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认删除工作' }));
+  fireEvent.click(await within(dialog).findByRole('button', { name: '仍然删除' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/'));
+  expect((await daemon!.call('get-work', { workId: work.id })).error.code).toBe('NOT_FOUND');
+});

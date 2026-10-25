@@ -3,6 +3,7 @@ import { OperationError } from '../../shared/api.js';
 import { useData } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
+import { useRouter } from '../../shared/router.js';
 import type { Work } from '../../shared/types.js';
 import { ExportForm } from './ExportForm.js';
 import { CoordinatorChooser } from './CoordinatorChooser.js';
@@ -13,13 +14,15 @@ export interface ActionWork extends Work { allowedOperations?: string[]; coordin
 export function WorkActions({ work, reload }: { work: ActionWork; reload: () => void }) {
   const { t } = useI18n();
   const { api } = useData();
+  const { navigate } = useRouter();
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState<'cancel' | 'agent' | 'export' | 'delete'>();
+  const [panel, setPanel] = useState<'cancel' | 'agent' | 'export' | 'delete' | 'remove'>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error>();
   const [restriction, setRestriction] = useState<{ status: string; operations: string[] }>();
   const [deletePrompt, setDeletePrompt] = useState(false);
   const [exportPath, setExportPath] = useState<string>();
+  const [keptBranch, setKeptBranch] = useState<string>();
   const pending = useRef(false);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -38,8 +41,9 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
     pending.current = true;
     setBusy(true); setError(undefined);
     try {
-      const result = await api.call<{ requiresConfirmation?: boolean; targetPath?: string }>(operation, { workId: work.id, ...params });
+      const result = await api.call<{ requiresConfirmation?: boolean; targetPath?: string; keptBranch?: string | null }>(operation, { workId: work.id, ...params });
       if (result.requiresConfirmation) { setDeletePrompt(true); return; }
+      if (operation === 'delete-work') { if (result.keptBranch) setKeptBranch(result.keptBranch); else navigate('/'); return; }
       if (result.targetPath) setExportPath(result.targetPath);
       setRestriction(undefined); setOpen(false); close(); reload();
     } catch (error) {
@@ -58,6 +62,7 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
       <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>
       <button className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setOpen(false); setPanel('export'); }}>{t('exportOutputs')}</button>
       <button className="btn sm work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('delete'); }}>{t('deleteOutputs')}</button>
+      <button className="btn sm work-danger" disabled={!enabled('delete-work', ended)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('remove'); }}>{t('deleteWork')}</button>
       <p className="muted">{t(ended ? 'endedWorkActions' : 'outputsWhenEnded')}</p>
       {error && <ErrorNotice error={error} />}
     </div>}
@@ -73,6 +78,13 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
       {error && <ErrorNotice error={error} />}
       {deletePrompt && <><p role="status">{t('outputsNotExported')}</p><button className="btn" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setPanel('export'); }}>{t('exportFirst')}</button></>}
       <button className="btn work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => void run('delete-outputs', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteOutputs')}</button>
+    </ActionDialog>}
+    {panel === 'remove' && <ActionDialog key="remove" title={t('deleteWork')} description={`${work.title} · ${t('deleteWorkConsequence')}`} busy={busy} onClose={keptBranch ? () => navigate('/') : close} returnFocus={trigger}>
+      {error && <ErrorNotice error={error} />}
+      {keptBranch ? <><p role="status">{t('workDeletedBranchKept')} <span className="mono">{keptBranch}</span></p><button className="btn" onClick={() => navigate('/')}>{t('actionBack')}</button></> : <>
+        {deletePrompt && <><p role="status">{t('outputsNotExported')}</p><button className="btn" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setPanel('export'); }}>{t('exportFirst')}</button></>}
+        <button className="btn work-danger" disabled={!enabled('delete-work', ended)} onClick={() => void run('delete-work', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteWork')}</button>
+      </>}
     </ActionDialog>}
     {panel === 'agent' && <ActionDialog title={t('changeCoordinator')} busy={busy} onClose={close} returnFocus={trigger}>
       {error && <ErrorNotice error={error} />}
