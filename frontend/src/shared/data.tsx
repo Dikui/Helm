@@ -43,7 +43,9 @@ export function useResource<T>(operation: string, params: object = {}, affects?:
           const data = await api.call<T>(operation, input, controller.signal);
           if (!controller.signal.aborted) setState({ identity, data });
         } catch (error) {
-          if (!controller.signal.aborted) setState(previous => ({ identity,
+          // A reload or unmount superseded this read; the replacement read takes over, so the event stream must not replay.
+          if (controller.signal.aborted) return;
+          setState(previous => ({ identity,
             data: previous.identity === identity ? previous.data : undefined, error: error as Error }));
           throw error;
         }

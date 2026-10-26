@@ -139,6 +139,8 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   render(<App baseUrl={daemon.url} />);
   const project = await screen.findByRole('form', { name: `项目 ${daemon.project.name}` });
   expect(await within(project).findByText('1 项工作')).toBeTruthy();
+  expect((within(project).getByRole('button', { name: '删除项目' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(within(project).getByText('请先删除此项目下的所有工作，再删除项目登记。')).toBeTruthy();
   const config = await agent('claude-coordinator');
   await daemon.call('save-agent', { id: 'second-coordinator', mode: 'create', prompt: config.prompt,
     config: { role: 'coordinator', driver: 'claude-sdk', model: null, reasoningEffort: null, fast: false, home: 'shared', description: '第二调度者' } });
@@ -157,6 +159,59 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   expect(await screen.findByRole('form', { name: '项目 新项目' })).toBeTruthy();
   const projects = (await daemon.call('list-projects')).result;
   expect(projects.find((item: any) => item.name === '新项目').path).toBe(repo);
+  const emptyProject = screen.getByRole('form', { name: '项目 新项目' });
+  const remove = within(emptyProject).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
+  await waitFor(() => expect(remove.disabled).toBe(false));
+  expect(within(emptyProject).getByText('只删除项目登记，磁盘上的仓库和文件会保留。')).toBeTruthy();
+  fireEvent.click(remove);
+  expect(remove.disabled).toBe(true);
+  await screen.findByText('项目已删除');
+  await waitFor(() => expect(screen.queryByRole('form', { name: '项目 新项目' })).toBeNull());
+  expect((await daemon.call('list-projects')).result.map((item: any) => item.id)).toEqual([daemon.project.id]);
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect((within(project).getByRole('button', { name: 'Delete project' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(within(project).getByText('Delete all works in this project before removing its registration.')).toBeTruthy();
+});
+
+test('项目删除遇到新增工作的竞争时显示服务端错误并保留项目', async () => {
+  daemon = await uiFixture();
+  const transport: typeof fetch = async (url, options) => {
+    if (String(url).endsWith('/api/delete-project')) {
+      expect((await daemon!.call('send-message', { projectId: daemon!.project.id, body: '并发新增工作', key: 'delete-race' })).ok).toBe(true);
+    }
+    return fetch(url, options);
+  };
+  window.history.replaceState(null, '', '/settings/projects');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  const project = await screen.findByRole('form', { name: `项目 ${daemon.project.name}` });
+  const remove = within(project).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
+  await waitFor(() => expect(remove.disabled).toBe(false));
+  fireEvent.click(remove);
+  expect((await within(project).findByRole('alert')).textContent).toContain('项目下还有 1 项工作，请先删除这些工作');
+  await waitFor(() => expect(remove.disabled).toBe(true));
+  expect((await daemon.call('list-projects')).result[0].id).toBe(daemon.project.id);
+});
+
+test('保存后的 reload 取消事件触发的刷新，不会断开实时更新', async () => {
+  daemon = await uiFixture();
+  let streams = 0;
+  let reads = 0;
+  // Slow later reads so the event-driven refresh is still in flight when the delete response triggers reload().
+  const transport: typeof fetch = async (url, options) => {
+    if (String(url).endsWith('/events')) streams++;
+    if (String(url).endsWith('/api/list-projects') && reads++ > 0) await new Promise(resolve => setTimeout(resolve, 300));
+    return fetch(url, options);
+  };
+  window.history.replaceState(null, '', '/settings/projects');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  await screen.findByText('实时更新已连接');
+  const remove = within(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` })).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
+  await waitFor(() => expect(remove.disabled).toBe(false));
+  fireEvent.click(remove);
+  await screen.findByText('项目已删除');
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  expect(screen.queryByText('连接已断开，正在重连…')).toBeNull();
+  expect(streams).toBe(1);
 });
 
 test('运行设置校验后分别保存并发、派单和轮次看门狗及输出阈值，重新载入仍保留数值', async () => {
