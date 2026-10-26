@@ -134,8 +134,7 @@ for (const [script, reason, failure] of [
 });
 
 test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话，压缩事件落库', async t => {
-  const conclude = { name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '执行完成' } };
-  const acp = await acpFixture(t, { uniqueSession: true, mcpTools: [conclude], notifications: [
+  const acp = await acpFixture(t, { uniqueSession: true, notifications: [
     { method: '_x.ai/session/update', params: { update: { sessionUpdate: 'auto_compact_started', tokens_used: 850, context_window: 1000, percentage: 85, reason: 'threshold' } } },
   ] }, false);
   const daemon = await grokFixture(t, acp.driver);
@@ -154,7 +153,7 @@ test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话
   assert.notEqual(verification.sessionId, first.sessionId);
   assert.equal(verification.resumeSessionId, null);
   await idle();
-  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true, mcpTools: [conclude] }));
+  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true }));
   daemon.actions.push([
     { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
       agentId: 'grok-executor', key: 'invalid-verification', purpose: 'verification', resumeSessionId: first.sessionId },

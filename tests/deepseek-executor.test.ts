@@ -272,8 +272,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
     stdoutBefore: { 'session/new': ['[llm-deepseek-account] model listing from fixture loaded 2 model(s)\n'],
       'session/resume': ['续跑日志\n'] } };
   const acp = await acpFixture(t, mode === 'resume'
-    ? { configOptions, sessionLog: logSample([previous]).toString('base64'),
-      mcpTools: [{ name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '首段完成' } }] } : script, false, 'deepseek');
+    ? { configOptions, sessionLog: logSample([previous]).toString('base64') } : script, false, 'deepseek');
   const daemon = await acpExecutorFixture(t, acp.driver, { agent: 'deepseek' });
   if (mode === 'timeout') ok(await daemon.call('set-dispatch-watchdog', { wallTimeoutMs: 30_000, idleTimeoutMs: 3000 }));
   await daemon.confirm();

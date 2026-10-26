@@ -169,8 +169,7 @@ test('排队期间 Agent 变为不可用，实际启动前再次检查，不拉�
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
-  daemon.executors.push([{ type: 'hang', until: hold },
-    { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '运行中的派单完成' }, check: ok }]);
+  daemon.executors.push([{ type: 'hang', until: hold }]);
   ok(await daemon.call('set-concurrency', { limit: 1 }));
   const work = await daemon.startWork();
   daemon.actions.push(ctx => ['first', 'second'].flatMap(key => [

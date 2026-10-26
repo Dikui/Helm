@@ -771,8 +771,7 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
   const seen: FakeContext['options'][] = [];
   const executors = new FakeDriver([first, second].map(hold => ctx => {
     seen.push(ctx.options);
-    return [...forbiddenLibrary, { type: 'hang', until: hold },
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'skill 快照检查完成' }, check: ok }];
+    return [...forbiddenLibrary, { type: 'hang', until: hold }];
   }));
   const roundOptions: FakeContext['options'][] = [];
   const rounds = new FakeDriver([ctx => { roundOptions.push(ctx.options); return [...forbiddenLibrary, ...alignment(ctx)]; }, ctx => {
@@ -850,8 +849,7 @@ test('派单及调度轮次合并所选 HTTP 或 stdio MCP，排队在启动时�
     const seen: FakeContext['options'][] = [];
     const executor = new FakeDriver([first, second].map(hold => ctx => {
       seen.push(ctx.options);
-      return [...forbiddenLibrary, { type: 'hang', until: hold },
-        { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'MCP 配置检查完成' }, check: ok }];
+      return [...forbiddenLibrary, { type: 'hang', until: hold }];
     }));
     const roundOptions: FakeContext['options'][] = [];
     const rounds = new FakeDriver([ctx => { roundOptions.push(ctx.options); return [...forbiddenLibrary, ...alignment(ctx)]; }, ctx => {
@@ -912,9 +910,7 @@ test('每次派单和调度轮次读取文件并留快照，下一轮按文件�
   const jobs = ['first'];
   const script = (driver: string): FakeScript => ctx => {
     seen.push({ driver, agent: structuredClone(ctx.options.agent) });
-    if (ctx.options.agent?.role === 'executor') return [
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'Agent 快照检查完成' }, check: ok },
-    ];
+    if (ctx.options.agent?.role === 'executor') return [];
     if (JSON.parse(ctx.input).work.status === 'aligning') return alignment(ctx);
     const key = jobs.shift();
     if (!key) return [];
@@ -982,9 +978,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     ]]);
     const routed: string[] = [];
     const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => options.agent?.role === 'coordinator' ? rounds.start(options) : executors.start(options) },
-      codex: { checkAvailability: async () => ({ available: true }), start: options => { routed.push(options.agent!.model!); return new FakeDriver([[
-        { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '排队后配置检查完成' }, check: ok },
-      ]]).start(options); } },
+      codex: { checkAvailability: async () => ({ available: true }), start: options => { routed.push(options.agent!.model!); return new FakeDriver().start(options); } },
     });
     await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
     await daemon.writeAgent('file-executor', { model: 'before-queue' });

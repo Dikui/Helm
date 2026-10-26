@@ -134,7 +134,7 @@ test('同时派单得到不重叠的环境端口段，结束后的端口段供�
     { ...create, arguments: ctx => ({ workId: workIdOf(ctx), key: 'third', content: '第三张卡片' }) }, dispatch('third'),
   ], holds.map(until => ctx => {
     ranges.push({ start: Number(ctx.options.env.HELM_PORT_START), end: Number(ctx.options.env.HELM_PORT_END) });
-    return [{ type: 'hang', until }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '端口检查完成' }, check: ok }];
+    return [{ type: 'hang', until }];
   }), { beforeConfirm: async call => { ok(await call('set-concurrency', { limit: 2 })); } });
   await daemon.finished();
   await until(async () => ranges.length, count => count === 2);
@@ -417,263 +417,6 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   assert.equal(brief.newEvents.some(event => event.action === 'dispatch-step'), false);
 });
 
-test('漏交结论时续跑原会话提醒一次，保留首段回答、合计用量并接续派单输出', async t => {
-  for (const purpose of ['execution', 'verification'] as const) await t.test(purpose, async t => {
-    const starts: SessionOptions[] = [];
-    const allowed = purpose === 'execution' ? 'completed 或 blocked' : 'passed 或 failed';
-    const fake = new FakeDriver([ctx => {
-      const input = JSON.parse(ctx.input);
-      assert.equal(input.purpose, purpose);
-      assert.match(input.conclusionInstruction, /结束前必须调用.*submit-conclusion/);
-      assert.ok(input.conclusionInstruction.includes(allowed));
-      return [
-        { type: 'write', path: 'evidence.txt', content: '第一段的完整证据\n' },
-        { type: 'artifact', kind: 'test-output', path: 'evidence.txt' },
-        { type: 'end', reason: 'completed', finalAnswer: '完整证据见 evidence.txt', usage: { inputTokens: 11, outputTokens: 7 } },
-      ];
-    }, ctx => {
-      assert.match(ctx.input, new RegExp(purpose));
-      assert.ok(ctx.input.includes(allowed));
-      assert.match(ctx.input, /helm MCP.*submit-conclusion.*当前会话/);
-      assert.match(ctx.input, /现在调用.*一句理由/);
-      assert.match(ctx.input, /不要再做别的工作/);
-      return [
-        { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'execution' ? 'completed' : 'passed', reason: '证据已经齐备' }, check: ok },
-        { type: 'compaction' },
-        { type: 'end', reason: 'completed', finalAnswer: '已经补交', usage: { inputTokens: 3, outputTokens: 2 } },
-      ];
-    }]);
-    const daemon = await fixture(t, [create, { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
-      key: 'dispatch', agentId: 'claude-executor', purpose }), check: ok }], [], { executorDriver: {
-      checkAvailability: async () => ({ available: true }), start: options => { starts.push(options); return fake.start(options); },
-    } });
-    await daemon.finished();
-    const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-    const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-    assert.equal(result.endReason, 'completed', JSON.stringify(result));
-    assert.equal(result.conclusion, purpose === 'execution' ? 'completed' : 'passed');
-    assert.equal(result.conclusionReason, '证据已经齐备');
-    assert.equal(result.finalAnswer, '完整证据见 evidence.txt');
-    assert.deepEqual(result.usage, { inputTokens: 14, outputTokens: 9 });
-    assert.equal(starts.length, 2);
-    assert.equal(starts[0]!.resumeSessionId, undefined);
-    assert.deepEqual(starts[1], { ...starts[0], resumeSessionId: result.sessionId });
-    const reminders = events.filter(event => event.action === 'conclusion-reminded');
-    assert.equal(reminders.length, 1);
-    assert.equal(reminders[0].dispatchId, result.id);
-    assert.equal(reminders[0].details.sessionId, result.sessionId);
-    const params = { workId: daemon.work.id, dispatchId: result.id };
-    const output = (await daemon.call('get-dispatch-output', params)).result;
-    assert.deepEqual(output.map((event: any) => event.step), [1, 2, 3, 4, 5, 6]);
-    assert.equal(output[2].finalAnswer, '完整证据见 evidence.txt');
-    assert.equal(output[5].finalAnswer, '已经补交');
-    assert.deepEqual(events.filter(event => event.action === 'dispatch-step').map(event => event.details.step), [1, 2, 3, 4, 5, 6]);
-    const artifacts = (await daemon.call('get-dispatch-artifacts', params)).result;
-    const evidence = artifacts.find((artifact: any) => artifact.kind === 'test-output');
-    assert.equal((await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: evidence.id })).result.content, '第一段的完整证据\n');
-    assert.equal((await daemon.call('submit-conclusion', { conclusion: purpose === 'execution' ? 'completed' : 'passed', reason: '结束后无权提交' },
-      starts[0]!.mcpServers.helm!.headers.Authorization)).status, 401);
-  });
-});
-
-test('两段都漏交结论时保持未声明，每个派单只提醒一次', async t => {
-  let starts = 0;
-  const fake = new FakeDriver([
-    [{ type: 'end', reason: 'completed', finalAnswer: '第一段证据' }],
-    [{ type: 'end', reason: 'completed', finalAnswer: '仍未提交' }],
-  ]);
-  const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-    checkAvailability: async () => ({ available: true }), start: options => { starts++; return fake.start(options); },
-  } });
-  await daemon.finished();
-  const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-  const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-  assert.equal(result.endReason, 'completed');
-  assert.equal(result.conclusion, 'undeclared');
-  assert.equal(result.conclusionReason, null);
-  assert.equal(result.finalAnswer, '第一段证据');
-  assert.equal(starts, 2);
-  assert.equal(events.filter(event => event.action === 'conclusion-reminded').length, 1);
-});
-
-test('首段已经提交结论时不续跑提醒', async t => {
-  let starts = 0;
-  const fake = new FakeDriver([[
-    { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'blocked', reason: '缺少必要信息' }, check: ok },
-    { type: 'end', reason: 'completed', finalAnswer: '受阻证据', usage: { inputTokens: 5, outputTokens: 3 } },
-  ]]);
-  const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-    checkAvailability: async () => ({ available: true }), start: options => { starts++; return fake.start(options); },
-  } });
-  await daemon.finished();
-  const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-  const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-  assert.equal(result.endReason, 'completed');
-  assert.equal(result.conclusion, 'blocked');
-  assert.equal(result.finalAnswer, '受阻证据');
-  assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 3 });
-  assert.equal(starts, 1);
-  assert.ok(!events.some(event => event.action === 'conclusion-reminded'));
-});
-
-test('驱动同步或异步拒绝续跑时不发送提醒，保留原派单结果', async t => {
-  for (const rejection of ['throw', 'reject'] as const) await t.test(rejection, async t => {
-    let starts = 0;
-    let sends = 0;
-    const fake = new FakeDriver([() => {
-      sends++;
-      return [{ type: 'end', reason: 'completed', finalAnswer: '原始完整证据', usage: { inputTokens: 5, outputTokens: 3 } }];
-    }]);
-    const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-      checkAvailability: async () => ({ available: true }), start(options) {
-        starts++;
-        if (options.resumeSessionId) {
-          const error = new Error('ACP agent does not support session/resume');
-          if (rejection === 'throw') throw error;
-          return Promise.reject(error);
-        }
-        return fake.start(options);
-      },
-    } });
-    await daemon.finished();
-    const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-    const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-    assert.equal(result.endReason, 'completed');
-    assert.equal(result.conclusion, 'undeclared');
-    assert.equal(result.finalAnswer, '原始完整证据');
-    assert.equal(result.failure, null);
-    assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 3 });
-    assert.equal(starts, 2);
-    assert.equal(sends, 1);
-    assert.ok(!events.some(event => event.action === 'conclusion-reminded'));
-  });
-});
-
-test('提醒续跑异常结束或输出抛错时保留首段回答和改动，结论失效', async t => {
-  for (const outcome of ['error', 'quota-exhausted', 'timed-out', 'aborted', 'context-overflow', 'crash', 'send-error', 'no-end'] as const) await t.test(outcome, async t => {
-    let starts = 0;
-    const fake = new FakeDriver([[
-      { type: 'write', path: 'progress.txt', content: '首段进度\n' },
-      { type: 'end', reason: 'completed', finalAnswer: '首段完整证据', usage: { inputTokens: 11, outputTokens: 7 } },
-    ], [
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '异常结束前提交' }, check: ok },
-      outcome === 'crash' ? { type: 'crash', message: 'reminder crashed' }
-        : { type: 'end', reason: outcome === 'send-error' || outcome === 'no-end' ? 'error' : outcome, usage: { inputTokens: 3, outputTokens: 2 } },
-    ]]);
-    const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-      checkAvailability: async () => ({ available: true }), async start(options) {
-        starts++;
-        const session = await fake.start(options);
-        if (!options.resumeSessionId) return session;
-        if (outcome === 'send-error') return { ...session, async send() { throw new Error('reminder send failed'); } };
-        if (outcome === 'no-end') return { ...session, events: (async function* () {})() };
-        return session;
-      },
-    } });
-    await daemon.finished();
-    const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-    const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-    assert.equal(result.endReason, ['crash', 'send-error', 'no-end'].includes(outcome) ? 'error' : outcome, JSON.stringify(result));
-    assert.equal(result.finalAnswer, '首段完整证据');
-    assert.equal(result.conclusion, 'undeclared');
-    assert.equal(result.conclusionReason, null);
-    assert.deepEqual(result.usage, ['crash', 'send-error', 'no-end'].includes(outcome)
-      ? { inputTokens: 11, outputTokens: 7 } : { inputTokens: 14, outputTokens: 9 });
-    assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '首段进度');
-    assert.equal(starts, 2);
-    assert.equal(events.filter(event => event.action === 'conclusion-reminded').length, outcome === 'send-error' ? 0 : 1);
-  });
-});
-
-test('提醒续跑启动、发送或输出挂住时看门狗仍生效，保留首段证据', async t => {
-  for (const phase of ['start', 'send', 'events'] as const) await t.test(phase, async t => {
-    const fake = new FakeDriver([[
-      { type: 'write', path: 'progress.txt', content: '超时前首段进度\n' },
-      { type: 'end', reason: 'completed', finalAnswer: '首段完整证据', usage: { inputTokens: 5, outputTokens: 3 } },
-    ]]);
-    let starts = 0;
-    const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-      checkAvailability: async () => ({ available: true }), async start(options) {
-        starts++;
-        if (!options.resumeSessionId) return fake.start(options);
-        if (phase === 'start') return new Promise(() => {});
-        const session = await fake.start(options);
-        return phase === 'send' ? { ...session, send: () => new Promise(() => {}) }
-          : { ...session, events: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) } };
-      },
-    }, beforeConfirm: async call => {
-      ok(await call('set-dispatch-watchdog', phase === 'start'
-        ? { wallTimeoutMs: 1000, idleTimeoutMs: 30_000 } : { wallTimeoutMs: 30_000, idleTimeoutMs: 1000 }));
-    } });
-    await daemon.finished();
-    const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-    const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
-    assert.equal(result.endReason, 'timed-out');
-    assert.equal(result.conclusion, 'undeclared');
-    assert.equal(result.finalAnswer, '首段完整证据');
-    assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 3 });
-    assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '超时前首段进度');
-    assert.equal(starts, 2);
-    assert.equal(events.find(event => event.action === 'dispatch-timed-out').details.threshold, phase === 'start' ? 'wall' : 'idle');
-  });
-});
-
-test('提醒续跑中撤销派单使令牌失效，保留首段回答和改动', async t => {
-  let token = '';
-  let revoke!: () => void;
-  const ready = new Promise<void>(resolve => { revoke = resolve; });
-  t.after(() => revoke());
-  const fake = new FakeDriver([[
-    { type: 'write', path: 'progress.txt', content: '撤销前首段进度\n' },
-    { type: 'end', reason: 'completed', finalAnswer: '首段完整证据' },
-  ], ctx => {
-    token = ctx.options.mcpServers.helm!.headers.Authorization!;
-    return [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '撤销前补交' }, check: ok }, { type: 'hang' }];
-  }]);
-  const daemon = await fixture(t, [create, dispatch(), { type: 'hang', until: ready },
-    { type: 'tool', name: 'revoke-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: saved(ctx, 'dispatch').id, reason: '停止补交' }), check: ok },
-  ], [], { executorDriver: {
-    checkAvailability: async () => ({ available: true }), start: options => fake.start(options),
-  } });
-  await until(daemon.events, values => values.some(event => event.action === 'conclusion-submitted'));
-  const params = { workId: daemon.work.id, dispatchId: (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0].id };
-  revoke();
-  await daemon.finished();
-  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
-  const result = (await daemon.call('get-dispatch', params)).result;
-  assert.equal(result.endReason, 'aborted');
-  assert.equal(result.abortReason, '停止补交');
-  assert.equal(result.finalAnswer, '首段完整证据');
-  assert.equal(result.conclusion, 'undeclared');
-  assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '撤销前首段进度');
-  assert.equal((await daemon.call('submit-conclusion', { conclusion: 'completed', reason: '撤销后无权提交' }, token)).status, 401);
-});
-
-test('提醒续跑中停止服务会中止派单，重启后保留首段回答和改动', async t => {
-  const fake = new FakeDriver([[
-    { type: 'write', path: 'progress.txt', content: '关闭前首段进度\n' },
-    { type: 'end', reason: 'completed', finalAnswer: '首段完整证据', usage: { inputTokens: 5, outputTokens: 3 } },
-  ], [{ type: 'hang' }]]);
-  const daemon = await fixture(t, [create, dispatch()], [], { executorDriver: {
-    checkAvailability: async () => ({ available: true }), start: options => fake.start(options),
-  } });
-  await daemon.finished();
-  await until(daemon.events, values => values.some(event => event.action === 'conclusion-reminded'));
-  const params = { workId: daemon.work.id, dispatchId: (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0].id };
-  await daemon.close();
-  const reopened = await startHelmd({ port: 0, dataDir: daemon.dataDir, agentDir: daemon.agentDir });
-  try {
-    const response = await fetch(`${reopened.url}/api/get-dispatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
-    const { result } = await response.json() as any;
-    assert.equal(result.endReason, 'aborted');
-    assert.equal(result.abortReason, '运行层重启');
-    assert.equal(result.conclusion, 'undeclared');
-    assert.equal(result.finalAnswer, '首段完整证据');
-    assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 3 });
-    assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '关闭前首段进度');
-  } finally { await reopened.close(); }
-});
-
 test('同一卡片续跑复用副本和原 Agent 会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
   let firstDone!: () => void;
   let secondReady!: () => void;
@@ -697,8 +440,7 @@ test('同一卡片续跑复用副本和原 Agent 会话，拒绝跨卡片续跑�
     { type: 'tool', name: 'revoke-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: saved(ctx, 'resume').id, reason: '重复撤销' }), check: ok },
   ], [ctx => {
     original = ctx.options;
-    return [{ type: 'write', path: 'first.txt', content: '第一轮\n' },
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '首段完成' }, check: ok }];
+    return [{ type: 'write', path: 'first.txt', content: '第一轮\n' }];
   }, ctx => {
     assert.equal(ctx.options.cwd, original!.cwd);
     assert.equal(ctx.options.agent?.id, original!.agent?.id);
@@ -842,7 +584,6 @@ test('按实际步骤号读输出，步骤不连续仍可读取；重启后派�
     { type: 'output', text: '第二个实际步骤' },
   ]]);
   const driver: Driver = { checkAvailability: async () => ({ available: true }), async start(options) {
-    if (options.resumeSessionId) throw new Error('Fixture does not support resume');
     const session = await fake.start(options);
     return { ...session, events: (async function* () { for await (const event of session.events) yield { ...event, step: event.step * 2 }; })() };
   } };
