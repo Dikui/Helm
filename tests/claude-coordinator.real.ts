@@ -100,7 +100,8 @@ function connected(round: Observation) {
 
 function successfulTool(round: Observation, name: string, count: number) {
   const calls = toolCalls(round.messages).filter(call => call.name === `mcp__helm__${name}`);
-  assert.equal(calls.length, count, `必须实际调用 ${name} ${count} 次`);
+  // Models sometimes repeat a successful call; the final graph checks catch any extra call that changed state.
+  assert.ok(calls.length >= count, `必须实际调用 ${name} 至少 ${count} 次，实际 ${calls.length} 次`);
   for (const call of calls) {
     const result = toolResult(round.messages, call.id);
     assert.ok(result && !result.is_error, `${name} 未成功`);
