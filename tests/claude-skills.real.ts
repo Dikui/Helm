@@ -58,7 +58,8 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
           if (event.type === 'output') messages.push(JSON.parse(event.text) as SDKMessage);
           if (event.type === 'end') {
             assert.equal(event.reason, 'completed');
-            assert.equal(event.finalAnswer?.trim(), secrets[index]);
+            // The executor role asks for evidence after the answer; only the leading answer is under test.
+            assert.equal(event.finalAnswer?.trim().split('\n')[0]?.trim(), secrets[index]);
             completed = true;
           }
         }
@@ -227,7 +228,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
     const dispatches = await until(() => call('list-dispatches', { workId: work.id }), values => values.length === 1 && values[0].status === 'ended', 180_000);
     const dispatch = dispatches[0];
     assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? '派单未正常结束');
-    assert.equal(dispatch.finalAnswer?.trim(), `${secret}\n${mcpSecret}\n${stdioSecret}`);
+    assert.deepEqual(dispatch.finalAnswer?.trim().split('\n').slice(0, 3).map((line: string) => line.trim()), [secret, mcpSecret, stdioSecret]);
     assert.ok(probeCalls > 0, '必须带登记的请求头实际调用库 HTTP MCP');
     assert.equal(dispatch.agent.skillsPath, join(dirname(dispatch.outputPath), 'skills'));
     assert.ok((await readFile(join(dispatch.agent.skillsPath, 'helm-library-probe', 'SKILL.md'), 'utf8')).includes(secret));
