@@ -28,7 +28,7 @@ npm start -- get-events --workId <工作id> --actorType runtime
 npm start -- --help
 ```
 
-项目路径会归一到 git 工作树根目录，重复登记返回已有项目。每条消息必须带 `key`；同一工作中重复使用同一个 key 返回已有消息。新建工作的第一条消息使用项目内唯一的 key，重试不会重复新建工作。后续消息使用 `--workId`，可以加 `--gateId` 引用该工作的关卡。
+项目路径会归一到 git 工作树根目录，重复登记返回已有项目。`delete-project --projectId <项目id>` 删除项目登记，项目下还有任何工作时拒绝（先用 `delete-work` 删除），不动磁盘上的仓库和文件。每条消息必须带 `key`；同一工作中重复使用同一个 key 返回已有消息。新建工作的第一条消息使用项目内唯一的 key，重试不会重复新建工作。后续消息使用 `--workId`，可以加 `--gateId` 引用该工作的关卡。
 
 客户端默认连接 `http://127.0.0.1:4242`，可通过 `HELM_URL` 或各子命令的 `--url` 指定。也可用 `node dist/src/cli.js` 直接运行；通过 npm 链接这个包后可使用 `helm` 命令。
 
@@ -70,10 +70,11 @@ API Agent 仍各用 `~/.helm/agent-homes/<Agent id>/`，Claude 设置 `CLAUDE_CO
 
 修改文件后下一次派单或调度轮次即生效，排队派单在实际启动时重读；已有运行不受影响。`list-agents` 显示配置、计费方式 `billing`（`subscription` / `api`）、是否可用及原因。坏 Agent 独立报错，使用时返回 `AGENT_UNAVAILABLE`；创建工作时就校验调度者 Agent，不存在或不可用直接拒绝。派单详情的 `agent` 和 `round-agent-loaded` 事件中的 `agent` 保留当次解析快照（包含附加提示词），用户及调度者均可读取。内置角色规则在前，附加提示词其次，端口段、提交结论、清理、截图路径、不推送及验收说明快照等运行约定由代码追加在最后。
 
-共享 skill 安装在 `<dataDir>/library/skills/<名字>/`，默认是 `~/.helm/library/skills/`。目录必须含普通文件 `SKILL.md`，安装拒绝符号链接和同名条目；名字为 1–64 位小写字母、数字或连字符，以字母或数字开头。用户可以直接放入目录，也可以通过 CLI（或同名 HTTP 操作）管理：
+共享 skill 安装在 `<dataDir>/library/skills/<名字>/`，默认是 `~/.helm/library/skills/`。目录必须含普通文件 `SKILL.md`，安装拒绝符号链接；同名条目默认拒绝，加 `--replace true`（设置页勾选"覆盖同名 skill"）则先复制新版再整体替换，失败时保留旧版，仍被 Agent 引用的也可覆盖，已在运行的副本不受影响。名字为 1–64 位小写字母、数字或连字符，以字母或数字开头。用户可以直接放入目录，也可以通过 CLI（或同名 HTTP 操作）管理：
 
 ```sh
 helm install-skill --path /absolute/path/to/skill --name shared-skill
+helm install-skill --path /absolute/path/to/skill --name shared-skill --replace true
 helm list-library
 helm delete-library-entry --type skill --name shared-skill
 ```
