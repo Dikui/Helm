@@ -21,7 +21,7 @@ export function CardInspector({ card, dispatches, initialDispatchId, initialStep
         <li className={dispatch.conclusion === 'failed' ? 'cg-failed' : ''}>
           <button className="cg-history-select" aria-pressed={selected?.id === dispatch.id} onClick={() => choose(dispatch.id)}>{t('graphDispatch')} #{index + 1} · {t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}</button>
           <div className="row"><DispatchStatus dispatch={dispatch} /><span className="mono">{elapsed(dispatch.startedAt ?? dispatch.createdAt, dispatch.endedAt ? Date.parse(dispatch.endedAt) : now)}</span></div>
-          <span className="muted">{dispatch.agentId} · {t(conclusionLabels[dispatch.conclusion])}</span>
+          <span className="muted">{dispatch.agentId} · {dispatch.status === 'ended' ? t(conclusionLabels[dispatch.conclusion]) : '—'}</span>
           {dispatch.conclusionReason && <p className="cg-prose">{dispatch.conclusionReason}</p>}
           <time className="muted" dateTime={dispatch.startedAt ?? dispatch.createdAt}>{new Date(dispatch.startedAt ?? dispatch.createdAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en')}</time>
         </li>

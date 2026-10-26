@@ -5,7 +5,7 @@ import { useI18n } from '../../../shared/i18n.js';
 import { GraphCanvas } from './GraphCanvas.js';
 import { CardInspector } from './CardInspector.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
-import { nodeTitle, NodeStatus } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus } from './labels.js';
 import type { Dispatch, GraphNode } from './types.js';
 import type { Work } from '../../../shared/types.js';
 import { CoordinatorView } from './CoordinatorView.js';
@@ -56,7 +56,7 @@ export function CardGraphView({ work }: { work: Work }) {
             <dl className="cg-kv"><dt>{t('graphDependency')}</dt><dd>{selected.dependencies.length ? selected.dependencies.map(ref => <button className="btn sm" key={ref.id} onClick={() => select(ref.id)}>{nodeTitle(graph.data!.find(node => node.id === ref.id)!)}</button>) : '—'}</dd>
               <dt>{t('graphDownstream')}</dt><dd>{graph.data.filter(node => node.dependencies.some(ref => ref.id === selected.id)).map(node => <button className="btn sm" key={node.id} onClick={() => select(node.id)}>{nodeTitle(node)}</button>)}</dd></dl>
             <p className="cg-prose">{selected.type === 'card' ? selected.content : selected.body}</p>
-            {selected.type === 'gate' ? <><p className="cg-prose">{selected.decision || selected.withdrawalReason}</p><ul>{selected.options.map(option => <li key={option}>{option}</li>)}</ul></> : <CardInspector key={`${selected.id}:${selection?.request}`} card={selected} dispatches={dispatches.data?.filter(dispatch => dispatch.cardId === selected.id)} initialDispatchId={selection?.dispatchId} initialStep={selection?.step} />}
+            {selected.type === 'gate' ? <><p className="cg-prose">{gateDecision(selected, t) || selected.withdrawalReason}</p><ul>{selected.options.map(option => <li key={option}>{option}</li>)}</ul></> : <CardInspector key={`${selected.id}:${selection?.request}`} card={selected} dispatches={dispatches.data?.filter(dispatch => dispatch.cardId === selected.id)} initialDispatchId={selection?.dispatchId} initialStep={selection?.step} />}
           </div>
         </>}
       </aside>

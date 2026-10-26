@@ -32,7 +32,7 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   render(<App baseUrl={daemon.url} />);
   const editor = await screen.findByRole('form', { name: 'Agent 详情' });
   expect(screen.getByRole('region', { name: '调度者' })).toBeTruthy();
-  expect(screen.getByRole('region', { name: '执行者 Agent' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '执行者' })).toBeTruthy();
   expect(screen.getAllByText('可用').length).toBeGreaterThan(0);
   expect(screen.getAllByText('0 个运行中派单 · 0 项未结束工作').length).toBeGreaterThan(0);
   expect(screen.getByText('SKILL.md')).toBeTruthy();
@@ -76,6 +76,9 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   expect(copy.skills).toEqual([]);
   expect(copy.config.skills).toEqual(['library-skill']);
   expect(copy.config.mcp).toEqual(['remote']);
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(screen.getByRole('region', { name: 'Coordinators' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Executors' })).toBeTruthy();
 });
 
 test('删除 Agent 须二次确认，删除后回到列表；项目默认调度者的 Agent 拒绝删除并显示原因', async () => {

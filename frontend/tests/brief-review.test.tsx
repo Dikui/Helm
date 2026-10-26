@@ -135,6 +135,7 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   expect(gate.decision).toBe('return');
   expect(gate.comment).toBe('请补齐边界说明');
   expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
+  await checkGraphDecision(gate.question, '已退回', 'Sent back');
 });
 
 test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，工作移到已结束，成果只推送到临时本地仓库', async source => {
@@ -164,7 +165,21 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，工作
   expect(gate.decision).toBe('accept');
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
   expect(execFileSync('git', ['-C', remote, 'show', 'main:result.txt'], { encoding: 'utf8' })).toContain('末尾成果');
+  await checkGraphDecision(gate.question, '已接受', 'Accepted');
 });
+
+async function checkGraphDecision(question: string, zh: string, en: string) {
+  const header = screen.getByRole('heading', { level: 1 }).closest('header')!;
+  fireEvent.click(within(header).getByRole('link', { name: '调度结构' }));
+  const graph = await screen.findByRole('region', { name: '卡片图' });
+  const node = await within(graph).findByRole('button', { name: `关卡：${question}` });
+  expect(node.querySelector('.cg-node-summary')!.textContent).toBe(zh);
+  fireEvent.click(node);
+  expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText(zh)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(node.querySelector('.cg-node-summary')!.textContent).toBe(en);
+  expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText(en)).toBeTruthy();
+}
 
 test('收件箱退回失败保留意见和原始原因，重试后与工作页同步并移出等你处理', async () => {
   const work = await prepareReview();

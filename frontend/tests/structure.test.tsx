@@ -109,7 +109,7 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workId(ctx), body: '先做接口' }), check: ok },
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workId(ctx), body: '接口通过后做表单' }), check: ok },
     ...Array.from({ length: 24 }, (_, index): FakeStep => ({ type: 'output', text: `调度输出 ${index + 1}` })),
-    { type: 'hang', until: hold }, { type: 'end', reason: 'completed', usage: { inputTokens: 11, outputTokens: 7 } },
+    { type: 'hang', until: hold }, { type: 'end', reason: 'completed', usage: { inputTokens: 872308, outputTokens: 12345 } },
   ]]);
   try {
     await executeWork();
@@ -139,7 +139,14 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     await clickReady(within(panel).getByRole('button', { name: '调度轮次 #2' }));
     finish();
     expect(await within(panel).findByText('空闲')).toBeTruthy();
-    expect(await within(panel).findByText('11 / 7')).toBeTruthy();
+    expect(await within(panel).findByText('87.2万 / 1.23万')).toBeTruthy();
+    expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('87.2万 / 1.23万');
+    const inboxTokens = await screen.findByTitle('tokens: 884653');
+    expect(inboxTokens.textContent).toBe('◇ 88.5万');
+    await clickReady(screen.getByRole('button', { name: 'EN' }));
+    expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('872K / 12.3K');
+    expect(screen.getByTitle('tokens: 884653').textContent).toBe('◇ 885K');
+    await clickReady(screen.getByRole('button', { name: '中文' }));
     // Focus moves without activating a remote panel; Enter/Space activates the focused tab.
     const coordinatorTab = within(tabs).getByRole('tab', { name: '调度者' });
     coordinatorTab.focus();

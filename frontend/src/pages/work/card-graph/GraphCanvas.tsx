@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { graphlib, layout, type Point } from '@dagrejs/dagre';
 import { useI18n } from '../../../shared/i18n.js';
-import { nodeTitle, NodeStatus } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus } from './labels.js';
 import type { GraphNode } from './types.js';
 
 const nodeWidth = 224;
@@ -116,7 +116,7 @@ export function GraphCanvas({ nodes, selectedId, sendBacks, select }: {
                 <span className="cg-node-meta" id={`${marker}-${node.id}-meta`}>{node.agentId ?? t('graphNoAgent')}{node.currentStep > 0 && ` · ${t('graphStep')} ${node.currentStep}`}</span>
                 <span className="cg-node-summary" id={`${marker}-${node.id}-summary`}>{node.latestStepSummary || t('graphNoSteps')}</span>
               </>}
-              {node.type === 'gate' && <span className="cg-node-summary" id={`${marker}-${node.id}-summary`}>{node.decision || node.body}</span>}
+              {node.type === 'gate' && <span className="cg-node-summary" id={`${marker}-${node.id}-summary`}>{gateDecision(node, t) || node.body}</span>}
             </button>;
           })}
         </div>

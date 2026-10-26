@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
-import { useI18n } from '../../../shared/i18n.js';
+import { formatTokens, useI18n } from '../../../shared/i18n.js';
 import type { HelmEvent, Work } from '../../../shared/types.js';
 import type { Rounds } from '../conversation/types.js';
 import { OutputSteps } from './DispatchDetails.js';
@@ -41,7 +41,7 @@ export function CoordinatorView({ work }: { work: Work }) {
       </ol>}
       {selected && <section className="cs-round-detail" aria-label={`${t('structureRound')} #${selected.number}`}>
         <h3>{t('structureRound')} #{selected.number}</h3>
-        <dl className="cg-kv"><dt>{t('structureTokens')}</dt><dd className="mono">{selected.usage.inputTokens} / {selected.usage.outputTokens}</dd></dl>
+        <dl className="cg-kv"><dt>{t('structureTokens')}</dt><dd className="mono" title={`${selected.usage.inputTokens} / ${selected.usage.outputTokens}`}>{formatTokens(selected.usage.inputTokens, language)} / {formatTokens(selected.usage.outputTokens, language)}</dd></dl>
         <OutputSteps key={selected.id} workId={work.id} roundId={selected.id} affects={affects} />
       </section>}
     </>}

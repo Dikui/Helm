@@ -16,7 +16,7 @@ export function DispatchDetails({ workId, dispatchId, lastStep, initialStep }: {
     {!detail.data ? <p role="status">{detail.error ? '' : t('loading')}</p> : <>
       <dl className="cg-kv"><dt>{t('graphEnd')}</dt><dd><DispatchStatus dispatch={detail.data} /></dd>
         {detail.data.abortReason && <><dt>{t('graphAbortReason')}</dt><dd>{detail.data.abortReason}</dd></>}
-        <dt>{t('graphConclusion')}</dt><dd>{t(conclusionLabels[detail.data.conclusion])}</dd>
+        <dt>{t('graphConclusion')}</dt><dd>{detail.data.status === 'ended' ? t(conclusionLabels[detail.data.conclusion]) : '—'}</dd>
         {detail.data.conclusionReason && <><dt>{t('graphReason')}</dt><dd>{detail.data.conclusionReason}</dd></>}
       </dl>
       {detail.data.failure && <p className="error">{detail.data.failure}</p>}

@@ -178,14 +178,36 @@ test('针对卡片的发送响应丢失后保留正文和范围，重试同一�
 test('本轮步骤提取真实驱动输出中的文字与工具名称，详情仍可读取原始输出', async () => {
   const assistant = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '核对登录边界' }] } });
   const command = JSON.stringify({ method: 'item/started', params: { item: { type: 'commandExecution', command: 'npm run check' } } });
+  const categories = [
+    [{ type: 'user', message: { content: [{ type: 'tool_result', content: '\n检查通过\n更详细的工具结果' }] } }, '工具返回 · 检查通过', 'Tool result · 检查通过'],
+    [{ type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: '块状工具结果\n详情' }] }] } }, '工具返回 · 块状工具结果', 'Tool result · 块状工具结果'],
+    [{ type: 'system', subtype: 'init' }, '会话初始化', 'Session initialized'],
+    [{ type: 'system', subtype: 'status' }, '系统消息 · status', 'System message · status'],
+    [{ type: 'system', subtype: 'hook_response' }, 'Hook 执行 · hook_response', 'Hook execution · hook_response'],
+    [{ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }, '限额更新', 'Rate limits updated'],
+    [{ method: 'thread/tokenUsage/updated', params: {} }, 'Token 用量更新', 'Token usage updated'],
+    [{ method: 'account/rateLimits/updated', params: {} }, '限额更新', 'Rate limits updated'],
+    [{ method: 'thread/status/changed', params: { status: { type: 'active' } } }, '线程状态变化', 'Thread status changed'],
+    [{ method: 'unknown/event', params: {} }, '调度者输出', 'Coordinator output'],
+  ] as const;
   await executingWork([[
-    { type: 'output', text: assistant }, { type: 'output', text: command }, { type: 'hang' },
+    { type: 'output', text: assistant }, { type: 'output', text: command },
+    ...categories.map(([message]): FakeStep => ({ type: 'output', text: JSON.stringify(message) })), { type: 'hang' },
   ]]);
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
   expect(await within(chat).findByText('核对登录边界', { selector: 'summary' })).toBeTruthy();
   expect(await within(chat).findByText('npm run check', { selector: 'summary' })).toBeTruthy();
   expect(within(chat).getByText(assistant, { selector: 'pre' })).toBeTruthy();
+  for (const [message, zh] of categories) {
+    const summaries = await within(chat).findAllByText(zh, { selector: 'summary' });
+    expect(summaries.length).toBeGreaterThan(0);
+    const raw = within(chat).getByText(JSON.stringify(message), { selector: 'pre' });
+    fireEvent.click(raw.closest('details')!.querySelector('summary')!);
+    expect(raw.closest('details')!.open).toBe(true);
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  for (const [, , en] of categories) expect(within(chat).getAllByText(en, { selector: 'summary' }).length).toBeGreaterThan(0);
 });
 
 test('范围失效时空消息 Ctrl+Enter 仍能打断，打断按钮可终止下一轮且不产生空消息', async () => {

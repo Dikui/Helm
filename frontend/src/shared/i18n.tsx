@@ -24,7 +24,11 @@ export const messages = {
     conversationRoundElapsed: '本轮用时', conversationStepGap: '输出间隔', conversationStepSince: '距本步输出', conversationOutput: '调度者输出', conversationWaitingOutput: '等待调度者输出…', conversationCompaction: '上下文已压缩',
     conversationPlaceholder: '给调度者留言…', conversationNewline: '换行', conversationScopeUnavailable: '范围已失效，请重新选择',
     conversationDecided: '已决定', conversationWithdrawn: '已撤回', conversationClosed: '已关闭', conversationRuntime: '运行层',
-    coordinatorRole: '调度者', executorAgents: '执行者 Agent', unrecognizedAgents: '无法识别角色',
+    coordinatorRole: '调度者', executorAgents: '执行者', unrecognizedAgents: '无法识别角色',
+    conversationToolResult: '工具返回', conversationSessionInit: '会话初始化', conversationSystem: '系统消息', conversationHook: 'Hook 执行',
+    conversationRateLimit: '限额更新', conversationTokenUsage: 'Token 用量更新', conversationThreadStatus: '线程状态变化',
+    conversationStream: '流式消息更新', conversationTurnStarted: '开始处理', conversationRoundEnded: '本轮结束',
+    graphConfirmed: '已确认', graphAccepted: '已接受', graphReturned: '已退回',
     available: '可用', unavailable: '不可用', dispatchCount: '个运行中派单', workCount: '项未结束工作', projectWorkCount: '项工作',
     agentHelp: '按角色配置 Agent，改动从下一次派单或调度轮次生效。', newAgent: '新建 Agent',
     cliMissing: '未检测到这个驱动的 CLI。', openEnvironment: '去「环境」安装', install: '下载安装', installing: '安装中…',
@@ -136,7 +140,11 @@ export const messages = {
     conversationRoundElapsed: 'Round elapsed', conversationStepGap: 'Output interval', conversationStepSince: 'Time since output', conversationOutput: 'Coordinator output', conversationWaitingOutput: 'Waiting for coordinator output…', conversationCompaction: 'Context compacted',
     conversationPlaceholder: 'Message the coordinator…', conversationNewline: 'new line', conversationScopeUnavailable: 'Scope unavailable. Choose again.',
     conversationDecided: 'Decided', conversationWithdrawn: 'Withdrawn', conversationClosed: 'Closed', conversationRuntime: 'Runtime',
-    coordinatorRole: 'Coordinators', executorAgents: 'Executor agents', unrecognizedAgents: 'Unrecognized role',
+    coordinatorRole: 'Coordinators', executorAgents: 'Executors', unrecognizedAgents: 'Unrecognized role',
+    conversationToolResult: 'Tool result', conversationSessionInit: 'Session initialized', conversationSystem: 'System message', conversationHook: 'Hook execution',
+    conversationRateLimit: 'Rate limits updated', conversationTokenUsage: 'Token usage updated', conversationThreadStatus: 'Thread status changed',
+    conversationStream: 'Stream updated', conversationTurnStarted: 'Turn started', conversationRoundEnded: 'Turn ended',
+    graphConfirmed: 'Confirmed', graphAccepted: 'Accepted', graphReturned: 'Sent back',
     available: 'Available', unavailable: 'Unavailable', dispatchCount: 'running dispatches', workCount: 'active works', projectWorkCount: 'works',
     agentHelp: 'Configure Agents by role. Changes apply from the next dispatch or round.', newAgent: 'New agent',
     cliMissing: 'This driver’s CLI was not found.', openEnvironment: 'Install it in Environment', install: 'Download and install', installing: 'Installing…',
@@ -226,6 +234,9 @@ export const messages = {
   },
 } as const;
 export type Language = keyof typeof messages;
+export function formatTokens(value: number, language: Language) {
+  return new Intl.NumberFormat(language === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumSignificantDigits: 3 }).format(value);
+}
 export type MessageKey = keyof typeof messages.zh;
 const Context = createContext<{ language: Language; setLanguage: (value: Language) => void; t: (key: MessageKey) => string } | null>(null);
 export function I18nProvider({ children }: { children: ReactNode }) {

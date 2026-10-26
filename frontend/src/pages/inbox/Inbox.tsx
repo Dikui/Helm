@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { elapsed, useClock } from '../../shared/clock.js';
 import { ErrorNotice } from '../../shared/feedback.js';
-import { useI18n } from '../../shared/i18n.js';
+import { formatTokens, useI18n } from '../../shared/i18n.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { HelmEvent, Settings, WorkSummary } from '../../shared/types.js';
 import { InboxDetails } from './GateActions.js';
@@ -15,10 +15,11 @@ function group(work: WorkSummary): Group {
 const affectsWorks = (event: HelmEvent) => event.workId !== null;
 const affectsSettings = (event: HelmEvent) => Boolean(event.dispatchId) || event.object.type === 'settings';
 function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { path } = useRouter();
   const [expanded, setExpanded] = useState(false);
   const category = group(work);
+  const tokens = work.usage.inputTokens + work.usage.outputTokens;
   const tone = category === 'attention' ? 'att' : category === 'ended' ? (work.status === 'completed' ? 'ok' : 'idle') : work.status === 'paused' ? 'idle' : 'run';
   return <details className={`irow${path.startsWith(`/works/${work.id}`) ? ' current' : ''}`} onToggle={e => setExpanded(e.currentTarget.open)}>
     <summary>
@@ -28,7 +29,7 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
       <span className="f"><span className={`pill ${tone}`}>
         {tone === 'run' && <span className="spin" aria-hidden="true" />}{t(work.status)}
         <time aria-label={t(category === 'ended' ? 'duration' : 'elapsed')} dateTime={work.statusSince}> · {category === 'ended' ? elapsed(work.createdAt, Date.parse(work.statusSince)) : elapsed(work.statusSince, now)}</time>
-      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title="tokens">◇ {work.usage.inputTokens + work.usage.outputTokens}</span></span></span>
+      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={`tokens: ${tokens}`}>◇ {formatTokens(tokens, language)}</span></span></span>
     </summary>
     {expanded && <div className="more"><InboxDetails work={work} /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('open')}</Link></div>}
   </details>;

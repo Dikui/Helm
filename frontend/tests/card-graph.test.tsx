@@ -141,7 +141,7 @@ async function executeWork() {
 test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点查看关系', async () => {
   daemon = await uiFixture([[draft], [
     card('api', '接通接口'), card('form', '实现表单'), card('join', '集成检查'), card('old', '废弃方案'),
-    { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workId(ctx), key: 'choice', question: '选择发布时机', body: '等待用户决定', options: ['现在', '稍后'] }), saveAs: 'choice', check: ok },
+    { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workId(ctx), key: 'choice', question: '选择发布时机', body: '等待用户决定', options: ['confirm', '稍后'] }), saveAs: 'choice', check: ok },
     dependency('api', 'join'), dependency('form', 'join'), dependency('choice', 'join', 'gate'),
     { type: 'tool', name: 'cancel-card', arguments: ctx => ({ workId: workId(ctx), cardId: savedId(ctx, 'old'), reason: '由新方案替代' }), check: ok },
   ]]);
@@ -150,6 +150,13 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
   window.history.replaceState(null, '', `/works/${work.id}/structure`);
   render(<App baseUrl={daemon.url} />);
   const graph = await screen.findByRole('region', { name: '卡片图' });
+  const gates = (await daemon.call('get-card-graph', { workId: work.id })).result.filter((node: any) => node.type === 'gate');
+  const confirmation = gates.find((node: any) => node.kind === 'work-confirmation');
+  const confirmationNode = await within(graph).findByRole('button', { name: `关卡：${confirmation.question}` });
+  expect(confirmationNode.textContent).toContain('已确认');
+  expect(confirmationNode.querySelector('.cg-node-summary')!.textContent).toBe('已确认');
+  fireEvent.click(confirmationNode);
+  expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText('已确认')).toBeTruthy();
   expect(await within(graph).findByRole('button', { name: /卡片 \d+：接通接口/ })).toBeTruthy();
   expect(within(graph).getByRole('button', { name: /卡片 \d+：实现表单/ })).toBeTruthy();
   expect(within(graph).getByRole('button', { name: '关卡：选择发布时机' }).textContent).toContain('待你决定');
@@ -169,9 +176,54 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
   expect(await within(inspector).findByText('还没有派单。')).toBeTruthy();
   fireEvent.click(within(graph).getByRole('button', { name: '关卡：选择发布时机' }));
   expect(screen.getByRole('complementary', { name: '关卡检查器' }).textContent).toContain('等待用户决定');
+  const choice = gates.find((node: any) => node.kind === 'general');
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: choice.id, decision: 'confirm' }));
+  await waitFor(() => expect(within(graph).getByRole('button', { name: '关卡：选择发布时机' }).querySelector('.cg-node-summary')!.textContent).toBe('confirm'));
+  expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText('confirm', { selector: 'p' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByRole('region', { name: 'Card graph' })).toBeTruthy();
   expect(screen.getByRole('button', { name: /Card \d+：接通接口/ })).toBeTruthy();
+  expect(confirmationNode.querySelector('.cg-node-summary')!.textContent).toBe('Confirmed');
+  fireEvent.click(confirmationNode);
+  expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText('Confirmed')).toBeTruthy();
+});
+
+test('排队和运行中的派单结论显示占位符，结束后才显示未声明，支持中英文', async () => {
+  let finish!: () => void;
+  const hold = new Promise<void>(resolve => { finish = resolve; });
+  const dispatch = (key: string): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({
+    workId: workId(ctx), cardId: savedId(ctx, key), key: `${key}-dispatch`, agentId: 'claude-executor',
+  }), check: ok });
+  daemon = await uiFixture([[draft], [card('running', '运行卡片'), card('queued', '排队卡片'), dispatch('running'), dispatch('queued')]], undefined, {
+    executorScripts: [[{ type: 'hang', until: hold }], [{ type: 'hang', until: hold }]],
+  });
+  ok(await daemon.call('set-concurrency', { limit: 1 }));
+  try {
+    const work = await executeWork();
+    await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result.length === 2 && value.result[0].status === 'running' && value.result[1].status === 'queued');
+    window.history.replaceState(null, '', `/works/${work.id}/structure`);
+    render(<App baseUrl={daemon.url} />);
+    const graph = await screen.findByRole('region', { name: '卡片图' });
+    for (const name of ['卡片 1：运行卡片', '卡片 2：排队卡片']) {
+      fireEvent.click(await within(graph).findByRole('button', { name }));
+      const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
+      const detail = await within(inspector).findByRole('region', { name: '派单详情' });
+      const label = await within(detail).findByText('自报结论');
+      expect(label.nextElementSibling!.textContent).toBe('—');
+      expect(within(inspector).getByText('claude-executor · —')).toBeTruthy();
+      expect(inspector.textContent).not.toContain('未声明');
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    const inspector = screen.getByRole('complementary', { name: 'Card inspector' });
+    const detail = within(inspector).getByRole('region', { name: 'Dispatch details' });
+    expect(within(detail).getByText('Self-reported conclusion').nextElementSibling!.textContent).toBe('—');
+    finish();
+    expect(await within(detail).findByText('Undeclared')).toBeTruthy();
+    expect(await within(inspector).findByText('claude-executor · Undeclared')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '中文' }));
+    expect(within(detail).getByText('未声明')).toBeTruthy();
+    expect(within(inspector).getByText('claude-executor · 未声明')).toBeTruthy();
+  } finally { finish(); }
 });
 
 test('检查器暂停和恢复卡片，取消前二次确认，关闭确认不改变状态', async () => {
