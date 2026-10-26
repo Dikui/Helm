@@ -56,9 +56,9 @@ export const operations: readonly Operation[] = [
     schema: z.object({}).strict(), execute: ({ store }) => listLibrary(store),
   }),
   operation({
-    name: 'install-skill', description: '从本地目录安装 skill 到库，可指定名字', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ path: z.string().min(1), name: libraryName.optional() }).strict(),
-    execute: ({ store, actor }, { path, name }) => installSkill(store, actor, path, name),
+    name: 'install-skill', description: '从本地目录安装 skill 到库，可指定名字；replace: true 覆盖同名 skill（允许被 Agent 引用，不影响正在运行的副本）', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ path: z.string().min(1), name: libraryName.optional(), replace: z.boolean().optional() }).strict(),
+    execute: ({ store, actor }, { path, name, replace }) => installSkill(store, actor, path, name, replace),
   }),
   operation({
     name: 'register-mcp', description: '登记 HTTP 或 stdio MCP 到库', callers: ['user'], keyed: false, mutates: true, transactional: false,
@@ -234,6 +234,19 @@ export const operations: readonly Operation[] = [
       store.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(id, params.name ?? basename(path), path, time);
       store.appendEvent(actor, { type: 'project', id }, 'project-registered', { path, name: params.name ?? basename(path) });
       return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(id);
+    },
+  }),
+  operation({
+    name: 'delete-project', description: '删除没有工作的项目登记，只删除数据库记录，不删除磁盘上的仓库或文件', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ projectId: z.string().min(1) }).strict(),
+    execute({ store, actor }, { projectId }) {
+      const project = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
+      if (!project) throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
+      const workCount = Number(store.db.prepare('SELECT count(*) AS count FROM works WHERE project_id = ?').get(projectId)!.count);
+      if (workCount) throw new RuleError('PROJECT_IN_USE', `项目下还有 ${workCount} 项工作，请先删除这些工作。`, 409, { projectId, workCount });
+      store.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+      store.appendEvent(actor, { type: 'project', id: projectId }, 'project-deleted', { path: project.path, name: project.name });
+      return { id: projectId, deleted: true };
     },
   }),
   operation({

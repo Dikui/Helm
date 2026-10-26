@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { promisify } from 'node:util';
@@ -225,6 +227,108 @@ test('库 skill 安装拒绝重名、缺 SKILL.md、非法名字和符号链接�
   assert.equal((await daemon.call('install-skill', { path: source, name: 'linked-skill' })).error.code, 'INVALID_SKILL_PATH');
   assert.deepEqual(await readdir(library), ['valid']);
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
+});
+
+test('覆盖被引用的库 skill 保留引用，HTTP 和生成的 CLI 参数生效，事件区分安装和覆盖', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'shared');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '版本一');
+  await writeFile(join(source, 'obsolete.txt'), '旧文件');
+  ok(await daemon.call('install-skill', { path: source }));
+  const saved = await daemon.call('save-agent', { id: 'uses-shared', mode: 'create', config: { ...savedConfig, skills: ['shared'] }, prompt: '策略' });
+  ok(saved);
+  await writeFile(join(source, 'SKILL.md'), '版本二');
+  await rm(join(source, 'obsolete.txt'));
+  await mkdir(join(source, 'references'));
+  await writeFile(join(source, 'references', 'guide.md'), '新资料');
+  for (const params of [{}, { replace: false }]) {
+    assert.equal((await daemon.call('install-skill', { path: source, ...params })).error.code, 'LIBRARY_ENTRY_EXISTS');
+  }
+  ok(await daemon.call('install-skill', { path: source, replace: true }));
+  const library = join(daemon.directory, 'data', 'library', 'skills');
+  assert.equal(await readFile(join(library, 'shared', 'SKILL.md'), 'utf8'), '版本二');
+  assert.equal(await readFile(join(library, 'shared', 'references', 'guide.md'), 'utf8'), '新资料');
+  await assert.rejects(lstat(join(library, 'shared', 'obsolete.txt')), { code: 'ENOENT' });
+  assert.deepEqual((await daemon.call('list-library')).result, [{ type: 'skill', name: 'shared', agents: ['uses-shared'] }]);
+  const current = (await daemon.call('list-agents')).result.find((agent: any) => agent.id === 'uses-shared');
+  assert.deepEqual(current.config.skills, ['shared']);
+  assert.equal(current.revision, saved.result.revision);
+  await writeFile(join(source, 'SKILL.md'), '版本三');
+  const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)),
+    'install-skill', '--url', daemon.url, '--path', source, '--replace', 'true']);
+  ok(JSON.parse(stdout));
+  assert.equal(await readFile(join(library, 'shared', 'SKILL.md'), 'utf8'), '版本三');
+  ok(await daemon.call('install-skill', { path: source, name: 'new', replace: true }));
+  assert.deepEqual(await readdir(library), ['new', 'shared']);
+  const events = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed');
+  assert.deepEqual(events.map((event: any) => event.details.replaced), [false, true, true, false]);
+});
+
+test('覆盖 skill 的来源不存在、缺少 SKILL.md 或包含符号链接时，旧版本和引用完好', async t => {
+  const daemon = await fixture(t);
+  const source = join(daemon.directory, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '旧版本');
+  ok(await daemon.call('install-skill', { path: source, name: 'shared' }));
+  await daemon.writeAgent('uses-shared', { skills: ['shared'] });
+  await rm(join(source, 'SKILL.md'));
+  for (const path of [join(daemon.directory, 'missing'), source]) {
+    assert.equal((await daemon.call('install-skill', { path, name: 'shared', replace: true })).error.code, 'INVALID_SKILL_PATH');
+  }
+  await writeFile(join(source, 'SKILL.md'), '新版本');
+  await symlink(join(source, 'SKILL.md'), join(source, 'link'));
+  assert.equal((await daemon.call('install-skill', { path: source, name: 'shared', replace: true })).error.code, 'INVALID_SKILL_PATH');
+  const library = join(daemon.directory, 'data', 'library', 'skills');
+  assert.deepEqual(await readdir(library), ['shared']);
+  assert.equal(await readFile(join(library, 'shared', 'SKILL.md'), 'utf8'), '旧版本');
+  assert.deepEqual((await daemon.call('list-library')).result, [{ type: 'skill', name: 'shared', agents: ['uses-shared'] }]);
+  assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
+});
+
+test('覆盖 skill 复制或重命名失败时回滚，旧目录清理失败时保留完整的新版本', async t => {
+  for (const failure of ['copy', 'backup', 'swap', 'cleanup']) await t.test(failure, async t => {
+    const daemon = await fixture(t);
+    const source = join(daemon.directory, 'source');
+    await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '旧版本');
+    ok(await daemon.call('install-skill', { path: source, name: 'shared' }));
+    await writeFile(join(source, 'SKILL.md'), '新版本');
+    const library = join(daemon.directory, 'data', 'library', 'skills');
+    const destination = join(library, 'shared');
+    const { cpSync, renameSync, rmSync } = fs;
+    let injected = false;
+    t.mock.method(fs, 'cpSync', (...args: Parameters<typeof fs.cpSync>) => {
+      cpSync(...args);
+      if (failure === 'copy' && !injected) { injected = true; throw new Error('injected copy failure'); }
+    });
+    t.mock.method(fs, 'renameSync', (...args: Parameters<typeof fs.renameSync>) => {
+      if (!injected && ((failure === 'backup' && args[0] === destination) || (failure === 'swap' && args[1] === destination))) {
+        injected = true; throw new Error('injected rename failure');
+      }
+      renameSync(...args);
+    });
+    t.mock.method(fs, 'rmSync', (...args: Parameters<typeof fs.rmSync>) => {
+      if (failure === 'cleanup' && !injected && String(args[0]).endsWith('.old')) {
+        injected = true;
+        rmSync(join(String(args[0]), 'SKILL.md'));
+        throw new Error('injected cleanup failure');
+      }
+      rmSync(...args);
+    });
+    syncBuiltinESMExports();
+    let result;
+    try { result = await daemon.call('install-skill', { path: source, name: 'shared', replace: true }); }
+    finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+    assert.equal(injected, true);
+    assert.equal(result.status, failure === 'cleanup' ? 200 : 500);
+    if (failure !== 'cleanup') assert.equal(result.error.code, 'INTERNAL_ERROR');
+    assert.equal(await readFile(join(destination, 'SKILL.md'), 'utf8'), failure === 'cleanup' ? '新版本' : '旧版本');
+    assert.deepEqual((await daemon.call('list-library')).result, [{ type: 'skill', name: 'shared', agents: [] }]);
+    if (failure !== 'cleanup') assert.deepEqual(await readdir(library), ['shared']);
+    const events = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed');
+    assert.deepEqual(events.map((event: any) => event.details.replaced), failure === 'cleanup' ? [false, true] : [false]);
+  });
 });
 
 test('用户经 HTTP 和 CLI 登记 stdio MCP，文件保留命令参数及环境变量，列表和事件只返回环境变量键名', async t => {
@@ -807,8 +911,8 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
     assert.equal(await readFile(join(options.agent.skillsPath!, 'own', 'SKILL.md'), 'utf8'), `${options.agent.role} 自带 skill`);
   }
   await assert.rejects(lstat(join(queued[1].outputPath, '..', 'skills')), { code: 'ENOENT' });
-  const libraryPath = join(daemon.directory, 'data', 'library', 'skills', 'shared');
-  await writeFile(join(libraryPath, 'SKILL.md'), '库 skill 第二版');
+  await writeFile(join(source, 'SKILL.md'), '库 skill 第二版');
+  ok(await daemon.call('install-skill', { path: source, replace: true }));
   await writeFile(join(daemon.agentDir, 'file-executor', 'skills', 'own', 'SKILL.md'), '自带 skill 第二版');
   releaseFirst();
   await until(dispatches, values => values[1]?.status === 'running' && seen.length === 2);

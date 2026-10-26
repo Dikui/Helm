@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
@@ -16,13 +16,17 @@ export function ProjectsSection() {
   const [path, setPath] = useState('');
   const [name, setName] = useState('');
   const [invalidPath, setInvalidPath] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
   const save = useSettingsSave();
-  return <section className="settings-simple" aria-label={t('projects')}><h2>{t('projects')}</h2>
+  return <section className="settings-simple" aria-label={t('projects')}><h2 ref={heading} tabIndex={-1}>{t('projects')}</h2>
     {[projects, agents, works].map((resource, index) => resource.error && <ErrorNotice key={index} error={resource.error} retry={resource.reload} />)}
     {!projects.data && !projects.error && <p role="status">{t('loading')}</p>}
     {projects.data?.length === 0 && <p>{t('emptyProjects')}</p>}
+    <span role="status">{deleted ? t('projectDeleted') : ''}</span>
     {projects.data?.map(project => <ProjectRow key={project.id} project={project} agents={agents.data ?? []}
-      workCount={works.data?.filter(work => work.projectId === project.id).length} onSaved={projects.reload} />)}
+      workCount={works.error ? undefined : works.data?.filter(work => work.projectId === project.id).length} onSaved={projects.reload}
+      onDeleted={() => { setDeleted(true); heading.current?.focus(); projects.reload(); }} />)}
     <form className="settings-box" aria-label={t('registerProject')} noValidate aria-busy={save.pending} onSubmit={event => {
       event.preventDefault();
       if (!path.trim()) { setInvalidPath(true); document.getElementById('register-project-path')?.focus(); return; }
@@ -36,7 +40,7 @@ export function ProjectsSection() {
     </form>
   </section>;
 }
-function ProjectRow({ project, agents, workCount, onSaved }: { project: Project; agents: AgentEntry[]; workCount?: number; onSaved: () => void }) {
+function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { project: Project; agents: AgentEntry[]; workCount?: number; onSaved: () => void; onDeleted: () => void }) {
   const { t } = useI18n();
   const { api } = useData();
   const [selected, setSelected] = useState<string>();
@@ -48,6 +52,11 @@ function ProjectRow({ project, agents, workCount, onSaved }: { project: Project;
     <label>{t('defaultCoordinator')}<select aria-label={t('defaultCoordinator')} disabled={save.pending || !coordinators.length} value={selected ?? project.defaultCoordinatorAgentId} onChange={event => { setSelected(event.target.value); save.clear(); }}>
       {!coordinators.some(agent => agent.id === project.defaultCoordinatorAgentId) && <option>{project.defaultCoordinatorAgentId}</option>}
       {coordinators.map(agent => <option key={agent.id} value={agent.id} disabled={!agent.available}>{agent.id}{agent.available ? '' : ` · ${t('unavailable')}: ${agent.reason}`}</option>)}
-    </select></label><small className="muted">{t('projectDefaultHint')}</small><SaveFeedback {...save} /><div className="row"><button className="btn" disabled={save.pending || !coordinators.length}>{t('save')}</button></div>
+    </select></label><small className="muted">{t('projectDefaultHint')}</small>
+    <small className="muted" id={`project-delete-${project.id}`}>{t(workCount ? 'projectDeleteInUse' : 'projectDeleteHelp')}</small>
+    <SaveFeedback {...save} /><div className="row"><button className="btn" disabled={save.pending || !coordinators.length}>{t('save')}</button>
+      <button type="button" className="btn work-danger" disabled={save.pending || workCount !== 0} aria-describedby={`project-delete-${project.id}`} onClick={() => void save.run(async () => {
+        await api.call('delete-project', { projectId: project.id }); onDeleted();
+      })}>{t('deleteProject')}</button></div>
   </form>;
 }

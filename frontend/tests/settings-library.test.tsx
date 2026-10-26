@@ -63,6 +63,39 @@ test('从本地目录安装 skill，可省略或指定名字，同名和无效�
   expect((await daemon.call('list-library')).result.map((entry: any) => entry.name)).toEqual(['local-skill']);
 });
 
+test('勾选覆盖同名 skill 时请求带 replace: true，成功后重置勾选并更新内容', async () => {
+  daemon = await uiFixture();
+  const source = join(daemon.directory, 'shared');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '旧版本');
+  expect((await daemon.call('install-skill', { path: source })).ok).toBe(true);
+  await writeFile(join(source, 'SKILL.md'), '新版本');
+  const requests: Record<string, unknown>[] = [];
+  const transport: typeof fetch = (url, options) => {
+    if (String(url).endsWith('/api/install-skill')) requests.push(JSON.parse(String(options?.body)));
+    return fetch(url, options);
+  };
+  window.history.replaceState(null, '', '/settings/library');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  await screen.findByRole('article', { name: 'skill shared' });
+  const form = screen.getByRole('form', { name: '安装 skill' });
+  change('本地目录路径', source);
+  fireEvent.click(within(form).getByRole('button', { name: '安装 skill' }));
+  expect((await within(form).findByRole('alert')).textContent).toContain('库 skill shared 已存在');
+  expect(requests).toEqual([{ path: source }]);
+  const checkbox = within(form).getByRole('checkbox', { name: '覆盖同名 skill' }) as HTMLInputElement;
+  expect(checkbox.checked).toBe(false);
+  fireEvent.click(checkbox);
+  fireEvent.click(within(form).getByRole('button', { name: '安装 skill' }));
+  expect(checkbox.disabled).toBe(true);
+  await within(form).findByText('已保存');
+  expect(requests[1]).toEqual({ path: source, replace: true });
+  expect(checkbox.checked).toBe(false);
+  expect(await readFile(join(daemon.directory, 'data', 'library', 'skills', 'shared', 'SKILL.md'), 'utf8')).toBe('新版本');
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(screen.getByRole('checkbox', { name: 'Replace skill with the same name' })).toBeTruthy();
+});
+
 test('登记 HTTP 和 stdio MCP，校验 JSON 输入、遮罩密钥并在失败后保留输入', async () => {
   daemon = await uiFixture();
   window.history.replaceState(null, '', '/settings/library');

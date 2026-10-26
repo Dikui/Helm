@@ -10,9 +10,10 @@ export function InstallSkillForm({ onInstalled, onStateChange }: { onInstalled: 
   const { api } = useData();
   const [path, setPath] = useState('');
   const [name, setName] = useState('');
+  const [replace, setReplace] = useState(false);
   const [errors, setErrors] = useState<Record<string, MessageKey>>({});
   const save = useSettingsSave();
-  useEffect(() => { onStateChange({ dirty: !!(path || name), pending: save.pending }); }, [path, name, save.pending, onStateChange]);
+  useEffect(() => { onStateChange({ dirty: !!(path || name || replace), pending: save.pending }); }, [path, name, replace, save.pending, onStateChange]);
   async function submit(event: FormEvent) {
     event.preventDefault(); save.clear();
     const invalid: Record<string, MessageKey> = {};
@@ -22,8 +23,8 @@ export function InstallSkillForm({ onInstalled, onStateChange }: { onInstalled: 
     const first = Object.keys(invalid)[0];
     if (first) { document.getElementById(`library-skill-${first}`)?.focus(); return; }
     await save.run(async () => {
-      await api.call('install-skill', { path, ...(name.trim() ? { name: name.trim() } : {}) });
-      setPath(''); setName(''); onInstalled();
+      await api.call('install-skill', { path, ...(name.trim() ? { name: name.trim() } : {}), ...(replace ? { replace: true } : {}) });
+      setPath(''); setName(''); setReplace(false); onInstalled();
     });
   }
   return <form className="settings-box" aria-label={t('libraryInstallSkill')} noValidate aria-busy={save.pending} onSubmit={submit}>
@@ -33,6 +34,7 @@ export function InstallSkillForm({ onInstalled, onStateChange }: { onInstalled: 
         id={`library-skill-${field.key}`} label={field.label} disabled={save.pending} value={field.value} error={errors[field.key]} onChange={value => {
           field.change(value); setErrors(previous => { const next = { ...previous }; delete next[field.key]; return next; }); save.clear();
         }} />)}
+      <label className="settings-checkbox"><input type="checkbox" checked={replace} disabled={save.pending} onChange={event => { setReplace(event.target.checked); save.clear(); }} />{t('librarySkillReplace')}</label>
       <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('libraryInstallSkill')}</button></div>
     </form>;
 }

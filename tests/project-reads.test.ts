@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { uiFixture } from './ui-fixture.js';
@@ -26,4 +26,41 @@ test('HTTP 项目读取包含分支、HEAD 和改动数，git 不可读时保留
   assert.equal(unavailable.headCommit, null);
   assert.equal(unavailable.uncommittedChanges, null);
   assert.match(unavailable.gitStatusReason, /git/);
+});
+
+test('HTTP 删除空项目只移除登记和记录事件，仓库文件保留；不存在时返回 NOT_FOUND', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  const result = await daemon.call('delete-project', { projectId: daemon.project.id });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.result, { id: daemon.project.id, deleted: true });
+  assert.deepEqual((await daemon.call('list-projects')).result, []);
+  assert.ok((await lstat(daemon.repo)).isDirectory());
+  assert.ok((await lstat(join(daemon.repo, '.git'))).isDirectory());
+  assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), 'baseline\n');
+  const events = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'project-deleted');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].object, { type: 'project', id: daemon.project.id });
+  assert.equal(events[0].actor.type, 'user');
+  const missing = await daemon.call('delete-project', { projectId: daemon.project.id });
+  assert.equal(missing.status, 404);
+  assert.equal(missing.error.code, 'NOT_FOUND');
+});
+
+test('HTTP 删除有工作的项目被拒绝，工作数包含已取消的工作', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  for (const key of ['cancelled', 'aligning']) {
+    const result = await daemon.call('send-message', { projectId: daemon.project.id, body: key, key });
+    assert.equal(result.ok, true);
+    if (key === 'cancelled') assert.equal((await daemon.call('cancel-work', { workId: result.result.work.id })).ok, true);
+  }
+  const result = await daemon.call('delete-project', { projectId: daemon.project.id });
+  assert.equal(result.status, 409);
+  assert.equal(result.error.code, 'PROJECT_IN_USE');
+  assert.match(result.error.reason, /2 项工作.*先删除/);
+  assert.deepEqual(result.error.details, { projectId: daemon.project.id, workCount: 2 });
+  assert.equal((await daemon.call('list-projects')).result[0].id, daemon.project.id);
+  assert.equal((await daemon.call('list-works')).result.length, 2);
+  assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'project-deleted').length, 0);
 });

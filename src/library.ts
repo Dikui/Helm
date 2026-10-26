@@ -98,13 +98,18 @@ export class SkillLibrary {
       .filter(entry => entry.isDirectory() && libraryName.safeParse(entry.name).success).map(entry => entry.name).sort();
   }
 
-  install(source: string, givenName?: string) {
+  install(source: string, givenName?: string, replace = false) {
     const path = resolve(source);
     const parsed = libraryName.safeParse(givenName ?? basename(path));
     if (!parsed.success) throw new RuleError('INVALID_PARAMS', parsed.error.issues[0]!.message, 400);
     const name = parsed.data;
     const destination = join(this.directory, name);
-    try { lstatSync(destination); throw new RuleError('LIBRARY_ENTRY_EXISTS', `库 skill ${name} 已存在。`); }
+    let replaced = false;
+    try {
+      lstatSync(destination);
+      if (!replace) throw new RuleError('LIBRARY_ENTRY_EXISTS', `库 skill ${name} 已存在。`);
+      replaced = true;
+    }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     try {
       if (!lstatSync(path).isDirectory()) throw new Error('skill 须为实际目录，不能是符号链接');
@@ -115,17 +120,25 @@ export class SkillLibrary {
     }
     mkdirSync(this.directory, { recursive: true });
     const temporary = join(this.directory, `.${name}-${randomUUID()}.tmp`);
+    const backup = join(this.directory, `.${name}-${randomUUID()}.old`);
     let reserved = false;
+    let backedUp = false;
     try {
       cpSync(path, temporary, { recursive: true });
-      mkdirSync(destination);
+      if (replaced) { renameSync(destination, backup); backedUp = true; }
+      else mkdirSync(destination);
       reserved = true;
       renameSync(temporary, destination);
     } catch (error) {
       if (reserved) rmSync(destination, { recursive: true, force: true });
+      if (backedUp) renameSync(backup, destination);
       throw error;
     } finally { rmSync(temporary, { recursive: true, force: true }); }
-    return { type: 'skill' as const, name };
+    if (backedUp) {
+      // The new version is committed; failed cleanup must not restore a partially deleted backup.
+      try { rmSync(backup, { recursive: true, force: true }); } catch {}
+    }
+    return { type: 'skill' as const, name, replaced };
   }
 
   remove(name: string) {
@@ -154,9 +167,9 @@ export function registerMcp(store: TaskStore, actor: Actor, name: string, config
   return entry;
 }
 
-export function installSkill(store: TaskStore, actor: Actor, path: string, name?: string) {
-  const entry = skillLibrary(store).install(path, name);
-  store.transaction(() => store.appendEvent(actor, { type: 'library-skill', id: entry.name }, 'library-skill-installed', entry));
+export function installSkill(store: TaskStore, actor: Actor, path: string, name?: string, replace = false) {
+  const { replaced, ...entry } = skillLibrary(store).install(path, name, replace);
+  store.transaction(() => store.appendEvent(actor, { type: 'library-skill', id: entry.name }, 'library-skill-installed', { ...entry, replaced }));
   return entry;
 }
 
