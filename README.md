@@ -116,7 +116,7 @@ npm test
 npm run test:real --cache /private/tmp/helm-npm-cache
 ```
 
-入口按顺序运行浏览器、Claude 执行者、Claude 调度者、Claude skills、Codex 执行者、Codex 调度者，任一失败就停止。Claude 冒烟用本机默认主目录和已有登录（ADR 0005）；副本外沙箱拒绝检查在主目录下建一个临时目录，测试结束删除。需要已安装的有界面 Chromium；Linux 还需显示服务。入口固定在仓库根目录启动各套测试，子进程环境从空对象按白名单构造，仅保留运行必需变量，额外保留 `DISPLAY`、`XAUTHORITY`、`WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR` 供 Linux 浏览器连接显示服务。不会传入调用方的 Claude 桌面会话、任意变量、Node 注入参数或 Helm 假驱动开关。测试输出的截图须在沙箱外打开核对。沙箱内运行普通测试，浏览器使用工具替身。
+入口按顺序运行浏览器、Claude 执行者、Claude 调度者、Claude skills、Codex 执行者、Codex 调度者、Grok 执行者、DeepSeek 执行者和界面，某组失败后继续跑完其余各组，最后列出失败的组并以非零码退出。Claude 冒烟用本机默认主目录和已有登录（ADR 0005）；副本外沙箱拒绝检查在主目录下建一个临时目录，测试结束删除。需要已安装的有界面 Chromium；Linux 还需显示服务。入口固定在仓库根目录启动各套测试，子进程环境从空对象按白名单构造，仅保留运行必需变量，额外保留 `DISPLAY`、`XAUTHORITY`、`WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR` 供 Linux 浏览器连接显示服务。不会传入调用方的 Claude 桌面会话、任意变量、Node 注入参数或 Helm 假驱动开关。测试输出的截图须在沙箱外打开核对。沙箱内运行普通测试，浏览器使用工具替身。
 
 调度者和执行者的环境白名单及逐项用途见 [`src/environment.ts`](src/environment.ts)：PATH 查找 CLI 和开发工具，HOME 供 CLI 自行读取本地登录，USER/LOGNAME 提供用户身份，SHELL 选择命令解释器，LANG/LANGUAGE 和列出的 LC 类别保留语言与编码，TMPDIR/TMP/TEMP 指定临时目录，大小写代理变量维持网络访问。其余父环境不传入；运行层随后注入端口段、禁推送的 git 配置和无效 GH_TOKEN，并为本机 MCP 合并大小写 NO_PROXY。Helm 不读取登录凭据。Claude 会话固定设置 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` 和 `autoMemoryEnabled: false`，禁用自动记忆（[官方说明](https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory)）。
 

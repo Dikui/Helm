@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runRealSmoke } from './real-smoke-runner.js';
 
-test('真实冒烟入口按顺序在干净环境运行九套测试，失败时停止（只用进程替身）', () => {
+test('真实冒烟入口按顺序在干净环境运行九套测试，失败后继续跑完并返回首个失败码（只用进程替身）', () => {
   const parent = { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42',
     CLAUDE_CODE_DESKTOP_SESSION: 'desktop', ARBITRARY: 'secret', NODE_OPTIONS: '--inspect',
     HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', HELM_UI_REAL: 'unexpected', npm_config_cache: '/caller/cache' };
@@ -27,13 +27,15 @@ test('真实冒烟入口按顺序在干净环境运行九套测试，失败时�
   }
   let attempted = 0;
   assert.equal(runRealSmoke(() => ({ status: ++attempted === 2 ? 7 : 0, signal: null }), parent), 7);
-  assert.equal(attempted, 2);
+  assert.equal(attempted, 9);
   let uiAttempted = 0;
   assert.equal(runRealSmoke((_args, options) => {
     uiAttempted++;
     return { status: options.env.HELM_UI_REAL === '1' ? 5 : 0, signal: null };
   }, parent), 5);
   assert.equal(uiAttempted, 9);
-  assert.equal(runRealSmoke(() => ({ status: null, signal: 'SIGTERM' }), parent), 1);
+  let signalled = 0;
+  assert.equal(runRealSmoke(() => ++signalled === 1 ? { status: null, signal: 'SIGTERM' } : { status: 0, signal: null }, parent), 1);
+  assert.equal(signalled, 9);
   assert.equal(runRealSmoke(() => ({ status: null, signal: null, error: new Error('spawn failed') }), parent), 1);
 });

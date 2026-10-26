@@ -16,6 +16,8 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     if (parent[key] !== undefined) env[key] = parent[key];
   }
   const cwd = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+  // Groups are independent; one flaky group must not hide the rest, so run all and report at the end.
+  const failed: { file: string; code: number }[] = [];
   for (const [file, flag] of [
     ['browser', 'HELM_BROWSER_REAL'],
     ['claude-executor', 'HELM_CLAUDE_EXECUTOR_REAL'],
@@ -28,9 +30,10 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['ui', 'HELM_UI_REAL'],
   ] as const) {
     const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });
-    if (result.error || result.signal || result.status !== 0) return result.status || 1;
+    if (result.error || result.signal || result.status !== 0) failed.push({ file, code: result.status || 1 });
   }
-  return 0;
+  if (failed.length) console.error(`真实冒烟失败的组：${failed.map(f => f.file).join('、')}`);
+  return failed[0]?.code ?? 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = runRealSmoke();
