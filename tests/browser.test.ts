@@ -7,8 +7,37 @@ import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fixture, until } from './browser-fixture.js';
+import { FakeDriver } from '../src/driver.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
+
+test('补交结论续跑复用浏览器工具和令牌，整个派单结束后才清理浏览器', async t => {
+  let token = '';
+  const fake = new FakeDriver([ctx => {
+    token = ctx.options.mcpServers.helm!.headers.Authorization!;
+    return [{ type: 'end', reason: 'completed', finalAnswer: '首段检查证据' }];
+  }, ctx => {
+    assert.equal(ctx.options.mcpServers.helm!.headers.Authorization, token);
+    return [
+      { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: 'reminder.png', type: 'png' }, check: value => assert.ok(!(value as any).isError) },
+      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '补交检查结论' }, check: ok },
+    ];
+  }]);
+  const daemon = await fixture(t, [], { needsBrowser: true, executorDriver: {
+    checkAvailability: async () => ({ available: true }), start: options => fake.start(options),
+  } });
+  const result = await daemon.ended();
+  assert.equal(result.endReason, 'completed', result.failure);
+  assert.equal(result.conclusion, 'completed');
+  assert.equal(result.finalAnswer, '首段检查证据');
+  const events = await daemon.events();
+  assert.equal(events.filter(event => event.action === 'browser-started').length, 1);
+  assert.equal(events.filter(event => event.action === 'browser-stopped').length, 1);
+  assert.ok(events.findIndex(event => event.action === 'browser-stopped') > events.findIndex(event => event.action === 'conclusion-reminded'));
+  const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
+  assert.ok(artifacts.some((artifact: any) => artifact.name === 'browser/reminder.png'));
+  assert.equal((await daemon.call('submit-conclusion', { conclusion: 'completed', reason: '结束后无权提交' }, token)).status, 401);
+});
 
 test('浏览器进程组退出后探测返回 EPERM，已提交结论的派单仍正常完成', async t => {
   const kill = process.kill.bind(process);

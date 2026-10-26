@@ -38,7 +38,8 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
 });
 
 test('Codex 派单保存 thread 与 sqlite 目录，续跑同 thread 另开进程目录，运行层提交执行改动', async t => {
-  const fake = new FakeDriver([[{ type: 'write', path: 'first.txt', content: '第一轮' }], [{ type: 'write', path: 'second.txt', content: '续跑' }]]);
+  const conclude: FakeStep = { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '本次派单完成' }, check: ok };
+  const fake = new FakeDriver([[{ type: 'write', path: 'first.txt', content: '第一轮' }, conclude], [{ type: 'write', path: 'second.txt', content: '续跑' }, conclude]]);
   const starts: { id: string; sqlitePath: string; resume?: string }[] = [];
   const daemon = await codexFixture(t, { checkAvailability: async () => ({ available: true }), async start(options) {
     const session = await fake.start(options);

@@ -13,10 +13,18 @@ export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof start
   driver?: Pick<Driver, 'start'> & Partial<Driver>; executorDriver?: Pick<Driver, 'start'> & Partial<Driver>; codexDriver?: Driver;
 } = {}) {
   const { driver = new FakeDriver(), executorDriver = new FakeDriver(), codexDriver = new FakeDriver(), ...runtime } = options;
+  const executorStarts = new Set<string | undefined>();
   return startHelmd({ agentDir: fixtureAgentDir, ...runtime, drivers: { 'claude-sdk': {
     // These fixtures exercise sessions; availability scenarios register their own driver.
     checkAvailability: async () => ({ available: true }),
-    start: session => (session.agent?.role === 'coordinator' ? driver : executorDriver).start(session),
+    start: session => {
+      if (session.agent.role === 'coordinator') return driver.start(session);
+      const reminder = session.resumeSessionId && executorStarts.has(session.dataDir);
+      executorStarts.add(session.dataDir);
+      // Existing fake scripts describe separate dispatches. Reminder scenarios
+      // provide a driver wrapper to script the same dispatch's second segment.
+      return (reminder && executorDriver instanceof FakeDriver ? new FakeDriver() : executorDriver).start(session);
+    },
   }, codex: codexDriver, grok: new FakeDriver(), deepseek: new FakeDriver() } });
 }
 

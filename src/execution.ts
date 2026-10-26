@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
+import type { DriverRegistry, DriverEvent, DriverSession, EndReason, SessionOptions, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { agentEnvironment } from './agents.js';
@@ -137,6 +137,7 @@ export class ExecutionRunner {
     let finalAnswer: string | null = null;
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
     let failure: string | null = null;
+    let reminding = false;
     let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
     let browserFailed = false;
     let startCommit: string | null = null;
@@ -207,13 +208,12 @@ export class ExecutionRunner {
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
-        const starting = this.drivers[dispatch.agent.driver]!.start({
+        const options: SessionOptions = {
           dataDir: join(dispatch.outputPath, '..'),
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls),
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
-          ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
           signal: stop.signal,
           onProcess: process => {
             processes.push(process);
@@ -222,44 +222,73 @@ export class ExecutionRunner {
               this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'process-started', { ...process, cwd: workPath, role: 'executor' }, scope);
             });
           },
-        });
-        void starting.then(session => { if (stop.signal.aborted) session.cancel(); }, () => {});
-        const session = await abortable(starting, stop.signal);
-        this.sessions.set(dispatch.id, session);
-        if (dispatch.resumeSessionId && session.id !== dispatch.resumeSessionId) throw new Error('Driver did not resume the requested session');
-        if (this.store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND id <> ? AND status IN ('queued', 'running')`).get(session.id, dispatch.id)) {
-          throw new Error('Driver returned a session already used by an active dispatch');
-        }
-        this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
-        if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
-        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, content: dispatch.content })), stop.signal);
-        let previousStep = 0;
-        events = session.events[Symbol.asyncIterator]();
-        for (;;) {
-          const next = await abortable(events.next(), eventStop.signal);
-          if (next.done) break;
-          const event = next.value;
-          clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
-          if (!Number.isSafeInteger(event.step) || event.step <= previousStep) throw new Error('Driver step numbers must increase');
-          previousStep = event.step;
-          writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
-          const summary = stepSummary(event) || latestSummary;
-          latestSummary = summary;
-          const artifact = event.type === 'artifact' ? reportedArtifact(workPath, event.path) : undefined;
-          this.store.transaction(() => {
-            this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
-            this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step: event.step, summary }, scope);
-            if (event.type === 'compaction') this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'context-compacted', { step: event.step }, scope);
-            if (event.type === 'artifact' && artifact) saveArtifact(this.store, dispatch, event.kind, artifact.name, artifact.content);
-          });
-          if (event.type === 'end') {
-            reason = event.reason;
-            usage = event.usage;
-            failure = event.failure ?? failure;
-            if (reason === 'completed') finalAnswer = event.finalAnswer ?? '';
+        };
+        const conclusions = dispatch.purpose === 'verification' ? 'passed 或 failed' : 'completed 或 blocked';
+        const conclusionInstruction = `本次派单结束前必须调用 submit-conclusion 并附一句理由，结论只能是 ${conclusions}。`;
+        let resumeSessionId = dispatch.resumeSessionId ?? undefined;
+        let stepOffset = 0;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          let session: DriverSession;
+          try {
+            const starting = this.drivers[dispatch.agent.driver]!.start({ ...options, ...(resumeSessionId ? { resumeSessionId } : {}) });
+            void starting.then(session => { if (stop.signal.aborted) session.cancel(); }, () => {});
+            session = await abortable(starting, stop.signal);
+          } catch (error) {
+            if (!reminding || stop.signal.aborted) throw error;
+            // Drivers without resume support reject start(); keep the original result.
+            reason = 'completed';
             break;
           }
+          reason = 'error';
+          this.sessions.set(dispatch.id, session);
+          if (resumeSessionId && session.id !== resumeSessionId) throw new Error('Driver did not resume the requested session');
+          if (this.store.db.prepare(`SELECT id FROM dispatches WHERE session_id = ? AND id <> ? AND status IN ('queued', 'running')`).get(session.id, dispatch.id)) {
+            throw new Error('Driver returned a session already used by an active dispatch');
+          }
+          this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
+          if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
+          await abortable(session.send(reminding
+            ? `本次派单的 purpose 是 ${dispatch.purpose}，结论只能是 ${conclusions}。helm MCP 的 submit-conclusion 工具就在当前会话里，请现在调用并附一句理由，不要再做别的工作。`
+            : JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, content: dispatch.content, conclusionInstruction })), stop.signal);
+          if (reminding) this.store.transaction(() => this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id },
+            'conclusion-reminded', { sessionId: session.id, purpose: dispatch.purpose }, scope));
+          let previousStep = 0;
+          events = session.events[Symbol.asyncIterator]();
+          for (;;) {
+            const next = await abortable(events.next(), eventStop.signal);
+            if (next.done) break;
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
+            if (!Number.isSafeInteger(next.value.step) || next.value.step <= previousStep) throw new Error('Driver step numbers must increase');
+            previousStep = next.value.step;
+            const event = { ...next.value, step: stepOffset + next.value.step };
+            if (!Number.isSafeInteger(event.step)) throw new Error('Driver step numbers must be safe integers');
+            writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
+            const summary = stepSummary(event) || latestSummary;
+            latestSummary = summary;
+            const artifact = event.type === 'artifact' ? reportedArtifact(workPath, event.path) : undefined;
+            this.store.transaction(() => {
+              this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
+              this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step: event.step, summary }, scope);
+              if (event.type === 'compaction') this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'context-compacted', { step: event.step }, scope);
+              if (event.type === 'artifact' && artifact) saveArtifact(this.store, dispatch, event.kind, artifact.name, artifact.content);
+            });
+            if (event.type === 'end') {
+              reason = event.reason;
+              usage = { inputTokens: usage.inputTokens + event.usage.inputTokens, outputTokens: usage.outputTokens + event.usage.outputTokens };
+              failure = event.failure ?? failure;
+              if (!reminding && reason === 'completed') finalAnswer = event.finalAnswer ?? '';
+              break;
+            }
+          }
+          if (reminding || reason !== 'completed' || getDispatch(this.store, dispatch.workId, dispatch.id).conclusion !== 'undeclared'
+            || stop.signal.aborted || this.stopping || browserFailed) break;
+          reminding = true;
+          reason = 'error';
+          resumeSessionId = session.id;
+          stepOffset += previousStep;
+          await abortable(Promise.resolve(events.return?.()), stop.signal);
+          session.cancel();
         }
       }
     } catch (error) {
@@ -329,7 +358,7 @@ export class ExecutionRunner {
         current = getDispatch(this.store, dispatch.workId, dispatch.id);
       }
       if (current.abortReason) reason = 'aborted';
-      if (reason !== 'completed') finalAnswer = null;
+      if (reason !== 'completed' && !reminding) finalAnswer = null;
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, final_answer = ?, usage = ?, failure = ?, end_commit = ?,
           conclusion = CASE WHEN ? = 'completed' THEN conclusion ELSE 'undeclared' END,
