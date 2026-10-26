@@ -39,7 +39,7 @@ const coordinatorPrompt = `这是界面真实冒烟，使用真实 Helm 工具�
 content 要求用 Read 核对 smoke.txt，用 Node 读取后严格比较含换行的字符串，
 并用 git diff --name-only origin/main HEAD 确认只改 smoke.txt；必须 submit-conclusion(passed 或 failed)。
 验收结束且 passed 后 complete-card 第二张。异常或受阻只报告，不额外派单、不重试、不假装成功。
-两张卡片都完成后 send-message（key=ui-ready，body=${readyMessage}），写笔记后退出。
+两张卡片都完成后 send-message（key=ui-ready，body 原样为：${readyMessage} \`smoke.txt\`），写笔记后退出。
 只有用户最新消息的正文完全等于「${reviewMessage}」才 request-review（key=ui-review），body 记录实际派单和验收证据。
 每次从启动简报读当前卡片和派单状态，不重复执行已完成的阶段；等待时立即退出，不轮询。
 最多一张执行卡片和一张整体验收卡片、一次执行派单和一次验收派单。不要新增技能、文件或测试。`;
@@ -165,7 +165,14 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
 
     await click(workHeader(page).getByRole('link', { name: '对话', exact: true }));
     const conversation = main.getByRole('region', { name: '对话', exact: true });
-    await eventually(page, () => conversation.getByText(readyMessage, { exact: true }).isVisible(), '等待真实执行和整体验收完成超时');
+    const ready = conversation.locator('article:not(.me)').filter({ hasText: readyMessage });
+    await eventually(page, () => ready.isVisible(), '等待真实执行和整体验收完成超时');
+    // The coordinator's message names a file on the work branch; it opens in the preview dialog.
+    await click(ready.getByRole('link', { name: 'smoke.txt', exact: true }));
+    const preview = page.getByRole('dialog', { name: 'smoke.txt', exact: true });
+    assert.equal((await preview.locator('pre').innerText()).trim(), contents.trim());
+    await screenshot('05b-file-preview', preview.locator('pre'));
+    await click(preview.getByRole('button', { name: '返回', exact: true }));
     await click(workHeader(page).getByRole('link', { name: '调度结构', exact: true }));
     await click(card);
     await visible(inspector.getByText('自报完成', { exact: true }));
@@ -177,7 +184,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
       timeline.getByRole('group', { name: /^卡片 \d+：整体验收 smoke\.txt$/ }).getByRole('button', { name: '派单 #1 · 验收 ✓', exact: true }));
 
     await click(workHeader(page).getByRole('link', { name: '对话', exact: true }));
-    await visible(conversation.getByText(readyMessage, { exact: true }));
+    await visible(ready);
     await conversation.getByLabel('消息', { exact: true }).fill(reviewMessage);
     await click(conversation.getByRole('button', { name: '发送', exact: true }));
     await eventually(page, () => workHeader(page).getByText('待你审核', { exact: true }).isVisible(), '等待真实调度者发起审核超时');

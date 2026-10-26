@@ -19,6 +19,7 @@ import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
+import { listWorkFiles, readWorkFile } from './work-files.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -204,6 +205,16 @@ export const operations: readonly Operation[] = [
     name: 'read-artifact', description: '读取成果内容，二进制文件用 encoding: base64', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional() }).strict(),
     execute: ({ store }, { workId, artifactId, encoding }) => readArtifact(store, workId, artifactId, encoding),
+  }),
+  operation({
+    name: 'list-work-files', description: '列出工作分支上的文件路径；工作说明确认前为空', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId }) => listWorkFiles(store, workId),
+  }),
+  operation({
+    name: 'read-work-file', description: '读取工作分支上的文件（相对仓库根目录的路径）或这项工作的附件（绝对路径），二进制文件用 encoding: base64', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), path: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional() }).strict(),
+    execute: ({ store }, { workId, path, encoding }) => readWorkFile(store, workId, path, encoding),
   }),
   operation({
     name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,

@@ -31,10 +31,11 @@ export function AttachmentPicker({ files, onChange, disabled }: { files: File[];
   </div>;
 }
 
-export function AttachmentList({ attachments }: { attachments?: Attachment[] }) {
+export function AttachmentList({ attachments, onOpen }: { attachments?: Attachment[]; onOpen: (path: string, opener: HTMLElement) => void }) {
   const { t } = useI18n();
   if (!attachments?.length) return null;
   return <ul className="attachments" aria-label={t('attachments')}>
-    {attachments.map(item => <li key={item.path} className="pill attachment" title={item.path}><span>{item.name}</span></li>)}
+    {attachments.map(item => <li key={item.path} className="pill attachment" title={item.path}>
+      <a href="#" onClick={event => { event.preventDefault(); onOpen(item.path, event.currentTarget); }}>{item.name}</a></li>)}
   </ul>;
 }

@@ -7,6 +7,7 @@ import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
+import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import type { CardReference, ConversationItem, Message, Rounds } from './types.js';
 import './conversation.css';
 
@@ -22,6 +23,8 @@ export function ConversationView({ work }: { work: Work }) {
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const workFiles = useWorkFiles(work.id);
+  const preview = useFilePreview(work.id);
   const [scope, setScope] = useState('work');
   const submission = useSendMessage();
   const interruptBusy = useRef(false);
@@ -71,7 +74,7 @@ export function ConversationView({ work }: { work: Work }) {
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
-        {item.type === 'message' ? <><p>{item.body}</p><AttachmentList attachments={item.attachments} /></> : item.status === 'pending' && !ended
+        {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !ended
           ? <GateDecision gate={item} />
           : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
             {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
@@ -102,5 +105,6 @@ export function ConversationView({ work }: { work: Work }) {
       {submission.error && <ErrorNotice error={submission.error} />}
       {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
     </form>
+    {preview.preview}
   </section>;
 }

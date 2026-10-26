@@ -5,8 +5,12 @@ import { useI18n } from '../../../shared/i18n.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
+import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import './aligning.css';
+
+// The work branch only exists after the brief is confirmed.
+const noFiles: ReadonlySet<string> = new Set();
 
 export function AligningWork({ workId }: { workId: string }) {
   const { api } = useData();
@@ -19,6 +23,7 @@ export function AligningWork({ workId }: { workId: string }) {
   const [confirmError, setConfirmError] = useState<Error>();
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const preview = useFilePreview(workId);
   const input = useRef<HTMLTextAreaElement>(null);
   const submission = useSendMessage();
   const versions = descriptions.data ?? [];
@@ -48,7 +53,7 @@ export function AligningWork({ workId }: { workId: string }) {
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
-          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><p>{item.body}</p><AttachmentList attachments={item.attachments} /></article>
+          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><Markdown text={item.body} workId={workId} files={noFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
           : item.kind === 'work-confirmation'
             ? item.status === 'pending' && <div className="aligning-gate" key={item.id}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
@@ -89,5 +94,6 @@ export function AligningWork({ workId }: { workId: string }) {
       </div>
       <footer>{confirmButton}</footer>
     </aside>
+    {preview.preview}
   </div>;
 }

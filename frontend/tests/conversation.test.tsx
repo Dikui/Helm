@@ -1,10 +1,18 @@
-import { afterEach, expect, test } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 import type { FakeScript, FakeStep } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
+// jsdom has no native dialog implementation. Substitute only the platform API.
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 afterEach(async () => {
   cleanup();
   await daemon?.close();
@@ -231,4 +239,41 @@ test('范围失效时空消息 Ctrl+Enter 仍能打断，打断按钮可终止�
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[2]?.reason === 'aborted');
   const conversation = (await daemon!.call('get-conversation', { workId: work.id })).result;
   expect(conversation.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(1);
+});
+
+test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗预览', async () => {
+  const work = await executingWork([[{ type: 'hang' }]]);
+  const { workPath } = (await daemon!.call('get-work', { workId: work.id })).result;
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  await mkdir(join(workPath, 'outputs'));
+  await writeFile(join(workPath, 'outputs', 'report.md'), '# 报告标题\n\n![对比图](plot.png)\n\n[交互页](page.html)\n');
+  await writeFile(join(workPath, 'outputs', 'plot.png'), image);
+  await writeFile(join(workPath, 'outputs', 'page.html'), '<h1>交互页</h1><script>document.title = "x"</script>');
+  execFileSync('git', ['-C', workPath, 'add', 'outputs']);
+  execFileSync('git', ['-C', workPath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'outputs']);
+  await daemon!.call('send-message', { workId: work.id, key: 'files', body: '**结果**见 `outputs/report.md`，`outputs/missing.png` 不存在，[外链](https://example.com)<script>alert(1)</script>',
+    attachments: [{ name: 'notes.txt', content: Buffer.from('附件原文').toString('base64') }] });
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  // The message re-renders once the branch file list arrives, so wait for the file link before holding nodes.
+  const message = (await within(chat).findByRole('link', { name: 'outputs/report.md' })).closest('article')!;
+  expect(within(message).getByText('结果', { selector: 'strong' })).toBeTruthy();
+  expect(message.querySelector('script')).toBeNull();
+  expect(within(message).getByRole('link', { name: '外链' }).getAttribute('target')).toBe('_blank');
+  expect(within(message).queryByRole('link', { name: 'outputs/missing.png' })).toBeNull();
+
+  fireEvent.click(within(message).getByRole('link', { name: 'outputs/report.md' }));
+  const dialog = await screen.findByRole('dialog', { name: 'outputs/report.md' });
+  expect(await within(dialog).findByRole('heading', { name: '报告标题' })).toBeTruthy();
+  const plot = within(dialog).getByRole('img', { name: '对比图' }) as HTMLImageElement;
+  await waitFor(() => expect(plot.getAttribute('src')).toBe(`data:image/png;base64,${image.toString('base64')}`));
+  fireEvent.click(within(dialog).getByRole('link', { name: '交互页' }));
+  const frame = await within(await screen.findByRole('dialog', { name: 'outputs/page.html' })).findByTitle('outputs/page.html');
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+  expect(frame.getAttribute('srcdoc')).toContain('<h1>交互页</h1>');
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '返回' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+  fireEvent.click(within(message).getByRole('link', { name: 'notes.txt' }));
+  expect(await within(await screen.findByRole('dialog')).findByText('附件原文', { selector: 'pre' })).toBeTruthy();
 });
