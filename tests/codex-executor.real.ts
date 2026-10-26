@@ -44,7 +44,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     const daemon = await codexFixture(t, new CodexExecutorDriver(), { stagedAuth, needsBrowser: true,
       skills: { 'helm-smoke-alpha': `把 ${alpha} 写入 skill-proof.txt。` },
       content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交、不推送。
-记住会话记号 ${marker}，不得把记号写入文件。
+记住会话记号 ${marker}，后续续跑派单会问你，不得把记号写入文件。
 使用你可用的 helm-smoke- 开头的 skill，照技能要求写 skill-proof.txt，并列出可用的这些技能名。
 实际执行一次原样命令 ${command}，预期副本外写入被沙箱拒绝；不得重试、提权或寻找绕过方式，拒绝后继续。
 在副本中写 inside.txt（内容 inside）。
@@ -66,6 +66,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
       return messages;
     };
     const messages = await saveOutput(first);
+    const lastInput = (output: any[]) => output.findLast((m: any) => m.method === 'thread/tokenUsage/updated')?.params.tokenUsage.last.inputTokens ?? 0;
     assert.equal(first.endReason, 'completed', first.failure ?? JSON.stringify(first));
     assert.equal(first.conclusion, 'completed');
     assert.ok(first.usage.inputTokens > 0 && first.usage.outputTokens > 0);
@@ -92,9 +93,11 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
         agentId, key, content, ...(resumeSessionId ? { resumeSessionId } : {}) }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key, body: content }));
     };
-    await dispatch('resume', 'codex-executor', '只凭先前对话回答会话记号，不读文件。最后调用 submit-conclusion completed 并在最终回答中写出记号。', first.sessionId);
+    await dispatch('resume', 'codex-executor', '本会话上一次派单让你记住一个会话记号（UUID），它就在本会话上文里。只凭上文原样写出该记号，不读文件。最后调用 submit-conclusion completed 并在最终回答中写出记号。', first.sessionId);
     const resumed = (await daemon.ended(2, 180_000))[1];
-    await saveOutput(resumed);
+    const resumedMessages = await saveOutput(resumed);
+    // Separates "history not sent" from "model failed to recall": the resumed request must carry the first turn's context.
+    assert.ok(lastInput(resumedMessages) > lastInput(messages), '续跑请求必须带上先前对话');
     assert.equal(resumed.endReason, 'completed', resumed.failure);
     assert.equal(resumed.sessionId, first.sessionId);
     assert.notEqual(resumed.sqlitePath, first.sqlitePath);
