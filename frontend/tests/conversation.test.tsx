@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeAll, expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 import type { FakeScript, FakeStep } from '../../src/driver.js';
@@ -253,6 +253,8 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   execFileSync('git', ['-C', workPath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'outputs']);
   await daemon!.call('send-message', { workId: work.id, key: 'files', body: '**结果**见 `outputs/report.md`，`outputs/missing.png` 不存在，[外链](https://example.com)<script>alert(1)</script>',
     attachments: [{ name: 'notes.txt', content: Buffer.from('附件原文').toString('base64') }] });
+  const fetches = vi.spyOn(globalThis, 'fetch');
+  const reads = (name: string) => fetches.mock.calls.filter(([url]) => String(url).endsWith(`/api/${name}`)).length;
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
   // The message re-renders once the branch file list arrives, so wait for the file link before holding nodes.
@@ -267,6 +269,10 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   expect(await within(dialog).findByRole('heading', { name: '报告标题' })).toBeTruthy();
   const plot = within(dialog).getByRole('img', { name: '对比图' }) as HTMLImageElement;
   await waitFor(() => expect(plot.getAttribute('src')).toBe(`data:image/png;base64,${image.toString('base64')}`));
+  // Reads settle: re-renders must not re-fetch the file list or abort the open file.
+  const settled = [reads('list-work-files'), reads('read-work-file')];
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect([reads('list-work-files'), reads('read-work-file')]).toEqual(settled);
   fireEvent.click(within(dialog).getByRole('link', { name: '交互页' }));
   const frame = await within(await screen.findByRole('dialog', { name: 'outputs/page.html' })).findByTitle('outputs/page.html');
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts');

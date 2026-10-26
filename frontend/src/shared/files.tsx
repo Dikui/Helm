@@ -5,10 +5,13 @@ import { ActionDialog } from '../pages/work/ActionDialog.js';
 import { useData, useResource } from './data.js';
 import { ErrorNotice } from './feedback.js';
 import { useI18n } from './i18n.js';
+import type { HelmEvent } from './types.js';
 
 const imageTypes: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' };
 const extension = (path: string) => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 type Open = (path: string, opener: HTMLElement) => void;
+// useResource re-reads whenever its predicate changes identity, so predicates must stay stable.
+const never = () => false;
 
 function resolvePath(base: string, href: string) {
   if (/^[a-z][a-z0-9+.-]*:|^[/#?]/i.test(href)) return null;
@@ -68,7 +71,8 @@ export function Markdown({ text, workId, files, base = '', onOpen }: { text: str
 
 // The branch only changes before the coordinator reports it, so a new message is the refresh point.
 export function useWorkFiles(workId: string) {
-  const files = useResource<string[]>('list-work-files', { workId }, event => event.workId === workId && event.action === 'message-sent');
+  const affects = useCallback((event: HelmEvent) => event.workId === workId && event.action === 'message-sent', [workId]);
+  const files = useResource<string[]>('list-work-files', { workId }, affects);
   return useMemo(() => new Set(files.data ?? []), [files.data]);
 }
 
@@ -77,7 +81,7 @@ function FilePreview({ workId, path, onOpen, onClose, returnFocus }: { workId: s
   const files = useWorkFiles(workId);
   const kind = extension(path);
   const image = imageTypes[kind];
-  const file = useResource<{ content: string }>('read-work-file', { workId, path, encoding: image ? 'base64' : 'utf8' }, () => false);
+  const file = useResource<{ content: string }>('read-work-file', { workId, path, encoding: image ? 'base64' : 'utf8' }, never);
   const content = file.data?.content;
   return <ActionDialog title={path} busy={false} onClose={onClose} returnFocus={returnFocus} className="file-preview">
     {file.error && <ErrorNotice error={file.error} retry={file.reload} />}
