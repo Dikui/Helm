@@ -30,6 +30,8 @@ npm start -- --help
 
 项目路径会归一到 git 工作树根目录，重复登记返回已有项目。`delete-project --projectId <项目id>` 删除项目登记，项目下还有任何工作时拒绝（先用 `delete-work` 删除），不动磁盘上的仓库和文件。每条消息必须带 `key`；同一工作中重复使用同一个 key 返回已有消息。新建工作的第一条消息使用项目内唯一的 key，重试不会重复新建工作。后续消息使用 `--workId`，可以加 `--gateId` 引用该工作的关卡。
 
+用户消息可以带附件：CLI 用 `--attach <文件>`（可重复），HTTP 传 `attachments: [{ name, content }]`（`content` 为 base64），界面在输入框下方选文件。每条消息最多 10 个、合计不超过 20 MiB，文件名不能带路径，同一条消息内不能重名。附件存到 `<dataDir>/attachments/<工作id>/<消息id>/`，消息、对话和 `message-sent` 事件里只带文件名、绝对路径和大小。调度者和执行者用自己的读文件工具按绝对路径读取，不复制进项目或卡片副本；执行者需要的附件由调度者把路径写进卡片说明。导出输出时附件一起打包，删除工作时一起删除。调度者不能发附件。
+
 客户端默认连接 `http://127.0.0.1:4242`，可通过 `HELM_URL` 或各子命令的 `--url` 指定。也可用 `node dist/src/cli.js` 直接运行；通过 npm 链接这个包后可使用 `helm` 命令。
 
 Helm 始终使用用户 PATH 上的 Agent CLI。Claude Agent SDK 随 npm 附带的 Claude Code 二进制（约 262MB）由 `package.json` 的 `overrides` 换成空包 `stubs/no-claude-binary-0.0.0.tgz`，不会下载；升级 SDK 时核对平台包名单是否变化。路径写成 `file:../../../stubs/...` 是因为 npm 对嵌套依赖的 `file:` 覆盖按 SDK 目录解析，锁文件里记录的是仓库相对路径。Claude（`claude`）、Codex（`codex`）、Grok（`grok`）、DeepSeek（`dsh`）由用户按需自行安装；设置页「环境」统一检测这四个 CLI 和浏览器检查用的 Playwright Chromium（`check-environment`），显示是否安装、版本和登录命令；缺少的可点按钮由 helmd 在本机运行固定的官方安装命令（`install-tool --name <驱动或 browser>`），登录仍在终端完成。新建工作、换调度者或编辑 Agent 时，选中的驱动没有 CLI 只提示一行并链接到「环境」（`check-agent --driver <驱动>`）。执行者由调度者选择，所需 Agent 不可用时调度者提决策关卡，请用户到「环境」安装登录或到「Agent 集群」修改。

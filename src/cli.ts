@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { operations } from './operations.js';
@@ -9,7 +11,8 @@ async function main() {
     console.log('helm serve [--port 4242] [--data-dir ~/.helm/]');
     console.log('helm service install');
     for (const operation of operations.filter(item => item.callers.includes('user'))) {
-      console.log(`helm ${operation.name} ${Object.keys(operation.schema.shape).map(key => `--${key} <value>`).join(' ')}  ${operation.description}`);
+      const flags = Object.keys(operation.schema.shape).map(key => key === 'attachments' ? '[--attach <文件> ...]' : `--${key} <value>`);
+      console.log(`helm ${operation.name} ${flags.join(' ')}  ${operation.description}`);
     }
     return;
   }
@@ -48,12 +51,18 @@ async function main() {
   if (!definition) throw new Error(`Unknown command: ${command}. Run helm --help.`);
   const schema = z.toJSONSchema(definition.schema);
   const fields = schema.properties ?? {};
-  const options: Record<string, { type: 'string' }> = { url: { type: 'string' } };
+  const options: Record<string, { type: 'string'; multiple?: boolean }> = { url: { type: 'string' } };
   for (const key of Object.keys(fields)) options[key] = { type: 'string' };
+  // Local files are read here so callers pass paths instead of base64.
+  if ('attachments' in fields) { delete options.attachments; options.attach = { type: 'string', multiple: true }; }
   const { values } = parseArgs({ args, options });
   const params: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(values)) {
-    if (key === 'url' || value === undefined) continue;
+    if (key === 'attach' && Array.isArray(value)) {
+      params.attachments = await Promise.all(value.map(async path => ({ name: basename(path), content: (await readFile(path)).toString('base64') })));
+      continue;
+    }
+    if (key === 'url' || value === undefined || Array.isArray(value)) continue;
     const field = fields[key];
     const type = field && typeof field === 'object' ? field.type : undefined;
     const variants = field && typeof field === 'object' ? field.oneOf ?? field.anyOf : undefined;

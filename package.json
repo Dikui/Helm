@@ -15,6 +15,7 @@
     "check": "tsc --noEmit && tsc -p frontend/tsconfig.json",
     "test": "npm run build && node --test dist/tests/*.test.js && npm run test:ui",
     "test:real": "npm run build && node dist/tests/real-smoke-runner.js",
+    "test:attachments": "npm run build && HELM_ATTACHMENTS_REAL=1 node --test dist/tests/attachments.real.js",
     "browser:install": "node node_modules/@playwright/mcp/cli.js install-browser chromium --no-shell",
     "test:browser": "npm run build && HELM_BROWSER_REAL=1 node --test dist/tests/browser.real.js",
     "test:claude-executor": "npm run build && HELM_CLAUDE_EXECUTOR_REAL=1 node --test dist/tests/claude-executor.real.js",

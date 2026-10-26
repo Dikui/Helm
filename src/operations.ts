@@ -18,6 +18,7 @@ import { listWorks, readWork } from './work-reads.js';
 import { projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
+import { attachmentsSchema, saveAttachments } from './attachments.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -368,8 +369,9 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
-    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作', callers: ['user', 'coordinator-round'], keyed: true, mutates: true,
+    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作。用户可带附件 attachments: [{ name, content(base64) }]，存到 Helm 数据目录，消息里返回绝对路径', callers: ['user', 'coordinator-round'], keyed: true, mutates: true,
     schema: z.object({
+      attachments: attachmentsSchema.optional(),
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
       cardId: z.string().min(1).optional(),
@@ -402,15 +404,17 @@ export const operations: readonly Operation[] = [
       const existing = store.message(workId, params.key);
       if (existing) return { work, message: existing };
       if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
+      if (params.attachments?.length && actor.type !== 'user') throw new RuleError('FORBIDDEN', '只有用户可以发送附件。', 403);
       if (params.cardId) cardDetails(store, workId, params.cardId);
       if (params.gateId) {
         const gate = store.db.prepare('SELECT id FROM gates WHERE id = ? AND work_id = ?').get(params.gateId, workId);
         if (!gate) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
       }
       const id = randomUUID();
-      const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null, cardId: params.cardId ?? null }, { workId, cardId: params.cardId });
-      store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id, params.cardId ?? null,
+      const attachments = saveAttachments(store, workId, id, params.attachments ?? []);
+      const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null, cardId: params.cardId ?? null, attachments }, { workId, cardId: params.cardId });
+      store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence, card_id, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id, params.cardId ?? null, JSON.stringify(attachments),
       );
       if (actor.type === 'user') store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
       if (isNew) {

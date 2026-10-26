@@ -24,14 +24,14 @@ function json(response: ServerResponse, status: number, body: unknown) {
   response.end(JSON.stringify(body));
 }
 
-async function readBody(request: IncomingMessage): Promise<unknown> {
+async function readBody(request: IncomingMessage, limit: number): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > 1024 * 1024) {
+    if (size > limit) {
       request.resume();
-      throw new RuleError('BODY_TOO_LARGE', '请求体不能超过 1 MiB。', 413);
+      throw new RuleError('BODY_TOO_LARGE', `请求体不能超过 ${limit / 1024 / 1024} MiB。`, 413);
     }
     chunks.push(chunk);
   }
@@ -72,7 +72,8 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       }
       if (request.headers.authorization !== undefined) actor = executions.authenticate(request.headers.authorization) ?? scheduler.authenticate(request.headers.authorization);
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
-      const input = await readBody(request);
+      // Attachments travel as base64 inside send-message, which inflates them by a third.
+      const input = await readBody(request, path === '/api/send-message' ? 30 * 1024 * 1024 : 1024 * 1024);
       if (path === '/mcp') return await handleMcp(request, response, input, store, actor, userOperations, () => executions.browserFor(actor));
       if (path === '/events') {
         let filter = input;

@@ -4,10 +4,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runRealSmoke } from './real-smoke-runner.js';
 
-test('真实冒烟入口按顺序在干净环境运行九套测试，失败后继续跑完并返回首个失败码（只用进程替身）', () => {
+test('真实冒烟入口按顺序在干净环境运行十套测试，失败后继续跑完并返回首个失败码（只用进程替身）', () => {
   const parent = { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42',
     CLAUDE_CODE_DESKTOP_SESSION: 'desktop', ARBITRARY: 'secret', NODE_OPTIONS: '--inspect',
-    HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', HELM_UI_REAL: 'unexpected', npm_config_cache: '/caller/cache' };
+    HELM_FAKE_COORDINATOR: '1', HELM_BROWSER_REAL: 'unexpected', HELM_ATTACHMENTS_REAL: 'unexpected', HELM_UI_REAL: 'unexpected', npm_config_cache: '/caller/cache' };
   const calls: { args: string[]; env: Record<string, string>; cwd: string }[] = [];
   assert.equal(runRealSmoke((args, options) => {
     calls.push({ args, ...options });
@@ -18,24 +18,25 @@ test('真实冒烟入口按顺序在干净环境运行九套测试，失败后�
     ['--test', 'dist/tests/claude-skills.real.js'], ['--test', 'dist/tests/codex-executor.real.js'], ['--test', 'dist/tests/codex-coordinator.real.js'],
     ['--test', 'dist/tests/grok-executor.real.js'],
     ['--test', 'dist/tests/deepseek-executor.real.js'],
+    ['--test', 'dist/tests/attachments.real.js'],
     ['--test', 'dist/tests/ui.real.js'],
   ]);
   for (const [index, call] of calls.entries()) {
-    const flag = ['HELM_BROWSER_REAL', 'HELM_CLAUDE_EXECUTOR_REAL', 'HELM_CLAUDE_COORDINATOR_REAL', 'HELM_CLAUDE_SKILLS_REAL', 'HELM_CODEX_EXECUTOR_REAL', 'HELM_CODEX_COORDINATOR_REAL', 'HELM_GROK_EXECUTOR_REAL', 'HELM_DEEPSEEK_EXECUTOR_REAL', 'HELM_UI_REAL'][index]!;
+    const flag = ['HELM_BROWSER_REAL', 'HELM_CLAUDE_EXECUTOR_REAL', 'HELM_CLAUDE_COORDINATOR_REAL', 'HELM_CLAUDE_SKILLS_REAL', 'HELM_CODEX_EXECUTOR_REAL', 'HELM_CODEX_COORDINATOR_REAL', 'HELM_GROK_EXECUTOR_REAL', 'HELM_DEEPSEEK_EXECUTOR_REAL', 'HELM_ATTACHMENTS_REAL', 'HELM_UI_REAL'][index]!;
     assert.deepEqual(call.env, { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42', [flag]: '1' });
     assert.equal(call.cwd, resolve(fileURLToPath(new URL('../..', import.meta.url))));
   }
   let attempted = 0;
   assert.equal(runRealSmoke(() => ({ status: ++attempted === 2 ? 7 : 0, signal: null }), parent), 7);
-  assert.equal(attempted, 9);
+  assert.equal(attempted, 10);
   let uiAttempted = 0;
   assert.equal(runRealSmoke((_args, options) => {
     uiAttempted++;
     return { status: options.env.HELM_UI_REAL === '1' ? 5 : 0, signal: null };
   }, parent), 5);
-  assert.equal(uiAttempted, 9);
+  assert.equal(uiAttempted, 10);
   let signalled = 0;
   assert.equal(runRealSmoke(() => ++signalled === 1 ? { status: null, signal: 'SIGTERM' } : { status: 0, signal: null }, parent), 1);
-  assert.equal(signalled, 9);
+  assert.equal(signalled, 10);
   assert.equal(runRealSmoke(() => ({ status: null, signal: null, error: new Error('spawn failed') }), parent), 1);
 });

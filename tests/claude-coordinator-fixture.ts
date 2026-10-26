@@ -7,7 +7,7 @@ import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import type { HelmEvent } from '../src/store.js';
-import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
 
 type TestEvent = Omit<HelmEvent, 'details'> & { details: Record<string, any> };
 
@@ -23,7 +23,10 @@ export async function until<T>(read: () => Promise<T>, ready: (value: T) => bool
 
 // Only the requested rounds use the supplied driver. Alignment and draining
 // unrelated wake events use fake sessions; executor dispatches use hanging fakes.
-export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
+// realFirstRound instead exercises alignment itself and leaves its draft unconfirmed.
+export async function fixture(t: TestContext, driver: Driver, rounds = 1, config: {
+  realFirstRound?: boolean; firstMessage?: FirstMessage; roundTimeout?: number;
+} = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-coordinator-')));
   const repo = join(directory, 'project');
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -43,7 +46,8 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
   const daemon = await startHelmd({ agentDir, port: 0, dataDir: join(directory, 'data'),
     driver: { start(options) {
       const round = started++;
-      return (round === 0 ? setup : round <= rounds ? driver : drain).start(options);
+      return (config.realFirstRound ? (round < rounds ? driver : drain)
+        : (round === 0 ? setup : round <= rounds ? driver : drain)).start(options);
     } },
     executorDriver: new FakeDriver([[{ type: 'hang' }]]),
     browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url))] },
@@ -57,12 +61,15 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1) {
     return body.result;
   };
   const project = await call('register-project', { path: repo });
-  const initial = (await call('send-message', { projectId: project.id, key: 'start', body: '调度者驱动冒烟' })).work;
+  const initial = (await call('send-message', { projectId: project.id, key: 'start',
+    ...(config.firstMessage ?? { body: '调度者驱动冒烟' }) })).work;
   const params = { workId: initial.id };
   const events = async (): Promise<TestEvent[]> => call('get-events', params);
-  await until(events, values => values.some(event => event.action === 'round-ended'));
-  const gate = (await call('list-pending')).find((item: any) => item.workId === initial.id);
-  await call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
+  await until(events, values => values.some(event => event.action === 'round-ended'), config.roundTimeout);
+  if (!config.realFirstRound) {
+    const gate = (await call('list-pending')).find((item: any) => item.workId === initial.id);
+    await call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
+  }
   const work = await call('get-work', params);
   return { ...daemon, call, events, work, params, directory, repo, git };
 }

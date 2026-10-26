@@ -27,6 +27,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
     ['grok-executor', 'HELM_GROK_EXECUTOR_REAL'],
     ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
+    ['attachments', 'HELM_ATTACHMENTS_REAL'],
     ['ui', 'HELM_UI_REAL'],
   ] as const) {
     const result = run(['--test', `dist/tests/${file}.real.js`], { cwd, env: { ...env, [flag]: '1' } });

@@ -6,6 +6,7 @@ import type { HelmEvent, Work } from '../../../shared/types.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
+import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import type { CardReference, ConversationItem, Message, Rounds } from './types.js';
 import './conversation.css';
 
@@ -20,6 +21,7 @@ export function ConversationView({ work }: { work: Work }) {
   const graph = useResource<CardReference[]>('get-card-graph', params, cardsAffects);
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [scope, setScope] = useState('work');
   const submission = useSendMessage();
   const interruptBusy = useRef(false);
@@ -53,9 +55,9 @@ export function ConversationView({ work }: { work: Work }) {
     if (body.trim()) {
       if (!validScope && !submission.uncertain) return;
       const target = scope.startsWith('card:') ? { cardId: scope.slice(5) } : scope.startsWith('gate:') ? { gateId: scope.slice(5) } : {};
-      const result = await submission.send({ workId: work.id, body: body.trim(), ...target });
+      const result = await submission.send({ workId: work.id, body: body.trim(), attachments: await encodeFiles(files), ...target });
       if (!result) return;
-      setBody('');
+      setBody(''); setFiles([]);
     } else if (!immediate) return;
     if (immediate) await interrupt();
   };
@@ -69,7 +71,7 @@ export function ConversationView({ work }: { work: Work }) {
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
-        {item.type === 'message' ? <p>{item.body}</p> : item.status === 'pending' && !ended
+        {item.type === 'message' ? <><p>{item.body}</p><AttachmentList attachments={item.attachments} /></> : item.status === 'pending' && !ended
           ? <GateDecision gate={item} />
           : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
             {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
@@ -88,6 +90,7 @@ export function ConversationView({ work }: { work: Work }) {
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
       }} /></label>
       <button className="btn primary" disabled={ended || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+      <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
       <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
         <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>
         <label>{t('conversationAbout')}<select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>

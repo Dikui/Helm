@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript } from '../src/driver.js';
-import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
+import type { StartupBrief } from '../src/rounds.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
@@ -27,6 +28,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   watchdog?: { wallTimeoutMs: number; idleTimeoutMs: number };
   executorDriver?: Driver; content?: string; model?: string;
   projectSettings?: object;
+  firstMessage?: FirstMessage; dispatchContent?: (brief: StartupBrief) => string;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-browser-')));
   const repo = join(directory, 'project');
@@ -49,7 +51,8 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
       { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '浏览器派单', boundary: '本机', criteria: '截图匹配页面' }), check: ok },
     ], [
       { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: config.content ?? '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
-      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose: config.purpose, needsBrowser: config.needsBrowser ?? false }), check: ok },
+      { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose: config.purpose,
+        content: config.dispatchContent?.(JSON.parse(ctx.input)), needsBrowser: config.needsBrowser ?? false }), check: ok },
       { type: 'end', reason: 'completed', finalAnswer: 'created' },
     ], ...(config.after ? [config.after] : [])]),
   } satisfies Parameters<typeof startHelmd>[0];
@@ -60,7 +63,8 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
     return { status: response.status, ...await response.json() as any };
   };
   const project = (await call('register-project', { path: repo })).result;
-  const work = (await call('send-message', { projectId: project.id, key: 'start', body: '检查页面' })).result.work;
+  const work = (await call('send-message', { projectId: project.id, key: 'start',
+    ...(config.firstMessage ?? { body: '检查页面' }) })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
   const gate = (await call('list-pending')).result[0];

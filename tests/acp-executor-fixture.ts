@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyAgents, configureTestAgent } from './helmd-fixture.js';
+import type { StartupBrief } from '../src/rounds.js';
+import { copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -36,6 +37,7 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   content?: string; secondContent?: string; needsBrowser?: boolean; realBrowser?: boolean;
   stagedAuth?: string; model?: string; purpose?: 'execution' | 'verification';
   skills?: Record<string, string>; gitProbe?: boolean;
+  firstMessage?: FirstMessage; dispatchContent?: (brief: StartupBrief) => string;
 } = {}) {
   const agent = config.agent ?? 'grok';
   const agentId = `${agent}-executor`;
@@ -85,7 +87,8 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
       { type: 'tool', name: 'create-card', arguments: { workId: work.id, key: `card-${index}`, content: `${agent} 冒烟卡片`, needsVerification: config.purpose === 'verification' }, saveAs: `card-${index}`, check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: work.id,
         cardId: (ctx.results.get(`card-${index}`) as any).result.id, agentId, key: `dispatch-${index}`,
-        content, purpose: config.purpose ?? 'execution', needsBrowser: index === 0 && (config.needsBrowser ?? false) }), check: ok },
+        content: config.dispatchContent?.(JSON.parse(ctx.input)) ?? content,
+        purpose: config.purpose ?? 'execution', needsBrowser: index === 0 && (config.needsBrowser ?? false) }), check: ok },
     ]);
   }));
   const dataDir = join(directory, 'data');
@@ -94,7 +97,8 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   const call = async (name: string, params: object = {}): Promise<any> =>
     (await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json();
   const project = (await call('register-project', { path: repo })).result;
-  const work = (await call('send-message', { projectId: project.id, key: 'start', body: '执行' })).result.work;
+  const work = (await call('send-message', { projectId: project.id, key: 'start',
+    ...(config.firstMessage ?? { body: '执行' }) })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(e => e.action === 'round-ended'));
   const gate = (await call('list-pending')).result.find((g: any) => g.workId === work.id);

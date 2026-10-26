@@ -35,7 +35,7 @@
 .conversation-hints { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--muted); }
 .conversation-hints label { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; min-width: 0; }
 .conversation-hints select { min-width: 0; max-width: 260px; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
-.conversation-composer .error, .conversation-composer .hint { grid-column: 1 / -1; }
+.conversation-composer .error, .conversation-composer .hint, .conversation-composer .attachments { grid-column: 1 / -1; }
 @media (max-width: 640px) {
   .conversation-view { min-height: 65dvh; }
   .conversation-thread { max-height: 55dvh; }

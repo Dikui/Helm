@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyAgents, configureTestAgent } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 // All Codex metadata and credentials live in a temporary HOME. A real smoke may
 // link the real login into this temporary default CLI home without writing to the real home.
-export async function coordinatorFixture(t: TestContext, driver: Driver, config: { rounds?: number; stagedAuth?: string } = {}) {
+export async function coordinatorFixture(t: TestContext, driver: Driver, config: {
+  rounds?: number; stagedAuth?: string; realFirstRound?: boolean; firstMessage?: FirstMessage; roundTimeout?: number;
+} = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-coordinator-')));
   const home = join(directory, 'home');
   const previousHome = process.env.HOME;
@@ -45,7 +47,8 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
     'claude-sdk': new FakeDriver([[{ type: 'hang' }]]),
     codex: { checkAvailability: agent => driver.checkAvailability(agent), start(options) {
       const round = starts++;
-      return (round === 0 ? setup : round <= (config.rounds ?? 1) ? driver : drain).start(options);
+      return (config.realFirstRound ? (round < (config.rounds ?? 1) ? driver : drain)
+        : (round === 0 ? setup : round <= (config.rounds ?? 1) ? driver : drain)).start(options);
     } },
   } });
   const call = async (name: string, params: object = {}): Promise<any> => {
@@ -56,10 +59,11 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
     return body.result;
   };
   const project = await call('register-project', { path: repo });
-  const work = (await call('send-message', { projectId: project.id, coordinatorAgentId: 'codex-coordinator', key: 'start', body: '调度者冒烟' })).work;
+  const work = (await call('send-message', { projectId: project.id, coordinatorAgentId: 'codex-coordinator', key: 'start',
+    ...(config.firstMessage ?? { body: '调度者冒烟' }) })).work;
   const params = { workId: work.id };
   const events = async (): Promise<any[]> => call('get-events', params);
-  await until(events, values => values.some(event => event.action === 'round-ended'));
+  await until(events, values => values.some(event => event.action === 'round-ended'), config.roundTimeout);
   const gate = (await call('list-pending')).find((item: any) => item.workId === work.id && item.kind === 'work-confirmation');
   const confirm = () => call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
   return { ...daemon, call, events, work, params, directory, home, repo, dataDir, git, confirm };

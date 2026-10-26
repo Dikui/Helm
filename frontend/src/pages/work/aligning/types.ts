@@ -1,4 +1,5 @@
 import type { Gate } from '../../../shared/types.js';
+import type { Attachment } from '../../../shared/attachments.js';
 
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string;
@@ -6,5 +7,5 @@ export interface WorkDescription {
   gateId: string; baseRef: string; baseCommit: string;
 }
 export type ConversationItem = (Gate & { type: 'gate' }) | {
-  id: string; type: 'message'; sender: string; body: string;
+  id: string; type: 'message'; sender: string; body: string; attachments?: Attachment[];
 };

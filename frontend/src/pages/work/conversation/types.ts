@@ -1,8 +1,9 @@
 import type { Gate, Usage } from '../../../shared/types.js';
+import type { Attachment } from '../../../shared/attachments.js';
 
 export interface Message {
   id: string; sender: string; body: string; createdAt: string;
-  cardId: string | null; gateId: string | null;
+  cardId: string | null; gateId: string | null; attachments?: Attachment[];
 }
 export type ConversationItem = (Message & { type: 'message' }) | (Gate & {
   type: 'gate'; createdAt: string; decision: string | null; withdrawalReason: string | null;

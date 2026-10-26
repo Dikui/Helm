@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 // Agent configs for tests; the role rules are built into src/prompts.ts.
 export const fixtureAgentDir = fileURLToPath(new URL('../../tests/fixtures/agents/', import.meta.url));
 
+export interface FirstMessage {
+  body: string;
+  attachments?: { name: string; content: string }[];
+}
+
 // Existing scenarios have independent scripts for each role. Register both at
 // the same CLI boundary so their queues do not depend on wake-event timing.
 export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof startHelmd>[0]>, 'drivers'> & {

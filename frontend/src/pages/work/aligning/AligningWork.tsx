@@ -4,6 +4,7 @@ import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
+import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import './aligning.css';
 
@@ -17,6 +18,7 @@ export function AligningWork({ workId }: { workId: string }) {
   const confirmationBusy = useRef(false);
   const [confirmError, setConfirmError] = useState<Error>();
   const [body, setBody] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const input = useRef<HTMLTextAreaElement>(null);
   const submission = useSendMessage();
   const versions = descriptions.data ?? [];
@@ -36,7 +38,7 @@ export function AligningWork({ workId }: { workId: string }) {
   };
   const send = async () => {
     if (!body.trim()) return;
-    if (await submission.send({ workId, body: body.trim() })) setBody('');
+    if (await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files) })) { setBody(''); setFiles([]); }
   };
   const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
   return <div className="aligning-work">
@@ -46,7 +48,7 @@ export function AligningWork({ workId }: { workId: string }) {
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
-          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><p>{item.body}</p></article>
+          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><p>{item.body}</p><AttachmentList attachments={item.attachments} /></article>
           : item.kind === 'work-confirmation'
             ? item.status === 'pending' && <div className="aligning-gate" key={item.id}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
@@ -61,6 +63,7 @@ export function AligningWork({ workId }: { workId: string }) {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
         <button className="btn primary" disabled={submission.pending || !body.trim()}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+        <AttachmentPicker files={files} onChange={setFiles} disabled={submission.pending || submission.uncertain} />
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>

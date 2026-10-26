@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyAgents, configureTestAgent } from './helmd-fixture.js';
+import type { StartupBrief } from '../src/rounds.js';
+import { copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -33,6 +34,7 @@ export const result = (ctx: FakeContext, key: string): any => (ctx.results.get(k
 export async function codexFixture(t: TestContext, executor: Driver, config: {
   content?: string; needsBrowser?: boolean; after?: FakeScript;
   stagedAuth?: string; skills?: Record<string, string>;
+  firstMessage?: FirstMessage; dispatchContent?: (brief: StartupBrief) => string;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-executor-')));
   const previousHome = process.env.HOME;
@@ -73,7 +75,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
         // Keep the card short: every later dispatch on it gets the card snapshot.
         { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: 'Codex 执行者冒烟卡片' }, saveAs: 'card', check: ok },
         { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, cardId: result(ctx, 'card').id, agentId: 'codex-executor',
-          key: 'first', content: config.content ?? '实现卡片', needsBrowser: config.needsBrowser ?? false }), check: ok },
+          key: 'first', content: config.dispatchContent?.(JSON.parse(ctx.input)) ?? config.content ?? '实现卡片', needsBrowser: config.needsBrowser ?? false }), check: ok },
       ];
     }
     const action = actions.shift() ?? [];
@@ -89,7 +91,8 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
     return response.json();
   };
   const project = (await call('register-project', { path: repo })).result;
-  const work = (await call('send-message', { projectId: project.id, key: 'start', body: '执行' })).result.work;
+  const work = (await call('send-message', { projectId: project.id, key: 'start',
+    ...(config.firstMessage ?? { body: '执行' }) })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(e => e.action === 'round-ended'));
   const gate = (await call('list-pending')).result.find((g: any) => g.workId === work.id);

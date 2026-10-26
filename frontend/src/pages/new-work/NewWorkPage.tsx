@@ -6,6 +6,7 @@ import { CliStatus } from '../../shared/CliStatus.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { CoordinatorAgent, Project } from './types.js';
 import { useSendMessage } from './useSendMessage.js';
+import { AttachmentPicker, encodeFiles } from '../../shared/attachments.js';
 import { RegisterProjectDialog, RegisterProjectForm } from './RegisterProject.js';
 import './new-work.css';
 
@@ -17,6 +18,7 @@ export function NewWorkPage() {
   const [projectId, setProjectId] = useState('');
   const [agentId, setAgentId] = useState<string>();
   const [body, setBody] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [registering, setRegistering] = useState(false);
   const submission = useSendMessage();
   const project = projects.data?.find(item => item.id === projectId) ?? projects.data?.[0];
@@ -30,7 +32,7 @@ export function NewWorkPage() {
   const locked = submission.pending || submission.uncertain;
   const send = async () => {
     if (!project || (!submission.uncertain && !available) || !body.trim()) return;
-    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, body: body.trim() });
+    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, body: body.trim(), attachments: await encodeFiles(files) });
     if (result) navigate(`/works/${encodeURIComponent(result.work.id)}`);
   };
   const registered = (id: string) => {
@@ -48,6 +50,7 @@ export function NewWorkPage() {
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
+        <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
         <div className="new-tools">
           <label>{t('projects')}<select value={project.id} disabled={locked} onChange={event => { setProjectId(event.target.value); setAgentId(undefined); }}>
             {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.path}</option>)}

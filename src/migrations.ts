@@ -203,5 +203,7 @@ export const migrations: readonly string[] = [
   `
   DROP INDEX one_active_dispatch_per_card;
   CREATE UNIQUE INDEX one_active_execution_per_card ON dispatches(card_id) WHERE status IN ('queued', 'running') AND purpose = 'execution';
+  `,  `
+  ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
   `,
 ];

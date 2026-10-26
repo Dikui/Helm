@@ -11,7 +11,7 @@
 .aligning-composer { padding: var(--space-4); border-top: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-3); }
 .aligning-composer label { display: grid; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
 .aligning-composer textarea { resize: none; min-height: 110px; max-height: 35dvh; width: 100%; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-md); }
-.aligning-composer .error, .aligning-composer .hint { grid-column: 1 / -1; }
+.aligning-composer .error, .aligning-composer .hint, .aligning-composer .attachments { grid-column: 1 / -1; }
 .aligning-composer .btn { min-width: 100px; }
 .aligning-brief { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); }
 .aligning-brief > header { padding: var(--space-4); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }

@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import { projectPath } from './alignment.js';
 import { readWork } from './work-reads.js';
+import { attachmentDirectory } from './attachments.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const exec = promisify(execFile);
@@ -146,6 +147,7 @@ export function exportWorkOutputs(store: TaskStore, actor: Actor, workId: string
     // Include browser output and any other dispatch files, not just event streams.
     for (const dispatch of records.dispatches) for (const path of filesIn(dirname(String(dispatch.output_path)))) paths.add(path);
     for (const artifact of records.artifacts) if (artifact.path) paths.add(String(artifact.path));
+    for (const path of filesIn(attachmentDirectory(store, workId))) paths.add(path);
     const files = [...paths].sort().map(sourcePath => {
       const archivePath = relative(store.dataDir, sourcePath);
       if (archivePath === '..' || archivePath.startsWith('../') || isAbsolute(archivePath)) {
@@ -196,6 +198,7 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
       }
     }
     await rm(join(store.dataDir, 'worktrees', workId), { recursive: true, force: true });
+    await rm(attachmentDirectory(store, workId), { recursive: true, force: true });
     // `branch -d` refuses unmerged branches, so cancelled or unmerged work keeps its code.
     let keptBranch: string | null = null;
     if (work.workBranch) {
