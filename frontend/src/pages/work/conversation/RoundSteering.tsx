@@ -3,7 +3,7 @@ import type { PlanEntry } from '../../../../../src/driver.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { useI18n } from '../../../shared/i18n.js';
 import type { Message, Round, RoundStep } from './types.js';
-import { stepSummary } from '../../../shared/step-summary.js';
+import { isHousekeeping, stepSummary } from '../../../shared/step-summary.js';
 
 
 export function RoundSteering({ round, steps, plan = [], queue, interrupt, withdraw, busy, reference, pauseReason }: {
@@ -13,16 +13,20 @@ export function RoundSteering({ round, steps, plan = [], queue, interrupt, withd
   const { t } = useI18n();
   const now = useClock();
   const position = Math.min(plan.length, plan.filter(entry => entry.status === 'completed').length + 1);
-  const rawSteps = <>{steps.length ? <ol className="conversation-steps">{steps.map((step, index) => {
+  const meaningful = steps.filter(step => !(step.text && isHousekeeping(step.text)));
+  const stepList = (list: RoundStep[]) => <>{list.length ? <ol className="conversation-steps">{list.map((step, index) => {
     const text = step.type === 'plan' ? JSON.stringify(step, null, 2) : step.text ?? step.path ?? t('conversationCompaction');
     const summary = step.type === 'plan' ? t('conversationPlan') : step.text ? stepSummary(step.text, t) : text;
-    const next = steps[index + 1];
+    const next = list[index + 1];
     return <li key={step.step} className={next ? 'done' : 'now'}>
       <span className="conversation-step-icon" aria-hidden="true">{next ? '✓' : <span className="spin" />}</span>
       <details><summary title={summary}>{summary.split(/\r?\n/, 1)[0]?.slice(0, 160)}</summary><pre>{text}</pre></details>
       {step.time && <time dateTime={step.time} title={step.time} aria-label={`${t(next ? 'conversationStepGap' : 'conversationStepSince')} ${step.step}`}>{elapsed(step.time, next?.time ? Date.parse(next.time) : now)}</time>}
     </li>;
   })}</ol> : <p className="muted conversation-waiting">{t('conversationWaitingOutput')}</p>}</>;
+  const hidden = steps.filter(step => !meaningful.includes(step));
+  const allSteps = <details className="conversation-raw-steps"><summary>{t('conversationRawSteps')}</summary>{stepList(steps)}</details>;
+  const rawSteps = <>{stepList(meaningful)}{hidden.length > 0 && <details className="conversation-raw-steps"><summary>{t('conversationHiddenSteps')} · {hidden.length}</summary>{stepList(hidden)}</details>}</>;
   return <div className="conversation-steering">
     <details className="conversation-round" open>
       <summary className="conversation-round-heading">
@@ -34,7 +38,7 @@ export function RoundSteering({ round, steps, plan = [], queue, interrupt, withd
         <span className="chev" aria-hidden="true">⌄</span>
       </summary>
       {round && <><h3 className="sr">{t('conversationSteps')}</h3>
-        {plan.length ? <><PlanSteps entries={plan} /><details className="conversation-raw-steps"><summary>{t('conversationRawSteps')}</summary>{rawSteps}</details></> : rawSteps}
+        {plan.length ? <><PlanSteps entries={plan} />{allSteps}</> : rawSteps}
       </>}
     </details>
     {pauseReason && <p className="pause-reason">{pauseReason}</p>}

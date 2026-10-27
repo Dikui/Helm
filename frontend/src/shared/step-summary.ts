@@ -36,3 +36,15 @@ export function stepSummary(raw: string, t: (key: MessageKey) => string): string
   return t('conversationOutput');
 }
 
+
+// CLI 内部的流水事件（hook、限额、token 用量、会话状态），步骤列表默认不显示
+const housekeepingMethods = new Set(['thread/tokenUsage/updated', 'account/rateLimits/updated', 'thread/status/changed', 'thread/started', 'turn/started']);
+export function isHousekeeping(raw: string) {
+  if (outputSummary(raw)) return false;
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return false; }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const { type, method } = value as { type?: unknown; method?: unknown };
+  return type === 'system' || type === 'rate_limit_event' || type === 'stream_event'
+    || (typeof type === 'string' && type.startsWith('hook_')) || (typeof method === 'string' && housekeepingMethods.has(method));
+}

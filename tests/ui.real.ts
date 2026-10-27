@@ -114,15 +114,16 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     daemon = await startHelmd({ port: 0, dataDir: join(evidence, 'data'), agentDir, drivers: { 'claude-sdk': claude } });
     const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
     const { chromium } = require('playwright') as typeof import('playwright');
-    // Playwright's bundled Chromium, headed; never system Chrome.
-    browser = await chromium.launch({ headless: false });
+    // Playwright's bundled Chrome for Testing, headed; never system Chrome.
+    browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
     const context = await browser.newContext({ viewport: { width: 1600, height: 1050 }, locale: 'zh-CN', colorScheme: 'light' });
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     const main = page.getByRole('main');
-    const sidebar = page.getByRole('complementary', { name: 'Helm', exact: true });
+    // The native file-preview dialog makes the sidebar inert, but its SSE status remains visible.
+    const sidebar = page.getByRole('complementary', { name: 'Helm', exact: true, includeHidden: true });
     const screenshot = async (name: string, ...state: Locator[]) => {
       for (const element of state) await visible(element);
       await visible(sidebar.getByText('实时更新已连接', { exact: true }));
@@ -130,7 +131,8 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
       assert.equal(await page.locator('.error').count(), 0, await page.locator('.error').allTextContents().then(lines => lines.join('\n')));
       assert.deepEqual(pageErrors, [], '截图前必须没有页面异常');
       const path = join(evidence, `${name}.png`);
-      await page.screenshot({ path, fullPage: true, animations: 'disabled' });
+      // The app scrolls inside fixed-height panels; fullPage adds off-screen blank overflow.
+      await page.screenshot({ path, fullPage: false, animations: 'disabled' });
       console.log(`UI 截图 ${name}：${path}`);
     };
 
@@ -149,10 +151,11 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     const confirm = brief.getByRole('button', { name: '确认这一版', exact: true });
     await eventually(page, () => confirm.isEnabled().catch(() => false), '等待真实调度者起草工作说明超时');
     assert.match(await brief.innerText(), /smoke\.txt/);
-    await screenshot('03-aligning', workHeader(page).getByText('对齐中', { exact: true }), brief.getByRole('heading', { name: '标准', exact: true }), confirm);
+    // v2 puts the status and its elapsed time in the same pill.
+    await screenshot('03-aligning', workHeader(page).getByText(/^对齐中(?:\s*·|$)/), brief.getByRole('heading', { name: '标准', exact: true }), confirm);
     await click(confirm);
-    await visible(workHeader(page).getByText('执行中', { exact: true }));
-    await screenshot('04-conversation', main.getByRole('region', { name: '对话', exact: true }), main.getByLabel('消息', { exact: true }));
+    await visible(workHeader(page).getByText(/^执行中(?:\s*·|$)/));
+    await screenshot('04-conversation', main.getByRole('region', { name: '对话', exact: true }), main.getByLabel('消息', { exact: true }), main.getByRole('button', { name: '打断本轮', exact: true }));
 
     await click(workHeader(page).getByRole('link', { name: '调度结构', exact: true }));
     const graph = main.getByRole('region', { name: '卡片图', exact: true });
@@ -161,11 +164,11 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await click(card);
     const inspector = main.getByRole('complementary', { name: '卡片检查器', exact: true });
     await eventually(page, () => inspector.getByRole('button', { name: '派单 #1 · 执行', exact: true }).isVisible(), '等待真实执行派单超时');
-    await screenshot('05-card-graph-inspector', graph, inspector.getByRole('heading', { name: changeTitle, exact: true }), inspector.getByRole('heading', { name: '派单历史', exact: true }));
+    await screenshot('05-card-graph-inspector', graph, inspector.getByRole('heading', { name: changeTitle, exact: true }), inspector.getByRole('heading', { name: /^派单历史\s+1$/ }));
 
     await click(workHeader(page).getByRole('link', { name: '对话', exact: true }));
     const conversation = main.getByRole('region', { name: '对话', exact: true });
-    const ready = conversation.locator('article:not(.me)').filter({ hasText: readyMessage });
+    const ready = conversation.getByRole('article').filter({ has: page.getByText('调度者', { exact: true }), hasText: readyMessage });
     await eventually(page, () => ready.isVisible(), '等待真实执行和整体验收完成超时');
     // The coordinator's message names a file on the work branch; it opens in the preview dialog.
     await click(ready.getByRole('link', { name: 'smoke.txt', exact: true }));
@@ -175,11 +178,13 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await click(preview.getByRole('button', { name: '返回', exact: true }));
     await click(workHeader(page).getByRole('link', { name: '调度结构', exact: true }));
     await click(card);
-    await visible(inspector.getByText('自报完成', { exact: true }));
+    const executionHistory = inspector.getByRole('listitem').filter({ has: page.getByRole('button', { name: '派单 #1 · 执行', exact: true }) });
+    await visible(executionHistory.getByText(/^claude-executor\s*·\s*自报完成$/));
     assert.equal(await graph.getByRole('button', { name: /^卡片 \d+：/ }).count(), 2);
     await click(main.getByRole('tab', { name: '时间线', exact: true }));
     const timeline = main.getByRole('region', { name: '时间线', exact: true });
     await visible(timeline.getByRole('button', { name: '派单 #1 · 执行', exact: true }));
+    await visible(timeline.getByRole('button', { name: /^调度轮次 #\d+$/ }).first());
     await screenshot('06-timeline', timeline.getByRole('group', { name: /^卡片 \d+：添加 smoke\.txt$/ }),
       timeline.getByRole('group', { name: /^卡片 \d+：整体验收 smoke\.txt$/ }).getByRole('button', { name: '派单 #1 · 验收 ✓', exact: true }));
 
@@ -187,7 +192,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await visible(ready);
     await conversation.getByLabel('消息', { exact: true }).fill(reviewMessage);
     await click(conversation.getByRole('button', { name: '发送', exact: true }));
-    await eventually(page, () => workHeader(page).getByText('待你审核', { exact: true }).isVisible(), '等待真实调度者发起审核超时');
+    await eventually(page, () => workHeader(page).getByText(/^待你审核(?:\s*·|$)/).isVisible(), '等待真实调度者发起审核超时');
     await click(workHeader(page).getByRole('link', { name: '工作说明', exact: true }));
     const review = main.getByRole('region', { name: '审核', exact: true });
     const gate = review.getByRole('group', { name: '审核', exact: true });
@@ -197,16 +202,18 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await visible(diff);
     assert.match(await diff.innerText(), /\+helm-ui-smoke/);
     assert.equal(await gate.getByLabel('未声明结论的派单', { exact: true }).innerText(), '0');
+    // Show the diff and decision controls, which can be below a long model-written report.
+    await gate.getByRole('button', { name: '接受', exact: true }).scrollIntoViewIfNeeded();
     await screenshot('07-review', gate.getByRole('button', { name: '接受', exact: true }), review.getByRole('heading', { name: '整体验收', exact: true }), diff);
     await click(gate.getByRole('button', { name: '接受', exact: true }));
-    await visible(workHeader(page).getByText('已完成', { exact: true }));
+    await visible(workHeader(page).getByText(/^已完成(?:\s*·|$)/));
     assert.equal(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches), true);
     const lightBackground = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg'));
-    await screenshot('08-main-light', review.getByText('已决定 · 接受', { exact: true }), workHeader(page).getByText('已完成', { exact: true }));
+    await screenshot('08-main-light', review.getByText('已决定 · 接受', { exact: true }), workHeader(page).getByText(/^已完成(?:\s*·|$)/));
     await page.emulateMedia({ colorScheme: 'dark' });
     assert.equal(await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches), true);
     assert.notEqual(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg')), lightBackground);
-    await screenshot('09-main-dark', workHeader(page).getByText('已完成', { exact: true }), review);
+    await screenshot('09-main-dark', workHeader(page).getByText(/^已完成(?:\s*·|$)/), review);
 
     await click(sidebar.getByRole('link', { name: '设置', exact: true }));
     await screenshot('10-settings', main.getByRole('heading', { name: '设置', level: 1, exact: true }), main.getByRole('heading', { name: 'Agent 集群', exact: true }), main.getByRole('heading', { name: 'claude-coordinator', exact: true }));
