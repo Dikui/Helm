@@ -1,0 +1,9 @@
+.plan-steps, .conversation-round .plan-steps { list-style: none; display: grid; gap: var(--space-2); margin: 0; padding: var(--space-3); }
+.plan-steps > li, .conversation-round .plan-steps > li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; gap: var(--space-2); color: var(--text); font-size: var(--text-sm); }
+.plan-steps > li > span { overflow-wrap: anywhere; }
+.plan-steps small { color: var(--muted); }
+.plan-icon { width: 18px; height: 18px; display: grid; place-items: center; border-radius: var(--radius-pill); }
+.plan-pending .plan-icon { border: 1px dashed var(--muted); }
+.plan-completed .plan-icon { background: var(--success); color: var(--surface); }
+.plan-icon .spin { width: 16px; height: 16px; color: var(--running); }
+.conversation-raw-steps > summary { padding: var(--space-2) var(--space-3); font-size: var(--text-sm); color: var(--muted); }

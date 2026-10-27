@@ -34,7 +34,7 @@ export function listRounds(store: TaskStore, workId: string, includeCurrentSteps
   const queuedMessages = ['completed', 'cancelled'].includes(work.status) ? [] : store.db.prepare(`SELECT m.id, m.work_id AS workId, m.sender, m.body,
     m.card_id AS cardId, m.gate_id AS gateId, m.created_at AS createdAt, m.sequence
     FROM messages m JOIN wake_queue q ON q.event_id = m.sequence
-    WHERE q.work_id = ? AND q.processed_by IS NULL AND m.sender = 'user' ORDER BY m.sequence`)
+    WHERE q.work_id = ? AND q.processed_by IS NULL AND m.sender = 'user' AND m.withdrawn_at IS NULL ORDER BY m.sequence`)
     .all(workId).filter(message => !received.has(Number(message.sequence)));
   const rounds = rows.map(({ eventIds: _eventIds, outputPath: _outputPath, agentSnapshot, usage, ...round }, index) => ({
     ...round, number: index + 1,
@@ -43,7 +43,8 @@ export function listRounds(store: TaskStore, workId: string, includeCurrentSteps
   }));
   // Coordinator tool responses become output too. Returning that output to the
   // same coordinator would recursively embed earlier list-rounds responses.
-  const currentSteps = includeCurrentSteps && running ? readOutput(String(running.outputPath)).toString('utf8').split('\n').filter(Boolean)
+  const output = running ? readOutput(String(running.outputPath)).toString('utf8').split('\n').filter(Boolean)
     .map(line => JSON.parse(line) as DriverEvent & { time?: string }) : [];
-  return { rounds, queuedMessages, currentSteps };
+  const currentPlan = output.findLast(step => step.type === 'plan')?.entries ?? [];
+  return { rounds, queuedMessages, currentSteps: includeCurrentSteps ? output : [], currentPlan };
 }

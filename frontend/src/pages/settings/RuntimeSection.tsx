@@ -55,7 +55,7 @@ function RuntimeForm({ title, hint, fields, settings, operation, params }: {
     if (invalid.length) { document.getElementById(`runtime-${invalid[0]}`)?.focus(); return; }
     await save.run(async () => { await api.call(operation, params(values)); });
   }
-  return <form className="settings-box" aria-label={t(title)} onSubmit={submit} noValidate aria-busy={save.pending}><h3>{t(title)}</h3>{hint && <p className="muted">{t(hint)}</p>}
+  return <form className="settings-box settings-runtime-group" aria-label={t(title)} onSubmit={submit} noValidate aria-busy={save.pending}><h3>{t(title)}</h3>{hint && <p className="muted">{t(hint)}</p>}
     {fields.map(field => <div key={field.name}><div className="settings-numeric"><label htmlFor={`runtime-${field.name}`}>{t(field.label)}</label><span className="settings-unit"><input id={`runtime-${field.name}`} type="number" step="any" min={field.min / field.factor} max={field.max / field.factor}
       disabled={save.pending} value={draft[field.name] ?? String(settings[field.name] / field.factor)} aria-invalid={errors.includes(field.name)} aria-describedby={errors.includes(field.name) ? `runtime-${field.name}-error` : undefined}
       onChange={event => { setDraft({ ...draft, [field.name]: event.target.value }); setErrors(errors.filter(name => name !== field.name)); save.clear(); }} />{field.unit && <span>{field.unit === 'GB' ? 'GB' : t(field.unit)}</span>}</span></div>

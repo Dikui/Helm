@@ -12,7 +12,16 @@ beforeAll(() => {
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; localStorage.clear(); });
-const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label, { selector: 'input,select,textarea' }), { target: { value } });
+const change = (label: string, value: string) => {
+  const field = screen.queryByLabelText(label, { selector: 'input,select,textarea' });
+  if (field) fireEvent.change(field, { target: { value } });
+  else fireEvent.click(screen.getByLabelText(label, { selector: 'fieldset' }).querySelector(`input[value="${value}"]`)!);
+};
+const fieldValue = (label: string) => {
+  const field = screen.getByLabelText(label) as HTMLInputElement;
+  return field.tagName === 'FIELDSET' ? (field.querySelector('input:checked') as HTMLInputElement)?.value : field.value;
+};
+const expandProject = (project: HTMLElement) => { fireEvent.click(within(project).getByText('项目设置', { selector: 'summary' })); return project; };
 const agent = async (id: string) => (await daemon!.call('list-agents')).result.find((item: any) => item.id === id);
 
 test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 复制，API 主目录只显示配置提示', async () => {
@@ -140,7 +149,7 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   await daemon.call('send-message', { projectId: daemon.project.id, body: '项目工作', key: 'project-work' });
   window.history.replaceState(null, '', '/settings/projects');
   render(<App baseUrl={daemon.url} />);
-  const project = await screen.findByRole('form', { name: `项目 ${daemon.project.name}` });
+  const project = expandProject(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` }));
   expect(await within(project).findByText('1 项工作')).toBeTruthy();
   expect((within(project).getByRole('button', { name: '删除项目' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(project).getByText('请先删除此项目下的所有工作，再删除项目登记。')).toBeTruthy();
@@ -162,7 +171,7 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   expect(await screen.findByRole('form', { name: '项目 新项目' })).toBeTruthy();
   const projects = (await daemon.call('list-projects')).result;
   expect(projects.find((item: any) => item.name === '新项目').path).toBe(repo);
-  const emptyProject = screen.getByRole('form', { name: '项目 新项目' });
+  const emptyProject = expandProject(screen.getByRole('form', { name: '项目 新项目' }));
   const remove = within(emptyProject).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
   await waitFor(() => expect(remove.disabled).toBe(false));
   expect(within(emptyProject).getByText('只删除项目登记，磁盘上的仓库和文件会保留。')).toBeTruthy();
@@ -186,7 +195,7 @@ test('项目删除遇到新增工作的竞争时显示服务端错误并保留�
   };
   window.history.replaceState(null, '', '/settings/projects');
   render(<App baseUrl={daemon.url} transport={transport} />);
-  const project = await screen.findByRole('form', { name: `项目 ${daemon.project.name}` });
+  const project = expandProject(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` }));
   const remove = within(project).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
   await waitFor(() => expect(remove.disabled).toBe(false));
   fireEvent.click(remove);
@@ -208,7 +217,7 @@ test('保存后的 reload 取消事件触发的刷新，不会断开实时更新
   window.history.replaceState(null, '', '/settings/projects');
   render(<App baseUrl={daemon.url} transport={transport} />);
   await screen.findByText('实时更新已连接');
-  const remove = within(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` })).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
+  const remove = within(expandProject(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` }))).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
   await waitFor(() => expect(remove.disabled).toBe(false));
   fireEvent.click(remove);
   await screen.findByText('项目已删除');
@@ -296,7 +305,7 @@ test.each(['刚保存', '未保存'])('%s后复制 Agent 使用编辑器全部�
   await waitFor(() => expect(window.location.pathname).toBe('/settings/new-agent'));
   for (const [label, value] of [['职责说明', '当前职责'], ['模型', 'current-model'], ['驱动', 'codex'],
     ['推理强度', 'high'], ['计费方式', 'dedicated'], ['角色', 'executor'], ['附加提示词（可选）', '当前策略']]) {
-    expect((screen.getByLabelText(label!) as HTMLInputElement).value).toBe(value);
+    expect(fieldValue(label!)).toBe(value);
   }
   expect((screen.getByLabelText('fast') as HTMLInputElement).checked).toBe(true);
   expect((screen.getByLabelText('Agent id') as HTMLInputElement).value).toBe('');
@@ -323,14 +332,45 @@ test('模型和推理强度从 CLI 报出的选项中选择，换模型时只保
   const model = await screen.findByLabelText('模型', { selector: 'select' }) as HTMLSelectElement;
   expect([...model.options].map(option => option.textContent)).toEqual(['驱动默认', 'gpt-6-luna · CLI 未提供', 'Sol (gpt-sol)', 'Luna (gpt-luna)']);
   change('模型', 'gpt-sol');
-  const effort = screen.getByLabelText('推理强度', { selector: 'select' }) as HTMLSelectElement;
-  expect(effort.value).toBe('low');
+  const effort = screen.getByLabelText('推理强度', { selector: 'fieldset' });
+  expect(fieldValue('推理强度')).toBe('low');
   change('推理强度', 'ultra');
   change('模型', 'gpt-luna');
-  expect(effort.value).toBe('medium');
-  expect([...effort.options].map(option => option.value)).toEqual(['', 'low', 'medium']);
+  expect(fieldValue('推理强度')).toBe('medium');
+  expect(within(effort).getAllByRole('radio').map(option => (option as HTMLInputElement).value)).toEqual(['', 'low', 'medium']);
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await screen.findByText('已保存');
   const saved = JSON.parse(await readFile(join(daemon.directory, 'agents', 'codex-executor', 'config.json'), 'utf8'));
   expect([saved.model, saved.reasoningEffort]).toEqual(['gpt-luna', 'medium']);
+});
+
+test('Agent 外部编辑入口保留直接编辑和草稿，等待时禁用并显示启动失败原文，可重试', async () => {
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const calls: { command: string; args: string[] }[] = [];
+  let fail = true;
+  daemon = await uiFixture([], undefined, { promptEditor: { platform: 'darwin', async launch(command, args) {
+    calls.push({ command, args });
+    if (fail) { await wait; throw new Error('editor unavailable: 原始错误 ENOENT'); }
+  } } });
+  window.history.replaceState(null, '', '/settings/agents/claude-executor');
+  render(<App baseUrl={daemon.url} />);
+  const editor = await screen.findByRole('form', { name: 'Agent 详情' });
+  const prompt = within(editor).getByLabelText('附加提示词（可选）') as HTMLTextAreaElement;
+  fireEvent.change(prompt, { target: { value: '界面里未保存的提示词' } });
+  const open = within(editor).getByRole('button', { name: '在编辑器中打开' });
+  fireEvent.click(open);
+  expect((open as HTMLButtonElement).disabled).toBe(true);
+  release();
+  expect((await within(editor).findByRole('alert')).textContent).toContain('editor unavailable: 原始错误 ENOENT');
+  expect(prompt.value).toBe('界面里未保存的提示词');
+  expect((await agent('claude-executor')).prompt).not.toBe(prompt.value);
+  fail = false;
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(open);
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[1]).toEqual({ command: 'open', args: ['-t', join(daemon!.directory, 'agents', 'claude-executor', 'prompt.md')] });
+  expect(prompt.value).toBe('界面里未保存的提示词');
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(editor).getByRole('button', { name: 'Open in editor' })).toBeTruthy();
 });

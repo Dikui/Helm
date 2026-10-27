@@ -1,3 +1,4 @@
+import { normalizePlan } from './plans.js';
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -179,6 +180,10 @@ export class AcpDriver implements Driver {
         output({ method: 'session/update', params: notification });
         if (notification.sessionId !== id) return;
         const update = notification.update;
+        if (update.sessionUpdate === 'plan') {
+          const entries = normalizePlan(update.entries);
+          if (entries) push({ type: 'plan', entries });
+        }
         if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.rawInput !== undefined) toolInputs.set(update.toolCallId, update.rawInput);
         if (update.sessionUpdate === 'tool_call') finalAnswer = '';
         if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') finalAnswer += update.content.text;

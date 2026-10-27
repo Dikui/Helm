@@ -283,3 +283,96 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   fireEvent.click(within(message).getByRole('link', { name: 'notes.txt' }));
   expect(await within(await screen.findByRole('dialog')).findByText('附件原文', { selector: 'pre' })).toBeTruthy();
 });
+
+test('v2 排队条目的立即操作打断本轮，原消息只提交一次', async () => {
+  const work = await executingWork([
+    [{ type: 'output', text: '正在处理本轮' }, { type: 'hang' }],
+    [{ type: 'output', text: '开始处理排队消息' }, { type: 'hang' }],
+  ]);
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  await within(chat).findByText('正在处理本轮', { selector: 'summary' });
+  const input = within(chat).getByLabelText('消息');
+  fireEvent.change(input, { target: { value: '马上检查边界' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  const queue = await within(chat).findByRole('region', { name: '下一轮处理' });
+  fireEvent.click(within(queue).getByRole('button', { name: '立即' }));
+  await within(chat).findByText('开始处理排队消息', { selector: 'summary' });
+  await waitFor(() => expect(within(chat).queryByRole('region', { name: '下一轮处理' })).toBeNull());
+  const conversation = (await daemon!.call('get-conversation', { workId: work.id })).result;
+  expect(conversation.filter((item: any) => item.body === '马上检查边界')).toHaveLength(1);
+});
+
+test('排队消息撤回成功经 SSE 更新历史，提交中禁用，失败显示运行层原始原因', async () => {
+  const work = await executingWork([[{ type: 'output', text: '处理本轮' }, { type: 'hang' }]]);
+  const message = (await daemon!.call('send-message', { workId: work.id, body: '可撤回消息', key: 'withdraw' })).result.message;
+  let release!: () => void;
+  let first = true;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/api/withdraw-message') && first) {
+      first = false;
+      await wait;
+      return new Response(JSON.stringify({ ok: false, error: { code: 'MESSAGE_CLAIMED', reason: '原始原因：这条消息已被调度者领取', allowedOperations: ['withdraw-message'] } }), { status: 409 });
+    }
+    return fetch(input, init);
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const queue = await within(chat).findByRole('region', { name: '下一轮处理' });
+  const withdraw = within(queue).getByRole('button', { name: '撤回' });
+  fireEvent.click(withdraw);
+  expect((withdraw as HTMLButtonElement).disabled).toBe(true);
+  expect((within(queue).getByRole('button', { name: '立即' }) as HTMLButtonElement).disabled).toBe(true);
+  release();
+  expect((await within(chat).findByRole('alert')).textContent).toContain('原始原因：这条消息已被调度者领取');
+  await waitFor(() => expect((withdraw as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(withdraw);
+  await waitFor(() => expect(within(chat).queryByRole('region', { name: '下一轮处理' })).toBeNull());
+  const history = within(chat).getByText('可撤回消息', { selector: 'article p' }).closest('article')!;
+  expect(within(history).getByText('已撤回')).toBeTruthy();
+  const item = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.id === message.id);
+  expect(item.withdrawnAt).toBeTruthy();
+  const remote = (await daemon!.call('send-message', { workId: work.id, body: '另一客户端撤回', key: 'remote-withdraw' })).result.message;
+  await within(chat).findByRole('region', { name: '下一轮处理' });
+  await daemon!.call('withdraw-message', { workId: work.id, messageId: remote.id });
+  await waitFor(() => expect(within(chat).queryByRole('region', { name: '下一轮处理' })).toBeNull());
+  expect(within(within(chat).getByText('另一客户端撤回', { selector: 'article p' }).closest('article')!).getByText('已撤回')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(history).getByText('Withdrawn')).toBeTruthy();
+});
+
+test('本轮计划显示真实总数和三种状态，更新至全部完成，原始步骤可展开', async () => {
+  let clear!: () => void;
+  const clearing = new Promise<void>(resolve => { clear = resolve; });
+  let advance!: () => void;
+  const ready = new Promise<void>(resolve => { advance = resolve; });
+  const entries = [{ content: '读项目', status: 'completed' as const }, { content: '整理边界', status: 'in_progress' as const }, { content: '核对标准', status: 'pending' as const }];
+  await executingWork([[
+    { type: 'plan', entries }, { type: 'output', text: '原始执行步骤' }, { type: 'hang', until: ready },
+    { type: 'plan', entries: entries.map(entry => ({ ...entry, status: 'completed' as const })) }, { type: 'hang', until: clearing },
+    { type: 'plan', entries: [] }, { type: 'hang' },
+  ]]);
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  expect(await within(chat).findByText(/第 2 \/ 3 步/)).toBeTruthy();
+  const plan = within(chat).getByRole('list', { name: '本轮计划' });
+  expect(within(plan).getAllByRole('listitem')).toHaveLength(3);
+  expect(within(plan).getByText('已完成')).toBeTruthy();
+  expect(within(plan).getByText('进行中').closest('li')?.getAttribute('aria-current')).toBe('step');
+  expect(within(plan).getByText('待做').closest('li')?.className).toBe('plan-pending');
+  const raw = within(chat).getByText('查看原始步骤', { selector: 'summary' });
+  fireEvent.click(raw);
+  expect(raw.closest('details')?.open).toBe(true);
+  expect(within(chat).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
+  advance();
+  expect(await within(chat).findByText(/第 3 \/ 3 步/)).toBeTruthy();
+  expect(within(plan).getAllByText('已完成')).toHaveLength(3);
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(chat).getByText(/Step 3 \/ 3/)).toBeTruthy();
+  expect(within(chat).getByRole('list', { name: 'Round plan' })).toBeTruthy();
+  clear();
+  await waitFor(() => expect(within(chat).queryByRole('list', { name: 'Round plan' })).toBeNull());
+  expect(within(chat).queryByText(/Step \d+ \/ \d+/)).toBeNull();
+  expect(within(chat).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
+});

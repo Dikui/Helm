@@ -23,6 +23,7 @@ export interface StartupBrief {
 }
 
 export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]): StartupBrief {
+  const withdrawn = new Set(store.db.prepare('SELECT id FROM messages WHERE work_id = ? AND withdrawn_at IS NOT NULL').all(workId).map(row => String(row.id)));
   const work = store.work(workId);
   const versions = store.descriptions(workId);
   const description = versions.at(-1);
@@ -37,6 +38,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     coordinatorNotes: String(store.notes(workId).body),
     // Executor steps can number thousands per round; outcomes arrive as dispatch-ended, steps stay readable via get-dispatch-output.
     newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
+      .filter(event => event.action !== 'message-sent' || !withdrawn.has(event.object.id))
       .filter(event => event.action !== 'dispatch-step' && event.action !== 'round-step')
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
@@ -96,19 +98,20 @@ export class RoundScheduler {
   private async run(workId: string) {
     const id = randomUUID();
     const token = randomBytes(32).toString('hex');
-    const ids = this.store.db.prepare(`SELECT q.event_id FROM wake_queue q JOIN events e ON e.id = q.event_id JOIN works w ON w.id = q.work_id
-      WHERE q.work_id = ? AND q.processed_by IS NULL
-      AND (w.status <> 'paused' OR (e.action = 'message-sent' AND e.actor_type = 'user'
-        AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
-      ORDER BY q.event_id`).all(workId).map(row => Number(row.event_id));
-    const brief = startupBrief(this.store, workId, ids);
     const outputPath = join(this.store.dataDir, 'rounds', `${id}.jsonl`);
     mkdirSync(join(this.store.dataDir, 'rounds'), { recursive: true });
     writeFileSync(outputPath, '');
-    this.store.transaction(() => {
+    const { ids, brief } = this.store.transaction(() => {
+      const ids = this.store.db.prepare(`SELECT q.event_id FROM wake_queue q JOIN events e ON e.id = q.event_id JOIN works w ON w.id = q.work_id
+        WHERE q.work_id = ? AND q.processed_by IS NULL
+        AND (w.status <> 'paused' OR (e.action = 'message-sent' AND e.actor_type = 'user'
+          AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
+        ORDER BY q.event_id`).all(workId).map(row => Number(row.event_id));
+      const brief = startupBrief(this.store, workId, ids);
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
       this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started', { eventIds: ids, outputPath }, { workId });
+      return { ids, brief };
     });
     this.tokens.set(token, { type: 'coordinator-round', id, workId });
     let reason: EndReason = 'error';

@@ -20,3 +20,7 @@
 .work-export-result { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 9; display: grid; gap: var(--space-2); width: min(360px, 80vw); padding: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
 .output-warning { flex-shrink: 0; display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-5); max-height: 25dvh; overflow: auto; border-bottom: 1px solid var(--border); background: var(--attention-soft); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .output-warning a { display: inline-block; }
+.work-inline-actions { display: contents; }
+.work-inline-actions .work-actions-menu { position: static; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; border: 0; padding: 0; background: none; box-shadow: none; }
+.work-inline-actions .work-actions-menu .btn { width: auto; }
+.work-inline-actions .work-action-error, .work-inline-actions .work-export-result { position: static; width: 100%; }

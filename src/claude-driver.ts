@@ -1,3 +1,4 @@
+import { normalizePlan } from './plans.js';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { lstat, realpath, stat } from 'node:fs/promises';
@@ -78,7 +79,7 @@ function executorPermission(cwd: string): CanUseTool {
 
 function coordinatorPermission(): CanUseTool {
   return async (tool, input, context) => {
-    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'Skill'].includes(tool) || tool.startsWith('mcp__');
+    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill'].includes(tool) || tool.startsWith('mcp__');
     if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
       return { behavior: 'deny', message: 'Helm coordinator may only read project code and use Skill or MCP tools; Bash must stay sandboxed.' };
     }
@@ -187,7 +188,7 @@ export class ClaudeDriver implements Driver {
       canUseTool: coordinator ? coordinatorPermission() : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
       // An explicit tools list hides Skill unless it is listed, even with `skills` set.
-      tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob']
+      tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite']
         : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], 'Skill'],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
@@ -234,6 +235,13 @@ export class ClaudeDriver implements Driver {
           for await (const message of stream) {
             if (controller.signal.aborted) return;
             yield { type: 'output', step: ++step, text: JSON.stringify(message) };
+            if (message.type === 'assistant' && !message.parent_tool_use_id) {
+              for (const block of message.message.content) {
+                if (block.type !== 'tool_use' || block.name !== 'TodoWrite') continue;
+                const entries = normalizePlan((block.input as { todos?: unknown })?.todos);
+                if (entries) yield { type: 'plan', step: ++step, entries };
+              }
+            }
             if (message.type === 'system' && message.subtype === 'compact_boundary') {
               yield { type: 'compaction', step: ++step };
             }

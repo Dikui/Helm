@@ -2,7 +2,7 @@ export interface Usage { inputTokens: number; outputTokens: number }
 export type WorkStatus = 'aligning' | 'executing' | 'paused' | 'awaiting-review' | 'completed' | 'cancelled';
 export interface Work {
   id: string; projectId: string; title: string; status: WorkStatus; createdAt: string;
-  runtimePauseReason: string | null; usage: Usage;
+  runtimePauseReason: string | null; usage: Usage; workBranch?: string | null;
 }
 export interface WorkSummary extends Work {
   summary: string; statusSince: string; completedCards: number; totalCards: number;

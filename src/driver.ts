@@ -25,7 +25,9 @@ export interface SessionOptions {
   // Report each detached group at spawn time, including if start() has not resolved.
   onProcess?: (process: ManagedProcess) => void;
 }
+export interface PlanEntry { content: string; status: 'pending' | 'in_progress' | 'completed' }
 export type DriverEvent =
+  | { type: 'plan'; step: number; entries: PlanEntry[] }
   | { type: 'output'; step: number; text: string }
   | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }
@@ -58,6 +60,7 @@ export type FakeStep =
   | { type: 'tool'; name: string; arguments: Record<string, unknown> | ((context: FakeContext) => Record<string, unknown>); saveAs?: string; check?: (result: unknown) => void }
   | { type: 'write'; path: string; content: string }
   | { type: 'output'; text: string }
+  | { type: 'plan'; entries: PlanEntry[] }
   | { type: 'artifact'; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction' }
   | { type: 'end'; reason: EndReason; finalAnswer?: string; usage?: TokenUsage }

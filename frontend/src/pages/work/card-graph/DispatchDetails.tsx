@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
+import { PlanSteps } from '../../../shared/PlanSteps.js';
 import { useI18n } from '../../../shared/i18n.js';
 import type { HelmEvent } from '../../../shared/types.js';
 import { conclusionLabels, DispatchStatus, endLabels } from './labels.js';
@@ -65,7 +66,7 @@ export function OutputSteps({ workId, dispatchId, roundId, lastStep, initialStep
     {!output.data ? <p role="status">{output.error ? '' : t('loading')}</p> : !Array.isArray(output.data) ? <p>{t('graphDeleted')}</p> : output.data.length === 0 ? <p className="muted">{t('graphEmptySteps')}</p> : <ol className="cg-steps">
       {output.data.map(step => <li key={step.step} ref={step.step === initialStep ? target : undefined} tabIndex={step.step === initialStep ? -1 : undefined} aria-current={step.step === initialStep ? 'step' : undefined}>
         <span className="cg-step-number">{t('graphStep')} {step.step}</span>
-        {step.type === 'output' ? <pre>{step.text}</pre> : step.type === 'artifact' ? <p className="cg-prose">{t('graphArtifact')} · {step.path}</p> : step.type === 'compaction' ? <p>{t('graphCompaction')}</p> : <p>{t('graphEnd')} · {t(endLabels[step.reason])}</p>}
+        {step.type === 'output' ? <pre>{step.text}</pre> : step.type === 'artifact' ? <p className="cg-prose">{t('graphArtifact')} · {step.path}</p> : step.type === 'plan' ? <PlanSteps entries={step.entries} /> : step.type === 'compaction' ? <p>{t('graphCompaction')}</p> : <p>{t('graphEnd')} · {t(endLabels[step.reason])}</p>}
         <details><summary>{t('graphRawStep')}</summary><pre>{JSON.stringify(step, null, 2)}</pre></details>
       </li>)}
     </ol>}

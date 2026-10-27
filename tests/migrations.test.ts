@@ -46,6 +46,7 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
     assert.equal((await call('get-work', { workId: 'work' })).status, 'aligning');
     assert.equal((await call('get-work', { workId: 'work' })).coordinatorAgentId, 'claude-coordinator');
     assert.equal((await call('get-conversation', { workId: 'work' }))[0].body, '升级前的消息');
+    assert.equal((await call('get-conversation', { workId: 'work' }))[0].withdrawnAt, null);
     const settings = await call('get-settings');
     assert.equal(settings.concurrencyLimit, 3);
     assert.equal(settings.dispatchWallTimeoutMs, 1_800_000);

@@ -491,3 +491,23 @@ test('DeepSeek 按 Helm 支持的路由列出模型，不启动 CLI', async t =>
     ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'].map(id => [id, ['low', 'high', 'max']]));
   assert.equal((await ctx.requests()).length, 0);
 });
+
+test('ACP plan 更新归一完整条目、替换和清空，忽略非本会话计划', async t => {
+  const entries = [{ content: '读取', priority: 'high', status: 'completed' }, { content: '执行', priority: 'medium', status: 'in_progress' }, { content: '检查', priority: 'low', status: 'pending' }];
+  for (const kind of ['grok', 'deepseek'] as const) {
+    const ctx = await acpFixture(t, {
+      ...(kind === 'deepseek' ? { configOptions: [
+        { id: 'model', name: 'Model', type: 'select', currentValue: '["deepseek-account","deepseek-flash"]', options: [{ value: '["deepseek-account","deepseek-flash"]', name: 'Flash' }] },
+        { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }] },
+      ] } : {}),
+      updates: [{ sessionUpdate: 'plan', entries }, { sessionUpdate: 'plan', entries: [] }],
+      notifications: [{ method: 'session/update', params: { sessionId: 'foreign', update: { sessionUpdate: 'plan', entries } } }],
+    }, false, kind);
+    const session = await ctx.driver.start(ctx.options);
+    t.after(() => session.cancel());
+    await session.send('列出计划');
+    const events = await collect(session.events);
+    assert.deepEqual(events.filter(event => event.type === 'plan').map(event => event.entries), [entries.map(({ content, status }) => ({ content, status })), []]);
+    assert.ok(events.every((event, i) => event.step === i + 1));
+  }
+});

@@ -26,7 +26,7 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 function stepSummary(event: DriverEvent) {
   const text = event.type === 'output' ? outputSummary(event.text) : event.type === 'end' ? (event.reason === 'completed' ? event.finalAnswer ?? '' : event.reason)
-    : event.type === 'artifact' ? event.path : '上下文压缩';
+    : event.type === 'artifact' ? event.path : event.type === 'plan' ? outputSummary(JSON.stringify(event)) : '上下文压缩';
   return text.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 200) ?? '';
 }
 

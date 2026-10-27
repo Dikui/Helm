@@ -2,14 +2,21 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
-import type { Gate, Work, WorkStatus } from '../../shared/types.js';
+import type { Gate, HelmEvent, WorkSummary, WorkStatus } from '../../shared/types.js';
 import { Link } from '../../shared/router.js';
 import { ReviewDetails } from '../work/brief/ReviewDetails.js';
+import { WorkActions } from '../work/WorkActions.js';
+import { ago, useClock } from '../../shared/clock.js';
+import { Markdown, useFilePreview } from '../../shared/files.js';
+import { recentProgress, progressLabels } from './recent-progress.js';
+import type { GraphNode } from '../work/card-graph/types.js';
 import type { ReviewGate } from '../work/brief/types.js';
 
+const noFiles: ReadonlySet<string> = new Set();
 export function GateDecision({ gate, workStatus, detailedReview = false }: { gate: ReviewGate; workStatus?: WorkStatus; detailedReview?: boolean }) {
   const { api } = useData();
   const { t } = useI18n();
+  const preview = useFilePreview(gate.workId);
   const [answer, setAnswer] = useState('');
   const [comment, setComment] = useState('');
   const [pending, setPending] = useState(false);
@@ -33,7 +40,7 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
   // 焦点在卡内（不在输入框里）时，按数字键选对应选项
   const shortcut = (event: KeyboardEvent<HTMLElement>) => {
     const index = Number(event.key) - 1;
-    if (readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
+    if (event.nativeEvent.isComposing || readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     event.preventDefault(); void decide(gate.options[index]);
   };
@@ -41,7 +48,8 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
   return <section role="group" aria-busy={pending} className="gate-actions" aria-label={gate.kind === 'review' ? t('reviewTitle') : gate.question} onKeyDown={shortcut}>
     <strong>{gate.kind === 'review' ? t('reviewTitle') : gate.question}</strong>
     {gate.kind === 'review' && <b>{t('reviewReport')}</b>}
-    {gate.body && <p className="agent-text">{gate.body}</p>}
+    {gate.body && <Markdown text={gate.body} workId={gate.workId} files={noFiles} onOpen={preview.open} />}
+    {preview.preview}
     {gate.kind === 'review' && gate.review && <ReviewDetails review={gate.review} detailed={detailedReview} />}
     {gate.kind === 'review' && !detailedReview && <Link href={`/works/${encodeURIComponent(gate.workId)}/brief`}>{t('reviewOpenDetails')}</Link>}
     {gate.description && <dl className="brief-preview">
@@ -51,7 +59,7 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     </dl>}
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
     {ended && <p className="pill">{t(workStatus)}</p>}
-    {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
+    {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
     {!readOnly && gate.kind === 'general' && <div className="opts">
       {gate.options.map((option, index) => <button className="btn" key={option} disabled={pending} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
         onClick={() => void decide(option)}>{option}{index < 9 && <kbd aria-hidden="true">{index + 1}</kbd>}</button>)}
@@ -69,11 +77,22 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     {error && <ErrorNotice error={error} />}
   </section>;
 }
-export function InboxDetails({ work }: { work: Pick<Work, 'id' | 'status'> }) {
-  const { t } = useI18n();
+export function InboxDetails({ work }: { work: WorkSummary }) {
+  const { t, language } = useI18n();
+  const now = useClock();
   const { data, error, reload } = useResource<(Gate & { type: string })[]>('get-conversation', { workId: work.id });
-  return <>{error && <ErrorNotice error={error} retry={reload} />}
-    {!data && !error && <p role="status">{t('loading')}</p>}
+  const events = useResource<HelmEvent[]>('get-events', { workId: work.id });
+  const graph = useResource<GraphNode[]>('get-card-graph', { workId: work.id });
+  const cards = graph.data?.filter(node => node.type === 'card') ?? [];
+  const recent = recentProgress(events.data ?? []);
+  return <><hr />{error && <ErrorNotice error={error} retry={reload} />}{events.error && <ErrorNotice error={events.error} retry={events.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
+    {(!data || !events.data) && !error && !events.error && <p role="status">{t('loading')}</p>}
+    {recent.length > 0 && <ol className="tl" aria-label={t('inboxRecentSteps')}>{recent.map(event => {
+      const details = event.details as { summary?: string; step?: number; question?: string; reason?: string } | null;
+      const card = cards.findIndex(card => card.id === event.cardId);
+      return <li key={event.id}><span>{card >= 0 && `${t('graphCard')} ${card + 1} · `}{details?.summary || details?.question || t(progressLabels[event.action]!)}{details?.step ? ` · ${details.step}` : ''}</span><time dateTime={event.time} title={new Date(event.time).toLocaleString(language === 'zh' ? 'zh-CN' : 'en')}>{ago(event.time, now, language)}</time></li>;
+    })}</ol>}
     {data?.filter(item => item.type === 'gate' && item.status === 'pending').map(gate => <GateDecision key={gate.id} gate={gate} workStatus={work.status} />)}
+    <div className="acts inbox-work-actions"><WorkActions work={work} reload={() => { reload(); events.reload(); graph.reload(); }} inline /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('inboxOpen')}</Link></div>
   </>;
 }

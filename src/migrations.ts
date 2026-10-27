@@ -206,4 +206,7 @@ export const migrations: readonly string[] = [
   `,  `
   ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  ALTER TABLE messages ADD COLUMN withdrawn_at TEXT;
+  `,
 ];

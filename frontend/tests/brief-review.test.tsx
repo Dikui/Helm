@@ -180,11 +180,11 @@ async function checkGraphDecision(question: string, zh: string, en: string) {
   fireEvent.click(within(header).getByRole('link', { name: '调度结构' }));
   const graph = await screen.findByRole('region', { name: '卡片图' });
   const node = await within(graph).findByRole('button', { name: `关卡：${question}` });
-  expect(node.querySelector('.cg-node-summary')!.textContent).toBe(zh);
+  expect(node.title).toContain(zh);
   fireEvent.click(node);
   expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText(zh)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(node.querySelector('.cg-node-summary')!.textContent).toBe(en);
+  expect(node.title).toContain(en);
   expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText(en)).toBeTruthy();
 }
 

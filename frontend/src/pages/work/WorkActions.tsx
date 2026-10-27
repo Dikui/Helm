@@ -11,7 +11,7 @@ import { ActionDialog } from './ActionDialog.js';
 import './work-actions.css';
 
 export interface ActionWork extends Work { allowedOperations?: string[]; coordinatorAgentId?: string; outputsDeletedAt?: string | null }
-export function WorkActions({ work, reload }: { work: ActionWork; reload: () => void }) {
+export function WorkActions({ work, reload, inline = false }: { work: ActionWork; reload: () => void; inline?: boolean }) {
   const { t } = useI18n();
   const { api } = useData();
   const { navigate } = useRouter();
@@ -52,22 +52,22 @@ export function WorkActions({ work, reload }: { work: ActionWork; reload: () => 
       reload();
     } finally { pending.current = false; setBusy(false); }
   }
-  return <div ref={container} className="work-actions" onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
+  return <div ref={container} className={`work-actions${inline ? ' work-inline-actions' : ''}`} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
     {work.outputsDeletedAt && <span className="pill">{t('outputsDeleted')}</span>}
-    <button ref={trigger} className="btn sm" aria-expanded={open} onClick={() => setOpen(!open)}>{t('workActions')} <span aria-hidden="true">⌄</span></button>
-    {open && <div className="work-actions-menu" role="group" aria-label={t('workActionsGroup')}>
-      <button className="btn sm" disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
-        onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')}</button>
-      <button className="btn sm" disabled={!enabled('change-coordinator-agent')} onClick={() => { setError(undefined); setOpen(false); setPanel('agent'); }}>{t('changeCoordinator')}</button>
-      <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>
-      <button className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setOpen(false); setPanel('export'); }}>{t('exportOutputs')}</button>
-      <button className="btn sm work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('delete'); }}>{t('deleteOutputs')}</button>
-      <button className="btn sm work-danger" disabled={!enabled('delete-work', ended)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('remove'); }}>{t('deleteWork')}</button>
-      <p className="muted">{t(ended ? 'endedWorkActions' : 'outputsWhenEnded')}</p>
-      {error && <ErrorNotice error={error} />}
+    {!inline && <button ref={trigger} className="btn sm" aria-expanded={open} onClick={() => setOpen(!open)}>{t('workActions')} <span aria-hidden="true">⌄</span></button>}
+    {(inline || open) && <div className="work-actions-menu" role="group" aria-label={t('workActionsGroup')}>
+      {(!inline || !ended) && <button ref={inline ? trigger : undefined} className="btn sm" disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
+        onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')}</button>}
+      {!inline && <button className="btn sm" disabled={!enabled('change-coordinator-agent')} onClick={() => { setError(undefined); setOpen(false); setPanel('agent'); }}>{t('changeCoordinator')}</button>}
+      {!inline && <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>}
+      {(!inline || ended) && <button ref={inline && ended ? trigger : undefined} className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={event => { if (inline) trigger.current = event.currentTarget; setError(undefined); setOpen(false); setPanel('export'); }}>{t('exportOutputs')}</button>}
+      {(!inline || ended) && <button className="btn sm work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={event => { if (inline) trigger.current = event.currentTarget; setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('delete'); }}>{t('deleteOutputs')}</button>}
+      {!inline && <button className="btn sm work-danger" disabled={!enabled('delete-work', ended)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('remove'); }}>{t('deleteWork')}</button>}
+      {!inline && <p className="muted">{t(ended ? 'endedWorkActions' : 'outputsWhenEnded')}</p>}
+      {error && !panel && <ErrorNotice error={error} />}
     </div>}
     {exportPath && !open && !panel && <div className="work-export-result" role="status"><div className="row"><span>{t('outputsExported')}</span><button className="btn sm" aria-label={t('dismissActionFeedback')} onClick={() => setExportPath(undefined)}>×</button></div><span className="mono">{exportPath}</span></div>}
-    {error && !panel && !open && <div className="work-action-error"><ErrorNotice error={error} /><button className="btn sm" onClick={() => setError(undefined)}>{t('dismissActionFeedback')}</button></div>}
+    {error && !panel && !open && !inline && <div className="work-action-error"><ErrorNotice error={error} /><button className="btn sm" onClick={() => setError(undefined)}>{t('dismissActionFeedback')}</button></div>}
     {panel === 'export' && <ActionDialog key="export" title={t('exportOutputs')} busy={busy} onClose={close} returnFocus={trigger}>
       <p>{work.title}</p>
       {work.outputsDeletedAt && <p>{t('exportAfterDeletion')}</p>}

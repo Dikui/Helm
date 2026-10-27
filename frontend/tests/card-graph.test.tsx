@@ -53,14 +53,15 @@ test('派单打回回路、步骤分页及成果可查，派单结束经 SSE 同
     const graph = await screen.findByRole('region', { name: '卡片图' });
     const node = await within(graph).findByRole('button', { name: '卡片 1：验证码登录' });
     await waitFor(() => expect(node.textContent).toContain('↺ 1'), { timeout: 5_000 });
-    await waitFor(() => expect(node.textContent).toContain('修复中，等待结果'), { timeout: 5_000 });
-    expect(node.textContent).toContain('claude-executor');
-    expect(node.textContent).toContain('步骤 29');
-    expect(node.textContent).toContain('修复中，等待结果');
+    await waitFor(() => expect(node.title).toContain('修复中，等待结果'), { timeout: 5_000 });
+    expect(node.title).toContain('claude-executor');
+    expect(node.title).toContain('步骤 29');
+    expect(node.title).toContain('修复中，等待结果');
     fireEvent.click(node);
     const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
     expect(await within(inspector).findByText('过期验证码仍能登录')).toBeTruthy();
     expect(within(inspector).getByText('↺ 调度者打回，同一张卡片重新执行')).toBeTruthy();
+    fireEvent.click(within(inspector).getByRole('button', { name: '派单 #3 · 执行' }));
     expect(await within(inspector).findByText('修复步骤 1')).toBeTruthy();
     expect(within(inspector).queryByText('修复步骤 21')).toBeNull();
     fireEvent.click(within(inspector).getByRole('button', { name: '下一页步骤' }));
@@ -71,8 +72,8 @@ test('派单打回回路、步骤分页及成果可查，派单结束经 SSE 同
     expect(await within(inspector).findByText('tests: 2; pass: 2')).toBeTruthy();
     finish();
     await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result.at(-1)?.status === 'ended');
-    await waitFor(() => expect(node.textContent).toContain('修复完成，测试全通过'), { timeout: 5_000 });
-    expect(await within(inspector).findByText('修复完成，测试全通过')).toBeTruthy();
+    await waitFor(() => expect(node.title).toContain('修复完成，测试全通过'), { timeout: 5_000 });
+    expect(await within(inspector).findByText('修复完成，测试全通过', { selector: 'p' })).toBeTruthy();
     expect(within(inspector).getAllByText('正常完成').length).toBeGreaterThan(0);
     expect(within(inspector).getAllByText('边界检查通过').length).toBeGreaterThan(0);
     fireEvent.click(await within(inspector).findByRole('button', { name: '读取成果：login.txt' }));
@@ -154,9 +155,9 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
   const confirmation = gates.find((node: any) => node.kind === 'work-confirmation');
   const confirmationNode = await within(graph).findByRole('button', { name: `关卡：${confirmation.question}` });
   expect(confirmationNode.textContent).toContain('已确认');
-  expect(confirmationNode.querySelector('.cg-node-summary')!.textContent).toBe('已确认');
+  expect(confirmationNode.title).toContain('已确认');
   fireEvent.click(confirmationNode);
-  expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText('已确认')).toBeTruthy();
+  expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText('已确认', { selector: 'p' })).toBeTruthy();
   expect(await within(graph).findByRole('button', { name: /卡片 \d+：接通接口/ })).toBeTruthy();
   expect(within(graph).getByRole('button', { name: /卡片 \d+：实现表单/ })).toBeTruthy();
   expect(within(graph).getByRole('button', { name: '关卡：选择发布时机' }).textContent).toContain('待你决定');
@@ -170,22 +171,22 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
   fireEvent.click(within(graph).getByRole('button', { name: /卡片 \d+：集成检查/ }));
   const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
   expect(within(inspector).getByRole('heading', { name: '集成检查' })).toBeTruthy();
-  expect(within(inspector).getByText('接通接口')).toBeTruthy();
-  expect(within(inspector).getByText('实现表单')).toBeTruthy();
+  expect(within(inspector).getByRole('button', { name: /接通接口/ })).toBeTruthy();
+  expect(within(inspector).getByRole('button', { name: /实现表单/ })).toBeTruthy();
   expect(within(inspector).getByText('选择发布时机')).toBeTruthy();
   expect(await within(inspector).findByText('还没有派单。')).toBeTruthy();
   fireEvent.click(within(graph).getByRole('button', { name: '关卡：选择发布时机' }));
   expect(screen.getByRole('complementary', { name: '关卡检查器' }).textContent).toContain('等待用户决定');
   const choice = gates.find((node: any) => node.kind === 'general');
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: choice.id, decision: 'confirm' }));
-  await waitFor(() => expect(within(graph).getByRole('button', { name: '关卡：选择发布时机' }).querySelector('.cg-node-summary')!.textContent).toBe('confirm'));
+  await waitFor(() => expect(within(graph).getByRole('button', { name: '关卡：选择发布时机' }).title).toContain('confirm'));
   expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText('confirm', { selector: 'p' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByRole('region', { name: 'Card graph' })).toBeTruthy();
   expect(screen.getByRole('button', { name: /Card \d+：接通接口/ })).toBeTruthy();
-  expect(confirmationNode.querySelector('.cg-node-summary')!.textContent).toBe('Confirmed');
+  expect(confirmationNode.title).toContain('Confirmed');
   fireEvent.click(confirmationNode);
-  expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText('Confirmed')).toBeTruthy();
+  expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText('Confirmed', { selector: 'p' })).toBeTruthy();
 });
 
 test('排队和运行中的派单结论显示占位符，结束后才显示未声明，支持中英文', async () => {
@@ -207,6 +208,7 @@ test('排队和运行中的派单结论显示占位符，结束后才显示未�
     for (const name of ['卡片 1：运行卡片', '卡片 2：排队卡片']) {
       fireEvent.click(await within(graph).findByRole('button', { name }));
       const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
+      fireEvent.click(within(inspector).getByRole('button', { name: '派单 #1 · 执行' }));
       const detail = await within(inspector).findByRole('region', { name: '派单详情' });
       const label = await within(detail).findByText('自报结论');
       expect(label.nextElementSibling!.textContent).toBe('—');
@@ -270,5 +272,6 @@ test('检查器暂停和恢复卡片，取消前二次确认，关闭确认不�
   const ended = (await daemon.call('get-dispatch', { workId: work.id, dispatchId: dispatch.id })).result;
   expect(ended.endReason).toBe('aborted');
   expect(ended.abortReason).toBe('卡片暂停');
+  fireEvent.click(within(inspector).getByRole('button', { name: '派单 #1 · 执行' }));
   expect(await within(inspector).findByText('卡片暂停')).toBeTruthy();
 });

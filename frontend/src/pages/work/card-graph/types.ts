@@ -8,7 +8,7 @@ export interface CardNode {
   cardBranch: string | null; workPath: string | null; usage: Usage; dependencies: NodeRef[];
 }
 export interface GateNode extends Gate {
-  type: 'gate'; dependencies: NodeRef[]; decision: string | null; withdrawalReason: string | null;
+  type: 'gate'; createdAt: string; dependencies: NodeRef[]; decision: string | null; withdrawalReason: string | null;
 }
 export type GraphNode = CardNode | GateNode;
 export interface Dispatch {
@@ -20,6 +20,7 @@ export interface Dispatch {
   usage: Usage; outputStatus: 'available' | 'deleted';
 }
 export type OutputStep =
+  | { type: 'plan'; step: number; entries: import('../../../../../src/driver.js').PlanEntry[] }
   | { type: 'output'; step: number; text: string }
   | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }

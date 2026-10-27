@@ -31,6 +31,9 @@ export function ConversationView({ work }: { work: Work }) {
   const interruptBusy = useRef(false);
   const [interrupting, setInterrupting] = useState(false);
   const [interruptError, setInterruptError] = useState<Error>();
+  const withdrawingRef = useRef(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<Error>();
   const view = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useStoredSize('helm.conversation-dock-height');
@@ -50,11 +53,18 @@ export function ConversationView({ work }: { work: Work }) {
     ? `${t('conversationCard')} · ${cards.find(card => card.id === message.cardId)?.content?.split(/\r?\n/, 1)[0] || message.cardId}`
     : message.gateId ? `${t('conversationGate')} · ${gates.find(gate => gate.id === message.gateId)?.question || message.gateId}` : undefined;
   const interrupt = async () => {
-    if (!running || rounds.error || ended || interruptBusy.current || submission.pending) return;
+    if (!running || rounds.error || ended || interruptBusy.current || withdrawingRef.current || submission.pending) return;
     interruptBusy.current = true; setInterrupting(true); setInterruptError(undefined);
     try { await api.call('interrupt-round', params); }
     catch (error) { setInterruptError(error as Error); }
     finally { interruptBusy.current = false; setInterrupting(false); rounds.reload(); }
+  };
+  const withdraw = async (messageId: string) => {
+    if (withdrawingRef.current || interruptBusy.current || ended) return;
+    withdrawingRef.current = true; setWithdrawing(true); setWithdrawError(undefined);
+    try { await api.call('withdraw-message', { ...params, messageId }); }
+    catch (error) { setWithdrawError(error as Error); }
+    finally { withdrawingRef.current = false; setWithdrawing(false); rounds.reload(); conversation.reload(); }
   };
   const send = async (immediate = false) => {
     if (ended || submission.pending || interruptBusy.current) return;
@@ -76,6 +86,7 @@ export function ConversationView({ work }: { work: Work }) {
       {conversation.data?.map(item => <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
         <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : 'alignmentCoordinator')}</b>
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
+          {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
         {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !ended
@@ -90,11 +101,12 @@ export function ConversationView({ work }: { work: Work }) {
       max={() => (view.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => dock.current?.getBoundingClientRect().height ?? 200} />
     <div className="conversation-dock" ref={dock} style={dockHeight ? { height: dockHeight } : undefined}>
     <RoundSteering round={running} steps={rounds.data?.currentSteps.filter(step => step.type !== 'end') ?? []}
-      queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
-      busy={interrupting || submission.pending || ended || Boolean(rounds.error)} interrupt={() => void interrupt()} />
+      plan={rounds.data?.currentPlan ?? []} withdraw={messageId => void withdraw(messageId)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
+      busy={interrupting || withdrawing || submission.pending || ended || Boolean(rounds.error)} interrupt={() => void interrupt()} />
+    {withdrawError && <ErrorNotice error={withdrawError} />}
     {interruptError && <ErrorNotice error={interruptError} />}
     <form className="conversation-composer" noValidate aria-busy={submission.pending || interrupting} onSubmit={event => { event.preventDefault(); void send(); }}>
-      <label><span className="sr">{t('alignmentMessage')}</span><textarea value={body} disabled={locked} placeholder={t('conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
+      <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
         if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.metaKey || event.ctrlKey) { event.preventDefault(); void send(true); }
         else if (!event.shiftKey) { event.preventDefault(); void send(); }

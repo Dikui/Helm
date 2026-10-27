@@ -35,10 +35,12 @@ export function ModelFields({ settings, change, fieldProps, fieldError }: {
       {model !== null && !current && <option value={model}>{model} · {t('notOffered')}</option>}
       {options.filter(option => option.id !== null).map(option => <option key={option.id} value={option.id!}>{option.label === option.id ? option.id : `${option.label} (${option.id})`}</option>)}
     </select>{fieldError('model')}</label>
-    <label htmlFor="agent-reasoningEffort">{t('reasoning')}<select {...fieldProps('reasoningEffort')} value={effort ?? ''} onChange={event => change({ model, reasoningEffort: event.target.value || null })}>
-      {allowsDefault ? <option value="">{t('driverDefault')}</option> : effort === null && <option value="" disabled>{t('chooseEffort')}</option>}
-      {effort !== null && !efforts.includes(effort) && <option value={effort}>{effort} · {t('notOffered')}</option>}
-      {efforts.map(option => <option key={option}>{option}</option>)}
-    </select>{fieldError('reasoningEffort')}</label>
+    <fieldset className="settings-efforts" {...fieldProps('reasoningEffort')} tabIndex={-1}><legend>{t('reasoning')}</legend>
+      <div className="seg settings-effort-options">
+        {allowsDefault && <label><input type="radio" name="agent-effort" value="" checked={effort === null} onChange={() => change({ model, reasoningEffort: null })} /><span>{t('driverDefault')}</span></label>}
+        {effort !== null && !efforts.includes(effort) && <label><input type="radio" name="agent-effort" value={effort} checked readOnly /><span>{effort} · {t('notOffered')}</span></label>}
+        {efforts.map(option => <label key={option}><input type="radio" name="agent-effort" value={option} checked={effort === option} onChange={() => change({ model, reasoningEffort: option })} /><span>{option}</span></label>)}
+      </div>{effort === null && !allowsDefault && <p className="muted">{t('chooseEffort')}</p>}{fieldError('reasoningEffort')}
+    </fieldset>
   </>;
 }

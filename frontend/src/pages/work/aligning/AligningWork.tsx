@@ -6,6 +6,7 @@ import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview } from '../../../shared/files.js';
+import type { Project } from '../../new-work/types.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import './aligning.css';
@@ -13,9 +14,11 @@ import './aligning.css';
 // The work branch only exists after the brief is confirmed.
 const noFiles: ReadonlySet<string> = new Set();
 
-export function AligningWork({ workId }: { workId: string }) {
+export function AligningWork({ workId, projectId, workBranch }: { workId: string; projectId: string; workBranch?: string | null }) {
   const { api } = useData();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const projects = useResource<Project[]>('list-projects');
+  const project = projects.data?.find(item => item.id === projectId);
   const conversation = useResource<ConversationItem[]>('get-conversation', { workId });
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
   const [version, setVersion] = useState<number>();
@@ -57,11 +60,16 @@ export function AligningWork({ workId }: { workId: string }) {
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
-          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b><Markdown text={item.body} workId={workId} files={noFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
+          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><div className="aligning-who"><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b>{item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}<time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></div><Markdown text={item.body} workId={workId} files={noFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
           : item.kind === 'work-confirmation'
-            ? item.status === 'pending' && <div className="aligning-gate" key={item.id}>
+            ? item.status === 'pending' && <div className="aligning-gate gate-actions" key={item.id} role="group" aria-label={t('alignmentConfirmBrief')} onKeyDown={event => {
+              if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+              if (event.key === '1') { event.preventDefault(); void confirm(); }
+              if (event.key === '2') { event.preventDefault(); input.current?.focus(); }
+            }}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
-              <div className="row">{confirmButton}<button className="btn" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}</button></div>
+              <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
+              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span></p>}
             </div>
             : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
@@ -69,7 +77,7 @@ export function AligningWork({ workId }: { workId: string }) {
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
       <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
-        <label><span className="sr">{t('alignmentMessage')}</span><textarea ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
+        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
@@ -80,7 +88,7 @@ export function AligningWork({ workId }: { workId: string }) {
       </form>
     </section>
     <aside className="aligning-brief" aria-label={t('brief')} aria-busy={confirming}>
-      <header><h2>{t('brief')}</h2>{shown && <><span className="pill att">{t('alignmentUnconfirmed')}</span><label>{t('alignmentVersion')}<select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
+      <header><h2>{t('brief')}</h2>{shown && <><span className="pill att">{t('alignmentUnconfirmed')}</span><label><span className="sr">{t('alignmentVersion')}</span><select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
         {[...versions].reverse().map(item => <option key={item.id} value={item.version}>v{item.version}</option>)}
       </select></label></>}</header>
       <div className="aligning-brief-body">
@@ -93,7 +101,10 @@ export function AligningWork({ workId }: { workId: string }) {
             return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
               <li key={index}>{previous && !oldLines.includes(line) ? <mark>{line}</mark> : line}</li>)}</ul></section>;
           })}
-          <section className="aligning-base"><h3>{t('newWorkBase')}</h3><p className="mono">{shown.baseRef} <span title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></p></section>
+          <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>
+          {projects.error && <ErrorNotice error={projects.error} retry={projects.reload} />}
+          {project?.gitStatusReason && <p role="status">{project.gitStatusReason}</p>}
+          {!!project?.uncommittedChanges && <p className="warn"><span>!</span><span>{project.uncommittedChanges} {t('newWorkUncommittedHint')}</span></p>}
           <p className="muted">{t('alignmentNewEntriesHint')}</p>
           {latest?.id !== shown.id && <p>{t('alignmentHistoricalDraft')}</p>}
         </>}

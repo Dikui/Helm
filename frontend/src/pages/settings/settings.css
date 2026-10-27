@@ -2,7 +2,7 @@
 .settings-page .settings-nav { position: sticky; top: 0; display: grid; align-content: start; gap: var(--space-1); padding: var(--space-3); margin: 0; }
 .settings-page .settings-nav a { display: block; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); color: var(--muted); text-decoration: none; }
 .settings-page .settings-nav a:hover, .settings-page .settings-nav a[aria-current='page'] { background: var(--surface-soft); color: var(--text); }
-.settings-agents { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 400px; border-left: 1px solid var(--border); }
+.settings-agents { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); border-left: 1px solid var(--border); }
 .settings-agent-list { min-width: 0; padding: var(--space-4); }
 .settings-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
 .settings-heading h2 { margin-bottom: var(--space-1); }
@@ -48,7 +48,7 @@
 .settings-page .settings-numeric label { display: contents; }
 .settings-unit { display: flex; align-items: center; gap: var(--space-2); }
 .settings-unit input { flex: 1; }
-@media (max-width: 1400px) { .settings-agents { grid-template-columns: minmax(0, 1fr); } .settings-editor { border-left: 0; border-top: 1px solid var(--border); } }
+.settings-editor { border-left: 0; border-top: 1px solid var(--border); }
 @media (max-width: 1100px) { .settings-page { grid-template-columns: minmax(0, 1fr); } .settings-page .settings-nav { position: static; display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); } .settings-agents, .settings-simple { border-left: 0; } }
 @media (max-width: 760px) { .settings-agent-row { grid-template-columns: 32px minmax(0, 1fr); } .settings-agent-status { grid-column: 2; justify-items: start; } .settings-two { grid-template-columns: minmax(0, 1fr); } }
 .settings-leave { display: grid; gap: var(--space-3); margin: var(--space-4); padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface-soft); }
@@ -60,3 +60,83 @@
 .settings-library-input input { flex: 1 1 10rem; }
 .settings-library-input button { flex-shrink: 0; }
 .settings-box code { overflow-wrap: anywhere; }
+/* v2 settings: a quiet subnav, compact rows, and an editor with its own scroll. */
+.settings-page { container: settings / inline-size; grid-template-columns: 180px minmax(0, 1fr); min-height: 0; overflow: hidden; align-content: stretch; }
+.settings-page .settings-nav { position: static; border-right: 1px solid var(--border); overflow: auto; }
+.settings-page .settings-nav a { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.settings-agents { min-height: 0; overflow: auto; border-left: 0; align-items: start; }
+.settings-agent-list { padding: 16px 24px 32px; }
+.settings-heading { flex-wrap: nowrap; align-items: center; margin-bottom: 12px; }
+.settings-heading .btn { flex-shrink: 0; white-space: nowrap; }
+.settings-heading h2 { font-size: 16px; }
+.settings-agent-row { align-items: center; padding: 12px 14px; }
+.settings-agent-row.off { background: var(--clear); }
+.settings-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.settings-agent-row > span:nth-child(2) > .settings-meta:last-child { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.settings-bill { display: inline-flex; align-items: center; min-height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 10px; }
+.settings-agent-status { gap: 4px; max-width: 9rem; font-size: 11px; text-align: right; }
+.settings-editor { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.settings-detail-head { display: flex; align-items: center; gap: 12px; }
+.settings-detail-head > div { flex: 1; min-width: 0; }
+.settings-detail-head h2 { font-size: 15px; margin: 0; }
+.settings-detail-head small { display: block; font-size: 10px; overflow-wrap: anywhere; }
+.settings-page textarea { resize: none; }
+.settings-page .settings-prompt { background: var(--surface-soft); font-family: var(--mono); font-size: 12px; line-height: 1.6; min-height: 180px; }
+.settings-fields { gap: 20px; }
+.settings-page .settings-fast { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.settings-fast > span { display: grid; gap: 3px; }
+.settings-fast small { font-size: 11px; }
+.settings-page .settings-toggle { appearance: none; position: relative; flex-shrink: 0; width: 34px; height: 20px; padding: 0; border: 0; border-radius: 999px; background: var(--border-strong); cursor: pointer; }
+.settings-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-xs); transition: transform .15s; }
+.settings-toggle:checked { background: var(--accent); }
+.settings-toggle:checked::after { transform: translateX(14px); background: var(--on-accent); }
+.settings-billing, .settings-efforts { border: 0; margin: 0; padding: 0; min-width: 0; }
+.settings-billing legend, .settings-efforts legend { padding: 0; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.settings-page .settings-billing-option { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.settings-billing-option:has(input:checked) { border-color: var(--ring); background: var(--surface-soft); }
+.settings-billing-option:hover { background: var(--hover); }
+.settings-page .settings-billing-option input { width: 14px; height: 14px; padding: 0; margin: 3px 0 0; }
+.settings-billing-option b { font-size: 13px; font-weight: 500; }
+.settings-billing-option small { display: block; font-size: 11px; color: var(--muted); }
+.settings-effort-options { display: flex; flex-wrap: wrap; gap: 2px; }
+.settings-effort-options label { position: relative; flex: 1; padding: 0; cursor: pointer; }
+.settings-page .settings-effort-options input { width: 1px; height: 1px; padding: 0; }
+.settings-effort-options label span { display: block; padding: 4px 6px; border-radius: 6px; color: var(--muted); font-size: 11px; text-align: center; }
+.settings-effort-options label:has(input:checked) span { background: var(--surface); color: var(--text); box-shadow: var(--shadow-xs); }
+.settings-effort-options label:has(input:focus-visible) span { outline: 2px solid var(--ring); outline-offset: 1px; }
+.settings-effort-options label:hover span { background: var(--hover); }
+.settings-actions { position: sticky; bottom: 0; align-items: center; background: var(--surface); }
+.settings-actions > span { flex: 1 1 100%; font-size: 11px; }
+.settings-actions .btn { font-size: 12px; min-height: 28px; padding: 4px 8px; }
+.settings-simple { max-width: none; min-height: 0; overflow: auto; border-left: 0; padding: 16px 24px 32px; }
+.settings-simple > * { width: 100%; max-width: 640px; }
+.settings-simple .settings-box { padding: 12px 14px; gap: 10px; }
+.settings-runtime-group { border: 0; padding: 0 !important; gap: 0 !important; }
+.settings-runtime-group > h3 { padding-bottom: 8px; }
+.settings-runtime-group > .muted { font-size: 11px; padding-bottom: 8px; }
+.settings-runtime-group > div:has(.settings-numeric) { padding: 12px 14px; border: 1px solid var(--border); border-bottom: 0; }
+.settings-runtime-group > div:has(.settings-numeric):first-of-type { border-radius: 8px 8px 0 0; }
+.settings-runtime-group > div:has(.settings-numeric):has(+ .settings-feedback) { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+.settings-runtime-group > .row { justify-content: flex-end; padding-top: 8px; }
+.settings-numeric { grid-template-columns: minmax(0, 1fr) 120px; }
+.settings-project-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; font-size: 12px; }
+.settings-project-summary code { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.settings-project-config { border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }
+.settings-project-config > summary { color: var(--muted); }
+.settings-project-config > summary::after { content: '⌄'; margin-left: 8px; }
+.settings-project-config > div { display: grid; gap: 12px; padding-top: 12px; }
+.settings-prompt-group > label h3 { color: var(--text); }
+@container settings (min-width: 900px) { .settings-agents { grid-template-columns: minmax(0, 1fr) 400px; } .settings-editor { position: sticky; top: 0; height: 100%; max-height: 100%; border-left: 1px solid var(--border); border-top: 0; overflow: auto; } }
+@media (max-width: 1240px) { .settings-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } .settings-page .settings-nav { display: flex; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); } .settings-agents { grid-template-columns: minmax(0, 1fr); } .settings-editor { border-left: 0; border-top: 1px solid var(--border); } }
+@media (max-width: 640px) { .settings-page { overflow: visible; } .settings-agents, .settings-simple { overflow: visible; } .settings-project-summary { grid-template-columns: minmax(0, 1fr) auto; } .settings-project-summary > .muted { grid-column: 1 / -1; } .settings-heading { flex-wrap: wrap; } }
+@container settings (min-width: 900px) {
+  .settings-agents { align-items: stretch; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+  .settings-agent-list { min-height: 0; overflow: auto; }
+  .settings-editor { height: auto; position: static; }
+}
+/* 列表窄时，状态挪到名称下面，名称不被挤成一列 */
+.settings-agent-list { container: agent-list / inline-size; }
+@container agent-list (max-width: 480px) {
+  .settings-agent-row { grid-template-columns: 32px minmax(0, 1fr); }
+  .settings-agent-status { grid-column: 2; justify-items: start; max-width: none; text-align: left; }
+}

@@ -167,7 +167,7 @@ COMMIT;`);
 
   message(workId: string, key: string) {
     const row = this.db.prepare(`SELECT id, work_id AS workId, sender, body, key, gate_id AS gateId, card_id AS cardId,
-      created_at AS createdAt, sequence, attachments FROM messages WHERE work_id = ? AND key = ?`).get(workId, key);
+      created_at AS createdAt, sequence, attachments, withdrawn_at AS withdrawnAt FROM messages WHERE work_id = ? AND key = ?`).get(workId, key);
     return row && Object.assign(row, { attachments: JSON.parse(String(row.attachments)) as unknown[] });
   }
 
@@ -176,10 +176,10 @@ COMMIT;`);
     return this.db.prepare(`
       SELECT 'message' AS type, id, work_id AS workId, sender, body, gate_id AS gateId, card_id AS cardId,
         NULL AS kind, NULL AS status, NULL AS question, created_at AS createdAt, sequence,
-        NULL AS descriptionId, NULL AS decision, attachments
+        NULL AS descriptionId, NULL AS decision, attachments, withdrawn_at AS withdrawnAt
       FROM messages WHERE work_id = ?
       UNION ALL
-      SELECT 'gate', id, work_id, NULL, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision, NULL
+      SELECT 'gate', id, work_id, NULL, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision, NULL, NULL
       FROM gates WHERE work_id = ? ORDER BY sequence
     `).all(workId, workId).map(item => item.type === 'gate' ? { ...item, ...this.gate(workId, String(item.id)) }
       : Object.assign(item, { attachments: JSON.parse(String(item.attachments)) as unknown[] }));

@@ -1,7 +1,7 @@
 import { useI18n, type MessageKey } from '../../../shared/i18n.js';
 import type { Dispatch, GateNode, GraphNode } from './types.js';
 
-export const nodeTitle = (node: GraphNode) => node.type === 'card' ? node.content.split(/\r?\n/).find(line => line.trim()) || node.content : node.question;
+export const nodeTitle = (node: GraphNode) => node.type === 'card' ? (node.content.split(/\r?\n/).find(line => line.trim()) || node.content).replace(/^\s*#+\s*/, '') : node.question;
 export function gateDecision(node: Pick<GateNode, 'kind' | 'decision'>, t: (key: MessageKey) => string) {
   if (node.kind === 'work-confirmation' && node.decision === 'confirm') return t('graphConfirmed');
   if (node.kind === 'review' && node.decision === 'accept') return t('graphAccepted');
@@ -15,7 +15,7 @@ const statuses: Record<string, MessageKey> = {
 export function NodeStatus({ node }: { node: GraphNode }) {
   const { t } = useI18n();
   const tone = node.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(node.status) ? 'run' : ['completed', 'decided'].includes(node.status) ? 'ok' : 'idle';
-  return <span className={`pill ${tone}`}>{t(statuses[node.status]!)}</span>;
+  return <span className={`pill ${tone}`}>{node.type === 'gate' && node.kind === 'work-confirmation' && node.status === 'decided' ? t('graphConfirmed') : t(statuses[node.status]!)}</span>;
 }
 export const endLabels: Record<NonNullable<Dispatch['endReason']>, MessageKey> = {
   completed: 'graphEndCompleted', error: 'graphEndError', 'quota-exhausted': 'graphEndQuota',
@@ -30,3 +30,5 @@ export function DispatchStatus({ dispatch }: { dispatch: Dispatch }) {
     {t(dispatch.status === 'queued' ? 'graphQueued' : dispatch.status === 'running' ? 'graphDispatchRunning' : endLabels[dispatch.endReason!]!)}
   </span>;
 }
+
+export const nodeRingTone: Record<string, string> = { executing: 'run busy', verifying: 'run busy', completed: 'ok', decided: 'ok', pending: 'att', cancelled: 'cut', withdrawn: 'cut' };

@@ -323,3 +323,21 @@ test('Codex 经 model/list 翻页列出可见模型和原生推理强度，默�
   assert.deepEqual(models[0], { id: null, label: 'GPT-A', efforts: ['low', 'max', 'ultra'], defaultEffort: 'low' });
   assert.deepEqual((await ctx.requests()).filter(r => r.method === 'model/list').map(r => r.params), [{}, { cursor: '1' }]);
 });
+
+test('Codex turn/plan/updated 归一 inProgress、替换和清空，忽略其他会话及无效计划', async t => {
+  const ctx = await fixture(t, [
+    notification('turn/plan/updated', { plan: [{ step: '读取', status: 'completed' }, { step: '执行', status: 'inProgress' }, { step: '检查', status: 'pending' }] }),
+    notification('turn/plan/updated', { threadId: 'foreign', plan: [{ step: '串会话', status: 'pending' }] }),
+    notification('turn/plan/updated', { turnId: 'foreign', plan: [] }),
+    notification('turn/plan/updated', { plan: [{ step: '无效', status: 'unknown' }] }),
+    notification('turn/plan/updated', { plan: [] }), completed(),
+  ], {}, 'coordinator');
+  const session = await ctx.driver.start(ctx.options);
+  t.after(() => session.cancel());
+  await session.send('列出计划');
+  const events = await collect(session.events);
+  assert.deepEqual(events.filter(event => event.type === 'plan').map(event => event.entries), [[
+    { content: '读取', status: 'completed' }, { content: '执行', status: 'in_progress' }, { content: '检查', status: 'pending' },
+  ], []]);
+  assert.ok(events.every((event, i) => event.step === i + 1));
+});

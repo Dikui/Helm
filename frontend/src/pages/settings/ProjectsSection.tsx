@@ -19,7 +19,7 @@ export function ProjectsSection() {
   const [deleted, setDeleted] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const save = useSettingsSave();
-  return <section className="settings-simple" aria-label={t('projects')}><h2 ref={heading} tabIndex={-1}>{t('projects')}</h2>
+  return <section className="settings-simple settings-projects" aria-label={t('projects')}><div className="settings-heading"><h2 ref={heading} tabIndex={-1}>{t('projects')}</h2><button type="button" className="btn sm" onClick={() => document.getElementById('register-project-path')?.focus()}>＋ {t('newWorkRegisterProject')}</button></div>
     {[projects, agents, works].map((resource, index) => resource.error && <ErrorNotice key={index} error={resource.error} retry={resource.reload} />)}
     {!projects.data && !projects.error && <p role="status">{t('loading')}</p>}
     {projects.data?.length === 0 && <p>{t('emptyProjects')}</p>}
@@ -48,7 +48,8 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
   const coordinators = agents.filter(agent => agent.role === 'coordinator');
   return <form className="settings-box" aria-label={`${t('projects')} ${project.name}`} noValidate aria-busy={save.pending} onSubmit={event => {
     event.preventDefault(); void save.run(async () => { await api.call('set-project-coordinator-agent', { projectId: project.id, agentId: selected ?? project.defaultCoordinatorAgentId }); onSaved(); });
-  }}><div><h3>{project.name}</h3><code>{project.path}</code><p className="muted">{workCount === undefined ? t('loading') : `${workCount} ${t('projectWorkCount')}`}</p></div>
+  }}><div className="settings-project-summary"><div><h3>{project.name}</h3><code>{project.path}</code></div><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="muted">{workCount === undefined ? t('loading') : `${workCount} ${t('projectWorkCount')}`}</span></div>
+    <details className="settings-project-config"><summary>{t('projectSettings')}</summary><div>
     <label>{t('defaultCoordinator')}<select aria-label={t('defaultCoordinator')} disabled={save.pending || !coordinators.length} value={selected ?? project.defaultCoordinatorAgentId} onChange={event => { setSelected(event.target.value); save.clear(); }}>
       {!coordinators.some(agent => agent.id === project.defaultCoordinatorAgentId) && <option>{project.defaultCoordinatorAgentId}</option>}
       {coordinators.map(agent => <option key={agent.id} value={agent.id} disabled={!agent.available}>{agent.id}{agent.available ? '' : ` · ${t('unavailable')}: ${agent.reason}`}</option>)}
@@ -57,6 +58,6 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
     <SaveFeedback {...save} /><div className="row"><button className="btn" disabled={save.pending || !coordinators.length}>{t('save')}</button>
       <button type="button" className="btn work-danger" disabled={save.pending || workCount !== 0} aria-describedby={`project-delete-${project.id}`} onClick={() => void save.run(async () => {
         await api.call('delete-project', { projectId: project.id }); onDeleted();
-      })}>{t('deleteProject')}</button></div>
+      })}>{t('deleteProject')}</button></div></div></details>
   </form>;
 }

@@ -35,7 +35,7 @@ export function AttachmentList({ attachments, onOpen }: { attachments?: Attachme
   const { t } = useI18n();
   if (!attachments?.length) return null;
   return <ul className="attachments" aria-label={t('attachments')}>
-    {attachments.map(item => <li key={item.path} className="pill attachment" title={item.path}>
-      <a href="#" onClick={event => { event.preventDefault(); onOpen(item.path, event.currentTarget); }}>{item.name}</a></li>)}
+    {attachments.map(item => <li key={item.path} className="pill attachment" id={`attachment-${encodeURIComponent(item.path)}`} title={item.path}>
+      <a href={`#attachment-${encodeURIComponent(item.path)}`} onClick={event => { event.preventDefault(); onOpen(item.path, event.currentTarget); }}>{item.name}</a></li>)}
   </ul>;
 }

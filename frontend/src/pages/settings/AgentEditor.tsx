@@ -31,6 +31,9 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const [error, setError] = useState<Error>();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(initialSaved);
+  const [opening, setOpening] = useState(false);
+  const openingRef = useRef(false);
+  const [openError, setOpenError] = useState<Error>();
   const [deleting, setDeleting] = useState(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const config = <K extends keyof AgentSettings>(key: K, next: AgentSettings[K]) => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, [key]: next } })); };
@@ -77,6 +80,13 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     } catch (failure) { setError(failure as Error); }
     finally { setPending(false); }
   }
+  async function openPrompt() {
+    if (creating || pending || openingRef.current) return;
+    openingRef.current = true; setOpening(true); setOpenError(undefined);
+    try { await api.call('open-agent-prompt', { agentId: source!.id }); }
+    catch (failure) { setOpenError(failure as Error); }
+    finally { openingRef.current = false; setOpening(false); }
+  }
   async function remove() {
     if (pending) return;
     setPending(true); setError(undefined);
@@ -89,7 +99,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   }
   return <form className="settings-editor" aria-label={t('agentDetails')} onSubmit={save} noValidate aria-busy={pending}>
     <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} />
-    <div className="settings-detail-head"><h2>{creating ? t('newAgent') : source!.id}</h2><p className="muted">{t('nextDispatch')}</p></div>
+    <div className="settings-detail-head"><span className="settings-driver mono">{{ 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[value.config.driver]}</span><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted">{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}</div>
     <fieldset disabled={pending} className="settings-fields">
       <label htmlFor="agent-id">{t('agentId')}<input {...fieldProps('id')} value={value.id} disabled={!creating} onChange={event => { setSaved(false); setValue({ ...value, id: event.target.value }); }} />{fieldError('id')}</label>
       <div className="settings-two">
@@ -101,12 +111,15 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       <CliStatus key={value.config.driver} driver={value.config.driver} />
       <ModelFields settings={value.config} fieldProps={fieldProps} fieldError={fieldError}
         change={next => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, ...next } })); }} />
-      <label className="settings-checkbox" htmlFor="agent-fast"><input {...fieldProps('fast')} type="checkbox" checked={value.config.fast} onChange={event => config('fast', event.target.checked)} />{t('fastMode')}{fieldError('fast')}</label>
-      <label htmlFor="agent-home">{t('billing')}<select {...fieldProps('home')} value={value.config.home} onChange={event => config('home', event.target.value as AgentSettings['home'])}>
-        <option value="shared">{t('subscription')}</option><option value="dedicated">{t('apiBilling')}</option></select>{fieldError('home')}</label>
-      <p className="muted">{value.config.home === 'dedicated' ? <>{t('apiHomeHint')} <code>~/.helm/agent-homes/{value.id || '<id>'}/</code></> : t('sharedHomeHint')}</p>
-      <label htmlFor="agent-description">{t('description')}<textarea {...fieldProps('description')} rows={3} value={value.config.description} onChange={event => config('description', event.target.value)} />{fieldError('description')}</label>
-      <label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
+      <label className="settings-fast" htmlFor="agent-fast"><span>{t('fastMode')}<small className="muted">{t('fastModeHint')}</small></span><input className="settings-toggle" {...fieldProps('fast')} type="checkbox" checked={value.config.fast} onChange={event => config('fast', event.target.checked)} />{fieldError('fast')}</label>
+      <fieldset className="settings-billing" {...fieldProps('home')} tabIndex={-1}><legend>{t('billing')}</legend>
+        <label className="settings-billing-option"><input type="radio" name="agent-home" value="shared" checked={value.config.home === 'shared'} onChange={() => config('home', 'shared')} /><span><b>{t('subscription')}</b><small>{t('sharedHomeHint')}</small></span></label>
+        <label className="settings-billing-option"><input type="radio" name="agent-home" value="dedicated" checked={value.config.home === 'dedicated'} onChange={() => config('home', 'dedicated')} /><span><b>{t('apiBilling')}</b><small>{t('apiHomeHint')} <code>~/.helm/agent-homes/{value.id || '<id>'}/</code></small></span></label>
+        {fieldError('home')}
+      </fieldset>
+      <label htmlFor="agent-description">{t('description')}<textarea className="resize-none" {...fieldProps('description')} rows={3} value={value.config.description} onChange={event => config('description', event.target.value)} />{fieldError('description')}</label>
+      <label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="resize-none mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
+      {!creating && <div className="settings-prompt-external"><code>prompt.md</code> <button type="button" className="btn sm" disabled={pending || opening} aria-busy={opening} onClick={() => void openPrompt()}>{t('openAgentPrompt')}</button><p className="hint">{t('openAgentPromptHint')}</p>{openError && <ErrorNotice error={openError} />}</div>}
       <AgentLibrarySelection ownSkills={creating ? [] : source?.skills ?? []} settings={value.config} change={config} />
       {!creating && !!source?.warnings?.length && <div className="settings-box" role="status" aria-label={t('agentWarnings')}>
         <h3>{t('agentWarnings')}</h3>{source.warnings.map(warning => <p key={warning}>{warning}</p>)}
@@ -114,7 +127,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     </fieldset>
     <div className="settings-feedback">{error && !deleting && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadAgent')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
     {(!creating || source) && <p className="settings-duplicate-hint muted" id="agent-duplicate-hint">{t('duplicateAgentHint')}</p>}
-    <div className="settings-actions">{!creating && <button type="button" className="btn" aria-describedby="agent-duplicate-hint" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
+    <div className="settings-actions"><span className="muted">{t('nextDispatch')}</span>{!creating && <button type="button" className="btn" aria-describedby="agent-duplicate-hint" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
       {!creating && <button ref={deleteButton} type="button" className="btn work-danger" disabled={pending} onClick={() => { setError(undefined); setDeleting(true); }}>{t('deleteAgent')}</button>}
       <button className="btn primary" disabled={pending || conflict}>{t('save')}</button></div>
     {deleting && <ActionDialog title={t('deleteAgent')} description={`${source!.id} · ${t('deleteAgentConsequence')}`} busy={pending} onClose={() => setDeleting(false)} returnFocus={deleteButton}>

@@ -26,9 +26,9 @@ export function AgentsSection({ agentId, creating = false }: { agentId?: string;
         if (!entries.length) return null;
         const title = t(role === 'coordinator' ? 'coordinatorRole' : role === 'executor' ? 'executorAgents' : 'unrecognizedAgents');
         return <section key={role ?? 'unknown'} aria-label={title}><h3 className="sect">{title} <span className="count">{entries.length}</span></h3>
-          {entries.map(item => <Link key={item.id} href={`/settings/agents/${encodeURIComponent(item.id)}`} className="settings-agent-row" aria-current={item.id === selected?.id ? 'page' : undefined}>
-            <span className="settings-driver mono">{item.driver?.slice(0, 2) ?? '?'}</span>
-            <span><b className="mono">{item.id}</b><span className="settings-meta">{item.driver} · {item.model ?? t('driverDefault')} · {t(item.billing === 'api' ? 'apiBilling' : 'subscription')}</span><span className="settings-meta">{item.description}</span>
+          {entries.map(item => <Link key={item.id} href={`/settings/agents/${encodeURIComponent(item.id)}`} className={`settings-agent-row${item.available ? '' : ' off'}`} aria-current={item.id === selected?.id ? 'page' : undefined}>
+            <span className="settings-driver mono">{item.driver ? { 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[item.driver] : '?'}</span>
+            <span><b className="mono">{item.id}</b><span className="settings-meta">{item.driver} · {item.model ?? t('driverDefault')}{item.reasoningEffort ? ` · ${item.reasoningEffort}` : ''} <span className="settings-bill">{t(item.billing === 'api' ? 'apiBilling' : 'subscription')}</span></span><span className="settings-meta">{item.description}</span>
               {!item.available && <span className="settings-reason">{item.reason}{item.command && <> <code>{item.command}</code></>}</span>}</span>
             <span className="settings-agent-status"><span className={`pill ${item.available ? 'ok' : 'bad'}`}>{t(item.available ? 'available' : 'unavailable')}</span>
               <span>{item.runningDispatches} {t('dispatchCount')} · {item.activeWorks} {t('workCount')}</span></span>

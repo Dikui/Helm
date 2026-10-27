@@ -70,6 +70,7 @@ async function fixture(t: TestContext, executor: FakeScript, after: FakeScript =
 
 test('已结束工作导出全部输出、成果和完整任务库记录，归档可独立解包', async t => {
   const daemon = await fixture(t, [
+    { type: 'plan', entries: [{ content: '生成成果', status: 'in_progress' }] },
     { type: 'write', path: '结果.txt', content: '成果内容 中文\n' },
     { type: 'artifact', kind: 'file', path: '结果.txt' },
     { type: 'write', path: 'tests.txt', content: 'tests passed\n' },
@@ -79,6 +80,7 @@ test('已结束工作导出全部输出、成果和完整任务库记录，归�
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '第一版调度笔记' }), check: ok },
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '导出时保留调度笔记' }), check: ok },
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '修订后的说明', boundary: '本机', criteria: '仍保留旧版本' }), check: ok },
+    { type: 'plan', entries: [{ content: '导出前核对', status: 'completed' }] },
     { type: 'output', text: '调度者输出' },
   ]);
   await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended')
@@ -89,6 +91,8 @@ test('已结束工作导出全部输出、成果和完整任务库记录，归�
   await daemon.call('cancel-work', daemon.params);
   const other = await daemon.call('send-message', { projectId: daemon.project.id, key: 'other-work', body: 'OTHER-WORK-NOT-EXPORTED' });
   const before = await daemon.output();
+  assert.equal(before[0].type, 'plan');
+  assert.deepEqual(before[0].entries, [{ content: '生成成果', status: 'in_progress' }]);
   const artifacts = await daemon.call('get-dispatch-artifacts', { ...daemon.params, dispatchId: daemon.dispatch.id });
   const events = (await daemon.events()).filter(event => event.workId === daemon.params.workId);
   const targetPath = join(daemon.directory, '工作 输出.tar.gz');
@@ -116,6 +120,7 @@ test('已结束工作导出全部输出、成果和完整任务库记录，归�
   for (const file of records.files) {
     assert.deepEqual(await readFile(join(extracted, file.archivePath)), await readFile(file.sourcePath));
   }
+  assert.ok(records.events.some((event: any) => event.action === 'dispatch-step' && event.details.summary === '生成成果'));
   const stepFile = records.files.find((file: any) => file.archivePath.endsWith('/steps/1.json.gz'));
   assert.deepEqual(JSON.parse(gunzipSync(await readFile(join(extracted, stepFile.archivePath))).toString()), before[0]);
   assert.ok(records.files.some((file: any) => file.archivePath.endsWith('/browser/screenshot.png')));

@@ -20,7 +20,7 @@ export interface AgentEntry {
   runningDispatches: number; activeWorks: number;
   warnings?: string[];
 }
-export interface Project { id: string; name: string; path: string; defaultCoordinatorAgentId: string }
+export interface Project { id: string; name: string; path: string; defaultCoordinatorAgentId: string; currentBranch?: string | null; headCommit?: string | null }
 export interface RuntimeSettings {
   concurrencyLimit: number; dispatchWallTimeoutMs: number; dispatchIdleTimeoutMs: number;
   roundTotalTimeoutMs: number; roundIdleTimeoutMs: number; outputThresholdBytes: number;

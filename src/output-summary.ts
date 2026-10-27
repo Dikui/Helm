@@ -10,6 +10,11 @@ export function outputSummary(raw: string, fallback = ''): string {
   try { parsed = JSON.parse(raw); } catch { return text(raw) ?? fallback; }
   if (typeof parsed === 'string') return text(parsed) ?? fallback;
   const value = object(parsed);
+  if (value.type === 'plan') {
+    const entries = Array.isArray(value.entries) ? value.entries.map(object) : [];
+    return entries.filter(entry => entry.status === 'in_progress').map(entry => text(entry.content)).filter(Boolean).join(' · ')
+      || entries.map(entry => text(entry.content)).filter(Boolean).join(' · ') || fallback;
+  }
   if (value.type === 'assistant') {
     const message = object(value.message);
     const blocks = Array.isArray(message.content) ? message.content : [];

@@ -82,6 +82,14 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     expect(await within(events).findByRole('button', { name: 'dispatch-step · 卡片 1 · 步骤 24' })).toBeTruthy();
     await clickReady(screen.getByRole('tab', { name: '图' }));
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
+    await clickReady(screen.getByRole('tab', { name: '时间线' }));
+    const roundBlock = await waitFor(() => {
+      const block = screen.getByRole('tabpanel', { name: '时间线' }).querySelector<HTMLButtonElement>('.cs-round-lane button');
+      expect(block).not.toBeNull(); return block!;
+    });
+    await clickReady(roundBlock);
+    expect(screen.getByRole('tab', { name: '调度者' }).getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '调度者' }));
   } finally { finish(); }
 });
 const workId = (ctx: FakeContext): string => JSON.parse(ctx.input).work.id;

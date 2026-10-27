@@ -1,3 +1,4 @@
+import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { useCallback, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
@@ -11,12 +12,14 @@ import type { Dispatch } from './types.js';
 
 interface Notes { body: string; version: number; versions: { body: string; version: number; time: string }[] }
 
-export function CoordinatorView({ work }: { work: Work }) {
+export function CoordinatorView({ work, initialRoundId }: { work: Work; initialRoundId?: string }) {
   const { t, language } = useI18n();
   const now = useClock();
+  const files = useWorkFiles(work.id);
+  const preview = useFilePreview(work.id);
   const rounds = useResource<Rounds>('list-rounds', { workId: work.id });
   const notes = useResource<Notes>('get-coordinator-notes', { workId: work.id });
-  const [roundId, selectRound] = useState<string | null>(null);
+  const [roundId, selectRound] = useState<string | null>(initialRoundId ?? null);
   const [version, selectVersion] = useState<number | null>(null);
   const current = rounds.data?.rounds.find(round => round.status === 'running');
   const selected = rounds.data?.rounds.find(round => round.id === roundId) ?? rounds.data?.rounds.at(-1);
@@ -30,7 +33,7 @@ export function CoordinatorView({ work }: { work: Work }) {
     {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : <>
-      <h3>{t('structureRounds')} <span className="count">{rounds.data.rounds.length}</span></h3>
+      <h3 className="sect">{t('structureRounds')} <span className="count">{rounds.data.rounds.length}</span></h3>
       {!rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds">
         {rounds.data.rounds.slice().reverse().map(round => <li key={round.id}>
           <button className="btn sm" aria-pressed={selected?.id === round.id} aria-label={`${t('structureRound')} #${round.number}`} onClick={() => selectRound(round.id)}>#{round.number}</button>
@@ -46,14 +49,15 @@ export function CoordinatorView({ work }: { work: Work }) {
       </section>}
     </>}
     <section className="cs-notes" aria-label={t('structureNotes')}>
-      <h3>{t('structureNotes')}</h3>
+      <h3 className="sect">{t('structureNotes')}{note?.version ? <span className="count">v{note.version}</span> : null}</h3>
       {notes.error && <ErrorNotice error={notes.error} retry={notes.reload} />}
       {!notes.data ? <p role="status">{notes.error ? '' : t('loading')}</p> : notes.data.version === 0 ? <p className="muted">{t('structureNoNotes')}</p> : <>
         <label>{t('structureNotesVersion')}<select value={note?.version} onChange={event => selectVersion(Number(event.target.value))}>
           {notes.data.versions.slice().reverse().map(note => <option key={note.version} value={note.version}>v{note.version} · {date(note.time)}</option>)}
         </select></label>
-        <p className="cg-prose">{note?.body}</p>
+        <div className="cs-note"><Markdown text={note?.body ?? ''} workId={work.id} files={files} onOpen={preview.open} /></div>
       </>}
     </section>
+    {preview.preview}
   </div>;
 }

@@ -23,15 +23,15 @@ export function EventsView({ workId, nodes, dispatches, select }: {
   const filteredDispatches = dispatches?.filter(dispatch => !cardId || dispatch.cardId === cardId);
   return <section className="cs-events" aria-label={t('structureEvents')}>
     <div className="cs-filters">
-      <label>{t('structureCardFilter')}<select value={cardId} onChange={event => { setCardId(event.target.value); setDispatchId(''); }}>
+      <label><span className="sr">{t('structureCardFilter')}</span><select value={cardId} onChange={event => { setCardId(event.target.value); setDispatchId(''); }}>
         <option value="">{t('structureAllCards')}</option>{cards.map((card, index) => <option key={card.id} value={card.id}>{index + 1} · {nodeTitle(card)}</option>)}
       </select></label>
-      <label>{t('structureDispatchFilter')}<select value={dispatchId} disabled={!dispatches} onChange={event => setDispatchId(event.target.value)}>
+      <label><span className="sr">{t('structureDispatchFilter')}</span><select value={dispatchId} disabled={!dispatches} onChange={event => setDispatchId(event.target.value)}>
         <option value="">{t('structureAllDispatches')}</option>{filteredDispatches?.map(dispatch => <option key={dispatch.id} value={dispatch.id}>
           #{dispatches!.filter(item => item.cardId === dispatch.cardId).findIndex(item => item.id === dispatch.id) + 1} · {cardTitle(dispatch.cardId)} · {t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}
         </option>)}
       </select></label>
-      <label>{t('structureActorFilter')}<select value={actorType} onChange={event => setActorType(event.target.value)}>
+      <label><span className="sr">{t('structureActorFilter')}</span><select value={actorType} onChange={event => setActorType(event.target.value)}>
         <option value="">{t('structureAllActors')}</option>{Object.entries(actorLabels).map(([value, key]) => <option key={value} value={value}>{t(key)}</option>)}
       </select></label>
       {(cardId || dispatchId || actorType) && <button className="btn sm" onClick={() => { setCardId(''); setDispatchId(''); setActorType(''); }}>{t('structureClearFilters')}</button>}
@@ -45,7 +45,7 @@ export function EventsView({ workId, nodes, dispatches, select }: {
         const step = Number.isSafeInteger(details?.step) && details!.step! > 0 ? details!.step : undefined;
         const label = [event.action, cardIndex >= 0 ? `${t('graphCard')} ${cardIndex + 1}` : null, step ? `${t('graphStep')} ${step}` : null].filter(Boolean).join(' · ');
         return <li key={event.id}>
-          <time dateTime={event.time}>{new Date(event.time).toLocaleString(language === 'zh' ? 'zh-CN' : 'en', { timeZoneName: 'short' })}</time>
+          <time dateTime={event.time} title={new Date(event.time).toLocaleString(language === 'zh' ? 'zh-CN' : 'en', { timeZoneName: 'short' })}>{new Date(event.time).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</time>
           <div className="cs-event-body">{dispatch ? <button className="cs-event-link" onClick={() => select(dispatch.cardId, dispatch.id, step ?? 1)}>{label}</button> : <span>{label}</span>}
             <small className="muted">{t(actorLabels[event.actor.type])} · <span className="mono">{event.actor.id}</span>{dispatch && <> · {t('graphDispatch')} <span className="mono">{dispatch.id}</span></>}</small>
             {(details?.summary || details?.reason) && <p className="cg-prose">{details.summary || details.reason}</p>}

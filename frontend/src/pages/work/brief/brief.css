@@ -23,3 +23,12 @@
 .review-diff { display: grid; min-width: 0; gap: var(--space-3); margin-top: var(--space-3); }
 .review-diff > button { justify-self: start; }
 .review-diff pre { max-width: 100%; max-height: 440px; overflow: auto; margin: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font: var(--text-sm)/var(--leading) var(--mono); white-space: pre; tab-size: 4; }
+.brief-document { max-width: 720px; gap: 24px; padding: 8px 16px 32px; }
+.brief-document > header { gap: 8px; }
+.brief-document h2 { font-size: 18px; margin: 0; }
+.brief-document h3 { color: var(--text); font-size: 14px; font-weight: 700; }
+.brief-document label { font-size: 12px; margin-left: auto; }
+.brief-document ul { margin: 8px 0 0; padding-left: 20px; }
+.brief-document li { padding: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.brief-base { grid-template-columns: 100px minmax(0, 1fr); }
+.brief-document > .muted, .brief-document > a { font-size: 12px; }

@@ -28,3 +28,14 @@
 .aligning-brief > footer .btn { width: 100%; }
 .aligning-work .btn:active { transform: translateY(1px); }
 @media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); overflow: auto; } .aligning-chat, .aligning-brief { min-height: auto; } .aligning-brief { border-left: 0; border-top: 1px solid var(--border); } .aligning-thread, .aligning-brief-body { overflow: visible; } }
+.aligning-work { grid-template-columns: minmax(0, 1fr) 360px; }
+.aligning-brief h3 { color: var(--text); font-size: 14px; font-weight: 700; }
+.aligning-base { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; margin: 0; }
+.aligning-base dt { color: var(--muted); }
+.aligning-base dd { margin: 0; overflow-wrap: anywhere; }
+.aligning-gate .hint { padding: 0; font-size: 12px; }
+.aligning-message:not(.me) { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 12px; }
+.aligning-message:not(.me)::before { content: '✦'; grid-row: 1 / span 9; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-soft); color: var(--running); }
+.aligning-message:not(.me) > * { grid-column: 2; }
+@media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); } }
+.aligning-who { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; }

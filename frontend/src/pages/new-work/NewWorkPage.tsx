@@ -38,29 +38,30 @@ export function NewWorkPage() {
   const registered = (id: string) => {
     setProjectId(id); setAgentId(undefined); setRegistering(false); projects.reload();
   };
-  return <><header className="top"><h1>{t('newWork')}</h1></header><div className="page-body new-work">
+  return <><header className="top"><nav className="new-crumb" aria-label={t('breadcrumb')}><span>{t('workLabel')}</span><span aria-hidden="true">/</span><h1>{t('newWork')}</h1></nav></header><div className="page-body new-work">
     {projects.error && <ErrorNotice error={projects.error} retry={projects.reload} />}
     {agents.error && <ErrorNotice error={agents.error} retry={agents.reload} />}
-    {(!projects.data || !agents.data) && <p role="status">{t('loading')}</p>}
-    {projects.data?.length === 0 && <section className="new-base"><h2>{t('newWorkRegisterFirst')}</h2><RegisterProjectForm onRegistered={registered} /></section>}
+    {!projects.data && !projects.error && <p role="status">{t('loading')}</p>}
+    {projects.data?.length === 0 && <section className="new-base new-register-first"><h2>{t('newWorkRegisterFirst')}</h2><RegisterProjectForm onRegistered={registered} /></section>}
     {project && <div className="new-work-content">
       <div><h2>{t('newWorkGoal')}</h2><p className="muted">{t('newWorkLead')}</p></div>
       <form noValidate className="new-compose" aria-busy={submission.pending} onSubmit={event => { event.preventDefault(); void send(); }}>
-        <label className="new-request">{t('requirements')}<textarea value={body} disabled={locked} placeholder={t('newWorkRequestExample')}
+        <label className="new-request"><span className="sr">{t('requirements')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('newWorkRequestExample')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
         <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
         <div className="new-tools">
-          <label>{t('projects')}<select value={project.id} disabled={locked} onChange={event => { setProjectId(event.target.value); setAgentId(undefined); }}>
-            {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.path}</option>)}
+          <label className="new-project" title={project.path}><span className="sr">{t('projects')}</span><select value={project.id} disabled={locked} onChange={event => { setProjectId(event.target.value); setAgentId(undefined); }}>
+            {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.currentBranch ?? (item.headCommit ? 'HEAD' : '—')}</option>)}
           </select></label>
-          <button type="button" className="btn" disabled={locked} onClick={() => setRegistering(true)}>{t('newWorkRegisterProject')}</button>
-          <label>{t('newWorkCoordinatorAgent')}<select value={selectedAgent} disabled={locked} onChange={event => setAgentId(event.target.value)}>
-            {!coordinators.some(item => item.id === selectedAgent) && <option value={selectedAgent} disabled>{selectedAgent} · {t('newWorkAgentMissing')}</option>}
-            {coordinators.map(item => <option key={item.id} value={item.id}>{item.id}{!item.available ? ` · ${item.reason || t('newWorkAgentUnavailable')}` : ''}</option>)}
+          <button type="button" className="btn sm new-register" disabled={locked} onClick={() => setRegistering(true)}>{t('newWorkRegisterProject')}</button>
+          <label className="new-agent"><span className="sr">{t('newWorkCoordinatorAgent')}</span><select value={selectedAgent} disabled={locked} onChange={event => setAgentId(event.target.value)}>
+            {!agents.data && <option value={selectedAgent} disabled>{t('loading')}</option>}
+            {agents.data && !coordinators.some(item => item.id === selectedAgent) && <option value={selectedAgent} disabled>{selectedAgent} · {t('newWorkAgentMissing')}</option>}
+            {coordinators.map(item => <option key={item.id} value={item.id} disabled={!item.available}>{item.id}{!item.available ? ` · ${item.reason || t('newWorkAgentUnavailable')}` : ''}</option>)}
           </select></label>
-          <button className="btn primary" disabled={submission.pending || (!submission.uncertain && !available) || !body.trim()}>{t(submission.error ? 'newWorkRetrySend' : 'newWorkStart')}</button>
+          <button className="btn primary new-send" disabled={submission.pending || (!submission.uncertain && !available) || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'newWorkStart')}</span><span aria-hidden="true">↑</span></button>
         </div>
         {agents.data && coordinators.length === 0 ? <p className="hint">{t('newWorkNoCoordinator')} <Link href="/settings/new-agent">{t('newAgent')}</Link></p>
           : !available && agents.data && <p className="hint">{chosen?.reason} {t('newWorkChooseAvailableAgent')}</p>}
@@ -68,12 +69,12 @@ export function NewWorkPage() {
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>
-      <section className="new-base" aria-label={t('newWorkBase')}><h3>{t('newWorkBase')}</h3><p className="mono">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')} <span title={project.headCommit ?? undefined}>{project.headCommit?.slice(0, 7)}</span></p>
+      <div className="new-context"><section className="new-base" aria-label={t('newWorkBase')}><h3>{t('newWorkBase')}</h3><p className="row"><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="ref" title={project.headCommit ?? undefined}>{project.headCommit?.slice(0, 7) ?? '—'}</span></p>
         <p className="mono">{project.path}</p><p className="muted">{t('newWorkBaseHint')}</p>
         {project.gitStatusReason && <p role="status">{project.gitStatusReason}</p>}
-        {Boolean(project.uncommittedChanges) && <p className="new-warning">! {project.uncommittedChanges} {t('newWorkUncommittedHint')}</p>}
       </section>
-      <p className="muted">{t('newWorkAlignmentNext')}</p>
+      {Boolean(project.uncommittedChanges) && <p className="warn"><span>!</span><span>{project.uncommittedChanges} {t('newWorkUncommittedHint')}</span></p>}</div>
+      <div className="new-tips"><span><kbd>⏎</kbd> {t('newWorkStart')}</span><span><kbd>⇧⏎</kbd> {t('conversationNewline')}</span><span>{t('newWorkAlignmentNext')}</span></div>
     </div>}
   </div>{registering && <RegisterProjectDialog onRegistered={registered} onClose={() => setRegistering(false)} />}</>;
 }

@@ -68,12 +68,11 @@ export function Inbox() {
     </div>
     <div className="usage">
       {settings.error && <ErrorNotice error={settings.error} retry={settings.reload} />}
-      <div className="row"><span>{t('executors')}</span><b className="num" aria-label={t('concurrency')}>{settings.data ? `${settings.data.runningDispatches} / ${settings.data.concurrencyLimit}` : '—'}</b>
-        <span>{t('queued')} {settings.data?.queuedDispatches ?? '—'}</span></div>
+      <div className="row"><span className="muted">{t('executors')}</span><b className="num"><span aria-label={t('concurrency')}>{settings.data ? `${settings.data.runningDispatches} / ${settings.data.concurrencyLimit}` : '—'}</span> <span className="muted">· {t('queued')} {settings.data?.queuedDispatches ?? '—'}</span></b></div>
       <div className="bar" aria-hidden="true"><i style={{ width: `${settings.data ? Math.min(100, settings.data.runningDispatches / settings.data.concurrencyLimit * 100) : 0}%` }} /></div>
     </div>
-    <div className="sb-foot"><div className="seg" role="group" aria-label="语言 / Language">
-      <button aria-pressed={language === 'zh'} onClick={() => setLanguage('zh')}>中文</button><button aria-pressed={language === 'en'} onClick={() => setLanguage('en')}>EN</button>
-    </div><Link className="btn sm" href="/settings">{t('settings')}</Link></div>
+    <div className="sb-foot"><div className="seg" role="group" aria-label={t('language')}>
+      <button aria-pressed={language === 'zh'} onClick={() => setLanguage('zh')}>{t('languageZh')}</button><button aria-pressed={language === 'en'} onClick={() => setLanguage('en')}>{t('languageEn')}</button>
+    </div><Link className="btn ghost sm" href="/settings">{t('settings')}</Link></div>
   </aside>;
 }

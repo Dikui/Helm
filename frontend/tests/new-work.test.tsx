@@ -138,7 +138,7 @@ test('无项目时直接登记，非 git 路径保留输入并显示原始原因
   const path = within(dialog).getByLabelText('项目路径');
   expect(document.activeElement).toBe(path);
   fireEvent.keyDown(path, { key: 'Tab', shiftKey: true });
-  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '取消' }));
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '关闭' }));
   fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
   expect(document.activeElement).toBe(path);
   fireEvent.keyDown(path, { key: 'Escape' });

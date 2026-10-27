@@ -197,7 +197,9 @@ test('审核归等你处理，行内退回附意见后恢复进行中', async ()
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '等待审核的工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
   expandRow(await screen.findByText('等待审核的工作'));
-  fireEvent.click(await screen.findByRole('button', { name: '确认这一版' }));
+  const confirm = await screen.findByRole('button', { name: '确认这一版' }) as HTMLButtonElement;
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  fireEvent.click(confirm);
   await until(() => daemon!.call('list-pending'), value => value.result.some((item: any) => item.kind === 'review'));
   await screen.findByText('待你审核');
   expandRow(screen.getByText('等待审核的工作'));
@@ -208,4 +210,21 @@ test('审核归等你处理，行内退回附意见后恢复进行中', async ()
   const review = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(review.decision).toBe('return');
   expect(review.comment).toBe('请补齐边界说明');
+});
+
+test('v2 收件箱展开显示最近进展和行内工作操作，暂停恢复后仍可直接打开', async () => {
+  daemon = await uiFixture();
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '行内管理进展', key: 'inline' })).result.work;
+  render(<App baseUrl={daemon.url} />);
+  const row = expandRow(await screen.findByText('行内管理进展'));
+  const recent = await within(row).findByRole('list', { name: '最近步骤' });
+  expect(within(recent).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
+  fireEvent.click(within(row).getByRole('button', { name: '暂停工作' }));
+  const resume = await within(row).findByRole('button', { name: '恢复工作' });
+  await waitFor(() => expect((resume as HTMLButtonElement).disabled).toBe(false));
+  expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('paused');
+  fireEvent.click(resume);
+  await within(row).findByRole('button', { name: '暂停工作' });
+  fireEvent.click(within(row).getByRole('link', { name: '打开' }));
+  expect(window.location.pathname).toBe(`/works/${work.id}`);
 });

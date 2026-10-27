@@ -10,10 +10,30 @@ import { completeReviewedWork, decideReview } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry } from './driver.js';
+import { openAgentPrompt, type PromptEditor } from './prompt-editor.js';
 
 export class UserOperations {
   private reviewCompletions = new Map<string, Promise<unknown>>();
-  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry) {}
+  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry, private promptEditor?: PromptEditor) {}
+
+  openAgentPrompt(agentId: string) { return openAgentPrompt(this.store.agents, agentId, this.promptEditor); }
+
+  // invoke() holds BEGIN IMMEDIATE through all eligibility checks and the write.
+  withdrawMessage(actor: Actor, { workId, messageId }: { workId: string; messageId: string }) {
+    const message = this.store.db.prepare('SELECT sender, sequence, withdrawn_at FROM messages WHERE id = ? AND work_id = ?').get(messageId, workId);
+    if (!message) throw new RuleError('MESSAGE_NOT_FOUND', '找不到这项工作的消息。', 404);
+    if (message.sender !== 'user') throw new RuleError('MESSAGE_NOT_USER', '只能撤回用户发送的消息。', 409);
+    if (message.withdrawn_at) throw new RuleError('MESSAGE_WITHDRAWN', '这条消息已撤回。', 409);
+    const claimed = this.store.db.prepare(`SELECT 1 FROM coordinator_rounds r, json_each(r.event_ids) e
+      WHERE r.work_id = ? AND e.value = ? LIMIT 1`).get(workId, Number(message.sequence));
+    if (claimed) throw new RuleError('MESSAGE_CLAIMED', '这条消息已被调度者领取，不能撤回。', 409);
+    const queued = this.store.db.prepare('SELECT processed_by FROM wake_queue WHERE event_id = ? AND work_id = ?').get(Number(message.sequence), workId);
+    if (!queued || queued.processed_by !== null) throw new RuleError('MESSAGE_NOT_QUEUED', '这条消息已不在等待队列中，不能撤回。', 409);
+    const event = this.store.appendEvent(actor, { type: 'message', id: messageId }, 'message-withdrawn', { messageId }, { workId });
+    this.store.db.prepare('DELETE FROM wake_queue WHERE event_id = ? AND work_id = ?').run(Number(message.sequence), workId);
+    this.store.db.prepare('UPDATE messages SET withdrawn_at = ? WHERE id = ?').run(event.time, messageId);
+    return { workId, messageId, withdrawnAt: event.time };
+  }
 
   checkAgent(driver: string) { return checkAgent(this.drivers, driver); }
 

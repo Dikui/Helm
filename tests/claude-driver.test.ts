@@ -280,7 +280,7 @@ test('同一个 Claude 驱动按 Agent 角色选择会话权限，并在内置�
           assert.match(args.options!.systemPrompt as string, /不要 git commit 或改 git 配置/);
           assert.match(args.options!.systemPrompt as string, /不要自己安装或启动浏览器/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
-        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
+        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
       }) });
     assert.equal((await collect(driver, options)).end?.reason, 'completed');
   }
@@ -302,7 +302,7 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
       assert.equal(sdk.cwd, cwd);
       assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
       assert.equal(sdk.permissionMode, 'default');
-      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Skill']);
+      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
       assert.deepEqual(sdk.sandbox, {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
         filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
@@ -322,7 +322,7 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
   assert.ok(permission);
   const context: Parameters<CanUseTool>[2] = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
     suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' }] };
-  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency', 'mcp__user__query', 'mcp__other__write', 'Skill']) {
+  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency', 'mcp__user__query', 'mcp__other__write', 'Skill']) {
     const input = { command: 'cat README.md' };
     assert.deepEqual(await permission(tool, input, context), { behavior: 'allow', updatedInput: input });
   }
@@ -741,4 +741,17 @@ test('Claude 经 SDK supportedModels 列出模型和推理强度，default 记�
     { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null },
   ]);
   assert.ok(closed >= 1);
+});
+
+test('Claude TodoWrite 归一完整计划、更新和清空，调度者可使用待办工具', async t => {
+  const todos = [{ content: '读取', status: 'completed', activeForm: '读取中' }, { content: '执行', status: 'in_progress', activeForm: '执行中' }, { content: '检查', status: 'pending', activeForm: '检查中' }];
+  const message = (todos: unknown, parent_tool_use_id: string | null = null) => ({ type: 'assistant', parent_tool_use_id,
+    message: { content: [{ type: 'tool_use', name: 'TodoWrite', input: { todos } }] } }) as unknown as SDKMessage;
+  const { events } = await collect(new ClaudeCoordinatorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([
+    message(todos), message([{ content: '不可猜测', status: 'unknown' }]), message(todos, 'child-tool'), message([]), result(),
+  ], args => {
+    assert.ok((args.options!.tools as string[]).includes('TodoWrite'));
+  }) }), await fixture(t, 'coordinator'));
+  assert.deepEqual(events.filter(event => event.type === 'plan').map(event => event.entries), [todos.map(({ content, status }) => ({ content, status })), []]);
+  assert.ok(events.every((event, i) => event.step === i + 1));
 });

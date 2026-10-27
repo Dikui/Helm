@@ -1,3 +1,4 @@
+import { normalizePlan } from './plans.js';
 import { execFile } from 'node:child_process';
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -147,6 +148,10 @@ export class CodexDriver implements Driver {
               yield { type: 'output', step: ++step, text: JSON.stringify(message) };
               const params = message.params;
               if (params?.threadId !== id || (params?.turnId && turnId && params.turnId !== turnId)) continue;
+              if (message.method === 'turn/plan/updated') {
+                const entries = normalizePlan(params.plan, 'step');
+                if (entries) yield { type: 'plan', step: ++step, entries };
+              }
               if (message.method === 'thread/tokenUsage/updated' && params.tokenUsage?.total) {
                 const total = params.tokenUsage.total;
                 usage = { inputTokens: total.inputTokens, outputTokens: total.outputTokens };
