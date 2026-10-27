@@ -1,6 +1,14 @@
 import { afterEach, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
+
+// 收件箱行点击会打开工作页，详情要用右侧按钮展开
+function expandRow(text: HTMLElement) {
+  const row = text.closest('.irow') as HTMLElement;
+  const toggle = within(row).getByRole('button', { name: '展开详情' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  return row;
+}
 // Load the compiled Node fixture natively; Vite must not rewrite helmd's file URLs.
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 
@@ -62,6 +70,19 @@ function controlledTransport() {
   return { transport, cursors, disconnect() { online = false; controller?.abort(); }, reconnect() { online = true; } };
 }
 
+test('点收件箱行打开工作页，右侧按钮只在列表里展开详情', async () => {
+  daemon = await uiFixture();
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '点行打开', key: 'start' })).result.work;
+  render(<App baseUrl={daemon.url} />);
+  const title = await screen.findByText('点行打开');
+  const row = expandRow(title);
+  expect(window.location.pathname).toBe('/');
+  expect(within(row).getByRole('button', { name: '展开详情' }).getAttribute('aria-expanded')).toBe('true');
+  fireEvent.click(title.closest('a')!);
+  expect(window.location.pathname).toBe(`/works/${work.id}`);
+  await waitFor(() => expect(row.classList.contains('current')).toBe(true));
+});
+
 test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新全局并发', async () => {
   daemon = await uiFixture();
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '断线中的工作', key: 'start' })).result.work;
@@ -92,7 +113,7 @@ test('行内确认和一般关卡决定经 HTTP 生效，工作在等你处理�
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '关卡工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
-  fireEvent.click((await screen.findByText('关卡工作')).closest('summary')!);
+  expandRow(await screen.findByText('关卡工作'));
   const confirm = await screen.findByRole('button', { name: '确认这一版' });
   await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(confirm);
@@ -100,7 +121,7 @@ test('行内确认和一般关卡决定经 HTTP 生效，工作在等你处理�
   await waitFor(() => expect(screen.getByText('▦ 0/1')).toBeTruthy());
   release();
   await until(() => daemon!.call('list-pending'), value => value.result.some((gate: any) => gate.question === '保留多久？'));
-  fireEvent.click((await screen.findByText('关卡工作')).closest('summary')!);
+  expandRow(await screen.findByText('关卡工作'));
   fireEvent.click(await screen.findByRole('button', { name: '一周' }));
   await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('关卡工作')).toBeTruthy());
   const conversation = (await daemon.call('get-conversation', { workId: work.id })).result;
@@ -112,7 +133,7 @@ test('断线期间工作说明更新，行内操作显示运行层拒绝的原�
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '过期确认', key: 'start' })).result.work;
   const network = controlledTransport();
   render(<App baseUrl={daemon.url} transport={network.transport} />);
-  fireEvent.click((await screen.findByText('过期确认')).closest('summary')!);
+  expandRow(await screen.findByText('过期确认'));
   await screen.findByText('用户需求 v1');
   const button = await screen.findByRole('button', { name: '确认这一版' });
   network.disconnect();
@@ -173,12 +194,11 @@ test('审核归等你处理，行内退回附意见后恢复进行中', async ()
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '等待审核的工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
-  fireEvent.click((await screen.findByText('等待审核的工作')).closest('summary')!);
+  expandRow(await screen.findByText('等待审核的工作'));
   fireEvent.click(await screen.findByRole('button', { name: '确认这一版' }));
   await until(() => daemon!.call('list-pending'), value => value.result.some((item: any) => item.kind === 'review'));
   await screen.findByText('待你审核');
-  const row = screen.getByText('等待审核的工作').closest('details')!;
-  if (!row.open) fireEvent.click(row.querySelector('summary')!);
+  expandRow(screen.getByText('等待审核的工作'));
   expect(await screen.findByText('汇总报告原文')).toBeTruthy();
   fireEvent.change(screen.getByLabelText('意见'), { target: { value: '请补齐边界说明' } });
   fireEvent.click(screen.getByRole('button', { name: '退回' }));

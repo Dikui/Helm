@@ -21,18 +21,19 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
   const category = group(work);
   const tokens = work.usage.inputTokens + work.usage.outputTokens;
   const tone = category === 'attention' ? 'att' : category === 'ended' ? (work.status === 'completed' ? 'ok' : 'idle') : work.status === 'paused' ? 'idle' : 'run';
-  return <details className={`irow${path.startsWith(`/works/${work.id}`) ? ' current' : ''}`} onToggle={e => setExpanded(e.currentTarget.open)}>
-    <summary>
-      <span className="t"><span className={`spark ${tone}`} aria-hidden="true">✦</span><span>{work.title || t('untitled')}</span><span className="chev" aria-hidden="true">⌄</span></span>
+  // 点行打开工作页，右侧按钮在列表里展开详情
+  return <div className={`irow${path.startsWith(`/works/${work.id}`) ? ' current' : ''}`}>
+    <div className="irow-head"><Link className="irow-main" href={`/works/${encodeURIComponent(work.id)}`}>
+      <span className="t"><span className={`spark ${tone}`} aria-hidden="true">✦</span><span>{work.title || t('untitled')}</span></span>
       {!(work.status === 'paused' && work.summary === work.runtimePauseReason) && <span className="d">{work.summary}</span>}
       {work.runtimePauseReason && work.status === 'paused' && <span className="pause-reason">{work.runtimePauseReason}</span>}
       <span className="f"><span className={`pill ${tone}`}>
         {tone === 'run' && <span className="spin" aria-hidden="true" />}{t(work.status)}
         <time aria-label={t(category === 'ended' ? 'duration' : 'elapsed')} dateTime={work.statusSince}> · {category === 'ended' ? elapsed(work.createdAt, Date.parse(work.statusSince)) : elapsed(work.statusSince, now)}</time>
       </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={`tokens: ${tokens}`}>◇ {formatTokens(tokens, language)}</span></span></span>
-    </summary>
-    {expanded && <div className="more"><InboxDetails work={work} /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('open')}</Link></div>}
-  </details>;
+    </Link><button type="button" className="chev" aria-expanded={expanded} aria-label={t('showDetails')} onClick={() => setExpanded(!expanded)}>⌄</button></div>
+    {expanded && <div className="more"><InboxDetails work={work} /></div>}
+  </div>;
 }
 export function Inbox() {
   const { t, language, setLanguage } = useI18n();

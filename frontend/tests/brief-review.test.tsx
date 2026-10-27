@@ -3,6 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
+
+// 收件箱行点击会打开工作页，详情要用右侧按钮展开
+function expandRow(text: HTMLElement) {
+  const row = text.closest('.irow') as HTMLElement;
+  const toggle = within(row).getByRole('button', { name: '展开详情' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  return row;
+}
 import type { FakeStep } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 
@@ -147,8 +155,7 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，工作
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
   const review = await screen.findByRole('region', { name: '审核' });
   const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
-  const row = within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核').closest('details')!;
-  fireEvent.click(row.querySelector('summary')!);
+  const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
   const inboxAccept = await within(row).findByRole('button', { name: '接受' });
   expect(within(row).queryByRole('button', { name: '查看 diff' })).toBeNull();
   expect(within(row).getByRole('link', { name: '查看审核详情' }).getAttribute('href')).toBe(`/works/${work.id}/brief`);
@@ -192,8 +199,7 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} transport={transport} />);
   const review = await screen.findByRole('region', { name: '审核' });
-  const row = within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核').closest('details')!;
-  fireEvent.click(row.querySelector('summary')!);
+  const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
   const sendBack = await within(row).findByRole('button', { name: '退回' }) as HTMLButtonElement;
   expect(sendBack.disabled).toBe(true);
   fireEvent.change(within(row).getByLabelText('意见'), { target: { value: '请补边界情况' } });
@@ -248,8 +254,7 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
     const gate = await within(review).findByRole('group', { name: '审核' });
     const accept = within(gate).getByRole('button', { name: '接受' }) as HTMLButtonElement;
     await waitFor(() => expect(accept.disabled).toBe(false));
-    const row = within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核').closest('details')!;
-    fireEvent.click(row.querySelector('summary')!);
+    const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
     await within(row).findByRole('group', { name: '审核' });
     fireEvent.change(within(gate).getByLabelText('意见'), { target: { value: '取消前输入' } });
     ok(await daemon.call('cancel-work', { workId: work.id }));
@@ -263,8 +268,7 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   expect(within(review).getByText('终态仍可读取的汇总报告')).toBeTruthy();
   const ended = await screen.findByRole('region', { name: '已结束' });
   const row = await within(ended).findByText('工作说明与审核');
-  const details = row.closest('details')!;
-  if (!details.open) fireEvent.click(details.querySelector('summary')!);
+  const details = expandRow(row);
   const gate = await within(details).findByRole('group', { name: '审核' });
   expect(within(gate).getByText('终态仍可读取的汇总报告')).toBeTruthy();
   expect(within(gate).getByText('已取消')).toBeTruthy();

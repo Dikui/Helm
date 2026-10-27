@@ -28,6 +28,7 @@ Helm 是个人使用的多 Agent 编排器。界面帮助用户在工作收件�
 - 实时：`shared/events.ts` 使用 fetch 读取 POST SSE，重读相关资源成功后推进游标；断线使用 Last-Event-ID 补读。
 - 语言：`shared/i18n.tsx` 管理中文 / 英文和 localStorage。仅翻译界面文字，用户和 Agent 内容原样显示。
 - 反馈：`shared/feedback.tsx` 提供可读取原始原因的行内错误；保留输入，按钮提交中禁用并标记忙碌。
+- 收件箱行：整行是打开工作页的链接；行右侧的“展开详情”按钮（`aria-expanded`）在列表里展开最近步骤、关卡和审核操作，不跳转。
 - 搜索：收件箱本地标题过滤，关键词为临时状态；提供清除和 ⌘K / Ctrl+K 聚焦。
 - 新建与对齐：页面专用组件、类型和样式分别在 `pages/new-work/`、`pages/work/aligning/`，复用共享读取、SSE 和反馈。项目、调度者 Agent 及草稿版本采用原生 select，接受系统弹出层的外观与键盘交互；不可用 Agent 在选项中展示运行层原因并禁选。
 - 登记项目：本页登记表单同时用于无项目状态与弹窗。弹窗由 `pages/new-work/RegisterProject.tsx` 管理 portal、背景 inert、初始焦点、Tab 循环、Escape 和焦点恢复；登记期间禁止关闭。输入错误保留原文并关联到路径字段。
