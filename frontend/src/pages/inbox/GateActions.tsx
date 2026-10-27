@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
@@ -30,8 +30,15 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     } catch (error) { setError(error as Error); }
     finally { busy.current = false; setPending(false); }
   };
+  // 焦点在卡内（不在输入框里）时，按数字键选对应选项
+  const shortcut = (event: KeyboardEvent<HTMLElement>) => {
+    const index = Number(event.key) - 1;
+    if (readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    event.preventDefault(); void decide(gate.options[index]);
+  };
   if (decided) return null;
-  return <section role="group" aria-busy={pending} className="gate-actions" aria-label={gate.kind === 'review' ? t('reviewTitle') : gate.question}>
+  return <section role="group" aria-busy={pending} className="gate-actions" aria-label={gate.kind === 'review' ? t('reviewTitle') : gate.question} onKeyDown={shortcut}>
     <strong>{gate.kind === 'review' ? t('reviewTitle') : gate.question}</strong>
     {gate.kind === 'review' && <b>{t('reviewReport')}</b>}
     {gate.body && <p className="agent-text">{gate.body}</p>}
@@ -45,7 +52,11 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
     {ended && <p className="pill">{t(workStatus)}</p>}
     {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
-    {!readOnly && <div className="acts">
+    {!readOnly && gate.kind === 'general' && <div className="opts">
+      {gate.options.map((option, index) => <button className="btn" key={option} disabled={pending} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
+        onClick={() => void decide(option)}>{option}{index < 9 && <kbd aria-hidden="true">{index + 1}</kbd>}</button>)}
+    </div>}
+    {!readOnly && gate.kind !== 'general' && <div className="acts">
       {gate.kind === 'work-confirmation'
         ? <button className="btn sm primary" disabled={pending || !gate.descriptionId} onClick={() => void decide('confirm')}>{t('confirm')}</button>
         : gate.options.map(option => <button className="btn sm" key={option} disabled={pending || (gate.kind === 'review' && option === 'return' && !comment.trim())}

@@ -46,7 +46,7 @@ export function RoundSteering({ round, steps, queue, interrupt, busy, reference,
   const now = useClock();
   return <div className="conversation-steering">
     <div className="conversation-round-heading">
-      <span className={`spark ${round ? 'run' : ''}`} aria-hidden="true">✦</span>
+      <span className={`spark ${round ? 'run busy' : ''}`} aria-hidden="true">✦</span>
       <h3>{t('alignmentCoordinator')}{round ? ` · ${t('conversationRound')} ${round.number}` : ` · ${t('conversationIdle')}`}</h3>
       {round && <><span className="muted">{round.agentId}</span><span className="pill run"><span className="spin" aria-hidden="true" /><time aria-label={t('conversationRoundElapsed')}>{elapsed(round.startedAt, now)}</time></span></>}
       <button type="button" className="btn sm" disabled={!round || busy} onClick={interrupt} title="⌘⏎ / Ctrl+Enter">{t('conversationInterrupt')}</button>

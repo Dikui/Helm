@@ -37,6 +37,7 @@ function relatedNodes(nodes: GraphNode[], focus: string | null) {
   }
   return related;
 }
+const ringTone: Record<string, string> = { executing: 'run busy', verifying: 'run busy', completed: 'ok', decided: 'ok', pending: 'att', cancelled: 'cut', withdrawn: 'cut' };
 export function GraphCanvas({ nodes, selectedId, sendBacks, select }: {
   nodes: GraphNode[]; selectedId: string | null; sendBacks: Map<string, number>; select: (id: string) => void;
 }) {
@@ -110,7 +111,7 @@ export function GraphCanvas({ nodes, selectedId, sendBacks, select }: {
               style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }} aria-label={name} title={nodeTitle(node)} aria-pressed={selectedId === node.id}
               aria-describedby={`${marker}-${node.id}-state ${marker}-${node.id}-summary${node.type === 'card' ? ` ${marker}-${node.id}-meta` : ''}`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
-              <span className="cg-node-name"><span className="spark" aria-hidden="true">{node.type === 'gate' ? '▲' : '✦'}</span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span>
+              <span className="cg-node-name"><span className={`spark ${ringTone[node.status] ?? ''}`} aria-hidden="true">{node.type === 'gate' ? '▲' : '✦'}</span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span>
               <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}</span>
               {node.type === 'card' && <>
                 <span className="cg-node-meta" id={`${marker}-${node.id}-meta`}>{node.agentId ?? t('graphNoAgent')}{node.currentStep > 0 && ` · ${t('graphStep')} ${node.currentStep}`}</span>

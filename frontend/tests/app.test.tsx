@@ -122,7 +122,9 @@ test('行内确认和一般关卡决定经 HTTP 生效，工作在等你处理�
   release();
   await until(() => daemon!.call('list-pending'), value => value.result.some((gate: any) => gate.question === '保留多久？'));
   expandRow(await screen.findByText('关卡工作'));
-  fireEvent.click(await screen.findByRole('button', { name: '一周' }));
+  const gate = await screen.findByRole('group', { name: '保留多久？' });
+  expect(within(gate).getByRole('button', { name: '一周' }).getAttribute('aria-keyshortcuts')).toBe('1');
+  fireEvent.keyDown(gate, { key: '1' });
   await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('关卡工作')).toBeTruthy());
   const conversation = (await daemon.call('get-conversation', { workId: work.id })).result;
   expect(conversation.find((item: any) => item.question === '保留多久？').decision).toBe('一周');

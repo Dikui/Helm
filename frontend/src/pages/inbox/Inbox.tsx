@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { elapsed, useClock } from '../../shared/clock.js';
 import { ErrorNotice } from '../../shared/feedback.js';
@@ -21,10 +21,12 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
   const category = group(work);
   const tokens = work.usage.inputTokens + work.usage.outputTokens;
   const tone = category === 'attention' ? 'att' : category === 'ended' ? (work.status === 'completed' ? 'ok' : 'idle') : work.status === 'paused' ? 'idle' : 'run';
+  const ring = work.status === 'cancelled' ? 'cut' : tone === 'run' && !work.totalCards ? 'run busy' : tone;
+  const progress = tone === 'run' && work.totalCards ? { '--p': `${Math.round(work.completedCards / work.totalCards * 100)}%` } as CSSProperties : undefined;
   // 点行打开工作页，右侧按钮在列表里展开详情
-  return <div className={`irow${path.startsWith(`/works/${work.id}`) ? ' current' : ''}`}>
+  return <div className={`irow${path.startsWith(`/works/${work.id}`) ? ' current' : ''}${expanded ? ' open' : ''}`}>
     <div className="irow-head"><Link className="irow-main" href={`/works/${encodeURIComponent(work.id)}`}>
-      <span className="t"><span className={`spark ${tone}`} aria-hidden="true">✦</span><span>{work.title || t('untitled')}</span></span>
+      <span className="t"><span className={`spark ${ring}`} style={progress} aria-hidden="true">✦</span><span>{work.title || t('untitled')}</span></span>
       {!(work.status === 'paused' && work.summary === work.runtimePauseReason) && <span className="d">{work.summary}</span>}
       {work.runtimePauseReason && work.status === 'paused' && <span className="pause-reason">{work.runtimePauseReason}</span>}
       <span className="f"><span className={`pill ${tone}`}>
@@ -50,7 +52,7 @@ export function Inbox() {
   }, []);
   const filtered = works?.filter(work => work.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   return <aside className="sb" aria-label="Helm">
-    <div className="sb-head"><Link className="logo" href="/">H</Link><b>Helm</b><Link className="btn sm primary" href="/new">＋ {t('newWork')}</Link></div>
+    <div className="sb-head"><Link className="logo" href="/" aria-label="Helm">H</Link><b>Helm</b><Link className="btn sm primary" href="/new">＋ {t('newWork')}</Link></div>
     <div className="search"><input ref={input} type="search" aria-label={t('search')} placeholder={t('search')} value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="clear-search" aria-label={t('clearSearch')} onClick={() => { setSearch(''); input.current?.focus(); }}>×</button>}<kbd>⌘K</kbd></div>
     <div className="connection" role="status">{t(connection)}</div>
     <div className="inbox">
