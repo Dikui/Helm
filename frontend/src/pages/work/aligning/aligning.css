@@ -1,18 +1,19 @@
 .aligning-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 38%); flex: 1; min-height: 0; }
 .aligning-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.aligning-thread { flex: 1; overflow: auto; padding: var(--space-5); display: grid; align-content: start; gap: var(--space-5); scrollbar-gutter: stable; }
+.aligning-thread { flex: 1; min-height: 100px; overflow: auto; padding: var(--space-5) max(var(--space-5), calc((100% - 720px) / 2)); display: grid; align-content: start; gap: var(--space-5); scrollbar-gutter: stable; }
 .aligning-work h2 { font-size: var(--text-md); }
-.aligning-message { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius); }
-.aligning-message.me { background: var(--surface-soft); margin-left: var(--space-5); }
+.aligning-message { display: grid; gap: var(--space-2); }
+.aligning-message.me { width: fit-content; max-width: 80%; margin-left: auto; padding: 10px 14px; border-radius: 18px 18px 4px 18px; background: var(--surface-soft); }
 .aligning-message b { color: var(--muted); font-size: var(--text-sm); }
 .aligning-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.aligning-gate { display: grid; gap: var(--space-3); border: 1px solid var(--attention-line); background: var(--attention-soft); border-radius: var(--radius); padding: var(--space-4); }
+.aligning-gate { display: grid; gap: var(--space-3); border: 1px solid var(--attention-line); background: var(--surface); box-shadow: var(--shadow-card); border-radius: 14px; padding: var(--space-4); }
 .aligning-gate .pill { justify-self: start; }
-.aligning-composer { padding: var(--space-4); border-top: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-3); }
-.aligning-composer label { display: grid; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
-.aligning-composer textarea { resize: none; min-height: 110px; max-height: 35dvh; width: 100%; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-md); }
+.aligning-composer { flex-shrink: 0; min-height: 0; width: min(720px, calc(100% - 2 * var(--space-5))); margin: 0 auto var(--space-4); display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); grid-auto-rows: auto; align-items: end; gap: var(--space-2) var(--space-3); padding: 10px 10px 8px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); }
+.aligning-composer label { display: grid; align-self: stretch; min-height: 0; }
+.aligning-composer textarea { width: 100%; height: 100%; min-height: 48px; resize: none; padding: 4px 0; border: 0; background: var(--clear); color: var(--text); font: inherit; outline: 0; }
+.aligning-composer:focus-within { border-color: var(--ring); }
 .aligning-composer .error, .aligning-composer .hint, .aligning-composer .attachments { grid-column: 1 / -1; }
-.aligning-composer .btn { min-width: 100px; }
+.aligning-composer .send { width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-md); font-size: 15px; }
 .aligning-brief { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); }
 .aligning-brief > header { padding: var(--space-4); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .aligning-brief label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }

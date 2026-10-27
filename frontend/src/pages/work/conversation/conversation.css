@@ -2,11 +2,16 @@
 .conversation-view-switch a { padding: 3px 10px; border-radius: var(--radius-sm); color: var(--muted); text-decoration: none; }
 .conversation-view-switch a[aria-current='page'] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .conversation-view { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.conversation-thread { flex: 1; min-height: 100px; overflow: auto; padding: var(--space-5); scrollbar-gutter: stable; }
+.conversation-thread { flex: 1; min-height: 100px; overflow: auto; padding: var(--space-5) max(var(--space-5), calc((100% - 720px) / 2)); scrollbar-gutter: stable; }
 .conversation-view h2 { font-size: var(--text-md); margin-bottom: var(--space-4); }
 .conversation-view h3 { font-size: var(--text-sm); font-weight: 600; }
-.conversation-item { padding: var(--space-3); margin-bottom: var(--space-4); border-radius: var(--radius); }
-.conversation-item.me { margin-left: var(--space-5); background: var(--surface-soft); }
+.conversation-item { margin-bottom: var(--space-5); }
+/* 你的消息是靠右气泡，调度者和运行层的消息带头像 */
+.conversation-item.me { width: fit-content; max-width: 80%; margin-left: auto; padding: 10px 14px; border-radius: 18px 18px 4px 18px; background: var(--surface-soft); }
+.conversation-item:not(.me) { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: var(--space-3); }
+.conversation-item:not(.me)::before { content: "✦"; grid-row: 1 / span 9; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-md); background: var(--surface-soft); color: var(--running); font-size: 13px; line-height: 1; }
+.conversation-item:not(.me):has(.gate-actions)::before { color: var(--attention); }
+.conversation-item:not(.me) > * { grid-column: 2; }
 .conversation-item p, .conversation-queue p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .conversation-who { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-2); overflow-wrap: anywhere; }
 .conversation-who small { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 var(--space-1); max-width: 100%; }
@@ -14,7 +19,10 @@
 .conversation-item .gate-actions > strong { font-size: 16px; }
 .conversation-gate-history { display: grid; gap: var(--space-2); color: var(--muted); }
 .conversation-gate-history .pill { justify-self: start; }
-.conversation-steering { border-top: 1px solid var(--border); padding: var(--space-3) var(--space-5); background: var(--surface); max-height: 35dvh; overflow: auto; flex-shrink: 0; }
+/* 底部浮起的引导卡：本轮步骤 + 下一轮处理 + 输入框，高度可拖动 */
+.conversation-dock { display: flex; flex-direction: column; flex-shrink: 0; width: min(720px, calc(100% - 2 * var(--space-5))); min-height: 0; max-height: 75%; margin: 0 auto var(--space-4); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); overflow: hidden; }
+.conversation-dock > .error { margin: var(--space-2) var(--space-3) 0; }
+.conversation-steering { flex: 0 1 auto; min-height: 0; max-height: 35dvh; overflow: auto; padding: 12px 14px; }
 .conversation-round-heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .conversation-round-heading .btn { margin-left: auto; }
 .conversation-round-heading .muted { font-size: var(--text-sm); }
@@ -30,9 +38,11 @@
 .conversation-queue { border-top: 1px solid var(--border); margin-top: var(--space-3); padding-top: var(--space-3); }
 .conversation-queue ul { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-2); font-size: var(--text-sm); }
 .conversation-queue li { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-soft); }
-.conversation-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: end; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border); }
-.conversation-composer > label { display: grid; gap: var(--space-2); font-size: var(--text-sm); color: var(--muted); }
-.conversation-composer textarea { width: 100%; min-height: 70px; max-height: 25dvh; resize: vertical; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; }
+.conversation-composer { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); grid-auto-rows: auto; gap: var(--space-2) var(--space-3); align-items: end; padding: 10px 10px 8px 14px; border-top: 1px solid var(--border); }
+.conversation-composer > label { display: grid; align-self: stretch; min-height: 0; }
+.conversation-composer .send { width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-md); font-size: 15px; }
+.conversation-composer textarea { width: 100%; height: 100%; min-height: 48px; resize: none; padding: 4px 0; border: 0; background: var(--clear); color: var(--text); font: inherit; outline: 0; }
+.conversation-composer:focus-within { box-shadow: inset 0 2px 0 var(--ring); }
 .conversation-hints { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--muted); }
 .conversation-hints label { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; min-width: 0; }
 .conversation-hints select { min-width: 0; max-width: 260px; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
@@ -41,5 +51,6 @@
   .conversation-view { min-height: 65dvh; }
   .conversation-thread { max-height: 55dvh; }
   .conversation-thread, .conversation-steering, .conversation-composer { padding: var(--space-3); }
+  .conversation-dock { width: calc(100% - 2 * var(--space-2)); margin-bottom: var(--space-2); }
   .conversation-hints label { margin-left: 0; max-width: 100%; }
 }

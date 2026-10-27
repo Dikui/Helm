@@ -7,6 +7,7 @@ import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { ConversationItem, WorkDescription } from './types.js';
+import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import './aligning.css';
 
 // The work branch only exists after the brief is confirmed.
@@ -46,10 +47,13 @@ export function AligningWork({ workId }: { workId: string }) {
     if (await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files) })) { setBody(''); setFiles([]); }
   };
   const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
+  const chat = useRef<HTMLElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
+  const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
   return <div className="aligning-work">
-    <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming}>
+    <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
       <div className="aligning-thread">
-        <h2>{t('chat')}</h2>
+        <h2 className="sr">{t('chat')}</h2>
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
@@ -62,12 +66,14 @@ export function AligningWork({ workId }: { workId: string }) {
             : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
       </div>
-      <form className="aligning-composer" noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
-        <label>{t('alignmentMessage')}<textarea ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
+      <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
+        max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
+      <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
+        <label><span className="sr">{t('alignmentMessage')}</span><textarea ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
-        <button className="btn primary" disabled={submission.pending || !body.trim()}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+        <button className="btn primary send" disabled={submission.pending || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
         <AttachmentPicker files={files} onChange={setFiles} disabled={submission.pending || submission.uncertain} />
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}

@@ -18,7 +18,7 @@ a { color: var(--accent); text-underline-offset: .2em; }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 body { background: var(--sidebar-bg); }
-.shell { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100vh; }
+.shell { position: relative; display: grid; grid-template-columns: var(--sidebar-w, var(--sidebar-default, 320px)) minmax(0, 1fr); height: 100vh; }
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); font-size: var(--text-sm); }
 
@@ -130,7 +130,10 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .top { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-height: 52px; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border); }
 .top h1 { font-size: var(--text-md); overflow-wrap: anywhere; }
 /* 工作页顶栏：大标题 + 进度环（Things 3 项目页） */
-.work-title { display: flex; align-items: center; gap: var(--space-3); min-width: 0; margin-right: auto; }
+.top:has(.work-title) { flex-wrap: nowrap; }
+.top:has(.work-title) > :not(.work-title) { flex-shrink: 0; }
+.work-title { display: flex; flex: 1 1 auto; align-items: center; gap: var(--space-3); min-width: 0; margin-right: auto; }
+@media (max-width: 900px) { .top:has(.work-title) { flex-wrap: wrap; } }
 .work-title > div { display: grid; min-width: 0; }
 .work-title .pill { height: auto; padding: 0; justify-self: start; }
 .work-title h1 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; }
@@ -140,7 +143,7 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .empty-main .spark { width: 32px; height: 32px; padding: 4px; border-width: 2px; }
 .empty-main h1 { color: var(--text); font-size: var(--text-lg); font-weight: 500; }
 .settings-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-5); }
-@media (max-width: 1280px) { .shell { grid-template-columns: 280px minmax(0, 1fr); } }
+@media (max-width: 1280px) { .shell { --sidebar-default: 280px; } }
 @media (max-width: 640px) { .shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 100dvh; } .sb { min-height: 55dvh; } .inbox { max-height: 60dvh; } .inset { min-height: 40dvh; margin: var(--space-2); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 /* All application scroll regions inherit a visible, theme-aware scrollbar. */
@@ -182,3 +185,16 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .gate-actions .opts .btn:hover { background: var(--hover); }
 .gate-actions .opts .btn:hover::before { border-color: var(--attention); }
 .gate-actions .opts kbd { margin-left: auto; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-soft); color: var(--muted); font: 500 11px/18px var(--mono); }
+
+/* 可拖动分界：侧栏宽度、对话与输入区高度；悬停或键盘聚焦时显示分界线 */
+.splitter { position: relative; z-index: 5; flex-shrink: 0; touch-action: none; }
+.splitter::after { content: ""; position: absolute; border-radius: 2px; background: var(--clear); transition: background .15s; }
+.splitter:hover::after, .splitter:focus-visible::after { background: var(--ring); }
+.splitter:focus-visible { outline: 0; }
+.splitter.vertical { cursor: col-resize; }
+.splitter.vertical::after { inset: 0 3px; }
+.splitter.horizontal { height: 8px; margin: -4px 0; cursor: row-resize; }
+.splitter.horizontal::after { inset: 3px 0; }
+.shell > .splitter { position: absolute; top: 0; bottom: 0; left: calc(var(--sidebar-w, var(--sidebar-default, 320px)) - 4px); width: 8px; }
+@media (max-width: 640px) { .shell > .splitter { display: none; } }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

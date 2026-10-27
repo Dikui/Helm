@@ -6,6 +6,7 @@ import type { HelmEvent, Work } from '../../../shared/types.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
+import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import type { CardReference, ConversationItem, Message, Rounds } from './types.js';
@@ -30,6 +31,9 @@ export function ConversationView({ work }: { work: Work }) {
   const interruptBusy = useRef(false);
   const [interrupting, setInterrupting] = useState(false);
   const [interruptError, setInterruptError] = useState<Error>();
+  const view = useRef<HTMLElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
+  const [dockHeight, setDockHeight] = useStoredSize('helm.conversation-dock-height');
   const running = rounds.data?.rounds.find(round => round.status === 'running');
   const cards = graph.data?.filter(node => node.type === 'card') ?? [];
   const gates = conversation.data?.filter(item => item.type === 'gate') ?? [];
@@ -64,9 +68,9 @@ export function ConversationView({ work }: { work: Work }) {
     } else if (!immediate) return;
     if (immediate) await interrupt();
   };
-  return <section className="conversation-view" aria-label={t('chat')}>
+  return <section className="conversation-view" aria-label={t('chat')} ref={view}>
     <div className="conversation-thread">
-      <h2>{t('chat')}</h2>
+      <h2 className="sr">{t('chat')}</h2>
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
       {conversation.data?.map(item => <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
@@ -82,17 +86,20 @@ export function ConversationView({ work }: { work: Work }) {
     </div>
     {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
+    <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={120} onResize={setDockHeight}
+      max={() => (view.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => dock.current?.getBoundingClientRect().height ?? 200} />
+    <div className="conversation-dock" ref={dock} style={dockHeight ? { height: dockHeight } : undefined}>
     <RoundSteering round={running} steps={rounds.data?.currentSteps.filter(step => step.type !== 'end') ?? []}
       queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
       busy={interrupting || submission.pending || ended || Boolean(rounds.error)} interrupt={() => void interrupt()} />
     {interruptError && <ErrorNotice error={interruptError} />}
     <form className="conversation-composer" noValidate aria-busy={submission.pending || interrupting} onSubmit={event => { event.preventDefault(); void send(); }}>
-      <label>{t('alignmentMessage')}<textarea value={body} disabled={locked} placeholder={t('conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
+      <label><span className="sr">{t('alignmentMessage')}</span><textarea value={body} disabled={locked} placeholder={t('conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
         if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.metaKey || event.ctrlKey) { event.preventDefault(); void send(true); }
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
       }} /></label>
-      <button className="btn primary" disabled={ended || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+      <button className="btn primary send" disabled={ended || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
       <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
       <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
         <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>
@@ -105,6 +112,7 @@ export function ConversationView({ work }: { work: Work }) {
       {submission.error && <ErrorNotice error={submission.error} />}
       {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
     </form>
+    </div>
     {preview.preview}
   </section>;
 }
