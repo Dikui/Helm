@@ -82,6 +82,32 @@ test('调度者建卡和改卡按 key 去重，内容和验收标记可读，待
   assert.equal((await daemon.call('create-card', { workId: daemon.work.id, key: 'user', content: '用户不能建卡' })).error.code, 'FORBIDDEN');
 });
 
+test('写入范围规范化后保存，没有依赖的卡片范围重叠时只提示；执行中无事可做的轮次结束后提示用户工作停住', async t => {
+  const card = (ctx: FakeContext, key: string, writeScopes: string[]) => ({ workId: workIdOf(ctx), key, content: key, writeScopes });
+  const daemon = await fixture(t, [
+    { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'api', ['./src/api/', 'src/api']), saveAs: 'api', check: value => { ok(value); assert.deepEqual((value as any).result.writeScopes, ['src/api']); } },
+    { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'user', ['src/api/user.ts']), saveAs: 'user', check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'docs', ['docs']), saveAs: 'docs', check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'after-api', ['src/api']), saveAs: 'after', check: ok },
+    { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'api').id }, downstream: { type: 'card', id: saved(ctx, 'after').id } }), check: ok },
+    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'docs').id, writeScopes: ['docs', 'src/api/routes'] }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'escape', ['../outside']), check: value => assert.equal((value as any).error.code, 'INVALID_WRITE_SCOPE') },
+  ], [{ type: 'end', reason: 'completed', finalAnswer: 'nothing-to-do' }]);
+  await daemon.finished();
+  const cards = new Map((await daemon.call('get-card-graph', { workId: daemon.work.id })).result
+    .filter((node: any) => node.type === 'card').map((node: any) => [node.key, node]));
+  const warned = (key: string) => (cards.get(key) as any).writeScopeWarnings.map((text: string) => text.match(/卡片 (\S+)（/)![1]).sort();
+  assert.deepEqual(warned('api'), ['docs', 'user']);
+  assert.deepEqual(warned('user'), ['after-api', 'api']);
+  assert.deepEqual(warned('after-api'), ['docs', 'user']);
+  assert.deepEqual((cards.get('docs') as any).writeScopes, ['docs', 'src/api/routes']);
+  const events = await until(daemon.events, values => values.some(event => event.action === 'work-stalled'));
+  assert.equal(events.filter(event => event.action === 'work-stalled').length, 1);
+  assert.ok(events.some(event => event.action === 'needs-user-attention' && event.details.kind === 'work-stalled'));
+  const conversation = (await daemon.call('get-conversation', { workId: daemon.work.id })).result;
+  assert.ok(conversation.some((item: any) => item.sender === 'runtime' && item.body.includes('发一条消息即可唤醒调度者')));
+});
+
 test('一般关卡支持 key 去重、修改历史和用户选项或自由回答，调度者不能代答或撤回固定关卡', async t => {
   let chosenGateId = '';
   let freeGateId = '';
@@ -104,6 +130,7 @@ test('一般关卡支持 key 去重、修改历史和用户选项或自由回答
   assert.equal(choice.creator.type, 'coordinator-round');
   assert.equal(choice.status, 'pending');
   assert.equal(events.filter(event => event.action === 'needs-user-attention' && event.details.kind === 'general').length, 2);
+  assert.ok(!events.some(event => event.action === 'work-stalled'), '有待决定的关卡时不算停住');
   const decide = { workId: daemon.work.id, gateId: chosenGateId, decision: '本地' };
   const chosen = await daemon.call('decide-gate', decide);
   ok(chosen);

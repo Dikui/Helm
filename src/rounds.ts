@@ -6,7 +6,7 @@ import { projectPath } from './alignment.js';
 import { cardGraph } from './graph.js';
 import { agentEnvironment } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
-import { pauseWorkFromRuntime } from './work-control.js';
+import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 
 export interface StartupBrief {
@@ -29,10 +29,11 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   const description = versions.at(-1);
   const lastStart = store.db.prepare(`SELECT MAX(id) AS id FROM events WHERE work_id = ? AND action = 'round-started'`).get(workId)!.id;
   const previous = store.db.prepare('SELECT reason FROM coordinator_rounds WHERE work_id = ? ORDER BY rowid DESC LIMIT 1').get(workId);
+  // Stable fields lead so consecutive rounds can share a cached prompt prefix; work carries per-round usage.
   return {
-    work,
-    workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
     activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
+    workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
+    work,
     cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
     coordinatorNotes: String(store.notes(workId).body),
@@ -183,7 +184,10 @@ export class RoundScheduler {
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-ended', { reason, abortReason, usage, finalAnswer, failure,
           ...(ruleFailure ? { error: ruleFailure } : {}), eventIds: ids, processed: reason === 'completed' }, { workId });
         if (reason === 'error' && ruleFailure?.code === 'AGENT_UNAVAILABLE') pauseWorkFromRuntime(this.store, workId, id, `调度者 Agent 不可用：${ruleFailure.reason}`);
-        else if (reason === 'completed') this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
+        else if (reason === 'completed') {
+          this.store.db.prepare('UPDATE works SET consecutive_round_failures = 0 WHERE id = ?').run(workId);
+          noticeStall(this.store, workId, id);
+        }
         else if (['error', 'timed-out', 'context-overflow'].includes(reason)) {
           const row = this.store.db.prepare(`UPDATE works SET consecutive_round_failures = consecutive_round_failures + 1 WHERE id = ? RETURNING consecutive_round_failures`).get(workId)!;
           if (Number(row.consecutive_round_failures) >= 3) pauseWorkFromRuntime(this.store, workId, id, '调度者连续失败 3 次');

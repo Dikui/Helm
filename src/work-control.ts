@@ -15,10 +15,28 @@ export function pauseWorkFromRuntime(store: TaskStore, workId: string, roundId: 
   for (const row of store.db.prepare(`SELECT id FROM dispatches WHERE work_id = ? AND status IN ('queued', 'running')`).all(workId)) {
     revokeDispatch(store, runtime, { workId, dispatchId: String(row.id), reason: '工作暂停' });
   }
+  runtimeMessage(store, workId, `runtime-pause:${roundId}`, `工作已由运行层暂停：${reason}。请手动恢复工作。`);
+  store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'runtime-pause', reason, roundId }, { workId });
+}
+
+// Called after a completed round: an executing work with nothing in flight and nothing owed by the user will never wake again.
+export function noticeStall(store: TaskStore, workId: string, roundId: string) {
+  if (store.work(workId).status !== 'executing') return;
+  const busy = store.db.prepare(`SELECT
+    EXISTS (SELECT 1 FROM dispatches WHERE work_id = ? AND status IN ('queued', 'running'))
+    OR EXISTS (SELECT 1 FROM wake_queue WHERE work_id = ? AND processed_by IS NULL)
+    OR EXISTS (SELECT 1 FROM gates WHERE work_id = ? AND status = 'pending')
+    OR EXISTS (SELECT 1 FROM cards WHERE work_id = ? AND status = 'paused') AS busy`).get(workId, workId, workId, workId)!.busy;
+  if (busy) return;
+  const reason = '调度者结束了这一轮，但没有运行中的派单、待你决定的关卡或待处理事件，工作不会自己推进';
+  store.appendEvent(runtime, { type: 'work', id: workId }, 'work-stalled', { reason, roundId }, { workId });
+  runtimeMessage(store, workId, `runtime-stall:${roundId}`, `${reason}。发一条消息即可唤醒调度者。`);
+  store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'work-stalled', reason, roundId }, { workId });
+}
+
+function runtimeMessage(store: TaskStore, workId: string, key: string, body: string) {
   const id = randomUUID();
-  const body = `工作已由运行层暂停：${reason}。请手动恢复工作。`;
   const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body }, { workId });
   store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(id, workId, 'runtime', body, `runtime-pause:${roundId}`, null, event.time, event.id);
-  store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'runtime-pause', reason, roundId }, { workId });
+    .run(id, workId, 'runtime', body, key, null, event.time, event.id);
 }

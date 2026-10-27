@@ -209,4 +209,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE messages ADD COLUMN withdrawn_at TEXT;
   `,
+  `
+  ALTER TABLE cards ADD COLUMN write_scopes TEXT NOT NULL DEFAULT '[]';
+  `,
 ];

@@ -7,14 +7,14 @@ export interface Card {
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
   agentId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
-  repairOfCardId?: string | null;
+  repairOfCardId?: string | null; writeScopes: string[];
   usage: TokenUsage;
 }
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
 const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt,
-  work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
+  work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, write_scopes AS writeScopes, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,
@@ -22,7 +22,24 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
     'outputTokens', COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0)) FROM dispatches WHERE card_id = cards.id) AS usage`;
 
 function readCard(row: Record<string, unknown>): Card {
-  return { ...row, needsVerification: Boolean(row.needsVerification), usage: JSON.parse(String(row.usage)) } as unknown as Card;
+  return { ...row, needsVerification: Boolean(row.needsVerification), writeScopes: JSON.parse(String(row.writeScopes)),
+    usage: JSON.parse(String(row.usage)) } as unknown as Card;
+}
+
+// Repo-relative path prefixes; advisory only, so malformed input is rejected rather than guessed at.
+function normalizeWriteScopes(scopes: string[]) {
+  const result = new Set<string>();
+  for (const scope of scopes) {
+    const path = scope.trim().replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+    if (!path || path === '.' || path.startsWith('/') || path.split('/').some(part => part === '..' || part === ''))
+      throw new RuleError('INVALID_WRITE_SCOPE', `写入范围须为仓库内的相对路径：${scope}`, 400);
+    result.add(path);
+  }
+  return [...result].sort();
+}
+
+function scopesOverlap(left: string, right: string) {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
 export function cardDetails(store: TaskStore, workId: string, cardId: string): Card {
@@ -44,8 +61,8 @@ function wake(store: TaskStore, eventId: number, workId: string) {
   store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(eventId, workId);
 }
 
-export function createCard(store: TaskStore, actor: Actor, params: {
-  workId: string; key: string; content: string; needsVerification?: boolean; repairOfCardId?: string;
+export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...params }: {
+  workId: string; key: string; content: string; needsVerification?: boolean; repairOfCardId?: string; writeScopes?: string[];
 }) {
   store.work(params.workId);
   const existing = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND key = ?`).get(params.workId, params.key);
@@ -53,9 +70,10 @@ export function createCard(store: TaskStore, actor: Actor, params: {
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
   const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false,
-    status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: 0, outputTokens: 0 } };
-  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null);
+    writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: 0, outputTokens: 0 } };
+  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id, write_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null,
+      JSON.stringify(card.writeScopes));
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
   const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
   wake(store, event.id, card.workId);
@@ -63,14 +81,16 @@ export function createCard(store: TaskStore, actor: Actor, params: {
 }
 
 export function updateCard(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; content?: string; needsVerification?: boolean;
+  workId: string; cardId: string; content?: string; needsVerification?: boolean; writeScopes?: string[];
 }) {
   const card = cardDetails(store, params.workId, params.cardId);
   requireMutable(card);
   const content = params.content ?? card.content;
   const needsVerification = params.needsVerification ?? card.needsVerification;
-  if (content === card.content && needsVerification === card.needsVerification) return card;
-  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ? WHERE id = ?').run(content, Number(needsVerification), card.id);
+  const writeScopes = params.writeScopes ? normalizeWriteScopes(params.writeScopes) : card.writeScopes;
+  if (content === card.content && needsVerification === card.needsVerification && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
+  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, write_scopes = ? WHERE id = ?')
+    .run(content, Number(needsVerification), JSON.stringify(writeScopes), card.id);
   const updated = cardDetails(store, card.workId, card.id);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-updated', { before: card, after: updated }, { workId: card.workId, cardId: card.id });
   return updated;
@@ -92,8 +112,16 @@ export function cardGraph(store: TaskStore, workId: string) {
   const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? ORDER BY created_at, id`).all(workId).map(readCard);
   const gates = store.gates(workId);
   const edges = dependencies(store, workId);
+  const active = cards.filter(card => card.status !== 'completed' && card.status !== 'cancelled' && card.writeScopes.length);
+  const upstream = new Map(active.map(card => [card.id, new Set(ancestors(edges, { type: 'card', id: card.id }).map(node => `${node.type}:${node.id}`))]));
+  // Overlap only matters between cards that no dependency orders; it warns and never blocks.
+  const warnings = (card: Card) => active.flatMap(other => {
+    if (other.id === card.id || upstream.get(card.id)?.has(`card:${other.id}`) || upstream.get(other.id)?.has(`card:${card.id}`)) return [];
+    const overlap = card.writeScopes.flatMap(mine => other.writeScopes.filter(theirs => scopesOverlap(mine, theirs)).map(theirs => `${mine} ↔ ${theirs}`));
+    return overlap.length ? [`与卡片 ${other.key}（${other.id}）没有依赖、写入范围重叠：${overlap.join('，')}`] : [];
+  });
   return [
-    ...cards.map(card => ({ type: 'card' as const, ...card })),
+    ...cards.map(card => ({ type: 'card' as const, ...card, writeScopeWarnings: upstream.has(card.id) ? warnings(card) : [] })),
     ...gates.map(gate => ({ type: 'gate' as const, ...gate })),
   ].map(node => ({ ...node, dependencies: edges.filter(edge => sameNode(edge.downstream, node)).map(edge => edge.upstream) }));
 }

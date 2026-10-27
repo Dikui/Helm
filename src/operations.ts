@@ -50,6 +50,7 @@ export const eventFilterSchema = z.object({
 
 const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
+const writeScopesSchema = z.array(z.string().trim().min(1)).max(50).optional();
 const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id AS defaultCoordinatorAgentId';
 
 export const operations: readonly Operation[] = [
@@ -537,13 +538,15 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, gateId }) => gateHistory(store, workId, gateId),
   }),
   operation({
-    name: 'create-card', description: '建卡片', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), repairOfCardId: z.string().min(1).optional() }).strict(),
+    name: 'create-card', description: '建卡片；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
+      writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => createCard(store, actor, params),
   }),
   operation({
-    name: 'update-card', description: '修改卡片内容或是否需要验收', callers: ['coordinator-round'], keyed: false, mutates: true,
-    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional() }).strict(),
+    name: 'update-card', description: '修改卡片内容、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(),
+      writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => updateCard(store, actor, params),
   }),
   operation({

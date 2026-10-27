@@ -18,7 +18,7 @@ const eventLabels: Record<string, string> = {
   'card-completed': '卡片已完成', 'card-cancelled': '卡片已取消', 'card-paused': '卡片已暂停', 'card-resumed': '卡片已恢复',
   'dispatch-created': '派单正在排队', 'dispatch-started': '执行者开始处理', 'dispatch-ended': '派单已结束',
   'dispatch-revoked': '派单已撤销', 'dispatch-timed-out': '派单已超时', 'conclusion-submitted': '执行者已提交结论',
-  'work-paused': '工作已暂停', 'work-resumed': '工作已恢复', 'work-cancelled': '工作已取消', 'work-completed': '工作已完成',
+  'work-paused': '工作已暂停', 'work-stalled': '工作没有在推进', 'work-resumed': '工作已恢复', 'work-cancelled': '工作已取消', 'work-completed': '工作已完成',
   'needs-user-attention': '等你处理', 'operation-rejected': '操作被拒绝', 'round-interrupted': '调度轮次已打断',
   'coordinator-agent-changed': '调度者 Agent 已更换', 'dependency-added': '卡片依赖已添加', 'dependency-removed': '卡片依赖已移除',
   'artifact-saved': '成果已保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除', 'work-deleted': '工作已删除',
@@ -28,7 +28,7 @@ const eventLabels: Record<string, string> = {
 function eventSummary(event?: HelmEvent) {
   if (!event) return '开始对齐';
   const details = event.details as Record<string, unknown>;
-  const text = details.summary ?? details.question ?? (['operation-rejected', 'work-paused', 'needs-user-attention'].includes(event.action) ? details.reason : undefined) ?? (event.action === 'message-sent' ? details.body : undefined);
+  const text = details.summary ?? details.question ?? (['operation-rejected', 'work-paused', 'work-stalled', 'needs-user-attention'].includes(event.action) ? details.reason : undefined) ?? (event.action === 'message-sent' ? details.body : undefined);
   // Agent/user text stays in its original language; never expose raw JSON or action names.
   return String(text || eventLabels[event.action] || '工作记录已更新').split(/\r?\n/, 1)[0]!.slice(0, 160);
 }
