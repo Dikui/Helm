@@ -296,6 +296,7 @@ test('工作取消后压缩所有派单与轮次输出，透明读取和步骤�
     { type: 'output', text: '取消前的输出 中文\n第二行' }, { type: 'compaction' }, { type: 'output', text: '第三步' }, { type: 'hang' },
   ], [{ type: 'output', text: '调度者仍在运行' }, { type: 'hang' }]);
   await until(daemon.events, events => events.some(event => event.action === 'dispatch-step' && event.details.step === 3));
+  await daemon.call('send-message', { ...daemon.params, key: 'next-round', body: '继续' });
   await until(daemon.events, events => events.filter(event => event.action === 'round-started').length >= 3);
   const before = await daemon.output();
   assert.equal(before[0].text, '取消前的输出 中文\n第二行');

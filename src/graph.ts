@@ -75,8 +75,7 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
     .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null,
       JSON.stringify(card.writeScopes));
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
-  const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
-  wake(store, event.id, card.workId);
+  store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
   return card;
 }
 
@@ -173,9 +172,9 @@ export function refreshCardReadiness(store: TaskStore, workId: string) {
     const status = blocked ? 'waiting' : latest ? latest.purpose === 'verification' ? 'verifying' : 'executing' : 'ready';
     if (status === card.status) continue;
     store.db.prepare('UPDATE cards SET status = ? WHERE id = ?').run(status, card.id);
-    const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id },
+    // card-ready never wakes: the coordinator caused it in its own round, or the triggering event (dispatch-ended, gate-decided…) already wakes.
+    store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id },
       status === 'waiting' ? 'card-waiting' : status === 'ready' ? 'card-ready' : 'card-unblocked', { previousStatus: card.status, status }, { workId, cardId: card.id });
-    if (status === 'ready') wake(store, event.id, workId);
   }
 }
 

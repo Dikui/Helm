@@ -63,7 +63,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-ready', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       if (wakes.length) this.schedule();
     });
     this.schedule();

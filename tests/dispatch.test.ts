@@ -351,13 +351,8 @@ test('看门狗记录执行者 pgid 和启动时间，SIGTERM 后等 5 秒再杀
 test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果、成果并唤醒调度者', async t => {
   let token = '';
   const briefs: StartupBrief[] = [];
-  let releaseExecutor!: () => void;
-  const cardReadyHandled = new Promise<void>(resolve => { releaseExecutor = resolve; });
-  t.after(() => releaseExecutor());
   const observeBrief: FakeScript = ctx => {
-    const brief: StartupBrief = JSON.parse(ctx.input);
-    briefs.push(brief);
-    if (brief.wakeEvents.some(event => event.action === 'card-ready')) releaseExecutor();
+    briefs.push(JSON.parse(ctx.input));
     return [];
   };
   const daemon = await fixture(t, [create, dispatch()], [ctx => {
@@ -369,8 +364,6 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
       { type: 'output', text: '检查结果\n第二行' },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'blocked', reason: '尚未检查' }, check: ok },
       { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '检查通过' }, check: ok },
-      // Force card-ready to wake its own round before dispatch-ended can be recorded.
-      { type: 'hang', until: cardReadyHandled },
       { type: 'end', reason: 'completed', finalAnswer: '实现已完成', usage: { inputTokens: 11, outputTokens: 7 } },
     ];
   }], { after: observeBrief, additionalRounds: [observeBrief] });
@@ -409,8 +402,9 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   // round-started is persisted before the driver receives the corresponding brief.
   const brief = await until(async () => briefs.find(value => value.wakeEvents.some(wake => wake.id === event.id)), value => value !== undefined);
   assert.ok(brief);
-  assert.ok(briefs[0]!.wakeEvents.some(event => event.action === 'card-ready'));
-  assert.equal(briefs[0]!.newEvents.some(event => event.action === 'dispatch-ended'), false);
+  // The coordinator's own new card does not wake a round; dispatch-ended is the first wake.
+  assert.equal(briefs[0], brief);
+  assert.equal(briefs.some(value => value.wakeEvents.some(wake => wake.action === 'card-ready')), false);
   assert.ok(brief.cardGraph.some((node: any) => node.id === card.id));
   assert.ok(ended.some(event => event.action === 'dispatch-step'));
   assert.ok(brief.newEvents.some(value => value.id === event.id && value.action === 'dispatch-ended'));

@@ -65,6 +65,8 @@ async function fixture(t: TestContext, script: FakeStep[] = [], executors: FakeS
   if (config.confirm !== false) {
     ok(await call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
     await until(events, events => events.some(event => event.action === 'round-ended' && event.details.finalAnswer === 'setup-finished'));
+    // New cards do not wake the coordinator, so a user message starts the follow-up rounds.
+    if (after.length) ok(await call('send-message', { ...params, key: 'next-round', body: '继续' }));
   }
   const card = async (key: string) => (await call('get-card-graph', params)).result.find((node: any) => node.type === 'card' && node.key === key);
   return { ...daemon, call, work, params, events, git, card, briefs, directory, gate };

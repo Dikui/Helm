@@ -56,7 +56,7 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript) {
   return { ...daemon, call, work, gate, events, finished, dataDir, project };
 }
 
-test('调度者建卡和改卡按 key 去重，内容和验收标记可读，待派单唤醒的简报含卡片图', async t => {
+test('调度者建卡和改卡按 key 去重，内容和验收标记可读；自己建的卡片不唤醒下一轮，下一轮简报含卡片图', async t => {
   let nextBrief: StartupBrief | undefined;
   const daemon = await fixture(t, [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'logic', content: '游戏逻辑', needsVerification: true }), saveAs: 'card', check: ok },
@@ -76,9 +76,14 @@ test('调度者建卡和改卡按 key 去重，内容和验收标记可读，待
   assert.equal(graph.find((node: any) => node.type === 'gate').id, daemon.gate.id);
   assert.equal(events.filter(event => event.action === 'card-created').length, 1);
   assert.equal(events.filter(event => event.action === 'card-updated').length, 1);
+  // card-ready is recorded but does not wake; with nothing dispatched the work stalls until the user writes.
+  const stalled = await until(daemon.events, values => values.some(event => event.action === 'work-stalled'));
+  assert.ok(stalled.some(event => event.action === 'card-ready' && event.cardId === card.id));
+  assert.equal(nextBrief, undefined);
+  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'wake', body: '继续' }));
   await until(async () => nextBrief, brief => brief !== undefined);
   assert.equal((nextBrief!.cardGraph.find((node: any) => node.type === 'card') as any).id, card.id);
-  assert.ok(nextBrief!.wakeEvents.some(event => event.action === 'card-ready' && event.cardId === card.id));
+  assert.deepEqual(nextBrief!.wakeEvents.map(event => event.action), ['message-sent']);
   assert.equal((await daemon.call('create-card', { workId: daemon.work.id, key: 'user', content: '用户不能建卡' })).error.code, 'FORBIDDEN');
 });
 
@@ -92,7 +97,7 @@ test('写入范围规范化后保存，没有依赖的卡片范围重叠时只�
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'api').id }, downstream: { type: 'card', id: saved(ctx, 'after').id } }), check: ok },
     { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'docs').id, writeScopes: ['docs', 'src/api/routes'] }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'escape', ['../outside']), check: value => assert.equal((value as any).error.code, 'INVALID_WRITE_SCOPE') },
-  ], [{ type: 'end', reason: 'completed', finalAnswer: 'nothing-to-do' }]);
+  ]);
   await daemon.finished();
   const cards = new Map((await daemon.call('get-card-graph', { workId: daemon.work.id })).result
     .filter((node: any) => node.type === 'card').map((node: any) => [node.key, node]));
@@ -260,7 +265,6 @@ test('卡片图、依赖和关卡修改历史在 helmd 重启后仍可读', asyn
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'gate').id }, downstream: { type: 'card', id: saved(ctx, 'card').id } }), check: ok },
   ]);
   await daemon.finished();
-  await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length === 3);
   const graph = (await daemon.call('get-card-graph', { workId: daemon.work.id })).result;
   const gateId = graph.find((node: any) => node.kind === 'general').id;
   const history = (await daemon.call('get-gate-history', { workId: daemon.work.id, gateId })).result;
