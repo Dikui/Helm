@@ -75,6 +75,8 @@ export async function reconcileStartup(store: TaskStore) {
   const recoveryWorks = [...works].sort((a, b) => recoveryRank(a.status) - recoveryRank(b.status)
     || (queuedAt.get(a.id) ?? 0) - (queuedAt.get(b.id) ?? 0));
   for (const work of recoveryWorks) {
+    // A deleted project has no repository to repair; keep the work as recorded instead of failing startup.
+    if (!existsSync(projectPath(store, work.id))) { await compressWorkOutputs(store, work.id); continue; }
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
