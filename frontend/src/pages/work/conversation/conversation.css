@@ -49,7 +49,7 @@
 .conversation-composer .error, .conversation-composer .hint, .conversation-composer .attachments { grid-column: 1 / -1; }
 @media (max-width: 640px) {
   .conversation-view { min-height: 65dvh; }
-  .conversation-thread { max-height: 55dvh; }
+  .conversation-scroll { max-height: 55dvh; }
   .conversation-thread, .conversation-steering, .conversation-composer { padding: var(--space-3); }
   .conversation-dock { width: calc(100% - 2 * var(--space-2)); margin-bottom: var(--space-2); }
   .conversation-hints label { margin-left: 0; max-width: 100%; }

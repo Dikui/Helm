@@ -9,6 +9,7 @@ import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { RoundSteps, Thinking } from '../conversation/RoundProgress.js';
+import { ConversationScroll } from '../conversation/ConversationScroll.js';
 import type { Rounds } from '../conversation/types.js';
 import './aligning.css';
 
@@ -57,7 +58,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
   const copyNotice = workBranch && <p className="warn"><span>!</span><span>{t('alignmentCopyReady')}</span></p>;
   return <div className="aligning-work">
     <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
-      <div className="aligning-thread">
+      <ConversationScroll key={workId} className="aligning-thread">
         <h2 className="sr">{t('chat')}</h2>
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
@@ -77,7 +78,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
         {confirmError && <ErrorNotice error={confirmError} />}
         {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
         <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
-      </div>
+      </ConversationScroll>
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
       <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
