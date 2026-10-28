@@ -110,7 +110,7 @@ npm run check
 npm test
 ```
 
-`npm install` 和 `npm ci` 会通过 `prepare` 自动将 `core.hooksPath` 设为 `.githooks`，每次提交前运行 `npm run check`。GitHub Actions 在 push 和 PR 时使用 Node 22.13.0 运行依赖安装、类型检查和普通测试，不运行真实冒烟。
+`npm install` 和 `npm ci` 会通过 `prepare` 自动将 `core.hooksPath` 设为 `.githooks`，每次提交前运行 `npm run check`。
 
 测试启动真实 `helmd`（含 CLI 子进程），使用临时任务库和 git 项目，经 HTTP、SSE、真实 MCP、CLI 和文件系统验证行为，不读取内部数据表；另有假驱动公共接口的契约测试。
 
