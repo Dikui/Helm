@@ -161,3 +161,15 @@ test.each(['对齐', '执行'])('%s切换工作和重新打开时重置到最新
   expect(screen.getByRole('region', { name: '对话记录' }).scrollTop).toBe(1500);
   expect(screen.queryByRole('button', { name: '回到最新内容' })).toBeNull();
 });
+
+test('视口被输入区挤小时触发的滚动不算往上翻，仍贴底跟随', async () => {
+  const { history } = await openWork('对齐');
+  expect(history.scrollTop).toBe(1200);
+  // A taller round summary shrinks the viewport: the browser fires scroll with scrollTop unchanged, before ResizeObserver.
+  viewportHeight = 375;
+  fireEvent.scroll(history);
+  expect(screen.queryByRole('button', { name: '回到最新内容' })).toBeNull();
+  act(() => resizes.forEach(callback => callback()));
+  expect(history.scrollTop).toBe(1225);
+  expect(screen.queryByRole('button', { name: '回到最新内容' })).toBeNull();
+});

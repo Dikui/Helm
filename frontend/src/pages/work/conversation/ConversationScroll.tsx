@@ -7,11 +7,15 @@ export function ConversationScroll({ className, children }: { className: string;
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const lastTop = useRef(0);
   const [away, setAway] = useState(false);
   const updatePosition = useCallback(() => {
     const element = viewport.current!;
     // scrollTop can be fractional; allow rounding at the bottom.
-    following.current = element.scrollHeight - element.clientHeight - element.scrollTop <= 2;
+    if (element.scrollHeight - element.clientHeight - element.scrollTop <= 2) following.current = true;
+    // Only moving up means the user is reading history; a shrinking viewport also fires scroll but keeps scrollTop.
+    else if (element.scrollTop < lastTop.current - 1) following.current = false;
+    lastTop.current = element.scrollTop;
     setAway(!following.current);
   }, []);
   const follow = useCallback(() => {
