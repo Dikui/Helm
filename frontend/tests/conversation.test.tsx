@@ -39,6 +39,46 @@ const gate = (key: string, question: string): FakeStep => ({ type: 'tool', name:
   workId: JSON.parse(ctx.input).work.id, key, question, options: ['保留一周', '一直保留'],
 }) });
 
+test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考和折叠步骤，重新打开保留已结束步骤', async phase => {
+  let output!: () => void;
+  let finish!: () => void;
+  const script: FakeStep[] = [
+    { type: 'hang', until: new Promise<void>(resolve => { output = resolve; }) },
+    { type: 'output', text: '正在检查邮件模板\n第二行原文' },
+    { type: 'hang', until: new Promise<void>(resolve => { finish = resolve; }) },
+  ];
+  let work: any;
+  if (phase === '执行') work = await executingWork([script]);
+  else {
+    daemon = await uiFixture([script]);
+    work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐思考', key: 'start' })).result.work;
+    window.history.replaceState(null, '', `/works/${work.id}`);
+  }
+  const view = render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const thinking = await within(chat).findByText('调度者正在思考…');
+  expect(thinking.closest('[role="status"]')!.parentElement!.className).toMatch(/thread/);
+  expect(await within(chat).findByText('本轮 0 步 · 等待首次输出')).toBeTruthy();
+  output();
+  const folded = (await within(chat).findByText('本轮 1 步 · 最新：正在检查邮件模板')).closest('details')!;
+  expect(folded.open).toBe(false);
+  fireEvent.click(folded.querySelector('summary')!);
+  expect(folded.open).toBe(true);
+  expect(within(folded).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
+  finish();
+  await waitFor(() => expect(within(chat).queryByText('调度者正在思考…')).toBeNull());
+  const ended = await within(chat).findByText('本轮 1 步 · 已结束 · 最新：正在检查邮件模板');
+  expect(ended.closest('details')!.open).toBe(false);
+  const duration = ended.closest('summary')!.querySelector('time')!.textContent;
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(ended.closest('summary')!.querySelector('time')!.textContent).toBe(duration);
+  view.unmount();
+  render(<App baseUrl={daemon!.url} />);
+  const reopened = await within(await screen.findByRole('region', { name: '对话' })).findByText('本轮 1 步 · 已结束 · 最新：正在检查邮件模板');
+  fireEvent.click(reopened.closest('summary')!);
+  expect(within(reopened.closest('details')!).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
+});
+
 test('执行中对话支持三种消息范围和顶栏视图切换，消息经 HTTP 保存并显示引用', async () => {
   const work = await executingWork([[card, gate('password', '旧密码保留多久？'), { type: 'hang' }]]);
   render(<App baseUrl={daemon!.url} />);
@@ -355,24 +395,26 @@ test('本轮计划显示真实总数和三种状态，更新至全部完成，�
   ]]);
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
-  expect(await within(chat).findByText(/第 2 \/ 3 步/)).toBeTruthy();
+  expect(await within(chat).findByText(/本轮计划 · 2 \/ 3/)).toBeTruthy();
   const plan = within(chat).getByRole('list', { name: '本轮计划' });
   expect(within(plan).getAllByRole('listitem')).toHaveLength(3);
   expect(within(plan).getByText('已完成')).toBeTruthy();
   expect(within(plan).getByText('进行中').closest('li')?.getAttribute('aria-current')).toBe('step');
   expect(within(plan).getByText('待做').closest('li')?.className).toBe('plan-pending');
-  const raw = within(chat).getByText('查看原始步骤', { selector: 'summary' });
+  const heading = within(chat).getByText(/本轮 \d+ 步 · 最新：原始执行步骤/);
+  fireEvent.click(heading.closest('summary')!);
+  const raw = within(chat).getByText(/执行步骤 · \d+/, { selector: 'summary' });
   fireEvent.click(raw);
   expect(raw.closest('details')?.open).toBe(true);
   expect(within(chat).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
   advance();
-  expect(await within(chat).findByText(/第 3 \/ 3 步/)).toBeTruthy();
+  expect(await within(chat).findByText(/本轮计划 · 3 \/ 3/)).toBeTruthy();
   expect(within(plan).getAllByText('已完成')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(within(chat).getByText(/Step 3 \/ 3/)).toBeTruthy();
+  expect(within(chat).getByText(/Round plan · 3 \/ 3/)).toBeTruthy();
   expect(within(chat).getByRole('list', { name: 'Round plan' })).toBeTruthy();
   clear();
   await waitFor(() => expect(within(chat).queryByRole('list', { name: 'Round plan' })).toBeNull());
-  expect(within(chat).queryByText(/Step \d+ \/ \d+/)).toBeNull();
+  expect(within(chat).queryByText(/Round plan · \d+ \/ \d+/)).toBeNull();
   expect(within(chat).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
 });

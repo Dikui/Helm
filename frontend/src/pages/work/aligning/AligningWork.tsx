@@ -9,6 +9,8 @@ import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { Project } from '../../new-work/types.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
+import { RoundSteps, Thinking } from '../conversation/RoundProgress.js';
+import type { Rounds } from '../conversation/types.js';
 import './aligning.css';
 
 // The work branch only exists after the brief is confirmed.
@@ -21,6 +23,9 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
   const project = projects.data?.find(item => item.id === projectId);
   const conversation = useResource<ConversationItem[]>('get-conversation', { workId });
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
+  const rounds = useResource<Rounds>('list-rounds', { workId });
+  const running = rounds.data?.rounds.find(round => round.status === 'running');
+  const latestRound = running ?? rounds.data?.rounds.at(-1);
   const [version, setVersion] = useState<number>();
   const [confirming, setConfirming] = useState(false);
   const confirmationBusy = useRef(false);
@@ -73,10 +78,13 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
             </div>
             : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
+        {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
+        <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
       </div>
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
       <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
+        {latestRound && <div className="aligning-round"><RoundSteps key={latestRound.id} workId={workId} round={latestRound} steps={rounds.data?.currentSteps ?? []} plan={rounds.data?.currentPlan ?? []} /></div>}
         <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }

@@ -6,6 +6,7 @@ import type { HelmEvent, Work } from '../../../shared/types.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
+import { Thinking } from './RoundProgress.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
@@ -94,13 +95,14 @@ export function ConversationView({ work }: { work: Work }) {
           : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
             {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
       </article>)}
+      <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
     </div>
     {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={120} onResize={setDockHeight}
       max={() => (view.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => dock.current?.getBoundingClientRect().height ?? 200} />
     <div className="conversation-dock" ref={dock} style={dockHeight ? { height: dockHeight } : undefined}>
-    <RoundSteering round={running} steps={rounds.data?.currentSteps.filter(step => step.type !== 'end') ?? []}
+    <RoundSteering workId={work.id} round={running ?? rounds.data?.rounds.at(-1)} steps={rounds.data?.currentSteps ?? []}
       plan={rounds.data?.currentPlan ?? []} withdraw={messageId => void withdraw(messageId)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
       busy={interrupting || withdrawing || submission.pending || ended || Boolean(rounds.error)} interrupt={() => void interrupt()} />
     {withdrawError && <ErrorNotice error={withdrawError} />}

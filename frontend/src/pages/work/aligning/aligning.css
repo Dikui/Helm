@@ -39,3 +39,5 @@
 .aligning-message:not(.me) > * { grid-column: 2; }
 @media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); } }
 .aligning-who { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; }
+.aligning-round { grid-column: 1 / -1; min-height: 0; max-height: 38dvh; overflow: auto; margin: -10px -10px 0 -14px; border-bottom: 1px solid var(--border); }
+.aligning-composer:has(.aligning-round) { grid-template-rows: minmax(0, auto) minmax(48px, 1fr); }

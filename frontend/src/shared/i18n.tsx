@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
-    conversationWithdrawMessage: '撤回', conversationPlan: '本轮计划', conversationRawSteps: '查看原始步骤',
-    conversationPlanPosition: '第 {current} / {total} 步', planPending: '待做', planInProgress: '进行中', planCompleted: '已完成',
+    conversationWithdrawMessage: '撤回', conversationPlan: '本轮计划', conversationRawSteps: '执行步骤',
+    conversationPlanPosition: '{current} / {total}', planPending: '待做', planInProgress: '进行中', planCompleted: '已完成',
     openAgentPrompt: '在编辑器中打开', openAgentPromptHint: '打开磁盘上已保存的文件；外部修改后重新加载 Agent，界面中未保存的编辑仍保留。',
     graphFlowLink: '流程',
     graphControls: '画布控制',
@@ -61,6 +61,7 @@ export const messages = {
     briefChangeHint: '要改：在对话里告诉调度者，它会起草新版本请你确认；确认前旧版继续有效。', briefChangeInChat: '在对话中提出修改',
     conversationViews: '工作视图', conversationWholeWork: '整项工作', conversationCard: '卡片', conversationGate: '关卡', conversationAbout: '关于',
     conversationRound: '轮次', conversationIdle: '空闲', conversationInterrupt: '打断本轮', conversationSteps: '本轮步骤', conversationQueue: '下一轮处理',
+    conversationThinking: '调度者正在思考…', conversationFoldedSteps: '本轮 {count} 步', conversationLatest: '最新：', conversationEnded: '已结束', conversationWaitingFirstOutput: '等待首次输出',
     conversationRoundElapsed: '本轮用时', conversationStepGap: '输出间隔', conversationStepSince: '距本步输出', conversationOutput: '调度者输出', conversationWaitingOutput: '等待调度者输出…', conversationCompaction: '上下文已压缩',
     conversationPlaceholder: '给调度者留言…', conversationNewline: '换行', conversationScopeUnavailable: '范围已失效，请重新选择',
     conversationDecided: '已决定', conversationWithdrawn: '已撤回', conversationClosed: '已关闭', conversationRuntime: '运行层',
@@ -157,8 +158,8 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
-    conversationWithdrawMessage: 'Withdraw', conversationPlan: 'Round plan', conversationRawSteps: 'View raw steps',
-    conversationPlanPosition: 'Step {current} / {total}', planPending: 'Pending', planInProgress: 'In progress', planCompleted: 'Completed',
+    conversationWithdrawMessage: 'Withdraw', conversationPlan: 'Round plan', conversationRawSteps: 'Execution steps',
+    conversationPlanPosition: '{current} / {total}', planPending: 'Pending', planInProgress: 'In progress', planCompleted: 'Completed',
     openAgentPrompt: 'Open in editor', openAgentPromptHint: 'Opens the saved file on disk. Reload the agent after external changes; unsaved edits here are kept.',
     graphFlowLink: 'Workflow',
     graphControls: 'Canvas controls',
@@ -217,6 +218,7 @@ export const messages = {
     briefChangeHint: 'To change it, tell the coordinator in chat. It drafts a new version for you to confirm; the current one stays in effect until then.', briefChangeInChat: 'Request changes in chat',
     conversationViews: 'Work views', conversationWholeWork: 'Whole work', conversationCard: 'Card', conversationGate: 'Gate', conversationAbout: 'About',
     conversationRound: 'Round', conversationIdle: 'Idle', conversationInterrupt: 'Interrupt round', conversationSteps: 'Current round steps', conversationQueue: 'Queued for next round',
+    conversationThinking: 'Coordinator is thinking…', conversationFoldedSteps: '{count} steps this round', conversationLatest: 'Latest: ', conversationEnded: 'Ended', conversationWaitingFirstOutput: 'Waiting for first output',
     conversationRoundElapsed: 'Round elapsed', conversationStepGap: 'Output interval', conversationStepSince: 'Time since output', conversationOutput: 'Coordinator output', conversationWaitingOutput: 'Waiting for coordinator output…', conversationCompaction: 'Context compacted',
     conversationPlaceholder: 'Message the coordinator…', conversationNewline: 'new line', conversationScopeUnavailable: 'Scope unavailable. Choose again.',
     conversationDecided: 'Decided', conversationWithdrawn: 'Withdrawn', conversationClosed: 'Closed', conversationRuntime: 'Runtime',
