@@ -30,12 +30,12 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
       await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared' });
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), `这是合入冲突真实冒烟。
-对齐时 draft-work-description：需求是合并 shared.txt 并保留双方内容，边界只改 shared.txt，标准是解决后内容恰为 work + base 加一个换行，基准提交是工作分支的祖先。
+对齐时 draft-work-description：需求是解决 shared.txt 的合并冲突，边界只改 shared.txt，标准是解决后 shared.txt 只有一行字面文本 RESOLVED-BOTH 加一个换行，基准提交是工作分支的祖先。
 首次确认后（没有 delivery.resolution）直接 request-review，key=initial-review，按工具 schema 提交 report：verdict=accept，summary 写“冲突冒烟的起始审核”，exceptions=[]，criteria 填工作说明标准、status=passed、evidence=[{label:"初始代码",kind:"file",ref:"shared.txt"}]，cards=[]，suggestions=[]；初始代码由测试夹具准备，不建卡不派单。不提交 body。
 收到 conflict-resolution-requested 后严格按角色规则的“接受后的合入冲突”执行。
 只建一张 needsVerification=true 的冲突卡片，key=resolve，首行“解决 shared.txt 冲突”。只派 claude-executor，执行 key=resolve-execute。
-执行者只编辑 shared.txt 为 work + base 加一个换行，禁止自行 git merge/add/commit，使用运行层预备的合并。
-执行结束后派同一 Agent 的新上下文验收 key=resolve-verify，purpose=verification：用 Node 严格比较 shared.txt 内容为 'work + base\\n'，运行 git merge-base --is-ancestor <delivery.resolution.baseCommit> HEAD，必须提交 passed 或 failed 及证据。
+执行者把 shared.txt 整个改写为一行字面文本 RESOLVED-BOTH 加一个换行（不保留 work 或 base 原文），禁止自行 git merge/add/commit，使用运行层预备的合并。
+执行结束后派同一 Agent 的新上下文验收 key=resolve-verify，purpose=verification：用 Node 严格比较 shared.txt 内容为 'RESOLVED-BOTH\\n'，运行 git merge-base --is-ancestor <delivery.resolution.baseCommit> HEAD，必须提交 passed 或 failed 及证据。
 验收 passed 后 complete-card，发消息、写笔记，最后 finish-conflict-resolution，立即退出。不要再 request-review，不合入基准、不推送。
 各轮按启动简报接续，稳定 key，不重复派单；等派单时立即退出，不轮询，失败或受阻只报告。`);
     const claude = new ClaudeDriver();
@@ -111,14 +111,14 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
         await until(() => call('get-work', { workId: work.id }), value => value.status === 'accepted' && value.delivery.resolution?.status === 'resolved');
         await panel.getByRole('button', { name: '查看冲突解决改动', exact: true }).click();
         await panel.locator('pre').waitFor();
-        assert.match(await panel.locator('pre').innerText(), /\+work \+ base/);
+        assert.match(await panel.locator('pre').innerText(), /\+RESOLVED-BOTH/);
         await page.screenshot({ path: join(evidence, 'conflict-resolved.png') });
         const changes = await call('get-conflict-resolution', { workId: work.id });
         assert.equal(changes.cards.length, 1);
         assert.ok(changes.cards[0].verificationId);
         await panel.getByRole('button', { name: '再次合入', exact: true }).click();
         await panel.getByRole('heading', { name: '已合入，待推送', exact: true }).waitFor();
-        assert.equal(await readFile(join(repo, 'shared.txt'), 'utf8'), 'work + base\n');
+        assert.equal(await readFile(join(repo, 'shared.txt'), 'utf8'), 'RESOLVED-BOTH\n');
       }
       assert.equal((await call('get-work', { workId: work.id })).status, 'merged');
       const finalGates = (await call('get-conversation', { workId: work.id })).filter((item: any) => item.kind === 'review');

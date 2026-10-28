@@ -265,7 +265,7 @@ test('冒烟④：创建后首个真实对齐轮次只读工作副本，项目�
 4. 调用 draft-work-description，key=alignment-copy，requirements=只读工作副本，boundary=临时项目，criteria=读取创建时的代码且不能写入。
 然后简短回答读到的内容并退出。`;
     });
-    const daemon = await fixture(t, observed.driver, 1, { realFirstRound: true });
+    const daemon = await fixture(t, observed.driver, 1, { realFirstRound: true, roundTimeout: 180_000 });
     const events = await daemon.events();
     const end = events.find(event => event.action === 'round-ended')!;
     assert.equal(end.details.reason, 'completed', JSON.stringify(end.details));

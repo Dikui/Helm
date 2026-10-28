@@ -100,7 +100,8 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
     }
   }
   finishExecution();
-  await page.getByText('本轮 1 步 · 已结束 · 最新：检查邮件模板', { exact: true }).waitFor();
+  // The follow-up messages queued above wake a new round once this one ends, so wait on the record, not the transient summary.
+  await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds.filter((round: { status: string }) => round.status === 'ended').length >= 2);
   await latest();
   await screenshot('round-ended');
   const other = (await daemon.call('send-message', { projectId: daemon.project.id, body: `另一项工作\n\n${body}`, key: 'other' })).result.work;
