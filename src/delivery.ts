@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import type { ConflictResolution } from './conflict-resolution.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const exec = promisify(execFile);
@@ -77,10 +78,17 @@ export function deliveryDetails(store: TaskStore, workId: string) {
   const events = store.events({ workId });
   const withdrawn = events.findLast(event => event.action === 'acceptance-withdrawn')?.id ?? 0;
   const current = events.filter(event => event.id > withdrawn);
+  const mergeEvent = current.findLast(event => event.action === 'base-merge-result');
+  const resolutionEvent = current.findLast(event => ['conflict-resolution-requested', 'conflict-resolution-finished'].includes(event.action));
+  const merge = mergeEvent?.details as MergeResult | undefined;
+  // A new conflict requires a new choice and verification, even after a previous resolution succeeded.
+  const resolution = merge?.status === 'conflict' && mergeEvent!.id > (resolutionEvent?.id ?? 0)
+    ? undefined : resolutionEvent?.details as ConflictResolution | undefined;
   return {
-    merge: current.findLast(event => event.action === 'base-merge-result')?.details as MergeResult | undefined,
+    merge,
     push: current.findLast(event => event.action === 'base-push-result')?.details as PushResult | undefined,
     cleanup: current.findLast(event => event.action === 'work-copy-cleanup')?.details as { reason?: string } | undefined,
+    resolution,
   };
 }
 
@@ -122,6 +130,33 @@ export async function mergeReviewedWork(store: TaskStore, workId: string) {
       .run(merge.status === 'merged' || merge.status === 'already-contained' ? 'merged' : 'accepted', workId);
   });
   if (store.work(workId).status === 'merged') await cleanupReviewedCopy(store, workId);
+  return store.work(workId);
+}
+
+// Detection never creates a merge: a user may still be resolving it in their project directory.
+export async function recheckReviewedWork(store: TaskStore, workId: string) {
+  const gate = acceptedGate(store, workId);
+  const work = store.work(workId);
+  const { merge, resolution } = deliveryDetails(store, workId);
+  if (work.status === 'merged') return work;
+  if (work.status !== 'accepted' || merge?.status !== 'conflict' || resolution?.status !== 'manual' || !merge.baseBranch) {
+    throw new RuleError('NO_MANUAL_RESOLUTION', '请先选择自己处理合入冲突。');
+  }
+  const project = projectPath(store, workId);
+  const run = (...args: string[]) => execFileSync('git', ['-C', project, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  const baseCommit = run('rev-parse', '--verify', `${merge.baseBranch}^{commit}`);
+  const workCommit = run('rev-parse', '--verify', `refs/heads/${work.workBranch}^{commit}`);
+  try { run('merge-base', '--is-ancestor', workCommit, baseCommit); }
+  catch (error) {
+    if ((error as { status?: number }).status === 1) return work;
+    throw error;
+  }
+  store.transaction(() => {
+    store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result',
+      { gateId: gate.id, status: 'already-contained', baseBranch: merge.baseBranch, workBranch: work.workBranch, commit: baseCommit }, { workId });
+    store.db.prepare("UPDATE works SET status = 'merged' WHERE id = ?").run(workId);
+  });
+  await cleanupReviewedCopy(store, workId);
   return store.work(workId);
 }
 

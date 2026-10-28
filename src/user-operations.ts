@@ -11,11 +11,11 @@ import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry, ModelContext } from './driver.js';
 import { openAgentPrompt, type PromptEditor } from './prompt-editor.js';
-import { mergeReviewedWork, pushReviewedWork, setDeliveryStatus } from './delivery.js';
+import { mergeReviewedWork, pushReviewedWork, recheckReviewedWork, setDeliveryStatus } from './delivery.js';
 
 export class UserOperations {
   private projectDeliveries = new Map<string, Promise<unknown>>();
-  private workDeliveries = new Map<string, { phase: 'merge' | 'push'; promise: Promise<unknown> }>();
+  private workDeliveries = new Map<string, { phase: 'merge' | 'push' | 'detect'; promise: Promise<unknown> }>();
   constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry, private promptEditor?: PromptEditor) {}
 
   async settleDeliveries() { await Promise.allSettled([...this.workDeliveries.values()].map(item => item.promise)); }
@@ -58,7 +58,7 @@ export class UserOperations {
 
   withdrawAcceptance(actor: Actor, workId: string) { return withdrawAcceptance(this.store, actor, workId); }
 
-  deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push') {
+  deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push' | 'detect') {
     const work = this.store.work(workId);
     const active = this.workDeliveries.get(workId);
     if (active) {
@@ -67,10 +67,12 @@ export class UserOperations {
     }
     if (phase === 'merge' && !['accepted', 'merged', 'completed'].includes(work.status)) throw new RuleError('REVIEW_NOT_ACCEPTED', '须先接受审核。');
     if (phase === 'push' && !['merged', 'completed'].includes(work.status)) throw new RuleError('WORK_NOT_MERGED', '合入完成后才能推送。');
+    if (phase === 'detect' && !['accepted', 'merged'].includes(work.status)) throw new RuleError('NO_MANUAL_RESOLUTION', '请先选择自己处理合入冲突。');
     const previous = this.projectDeliveries.get(work.projectId) ?? Promise.resolve();
     if (phase === 'merge' && work.status === 'accepted') setDeliveryStatus(this.store, actor, workId, 'merge-queued');
     const next = previous.catch(() => {}).then(async () => {
-      const result = phase === 'merge' ? await mergeReviewedWork(this.store, workId) : await pushReviewedWork(this.store, workId);
+      const result = phase === 'merge' ? await mergeReviewedWork(this.store, workId)
+        : phase === 'detect' ? await recheckReviewedWork(this.store, workId) : await pushReviewedWork(this.store, workId);
       if (result.status === 'completed') await compressWorkOutputs(this.store, workId);
       return result;
     }).finally(() => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,6 +68,138 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   const roundsEnded = (count: number) => until(events, values => values.filter(event => event.action === 'round-ended').length >= count);
   return { ...daemon, directory, repo, remote, baseline, work, call, events, getWork, conversation, pendingReview, roundsEnded };
 }
+
+for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡片副本解决并验收，保留接受并展示改动，${baseMoved ? '基准再次更新时重新选择处理' : '再次合入'}`, async t => {
+  const executed = hold();
+  const verified = hold();
+  t.after(() => { executed.release(); verified.release(); });
+  const daemon = await fixture(t, [[review()], [
+    { type: 'tool', name: 'finish-conflict-resolution', arguments: ctx => ({ workId: workIdOf(ctx) }), check: code('RESOLUTION_UNVERIFIED') },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'skip-verification', content: '跳过验收' }), check: code('VERIFICATION_REQUIRED') },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'resolve', content: '合入 main 并解决 shared.txt 冲突', needsVerification: true }), saveAs: 'resolve', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id, key: 'execute', agentId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: executed.promise },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id }), check: code('VERIFICATION_REQUIRED') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: verified.promise },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id }), check: ok },
+    review('no-new-review', code('CONFLICT_RESOLUTION_ACTIVE')),
+    { type: 'tool', name: 'finish-conflict-resolution', arguments: ctx => ({ workId: workIdOf(ctx) }), check: ok },
+    { type: 'tool', name: 'finish-conflict-resolution', arguments: ctx => ({ workId: workIdOf(ctx) }), check: ok },
+  ]], [ctx => {
+    const path = ctx.options.cwd;
+    assert.match(path, /helm-card|worktrees/);
+    assert.deepEqual(JSON.parse(ctx.input).conflictResolution.conflictFiles, ['shared.txt']);
+    assert.match(git(path, 'status', '--porcelain'), /UU shared.txt/);
+    writeFileSync(join(path, 'shared.txt'), 'work and base resolved\n');
+    return [];
+  }, [ { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '新副本确认同时保留两边结果，检查通过' }, check: ok } ]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  for (const [path, content] of [[work.workPath, 'work version\n'], [daemon.repo, 'base version\n']]) {
+    await writeFile(join(path, 'shared.txt'), content);
+    git(path, 'add', 'shared.txt'); git(path, ...identity, 'commit', '-m', content.trim());
+  }
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  ok(await daemon.call('resolve-merge-conflict', { workId: work.id, resolution: 'coordinator' }));
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  assert.equal((await daemon.getWork()).delivery.resolution.status, 'solving');
+  code('REVIEW_NOT_ACCEPTED')(await daemon.call('merge-work', { workId: work.id }));
+  code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: work.id }));
+  executed.release();
+  await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 2);
+  verified.release();
+  await until(daemon.getWork, value => value.status === 'accepted');
+  const resolution = (await daemon.getWork()).delivery.resolution;
+  assert.equal(resolution.status, 'resolved');
+  const changes = await daemon.call('get-conflict-resolution', { workId: work.id });
+  ok(changes); assert.match(changes.result.diff, /\+work and base resolved/);
+  assert.equal(resolution.cards.length, 1);
+  assert.ok(resolution.cards[0].verificationId);
+  assert.equal((await daemon.conversation()).filter(item => item.kind === 'review').length, 1);
+  if (baseMoved) {
+    await writeFile(join(daemon.repo, 'shared.txt'), 'base changed again\n');
+    git(daemon.repo, 'add', 'shared.txt'); git(daemon.repo, ...identity, 'commit', '-m', 'base changed again');
+  }
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  if (baseMoved) {
+    assert.equal((await daemon.getWork()).status, 'accepted');
+    assert.equal((await daemon.getWork()).delivery.merge.status, 'conflict');
+    assert.equal((await daemon.getWork()).delivery.resolution, undefined);
+    ok(await daemon.call('resolve-merge-conflict', { workId: work.id, resolution: 'manual' }));
+    return;
+  }
+  assert.equal((await daemon.getWork()).status, 'merged');
+  assert.equal(git(daemon.repo, 'show', 'main:shared.txt'), 'work and base resolved');
+  assert.equal((await daemon.getWork()).delivery.resolution.status, 'resolved');
+});
+
+test('冲突标记未解决时不能自动保存为成功派单，也不能回到待合入', async t => {
+  const ended = hold();
+  t.after(ended.release);
+  const daemon = await fixture(t, [[review()], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'resolve', content: '解决冲突', needsVerification: true }), saveAs: 'resolve', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id, key: 'execute', agentId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: ended.promise },
+    { type: 'tool', name: 'finish-conflict-resolution', arguments: ctx => ({ workId: workIdOf(ctx) }), check: code('RESOLUTION_UNVERIFIED') },
+  ]], [[]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  for (const [path, content] of [[work.workPath, 'work\n'], [daemon.repo, 'base\n']]) {
+    await writeFile(join(path, 'shared.txt'), content);
+    git(path, 'add', 'shared.txt'); git(path, ...identity, 'commit', '-m', content.trim());
+  }
+  const workTip = git(daemon.repo, 'rev-parse', work.workBranch);
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  ok(await daemon.call('resolve-merge-conflict', { workId: work.id, resolution: 'coordinator' }));
+  const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  assert.equal(events.find(event => event.action === 'dispatch-ended').details.endReason, 'error');
+  ended.release();
+  await daemon.roundsEnded(3);
+  assert.equal((await daemon.getWork()).status, 'executing');
+  assert.equal((await daemon.getWork()).delivery.resolution.status, 'solving');
+  assert.equal(git(daemon.repo, 'rev-parse', work.workBranch), workTip);
+});
+
+test('自己处理冲突：重新检测只检查包含关系，本地合并后标记已包含并清理副本', async t => {
+  const daemon = await fixture(t, [[review()]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  code('NO_MERGE_CONFLICT')(await daemon.call('resolve-merge-conflict', { workId: work.id, resolution: 'manual' }));
+  for (const [path, content] of [[work.workPath, 'work\n'], [daemon.repo, 'base\n']]) {
+    await writeFile(join(path, 'shared.txt'), content);
+    git(path, 'add', 'shared.txt'); git(path, ...identity, 'commit', '-m', content.trim());
+  }
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  ok(await daemon.call('resolve-merge-conflict', { workId: work.id, resolution: 'manual' }));
+  assert.equal((await daemon.getWork()).delivery.resolution.status, 'manual');
+  const before = git(daemon.repo, 'rev-parse', 'main');
+  ok(await daemon.call('recheck-work-merge', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'accepted');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), before);
+  assert.ok(existsSync(work.workPath));
+  assert.throws(() => git(daemon.repo, ...identity, 'merge', '--no-edit', work.workBranch));
+  const merging = git(daemon.repo, 'rev-parse', 'MERGE_HEAD');
+  ok(await daemon.call('recheck-work-merge', { workId: work.id }));
+  assert.equal(git(daemon.repo, 'rev-parse', 'MERGE_HEAD'), merging);
+  assert.equal((await daemon.getWork()).status, 'accepted');
+  await writeFile(join(daemon.repo, 'shared.txt'), 'manual resolution\n');
+  git(daemon.repo, 'add', 'shared.txt'); git(daemon.repo, ...identity, 'commit', '-m', 'manual merge');
+  const merged = git(daemon.repo, 'rev-parse', 'main');
+  ok(await daemon.call('recheck-work-merge', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'merged');
+  assert.equal((await daemon.getWork()).delivery.merge.status, 'already-contained');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
+  assert.equal(existsSync(work.workPath), false);
+  assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
+});
 
 test('非终态卡片阻止审核，错误和拒绝事件列出卡片，全部取消后可用原 key 重试', async t => {
   const paused = hold();

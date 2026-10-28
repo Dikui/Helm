@@ -12,6 +12,7 @@ import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browse
 import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
 import { checkOutputUsage } from './outputs.js';
 import { outputSummary } from './output-summary.js';
+import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -39,8 +40,14 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
     return dispatch.startCommit;
   }
   const workPath = card.workPath!;
-  abortCardGit(store, dispatch, workPath, card.cardBranch!);
-  if (dispatchGit(workPath, 'status', '--porcelain')) {
+  const conflictMerge = reason === 'completed' && pendingConflictCardMerge(store, dispatch, workPath);
+  if (!conflictMerge) abortCardGit(store, dispatch, workPath, card.cardBranch!);
+  else {
+    if (dispatchGit(workPath, 'symbolic-ref', '--short', 'HEAD') !== card.cardBranch) throw new RuleError('CARD_BRANCH_CHANGED', '卡片副本未处于卡片分支。');
+    // Refuse to save an unresolved merge as a successful dispatch.
+    dispatchGit(workPath, 'diff', '--check');
+  }
+  if (conflictMerge || dispatchGit(workPath, 'status', '--porcelain')) {
     const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
     if (names.length) dispatchGit(workPath, 'add', '--', ...names);
     dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
@@ -189,6 +196,7 @@ export class ExecutionRunner {
         }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit, portStart: ports.start, portEnd: ports.end }, scope);
       });
+      const conflictResolution = prepareConflictCardMerge(this.store, dispatch, workPath);
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
         if (dispatch.needsBrowser) {
           const browser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), () => {
@@ -234,6 +242,7 @@ export class ExecutionRunner {
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
         const conclusions = dispatch.purpose === 'verification' ? 'passed 或 failed' : 'completed 或 blocked';
         await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, content: dispatch.content,
+          ...(conflictResolution ? { conflictResolution } : {}),
           conclusionInstruction: `本次派单结束前必须调用 submit-conclusion 并附一句理由，结论只能是 ${conclusions}。` })), stop.signal);
         let previousStep = 0;
         events = session.events[Symbol.asyncIterator]();

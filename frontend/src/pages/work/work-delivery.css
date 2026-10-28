@@ -4,5 +4,6 @@
 .release-panel table { width: 100%; border-collapse: collapse; margin: 16px 0; text-align: left; }
 .release-panel th, .release-panel td { padding: 10px 12px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; white-space: pre-wrap; }
 .release-panel .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+.release-panel .conflict-diff { max-height: 440px; overflow: auto; white-space: pre; padding: 12px; border: 1px solid var(--border); }
 @media (max-width: 600px) { .release-panel { margin: 12px; padding: 16px; } }
 .brief-view > .release-panel { width: 100%; max-width: 960px; min-width: 0; margin: 0 auto; }

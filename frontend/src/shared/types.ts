@@ -4,6 +4,8 @@ export interface Delivery {
   merge?: { status: 'merged' | 'already-contained' | 'conflict' | 'failed'; baseBranch: string | null; workBranch: string; commit?: string; reason?: string; conflictFiles?: string[] };
   push?: { status: 'pushed' | 'failed'; reason?: string; baseBranch: string };
   cleanup?: { reason?: string };
+  resolution?: { status: 'solving' | 'manual' | 'resolved'; fromCommit: string; toCommit?: string; baseBranch: string; baseCommit: string;
+    cards?: { cardId: string; verificationId: string }[] };
 }
 export interface Work {
   id: string; projectId: string; title: string; status: WorkStatus; createdAt: string;

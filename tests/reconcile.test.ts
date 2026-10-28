@@ -113,8 +113,39 @@ console.log(readFileSync(path, 'utf8'));
   };
   const restart = async () => { await stop(); await start(); };
   return { directory, repo, dataDir, remote, processTools, work: currentWork, scope, call, tool, events, create, start, stop, restart, get url() { return url; },
-    waitRound: () => until(async () => token, Boolean) };
+    waitRound: (previous?: string) => until(async () => token, value => Boolean(value) && value !== previous) };
 }
+
+test('已接受工作的冲突处理崩溃后保留接受、清理半截合并并唤醒调度者', async t => {
+  const daemon = await fixture(t);
+  const previousRound = await daemon.waitRound();
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '原审核' });
+  for (const [path, content] of [[daemon.work.workPath, 'work\n'], [daemon.repo, 'base\n']]) {
+    await writeFile(join(path, 'baseline.txt'), content);
+    git(path, 'add', 'baseline.txt'); git(path, ...identity, 'commit', '-m', content.trim());
+  }
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  await daemon.call('merge-work', daemon.scope);
+  const before = (await daemon.events()).filter(event => event.action === 'round-started').length;
+  await daemon.call('resolve-merge-conflict', { ...daemon.scope, resolution: 'coordinator' });
+  await until(daemon.events, values => values.filter(event => event.action === 'round-started').length > before);
+  await daemon.waitRound(previousRound);
+  const card = await daemon.tool('create-card', { ...daemon.scope, key: 'resolve', content: '解决基准冲突', needsVerification: true });
+  const dispatch = await daemon.tool('create-dispatch', { ...daemon.scope, cardId: card.id, key: 'execute', agentId: 'claude-executor' });
+  await until(() => daemon.call('get-dispatch', { ...daemon.scope, dispatchId: dispatch.id }), value => value.conclusion === 'completed');
+  const path = (await daemon.call('get-card', { ...daemon.scope, cardId: card.id })).workPath;
+  assert.ok(git(path, 'rev-parse', 'MERGE_HEAD'));
+  const count = (await daemon.events()).filter(event => event.action === 'round-started').length;
+  await daemon.restart();
+  await until(daemon.events, values => values.filter(event => event.action === 'round-started').length > count);
+  const work = await daemon.call('get-work', daemon.scope);
+  assert.equal(work.status, 'executing'); assert.equal(work.delivery.resolution.status, 'solving');
+  const result = await daemon.call('get-dispatch', { ...daemon.scope, dispatchId: dispatch.id });
+  assert.equal(result.endReason, 'aborted'); assert.equal(result.abortReason, '运行层重启');
+  assert.throws(() => git(path, 'rev-parse', 'MERGE_HEAD'));
+  assert.equal((await daemon.call('get-conversation', daemon.scope)).find((item: any) => item.id === gate.id).decision, 'accept');
+  await daemon.tool('write-coordinator-notes', { ...daemon.scope, body: '重启后继续派冲突卡片，保留接受决定' });
+});
 
 test('崩溃后先清进程，再补交执行派单；轮次重投且不自动重派', async t => {
   const daemon = await fixture(t);
