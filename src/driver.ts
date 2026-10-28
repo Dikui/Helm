@@ -41,13 +41,15 @@ export interface DriverSession {
   events: AsyncIterable<DriverEvent>;
 }
 export interface AgentAvailability { available: boolean; reason?: string; command?: string }
+// Unsaved settings can choose a dedicated CLI home before an Agent exists.
+export type ModelContext = Pick<AgentConfig, 'id' | 'home'>;
 // A model the CLI offers and its native effort values; id null is the CLI's default model.
-export interface ModelOption { id: string | null; label: string; efforts: string[]; defaultEffort: string | null }
+export interface ModelOption { id: string | null; label: string; efforts: string[]; defaultEffort: string | null; unavailableReason?: string }
 export interface Driver {
   // The official install and login commands for the CLI; the user runs install from the UI and login in a terminal.
   install?: { executable: string; command: string; login: string };
   checkAvailability(agent: AgentConfig): Promise<AgentAvailability>;
-  listModels?(): Promise<ModelOption[]>;
+  listModels?(agent?: ModelContext): Promise<ModelOption[]>;
   start(options: SessionOptions): Promise<DriverSession>;
 }
 export type DriverRegistry = Record<string, Driver>;

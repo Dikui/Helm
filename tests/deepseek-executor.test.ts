@@ -27,6 +27,25 @@ const configOptions = [
     options: ['low', 'high', 'max'].map(value => ({ value, name: value })) },
 ];
 
+test('DeepSeek 从 session 公布的完整路由列出模型，读取每个路由的原生强度并关闭探测会话', async t => {
+  const ctx = await acpFixture(t, { configOptions: [
+    { ...configOptions[0], options: [
+      { value: '["deepseek-official","deepseek-flash"]', name: 'Qoder Flash' },
+      { group: 'custom', name: 'Forwarder', options: [{ value: '["custom","new-model"]', name: 'New model' }] },
+    ] },
+    { ...configOptions[1], options: [{ value: 'medium', name: 'Medium' }] },
+  ] }, true, 'deepseek');
+  assert.deepEqual(await ctx.driver.listModels(), [
+    { id: '["deepseek-official","deepseek-flash"]', label: 'Qoder Flash · deepseek-official / deepseek-flash', efforts: ['medium'], defaultEffort: null },
+    { id: '["custom","new-model"]', label: 'New model · custom / new-model', efforts: ['medium'], defaultEffort: null },
+  ]);
+  const requests = await ctx.requests();
+  assert.equal(requests.filter(r => r.method === 'fixture/spawn').length, 1);
+  assert.equal(requests.some(r => r.method === 'session/prompt' || r.method === 'authenticate'), false);
+  assert.equal(requests.at(-1).method, 'session/close');
+  assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
+});
+
 function logSample(rows: object[], id = 'session-scripted') {
   // Separate frames reproduce dsh's append-only concatenated zstd container.
   const header = { type: 'session', version: 4, id, createdAt: 1, cwd: '/test', isSeeded: false, delegationDepth: 0 };
@@ -44,6 +63,22 @@ function logSample(rows: object[], id = 'session-scripted') {
     return Buffer.concat([frame, block, bytes]);
   }));
 }
+
+test('DeepSeek 查询强度随路由切换，单个 provider 拒绝选择时仍列出其他已公布路由', async t => {
+  const account = '["deepseek-account","deepseek-flash"]';
+  const official = '["deepseek-official","deepseek-v4-flash"]';
+  const ctx = await acpFixture(t, { configOptions, rejectModels: [official], modelConfigOptions: {
+    [account]: [
+      { ...configOptions[0], currentValue: account },
+      { ...configOptions[1], currentValue: 'medium', options: [{ value: 'medium', name: 'Medium' }] },
+    ],
+  } }, true, 'deepseek');
+  const models = await ctx.driver.listModels();
+  assert.deepEqual(models[0]?.efforts, ['medium']);
+  assert.deepEqual(models[1]?.efforts, ['medium']);
+  assert.equal(models[2]?.id, official);
+  assert.match(JSON.stringify(models[2]), /provider unavailable/);
+});
 
 test('DeepSeek 在没有 Node 内置 zstd 的运行时用固定版本解码器读同一份样本', async t => {
   const sample = logSample([{ type: 'assistant/message', data: { usage: { inputTokens: 22, outputTokens: 7 } } }]);
@@ -125,6 +160,34 @@ test('DeepSeek 账号执行者经 ACP 设置并核对模型路线和强度，强
   assert.equal(builtin.home, 'shared');
 });
 
+test('DeepSeek official/flash 完整路由保存后，shared 与专用主目录均可预检并成功派单', async t => {
+  const route = '["deepseek-official","deepseek-flash"]';
+  const ctx = await acpFixture(t, { configOptions: [
+    { ...configOptions[0], options: [{ value: route, name: 'Flash via Qoder' }] }, configOptions[1],
+  ] }, true, 'deepseek');
+  const catalog = new AgentCatalog(join(ctx.directory, 'agents'), ['deepseek']);
+  for (const home of ['shared', 'dedicated'] as const) {
+    const saved = catalog.save({ id: `forwarded-${home}`, mode: 'create', prompt: '', config: {
+      role: 'executor', driver: 'deepseek', model: route, reasoningEffort: 'low', fast: false, home, description: '转发路由', skills: [], mcp: [],
+    } });
+    const agent = catalog.get(saved.id);
+    assert.equal(agent.model, route);
+    if (home === 'dedicated') {
+      const directory = join(ctx.home, '.helm', 'agent-homes', agent.id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, 'cordis.patch.yml'), 'CLI-owned configuration');
+    }
+    assert.deepEqual(await ctx.driver.checkAvailability(agent), { available: true });
+    const session = await ctx.driver.start({ ...ctx.options, agent });
+    await session.send('转发派单');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type === 'end' && end.reason, 'completed');
+  }
+  const requests = await ctx.requests();
+  assert.equal(requests.filter(r => r.method === 'fixture/spawn').length, 4, '每次预检只启动一次 dsh');
+  assert.ok(requests.filter(r => r.method === 'session/set_config_option' && r.params.configId === 'model').every(r => r.params.value === route));
+});
+
 test('DeepSeek API Agent 使用各自专用 DSH_HOME，凭据只由 CLI 读取，按公布值选择 official 路线', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   for (const id of ['deepseek-api-one', 'deepseek-api-two']) {
@@ -147,18 +210,14 @@ test('DeepSeek API Agent 使用各自专用 DSH_HOME，凭据只由 CLI 读取�
   assert.deepEqual([...new Set(spawns.map(r => r.env.DSH_HOME))], ['deepseek-api-one', 'deepseek-api-two'].map(id => join(ctx.home, '.helm', 'agent-homes', id)));
   assert.ok(spawns.every(r => r.env.HOME === ctx.home && r.env.DEEPSEEK_API_KEY === undefined && r.env.DSH_PERMISSION_MODE === 'workspace-write'));
   const settings = requests.filter(r => r.method === 'session/set_config_option').map(r => r.params.value);
-  assert.deepEqual(settings, ['["deepseek-official","deepseek-v4-flash"]', 'max', '["deepseek-official","deepseek-v4-flash"]', 'max']);
+  assert.deepEqual(settings, Array.from({ length: 4 }, () => ['["deepseek-official","deepseek-v4-flash"]', 'max']).flat());
 });
 
-test('DeepSeek 拒绝调度者、未知模型、medium、fast 和计费路线与 home 不一致', async t => {
+test('DeepSeek 拒绝调度者、未指定模型和 fast，不启动 CLI', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
-  const cases: [Partial<AgentConfig>, RegExp][] = [
-    [{ role: 'coordinator' }, /只支持执行者/], [{ model: null }, /模型 id/], [{ model: 'unknown' }, /unknown/],
-    [{ reasoningEffort: 'medium' }, /不支持推理强度 medium/], [{ reasoningEffort: null }, /推理强度/],
-    [{ fast: true }, /fast/],
-    [{ home: 'dedicated' }, /账号模型/], [{ model: 'deepseek-v4-flash' }, /专用主目录/],
-  ];
-  for (const [settings, reason] of cases) {
+  for (const [settings, reason] of [
+    [{ role: 'coordinator' }, /只支持执行者/], [{ model: null }, /模型 id/], [{ fast: true }, /fast/],
+  ] as [Partial<AgentConfig>, RegExp][]) {
     const agent = { ...ctx.agent, ...settings };
     const result = await ctx.driver.checkAvailability(agent);
     assert.equal(result.available, false);
@@ -166,6 +225,57 @@ test('DeepSeek 拒绝调度者、未知模型、medium、fast 和计费路线与
     await assert.rejects(ctx.driver.start({ ...ctx.options, agent }), reason);
   }
   assert.deepEqual(await ctx.requests(), []);
+});
+
+test('DeepSeek 路由缺失、旧模型歧义、强度不可用和最终状态不符在预检与派单给出相同原因', async t => {
+  for (const [settings, script, reason] of [
+    [{ model: '["missing","deepseek-flash"]' }, {}, /没有公布取值/],
+    [{ model: 'unknown' }, {}, /没有公布取值/],
+    [{ model: 'deepseek-flash' }, { configOptions: [
+      { ...configOptions[0], options: [{ value: '["one","deepseek-flash"]', name: 'One' }, { value: '["two","deepseek-flash"]', name: 'Two' }] }, configOptions[1],
+    ] }, /对应多个路由.*重新选择/],
+    [{ reasoningEffort: 'medium' }, {}, /没有公布取值 medium/],
+    [{}, { configuredOptions: configOptions }, /与 Agent 不一致/],
+  ] as [Partial<AgentConfig>, object, RegExp][]) {
+    await t.test(String(reason), async t => {
+      const ctx = await acpFixture(t, { configOptions, ...script }, true, 'deepseek');
+      const agent = { ...ctx.agent, ...settings };
+      const availability = await ctx.driver.checkAvailability(agent);
+      assert.equal(availability.available, false);
+      assert.match(availability.reason!, reason);
+      await assert.rejects(ctx.driver.start({ ...ctx.options, agent }), error => error instanceof Error && error.message === availability.reason);
+      assert.equal((await ctx.requests()).some(r => r.method === 'session/prompt'), false);
+    });
+  }
+});
+
+test('DeepSeek 旧模型只在当前公布路由唯一时继续可用，不再推断 provider 或主目录', async t => {
+  const route = '["deepseek-official","deepseek-flash"]';
+  const ctx = await acpFixture(t, { configOptions: [{ ...configOptions[0], options: [{ value: route, name: 'Forwarded' }] }, configOptions[1]] }, true, 'deepseek');
+  assert.deepEqual(await ctx.driver.checkAvailability(ctx.agent), { available: true });
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('旧配置');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type === 'end' && end.reason, 'completed');
+  assert.ok((await ctx.requests()).filter(r => r.method === 'session/set_config_option' && r.params.configId === 'model').every(r => r.params.value === route));
+});
+
+test('DeepSeek 模型查询在草稿专用主目录中运行，并在失败、超时后回收进程', async t => {
+  const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
+  const directory = join(ctx.home, '.helm', 'agent-homes', 'draft-api');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'cordis.patch.yml'), 'CLI-owned configuration');
+  assert.equal((await ctx.driver.listModels({ id: 'draft-api', home: 'dedicated' })).length, 3);
+  assert.equal((await ctx.requests())[0].env.DSH_HOME, directory);
+  for (const script of [{ hangOn: 'session/new' }, { rejectOn: 'session/new' }, { hangOn: 'session/set_config_option' }, { hangOn: 'session/close' }]) {
+    await t.test(JSON.stringify(script), async t => {
+      const ctx = await acpFixture(t, { configOptions, ...script }, true, 'deepseek');
+      const driver = new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 500 });
+      await assert.rejects(driver.listModels());
+      const spawn = (await ctx.requests())[0];
+      assert.throws(() => process.kill(spawn.pid, 0), { code: 'ESRCH' });
+    });
+  }
 });
 
 test('DeepSeek 不按显示名猜模型，拒绝未公布的模型/强度与配置核对失败，不发 prompt', async t => {
@@ -190,16 +300,16 @@ test('DeepSeek 按模型 id 和 provider 匹配选项原值，Pro/high 不会误
       { value: '[ "deepseek-account", "deepseek-v4-pro" ]', name: '任意显示名' },
     ] }, configOptions[1],
   ] }, true, 'deepseek');
-  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: 'deepseek-v4-pro', reasoningEffort: 'high' } });
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: '["deepseek-account","deepseek-v4-pro"]', reasoningEffort: 'high' } });
   await session.send('Pro');
   await collect(session.events);
   assert.deepEqual((await ctx.requests()).filter(r => r.method === 'session/set_config_option').map(r => r.params.value), ['[ "deepseek-account", "deepseek-v4-pro" ]', 'high']);
 });
 
-test('DeepSeek 可用性只做 initialize，无需认证；不可执行、拒绝或超时给安装和 dsh web 修复命令', async t => {
+test('DeepSeek 可用性建立会话并配置路由，无需认证或 prompt；不可执行、拒绝或超时给修复命令', async t => {
   const ctx = await acpFixture(t, { configOptions, initialize: { protocolVersion: 1, authMethods: [], agentCapabilities: { mcpCapabilities: { http: true } } } }, true, 'deepseek');
   assert.deepEqual(await ctx.driver.checkAvailability(ctx.agent), { available: true });
-  assert.deepEqual((await ctx.requests()).map(r => r.method), ['fixture/spawn', 'initialize']);
+  assert.deepEqual((await ctx.requests()).map(r => r.method), ['fixture/spawn', 'initialize', 'session/new', 'session/set_config_option', 'session/set_config_option', 'session/close']);
   await assert.rejects(stat(join(ctx.home, '.dsh')), { code: 'ENOENT' });
   const absent = new AcpDriver('deepseek', { command: { file: join(ctx.directory, 'absent'), args: [] } });
   const result = await absent.checkAvailability(ctx.agent);
@@ -210,7 +320,8 @@ test('DeepSeek 可用性只做 initialize，无需认证；不可执行、拒绝
       const ctx = await acpFixture(t, script, true, 'deepseek');
       const result = await new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 500 }).checkAvailability(ctx.agent);
       assert.equal(result.available, false);
-      assert.match(result.reason!, /initialize.*dsh web/);
+      assert.ok(result.reason);
+      assert.match(result.command!, /dsh web/);
     });
   }
 });
@@ -300,7 +411,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
   const event = (await daemon.events()).find(e => e.action === 'dispatch-ended' && e.dispatchId === ended.id);
   assert.deepEqual(event.details.usage, ended.usage);
   const requests = await acp.requests();
-  assert.equal(requests.filter(r => r.method === 'session/close').length, count);
+  assert.equal(requests.filter(r => r.method === 'session/close').length, requests.filter(r => ['session/new', 'session/resume'].includes(r.method)).length);
   assert.equal(requests.filter(r => r.method === 'session/cancel').length, 1);
   assert.throws(() => process.kill(running.pgid, 0), { code: 'ESRCH' });
 });
@@ -407,7 +518,7 @@ test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显�
     assert.equal(agents.find((t: any) => t.id === 'deepseek-coordinator').available, false);
     assert.match((await call('list-pending')).find((p: any) => p.agentId === 'deepseek-coordinator').reason, /只支持执行者/);
     assert.throws(() => new AgentCatalog(agentDir, ['deepseek']).get('deepseek-coordinator'), /只支持执行者/);
-    assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize'].includes(r.method)));
+    assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize', 'session/new', 'session/set_config_option', 'session/close'].includes(r.method)));
   } finally { await daemon.close(); }
 });
 

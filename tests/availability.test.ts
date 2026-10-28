@@ -236,6 +236,20 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
   assert.ok((await call('get-events')).result.some((event: any) => event.action === 'tool-installed' && event.object.id === 'codex'));
 });
 
+test('list-agent-models 将草稿 Agent 的主目录上下文交给驱动，不要求 Agent 已保存', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-model-context-')));
+  const requested: unknown[] = [];
+  const deepseek = Object.assign(new FakeDriver(), { listModels: async (agent?: unknown) => { requested.push(agent); return []; } });
+  const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory),
+    drivers: { 'claude-sdk': new FakeDriver(), deepseek } });
+  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const response = await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', body: JSON.stringify({
+    driver: 'deepseek', agent: { id: 'draft-forwarder', home: 'dedicated' },
+  }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(requested, [{ id: 'draft-forwarder', home: 'dedicated' }]);
+});
+
 test('list-agent-models 向驱动询问模型，驱动失败时返回结构化错误并提示去环境检查', async t => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-models-')));
   const models = [{ id: null, label: 'Default', efforts: ['low', 'max'], defaultEffort: null }];
