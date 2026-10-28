@@ -11,7 +11,7 @@ import { InboxDetails } from './GateActions.js';
 type Group = 'attention' | 'running' | 'ended';
 function group(work: WorkSummary): Group {
   if (['completed', 'cancelled'].includes(work.status)) return 'ended';
-  return work.hasPendingGate || work.status === 'awaiting-review' || (work.status === 'paused' && work.runtimePauseReason) ? 'attention' : 'running';
+  return work.hasPendingGate || ['awaiting-review', 'accepted', 'merged', 'merge-queued', 'merging', 'pushing'].includes(work.status) || (work.status === 'paused' && work.runtimePauseReason) ? 'attention' : 'running';
 }
 const affectsWorks = (event: HelmEvent) => event.workId !== null;
 const affectsSettings = (event: HelmEvent) => Boolean(event.dispatchId) || event.object.type === 'settings';

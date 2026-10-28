@@ -1,8 +1,13 @@
 export interface Usage { inputTokens: number | null; outputTokens: number | null }
-export type WorkStatus = 'aligning' | 'executing' | 'paused' | 'awaiting-review' | 'completed' | 'cancelled';
+export type WorkStatus = 'aligning' | 'executing' | 'paused' | 'awaiting-review' | 'accepted' | 'merge-queued' | 'merging' | 'merged' | 'pushing' | 'completed' | 'cancelled';
+export interface Delivery {
+  merge?: { status: 'merged' | 'already-contained' | 'conflict' | 'failed'; baseBranch: string | null; workBranch: string; commit?: string; reason?: string; conflictFiles?: string[] };
+  push?: { status: 'pushed' | 'failed'; reason?: string; baseBranch: string };
+  cleanup?: { reason?: string };
+}
 export interface Work {
   id: string; projectId: string; title: string; status: WorkStatus; createdAt: string;
-  runtimePauseReason: string | null; usage: Usage; workBranch?: string | null;
+  delivery?: Delivery; runtimePauseReason: string | null; usage: Usage; workBranch?: string | null;
 }
 export interface WorkSummary extends Work {
   summary: string; statusSince: string; completedCards: number; totalCards: number;

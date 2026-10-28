@@ -168,7 +168,7 @@ async function blockingHook(daemon: Awaited<ReturnType<typeof fixture>>, name: s
   await writeFile(block, 'block');
   // Keep the blocked subprocess in _work, where startup process cleanup finds it.
   await writeFile(join(hooks, name), `#!/bin/sh
-cd '${daemon.work.workPath}' || exit 1
+cd '${name === 'pre-push' ? join(daemon.work.workPath, '..') : daemon.work.workPath}' || exit 1
 echo reached > '${marker}'
 while [ -f '${block}' ]; do sleep 0.1; done
 `, { mode: 0o755 });
@@ -196,7 +196,7 @@ test('标记完成在 _work 合并中崩溃，重启 abort 后可重试标记完
   assert.equal(existsSync(join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId)), false);
 });
 
-test('审核接受在项目合并中崩溃，重启仅 abort 自己发起的合并并补做合并推送', async t => {
+test('合入中崩溃，重启只恢复合入并停在待推送', async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
@@ -204,7 +204,8 @@ test('审核接受在项目合并中崩溃，重启仅 abort 自己发起的合�
   const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
   const hook = await blockingHook(daemon, 'pre-merge-commit');
   await writeFile(join(daemon.repo, 'baseline.txt'), 'unrelated user edit\n');
-  const accepting = daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' }).catch(error => error);
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  const accepting = daemon.call('merge-work', daemon.scope).catch(error => error);
   await hook.wait();
   await daemon.stop();
   await accepting;
@@ -212,6 +213,8 @@ test('审核接受在项目合并中崩溃，重启仅 abort 自己发起的合�
   // Disable this hook for the retry while leaving the running hook blocked.
   await rm(join(daemon.directory, 'hooks', 'pre-merge-commit'));
   await daemon.start();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'merged');
+  await daemon.call('push-work', daemon.scope);
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   assert.equal(git(daemon.repo, 'status', '--porcelain'), 'M baseline.txt');
   assert.equal(await readFile(join(daemon.repo, 'baseline.txt'), 'utf8'), 'unrelated user edit\n');
@@ -224,7 +227,7 @@ test('审核接受在项目合并中崩溃，重启仅 abort 自己发起的合�
   assert.equal(existsSync(daemon.work.workPath), false);
 });
 
-for (const interruptedAt of ['post-merge', 'pre-push']) test(`审核在 ${interruptedAt} 中断，重启跳过已有合并并补推，重复启动不重复记结果`, async t => {
+for (const interruptedAt of ['post-merge', 'pre-push']) test(`独立合入或推送在 ${interruptedAt} 中断，重启跳过已有合并，重复启动不重复记结果`, async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
@@ -232,7 +235,9 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`审核在 ${interr
   const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
   const baseline = git(daemon.remote, 'rev-parse', 'main');
   const hook = await blockingHook(daemon, interruptedAt);
-  const accepting = daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' }).catch(error => error);
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  if (interruptedAt === 'pre-push') await daemon.call('merge-work', daemon.scope);
+  const accepting = daemon.call(interruptedAt === 'post-merge' ? 'merge-work' : 'push-work', daemon.scope).catch(error => error);
   await hook.wait();
   const merged = git(daemon.repo, 'rev-parse', 'main');
   assert.notEqual(merged, baseline);
@@ -241,7 +246,11 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`审核在 ${interr
   await accepting;
   await rm(join(daemon.directory, 'hooks', interruptedAt));
   await daemon.start();
-  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, interruptedAt === 'post-merge' ? 'merged' : 'completed');
+  if (interruptedAt === 'post-merge') {
+    assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+    await daemon.call('push-work', daemon.scope);
+  }
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), merged);
   const events = await daemon.events();
@@ -249,6 +258,75 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`审核在 ${interr
   assert.equal(events.find(event => event.action === 'base-merge-result').details.status, interruptedAt === 'post-merge' ? 'already-contained' : 'merged');
   assert.equal(events.filter(event => event.action === 'base-push-result').length, 1);
   await daemon.restart();
+  assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
+});
+
+test('重启先恢复正在合入的工作，再按请求顺序恢复队列，不按工作创建顺序合入', async t => {
+  const daemon = await fixture(t, 'delivery');
+  const second = (await daemon.call('send-message', { projectId: daemon.work.projectId, key: 'second', body: '第二项工作' })).work;
+  const descriptions = await until(async () => await daemon.call('get-work-descriptions', { workId: second.id }) as any[], values => values.length > 0);
+  const description = descriptions[0];
+  await daemon.call('decide-gate', { workId: second.id, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' });
+  const pending = await until(async () => await daemon.call('list-pending') as any[], values => values.filter(gate => gate.kind === 'review').length === 2);
+  const works = [daemon.work, await daemon.call('get-work', { workId: second.id })];
+  for (const [index, work] of works.entries()) {
+    await writeFile(join(work.workPath, `result-${index}.txt`), `work ${index}\n`);
+    git(work.workPath, 'add', `result-${index}.txt`);
+    git(work.workPath, ...identity, 'commit', '-m', `work ${index}`);
+    await daemon.call('decide-gate', { workId: work.id, gateId: pending.find(gate => gate.workId === work.id).id, decision: 'accept' });
+  }
+  const hook = await blockingHook(daemon, 'pre-merge-commit');
+  const active = daemon.call('merge-work', { workId: second.id }).catch(error => error);
+  await hook.wait();
+  const queued = daemon.call('merge-work', daemon.scope).catch(error => error);
+  await until(async () => (await daemon.call('get-work', daemon.scope)).status, status => status === 'merge-queued');
+  await daemon.stop();
+  await Promise.all([active, queued]);
+  await rm(join(daemon.directory, 'hooks', 'pre-merge-commit'));
+  await daemon.start();
+  const firstAfter = await daemon.call('get-work', daemon.scope);
+  const secondAfter = await daemon.call('get-work', { workId: second.id });
+  assert.equal(firstAfter.status, 'merged');
+  assert.equal(secondAfter.status, 'merged');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main^1'), secondAfter.delivery.merge.commit);
+  assert.equal(git(daemon.repo, 'show', 'main:result-0.txt'), 'work 0');
+  assert.equal(git(daemon.repo, 'show', 'main:result-1.txt'), 'work 1');
+});
+
+test('重启保留已接受、已合入和推送失败的阶段，只有显式操作才继续', async t => {
+  const daemon = await fixture(t, 'settled');
+  const { card, read } = await daemon.create();
+  await until(read, value => value.status === 'ended');
+  await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const baseline = git(daemon.repo, 'rev-parse', 'main');
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  await daemon.restart();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'accepted');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), baseline);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  assert.equal(existsSync(daemon.work.workPath), true);
+  await daemon.call('merge-work', daemon.scope);
+  const merged = git(daemon.repo, 'rev-parse', 'main');
+  await daemon.restart();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'merged');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  const hook = join(daemon.remote, 'hooks', 'pre-receive');
+  await writeFile(hook, '#!/bin/sh\necho retry-me >&2\nexit 1\n', { mode: 0o755 });
+  await daemon.call('push-work', daemon.scope);
+  await rm(hook);
+  await daemon.restart();
+  const failed = await daemon.call('get-work', daemon.scope);
+  assert.equal(failed.status, 'merged');
+  assert.match(failed.delivery.push.reason, /retry-me/);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  await daemon.call('push-work', daemon.scope);
+  await daemon.restart();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), merged);
+  assert.equal((await daemon.events()).filter(event => event.action === 'base-merge-result').length, 1);
+  assert.equal((await daemon.events()).filter(event => event.action === 'base-push-result').length, 2);
   assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
 });
 
@@ -285,6 +363,8 @@ test('终态卡片和已结束工作的残留副本与卡片分支在重启时�
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
   const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  await daemon.call('merge-work', daemon.scope);
+  await daemon.call('push-work', daemon.scope);
   // Recreate the external resources left by a crash before worktree removal.
   git(daemon.repo, 'branch', cardBranch, ended.endCommit);
   git(daemon.repo, 'worktree', 'add', cardPath, cardBranch);

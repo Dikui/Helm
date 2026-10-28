@@ -48,27 +48,27 @@ export function ConversationView({ work }: { work: Work }) {
     ...pendingGates.map(gate => ({ value: `gate:${gate.id}`, label: `${t('conversationGate')} · ${gate.question}` })),
   ];
   const validScope = scopes.some(item => item.value === scope);
-  const ended = work.status === 'completed' || work.status === 'cancelled';
-  const locked = ended || submission.pending || submission.uncertain || interrupting;
+  const readOnly = ['accepted', 'merge-queued', 'merging', 'merged', 'pushing', 'completed', 'cancelled'].includes(work.status);
+  const locked = readOnly || submission.pending || submission.uncertain || interrupting;
   const reference = (message: Message) => message.cardId
     ? `${t('conversationCard')} · ${cards.find(card => card.id === message.cardId)?.content?.split(/\r?\n/, 1)[0] || message.cardId}`
     : message.gateId ? `${t('conversationGate')} · ${gates.find(gate => gate.id === message.gateId)?.question || message.gateId}` : undefined;
   const interrupt = async () => {
-    if (!running || rounds.error || ended || interruptBusy.current || withdrawingRef.current || submission.pending) return;
+    if (!running || rounds.error || readOnly || interruptBusy.current || withdrawingRef.current || submission.pending) return;
     interruptBusy.current = true; setInterrupting(true); setInterruptError(undefined);
     try { await api.call('interrupt-round', params); }
     catch (error) { setInterruptError(error as Error); }
     finally { interruptBusy.current = false; setInterrupting(false); rounds.reload(); }
   };
   const withdraw = async (messageId: string) => {
-    if (withdrawingRef.current || interruptBusy.current || ended) return;
+    if (withdrawingRef.current || interruptBusy.current || readOnly) return;
     withdrawingRef.current = true; setWithdrawing(true); setWithdrawError(undefined);
     try { await api.call('withdraw-message', { ...params, messageId }); }
     catch (error) { setWithdrawError(error as Error); }
     finally { withdrawingRef.current = false; setWithdrawing(false); rounds.reload(); conversation.reload(); }
   };
   const send = async (immediate = false) => {
-    if (ended || submission.pending || interruptBusy.current) return;
+    if (readOnly || submission.pending || interruptBusy.current) return;
     if (immediate && (!running || rounds.error)) return;
     if (body.trim()) {
       if (!validScope && !submission.uncertain) return;
@@ -90,7 +90,7 @@ export function ConversationView({ work }: { work: Work }) {
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
-        {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !ended
+        {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
           ? <GateDecision gate={item} />
           : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
             {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
@@ -104,7 +104,7 @@ export function ConversationView({ work }: { work: Work }) {
     <div className="conversation-dock" ref={dock} style={dockHeight ? { height: dockHeight } : undefined}>
     <RoundSteering workId={work.id} round={running ?? rounds.data?.rounds.at(-1)} steps={rounds.data?.currentSteps ?? []}
       plan={rounds.data?.currentPlan ?? []} withdraw={messageId => void withdraw(messageId)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
-      busy={interrupting || withdrawing || submission.pending || ended || Boolean(rounds.error)} interrupt={() => void interrupt()} />
+      busy={interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} interrupt={() => void interrupt()} />
     {withdrawError && <ErrorNotice error={withdrawError} />}
     {interruptError && <ErrorNotice error={interruptError} />}
     <form className="conversation-composer" noValidate aria-busy={submission.pending || interrupting} onSubmit={event => { event.preventDefault(); void send(); }}>
@@ -113,7 +113,7 @@ export function ConversationView({ work }: { work: Work }) {
         if (event.metaKey || event.ctrlKey) { event.preventDefault(); void send(true); }
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
       }} /></label>
-      <button className="btn primary send" disabled={ended || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
+      <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
       <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
       <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
         <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>

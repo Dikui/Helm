@@ -1,7 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
 import { listDispatches } from './dispatch.js';
 import { cardGraph } from './graph.js';
@@ -72,6 +70,9 @@ export function decideReview(store: TaskStore, actor: Actor, params: { workId: s
   return store.transaction(() => {
     store.db.prepare(`UPDATE gates SET status = 'decided', decision = ?, comment = ? WHERE id = ?`).run(params.decision, params.comment ?? null, gate.id);
     const event = store.appendEvent(actor, { type: 'gate', id: gate.id }, 'gate-decided', { decision: params.decision, comment: params.comment ?? null }, { workId: gate.workId });
+    if (params.decision === 'accept') {
+      store.db.prepare("UPDATE works SET status = 'accepted', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(gate.workId);
+    }
     if (params.decision === 'return') {
       store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE 'executing' END,
         paused_from_status = CASE WHEN status = 'paused' THEN 'executing' ELSE paused_from_status END WHERE id = ?`).run(gate.workId);
@@ -81,111 +82,17 @@ export function decideReview(store: TaskStore, actor: Actor, params: { workId: s
   });
 }
 
+export function withdrawAcceptance(store: TaskStore, actor: Actor, workId: string) {
+  const work = store.work(workId);
+  if (work.status !== 'accepted') throw new RuleError('ACCEPTANCE_LOCKED', '只能在合入前撤回接受。');
+  const gate = store.gates(workId).findLast(item => item.kind === 'review' && item.decision === 'accept');
+  if (!gate) throw new RuleError('REVIEW_NOT_ACCEPTED', '工作尚未接受审核。');
+  store.db.prepare("UPDATE gates SET status = 'pending', decision = NULL, comment = NULL WHERE id = ?").run(gate.id);
+  store.db.prepare("UPDATE works SET status = 'awaiting-review' WHERE id = ?").run(workId);
+  store.appendEvent(actor, { type: 'gate', id: gate.id }, 'acceptance-withdrawn', {}, { workId });
+  return store.gate(workId, gate.id);
+}
+
 function git(project: string, ...args: string[]) {
   return execFileSync('git', ['-C', project, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
-}
-
-function failureReason(error: unknown) {
-  const failure = error as { stderr?: string; message?: string };
-  return String(failure.stderr || failure.message || error).trim();
-}
-
-interface MergeResult {
-  status: 'merged' | 'already-contained' | 'conflict' | 'failed';
-  baseBranch: string | null; workBranch: string; commit?: string; conflictFiles?: string[]; reason?: string;
-}
-
-function mergeIntoBase(store: TaskStore, workId: string): MergeResult {
-  const work = store.work(workId);
-  const project = projectPath(store, workId);
-  const result: MergeResult = { status: 'failed', baseBranch: null, workBranch: work.workBranch! };
-  try {
-    const baseBranch = git(project, 'rev-parse', '--symbolic-full-name', '--verify', '--end-of-options', work.baseRef!).trim();
-    if (!baseBranch.startsWith('refs/heads/')) throw new Error(`基准 ref ${work.baseRef} 不是本地分支，无法合并推送。`);
-    result.baseBranch = baseBranch;
-    const baseCommit = git(project, 'rev-parse', '--verify', `${baseBranch}^{commit}`).trim();
-    const workCommit = git(project, 'rev-parse', '--verify', `refs/heads/${work.workBranch}^{commit}`).trim();
-    let tree: string;
-    try {
-      tree = git(project, 'merge-tree', '--write-tree', '--name-only', '-z', baseCommit, workCommit).split('\0')[0]!;
-    } catch (error) {
-      const failure = error as { status?: number; stdout?: string };
-      if (failure.status !== 1) throw error;
-      const paths = String(failure.stdout).split('\0').slice(1);
-      const end = paths.indexOf('');
-      return { ...result, status: 'conflict', conflictFiles: end < 0 ? paths : paths.slice(0, end) };
-    }
-    try {
-      git(project, 'merge-base', '--is-ancestor', workCommit, baseCommit);
-      return { ...result, status: 'already-contained', commit: baseCommit };
-    } catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
-    let checkedOut = '';
-    try { checkedOut = git(project, 'symbolic-ref', '-q', 'HEAD').trim(); }
-    catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
-    const identity = ['-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false'];
-    let commit: string;
-    if (checkedOut === baseBranch) {
-      const mergeHead = resolve(project, git(project, 'rev-parse', '--git-path', 'MERGE_HEAD').trim());
-      const alreadyMerging = existsSync(mergeHead);
-      if (alreadyMerging) throw new Error('项目目录已有未结束的合并。');
-      // This durable intent distinguishes our interrupted merge from a user's merge.
-      store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-started',
-        { baseBranch, baseCommit, workCommit, mergeTree: tree }, { workId }));
-      try {
-        git(project, ...identity, '-c', 'merge.autoStash=false', 'merge', '--no-ff', '--commit', '--no-edit', workCommit);
-      } catch (error) {
-        // Only abort a merge started here; an existing user merge belongs to the user.
-        if (!alreadyMerging && existsSync(mergeHead) && readFileSync(mergeHead, 'utf8').trim() === workCommit) git(project, 'merge', '--abort');
-        throw error;
-      }
-      commit = git(project, 'rev-parse', baseBranch).trim();
-    } else {
-      commit = git(project, ...identity, 'commit-tree', tree, '-p', baseCommit, '-p', workCommit, '-m', `Merge ${work.workBranch}`).trim();
-      git(project, 'update-ref', baseBranch, commit, baseCommit);
-    }
-    return { ...result, status: 'merged', commit };
-  } catch (error) { return { ...result, reason: failureReason(error) }; }
-}
-
-// The accepted gate is durable before external actions. Startup reconciliation can use the result events.
-export function completeReviewedWork(store: TaskStore, workId: string, gateId: string) {
-  const work = store.work(workId);
-  const project = projectPath(store, workId);
-  const events = store.events({ workId });
-  const savedResult = (action: string) => events.find(event => event.action === action && (event.details as { gateId?: string }).gateId === gateId);
-  const savedMerge = savedResult('base-merge-result');
-  const merge = savedMerge ? savedMerge.details as MergeResult : mergeIntoBase(store, workId);
-  if (!savedMerge) store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId, ...merge }, { workId }));
-  const savedPush = savedResult('base-push-result');
-  let push: { status: 'pushed' | 'failed' | 'skipped'; reason?: string } = savedPush ? savedPush.details as typeof push : { status: 'skipped' };
-  if (!savedPush && (merge.status === 'merged' || merge.status === 'already-contained')) {
-    try {
-      let remote = 'origin';
-      try { remote = git(project, 'config', '--get', `branch.${merge.baseBranch!.slice('refs/heads/'.length)}.remote`).trim() || remote; }
-      catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
-      git(project, 'push', '--', remote, `${merge.baseBranch}:${merge.baseBranch}`);
-      push = { status: 'pushed' };
-    } catch (error) { push = { status: 'failed', reason: failureReason(error) }; }
-  }
-  if (!savedPush) store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-push-result', { gateId, baseBranch: merge.baseBranch, ...push }, { workId }));
-  let cleanupFailure: string | undefined;
-  try {
-    if (work.workPath && existsSync(work.workPath)) git(project, 'worktree', 'remove', '--force', work.workPath);
-  } catch (error) { cleanupFailure = failureReason(error); }
-  return store.transaction(() => {
-    const notices: string[] = [];
-    if (merge.status === 'conflict') notices.push(`工作分支 ${work.workBranch} 与基准分支冲突，未合并。冲突文件：${merge.conflictFiles!.join('、')}。`);
-    if (merge.status === 'failed') notices.push(`工作分支 ${work.workBranch} 合进基准分支失败：${merge.reason}`);
-    if (push.status === 'failed') notices.push(`基准分支 ${merge.baseBranch} 推送失败：${push.reason}`);
-    if (cleanupFailure) notices.push(`删除 _work 失败：${cleanupFailure}`);
-    if (notices.length && !store.message(workId, `review-result:${gateId}`)) {
-      const id = randomUUID();
-      const body = notices.join('\n');
-      const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body, gateId }, { workId });
-      store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, workId, 'runtime', body, `review-result:${gateId}`, gateId, event.time, event.id);
-    }
-    store.db.prepare(`UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?`).run(workId);
-    if (!savedResult('work-completed')) store.appendEvent(runtime, { type: 'work', id: workId }, 'work-completed', { gateId, merge, push, cleanupFailure }, { workId });
-    return store.work(workId);
-  });
 }

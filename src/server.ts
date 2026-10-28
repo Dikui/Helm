@@ -138,7 +138,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
     url,
     close() {
       ready = false;
-      closing ??= Promise.all([scheduler.close(), executions.close()]).then(() => new Promise<void>((resolve, reject) => {
+      closing ??= Promise.all([scheduler.close(), executions.close(), userOperations.settleDeliveries()]).then(() => new Promise<void>((resolve, reject) => {
         server.close(error => {
           void store.agents.settleChecks().then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
         });

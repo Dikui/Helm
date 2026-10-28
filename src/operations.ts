@@ -503,6 +503,16 @@ export const operations: readonly Operation[] = [
     name: 'get-work-descriptions', description: '读取工作说明的全部版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
   }),
+  ...(['merge', 'push'] as const).map(phase => operation({
+    name: `${phase}-work`, description: phase === 'merge' ? '把工作分支合入基准分支，不推送' : '推送已合入的基准分支', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.deliverWork(actor, workId, phase),
+  })),
+  operation({
+    name: 'withdraw-acceptance', description: '合入前撤回审核接受，回到待决定', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.withdrawAcceptance(actor, workId),
+  }),
   operation({
     name: 'decide-gate', description: '用户确认工作说明、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional() }).strict(),
@@ -615,7 +625,7 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
       const acceptedReview = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
       const repeatReview = name === 'decide-gate' && parsed.data.gateId === acceptedReview?.id;
       const managesOutputs = name === 'export-outputs' || name === 'delete-outputs' || name === 'delete-work';
-      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
+      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !['withdraw-acceptance', 'merge-work', 'push-work'].includes(name) && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
         throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       }
     }

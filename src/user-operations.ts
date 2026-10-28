@@ -6,15 +6,19 @@ import { dispatchGit, listDispatches, revokeDispatch } from './dispatch.js';
 import type { ExecutionRunner } from './execution.js';
 import type { RoundScheduler } from './rounds.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
-import { completeReviewedWork, decideReview } from './review.js';
+import { decideReview, withdrawAcceptance } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry, ModelContext } from './driver.js';
 import { openAgentPrompt, type PromptEditor } from './prompt-editor.js';
+import { mergeReviewedWork, pushReviewedWork, setDeliveryStatus } from './delivery.js';
 
 export class UserOperations {
-  private reviewCompletions = new Map<string, Promise<unknown>>();
+  private projectDeliveries = new Map<string, Promise<unknown>>();
+  private workDeliveries = new Map<string, { phase: 'merge' | 'push'; promise: Promise<unknown> }>();
   constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry, private promptEditor?: PromptEditor) {}
+
+  async settleDeliveries() { await Promise.allSettled([...this.workDeliveries.values()].map(item => item.promise)); }
 
   openAgentPrompt(agentId: string) { return openAgentPrompt(this.store.agents, agentId, this.promptEditor); }
 
@@ -45,22 +49,37 @@ export class UserOperations {
 
   async decideReview(actor: Actor, params: { workId: string; gateId: string; decision: string; comment?: string }) {
     const gate = decideReview(this.store, actor, params);
-    if (gate.decision === 'accept' && this.store.work(params.workId).status !== 'completed') {
-      let completion = this.reviewCompletions.get(params.workId);
-      if (!completion) {
-        completion = this.finishReview(actor, params.workId, gate.id).finally(() => this.reviewCompletions.delete(params.workId));
-        this.reviewCompletions.set(params.workId, completion);
-      }
-      await completion;
+    if (gate.decision === 'accept') {
+      this.store.transaction(() => this.abortDispatches(actor, params.workId, '审核接受'));
+      await Promise.all([this.executions.settle(params.workId), this.rounds.cancel(params.workId, '审核接受')]);
     }
-    if (gate.decision === 'accept') await compressWorkOutputs(this.store, params.workId);
     return this.store.gate(params.workId, gate.id);
   }
 
-  private async finishReview(actor: Actor, workId: string, gateId: string) {
-    this.store.transaction(() => this.abortDispatches(actor, workId, '审核接受'));
-    await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '审核接受')]);
-    return completeReviewedWork(this.store, workId, gateId);
+  withdrawAcceptance(actor: Actor, workId: string) { return withdrawAcceptance(this.store, actor, workId); }
+
+  deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push') {
+    const work = this.store.work(workId);
+    const active = this.workDeliveries.get(workId);
+    if (active) {
+      if (active.phase !== phase) throw new RuleError('DELIVERY_BUSY', '请等待当前合入或推送操作结束。');
+      return active.promise;
+    }
+    if (phase === 'merge' && !['accepted', 'merged', 'completed'].includes(work.status)) throw new RuleError('REVIEW_NOT_ACCEPTED', '须先接受审核。');
+    if (phase === 'push' && !['merged', 'completed'].includes(work.status)) throw new RuleError('WORK_NOT_MERGED', '合入完成后才能推送。');
+    const previous = this.projectDeliveries.get(work.projectId) ?? Promise.resolve();
+    if (phase === 'merge' && work.status === 'accepted') setDeliveryStatus(this.store, actor, workId, 'merge-queued');
+    const next = previous.catch(() => {}).then(async () => {
+      const result = phase === 'merge' ? await mergeReviewedWork(this.store, workId) : await pushReviewedWork(this.store, workId);
+      if (result.status === 'completed') await compressWorkOutputs(this.store, workId);
+      return result;
+    }).finally(() => {
+      this.workDeliveries.delete(workId);
+      if (this.projectDeliveries.get(work.projectId) === next) this.projectDeliveries.delete(work.projectId);
+    });
+    this.workDeliveries.set(workId, { phase, promise: next });
+    this.projectDeliveries.set(work.projectId, next);
+    return next;
   }
 
   private abortDispatches(actor: Actor, workId: string, reason: string, cardId?: string) {
