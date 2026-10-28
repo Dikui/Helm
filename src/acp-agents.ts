@@ -25,6 +25,7 @@ interface AcpAgentProfile {
   usage(response: PromptResponse): TokenUsage;
   sessionUsage?(env: Record<string, string>, sessionId: string, allowMissing?: boolean): Promise<TokenUsage>;
   quotaErrors: { codes: number[]; pattern: RegExp };
+  missingCredentialErrors?: { pattern: RegExp; recovery(agent: AgentConfig, env: Record<string, string>, message: string): { reason: string; command: string } };
   contextOverflowErrors?: RegExp;
   compactionNotification?: { method: string; sessionUpdate: string };
   installCommand: string;
@@ -102,6 +103,15 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     usage: () => ({ inputTokens: null, outputTokens: null }),
     sessionUsage: deepseekUsage,
     quotaErrors: { codes: [], pattern: /\b(?:ACCOUNT_QUOTA|QUOTA|insufficient[ _-](?:quota|balance|credits?)|(?:quota|usage[ _-]limit)[ _-](?:exceeded|exhausted|reached)|(?:balance|credits?)[ _-](?:exhausted|depleted))\b/i },
+    missingCredentialErrors: {
+      pattern: /\bMISSING_CREDENTIAL\b|no API key for provider route\b/i,
+      recovery(agent, env, message) {
+        const route = message.match(/no API key for provider route "([^"]+)"/i)?.[1] ?? deepseekRoute(agent.model ?? '')?.[0] ?? agent.model;
+        const home = env.DSH_HOME;
+        const command = home ? `DSH_HOME='${home.replaceAll("'", "'\\''")}' dsh web` : 'dsh web';
+        return { reason: `路由 ${route} 缺少 API key。请运行 dsh web，在 Models 页配置该路由的 key，或改用已配置凭据的专用主目录，然后对该 Agent 重新检测。`, command };
+      },
+    },
     contextOverflowErrors: /\bCONTEXT_WINDOW_EXCEEDED\b|context[ _-](?:window|length)[ _-](?:exceeded|overflow)|maximum context length/i,
     installCommand: 'npm install -g @deepseek-ai/dsh', loginCommand: 'dsh web',
   },

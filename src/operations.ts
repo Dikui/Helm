@@ -175,6 +175,15 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
+    name: 'recheck-agent', description: '清除该 Agent 的运行时不可用标记并重新检测当前设置', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ id: z.string().min(1) }).strict(),
+    async execute({ store }, { id }) {
+      const agent = await store.agents.recheck(id);
+      if (!agent) throw new RuleError('AGENT_NOT_FOUND', `Agent ${id} 的目录不存在。`, 404);
+      return agent;
+    },
+  }),
+  operation({
     name: 'list-agents', description: '读取文件中的 Agent、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => listAgents(store),
   }),

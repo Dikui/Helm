@@ -24,6 +24,48 @@ const fieldValue = (label: string) => {
 const expandProject = (project: HTMLElement) => { fireEvent.click(within(project).getByText('项目设置', { selector: 'summary' })); return project; };
 const agent = async (id: string) => (await daemon!.call('list-agents')).result.find((item: any) => item.id === id);
 
+test('Agent 详情重新检测保留未保存输入，检测中禁用操作，失败后可重试并显示恢复状态', async () => {
+  daemon = await uiFixture();
+  const original = await agent('claude-executor');
+  const unavailable = { ...original, available: false, reason: 'deepseek-official 缺少 API key，请在 dsh web 的 Models 页配置。', command: 'dsh web' };
+  let available = false;
+  let fail = true;
+  let calls = 0;
+  let release!: () => void;
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/api/list-agents')) return new Response(JSON.stringify({ ok: true, result: [available ? original : unavailable] }));
+    if (String(input).endsWith('/api/recheck-agent')) {
+      calls++;
+      expect(JSON.parse(String(init?.body))).toEqual({ id: original.id });
+      await new Promise<void>(resolve => { release = resolve; });
+      if (fail) return new Response(JSON.stringify({ ok: false, error: { code: 'CHECK_FAILED', reason: '检测连接失败' } }), { status: 500 });
+      available = true;
+      return new Response(JSON.stringify({ ok: true, result: original }));
+    }
+    return fetch(input, init);
+  };
+  window.history.replaceState(null, '', '/settings/agents/claude-executor');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  const editor = await screen.findByRole('form', { name: 'Agent 详情' });
+  change('职责说明', '未保存的输入');
+  expect(within(editor).getByText(unavailable.reason)).toBeTruthy();
+  const recheck = within(editor).getByRole('button', { name: '重新检测' }) as HTMLButtonElement;
+  fireEvent.click(recheck);
+  await waitFor(() => expect(recheck.disabled).toBe(true));
+  fireEvent.click(recheck);
+  expect(calls).toBe(1);
+  release();
+  await within(editor).findByText('检测连接失败');
+  expect(fieldValue('职责说明')).toBe('未保存的输入');
+  fail = false;
+  fireEvent.click(recheck);
+  await waitFor(() => expect(calls).toBe(2));
+  release();
+  await waitFor(() => expect(within(editor).getByText('可用')).toBeTruthy());
+  expect(within(editor).queryByText(unavailable.reason)).toBeNull();
+  expect(fieldValue('职责说明')).toBe('未保存的输入');
+});
+
 test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 复制，API 主目录只显示配置提示', async () => {
   daemon = await uiFixture();
   const skills = join(daemon.directory, 'agents', 'claude-executor', 'skills');

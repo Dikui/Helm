@@ -40,6 +40,8 @@ function revision(config: Buffer, prompt: Buffer) {
 // No cache: each use reads settings and strategy together into its own snapshot.
 export class AgentCatalog {
   private availability = new Map<string, AgentAvailability>();
+  // shortcut: Runtime credential failures are memory-only and are lost when helmd restarts.
+  private runtimeUnavailable = new Map<string, { context: string; result: AgentAvailability }>();
   private checks = new Set<Promise<AgentConfig>>();
   private checker?: (agent: AgentConfig) => Promise<AgentAvailability>;
   private report?: (id: string, result: AgentAvailability) => void;
@@ -85,7 +87,9 @@ export class AgentCatalog {
       if (mode === 'update') assertRevision();
       renameSync(temporaryConfig, join(directory, 'config.json'));
       renameSync(temporaryPrompt, join(directory, 'prompt.md'));
-      return this.read(id);
+      const saved = this.read(id);
+      this.runtimeAvailability(saved);
+      return saved;
     } catch (error) {
       if (mode === 'create') rmSync(directory, { recursive: true, force: true });
       throw error;
@@ -102,11 +106,44 @@ export class AgentCatalog {
     if (!existsSync(directory)) throw new RuleError('AGENT_NOT_FOUND', `Agent ${id} 的目录不存在。`, 404);
     if (!lstatSync(directory).isDirectory()) throw new RuleError('INVALID_AGENT_PATH', 'Agent 目录必须是实际目录，不能是符号链接。', 400);
     rmSync(directory, { recursive: true });
+    this.runtimeUnavailable.delete(id);
+    this.availability.delete(id);
   }
 
   monitor(checker: (agent: AgentConfig) => Promise<AgentAvailability>, report: (id: string, result: AgentAvailability) => void) {
     this.checker = checker;
     this.report = report;
+  }
+
+  private availabilityContext(agent: AgentConfig) {
+    return JSON.stringify([agent.driver, agent.model, agent.home]);
+  }
+
+  private runtimeAvailability(agent: AgentConfig) {
+    const entry = this.runtimeUnavailable.get(agent.id);
+    if (entry?.context === this.availabilityContext(agent)) return entry.result;
+    if (entry) {
+      this.runtimeUnavailable.delete(agent.id);
+      this.availability.delete(agent.id);
+    }
+  }
+
+  markUnavailable(agent: AgentConfig, recovery: { reason: string; command?: string }) {
+    // A dispatch uses a snapshot; a late failure must not disable edited settings.
+    let current: AgentConfig;
+    try { current = this.read(agent.id); } catch { return; }
+    if (this.availabilityContext(current) !== this.availabilityContext(agent)) return;
+    const result = { available: false, ...recovery };
+    this.runtimeUnavailable.set(agent.id, { context: this.availabilityContext(agent), result });
+    this.record(agent.id, result);
+  }
+
+  async recheck(id: string) {
+    this.runtimeUnavailable.delete(id);
+    this.availability.delete(id);
+    try { await this.check(id); }
+    catch (error) { if (!(error instanceof RuleError)) throw error; }
+    return this.list().find(agent => agent.id === id);
   }
 
   async check(id: string, role?: AgentConfig['role']): Promise<AgentConfig> {
@@ -127,8 +164,11 @@ export class AgentCatalog {
       throw error;
     }
     if (role && agent.role !== role) throw new RuleError('AGENT_UNAVAILABLE', `Agent 角色必须为 ${role}。`, 409, { agentId: id });
-    try { result = await this.checker?.(agent) ?? { available: true }; }
+    try { result = this.runtimeAvailability(agent) ?? await this.checker?.(agent) ?? { available: true }; }
     catch { result = { available: false, reason: '驱动无法检查 Agent 可用性，请检查 CLI 安装和主目录。' }; }
+    if (this.availabilityContext(this.get(id)) !== this.availabilityContext(agent)) return this.checkAgent(id, role);
+    // A dispatch may have failed while this probe was in flight.
+    result = this.runtimeAvailability(agent) ?? result;
     this.record(id, result);
     if (!result.available) throw new RuleError('AGENT_UNAVAILABLE', result.reason ?? 'Agent 不可用。', 409,
       { agentId: id, ...(result.command ? { command: result.command } : {}) });
@@ -145,6 +185,7 @@ export class AgentCatalog {
     for (const id of this.availability.keys()) if (!entries.some(entry => entry.id === id)) {
       this.record(id, { available: true });
       this.availability.delete(id);
+      this.runtimeUnavailable.delete(id);
     }
     await Promise.all(entries.map(entry => this.check(entry.id).catch(error => {
       if (!(error instanceof RuleError)) throw error;
@@ -278,7 +319,7 @@ export class AgentCatalog {
       try {
         const agent = this.read(id);
         const reason = this.unavailable(agent);
-        const availability = this.availability.get(id);
+        const availability = this.runtimeAvailability(agent) ?? this.availability.get(id);
         return { ...agent, billing: agent.home === 'shared' ? 'subscription' : 'api',
           warnings: this.warnings(agent),
           skills: agent.skillsPath ? readdirSync(agent.skillsPath, { withFileTypes: true })

@@ -333,8 +333,10 @@ export class AcpDriver implements Driver {
             const failure = error instanceof RequestError ? JSON.stringify({ code: error.code, message: error.message, data: error.data }) : String(error);
             output({ method: 'session/prompt', error: failure });
             const quota = (error instanceof RequestError && profile.quotaErrors.codes.includes(error.code)) || profile.quotaErrors.pattern.test(failure);
+            const unavailable = !cancelled && profile.missingCredentialErrors?.pattern.test(failure)
+              ? profile.missingCredentialErrors.recovery(agent, env, error instanceof RequestError ? error.message : failure) : undefined;
             await settle({ type: 'end', reason: cancelled ? 'aborted' : profile.contextOverflowErrors?.test(failure) ? 'context-overflow' : quota ? 'quota-exhausted' : 'error',
-              ...(!cancelled ? { failure } : {}), usage: { inputTokens: null, outputTokens: null } });
+              ...(!cancelled ? { failure } : {}), ...(unavailable ? { unavailable } : {}), usage: { inputTokens: null, outputTokens: null } });
           });
         },
         events: (async function* () {

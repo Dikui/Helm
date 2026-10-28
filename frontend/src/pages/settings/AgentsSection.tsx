@@ -37,7 +37,7 @@ export function AgentsSection({ agentId, creating = false }: { agentId?: string;
       })}
     </div>
     {creating ? <AgentEditor key="create-agent" source={copy} creating onSaved={result => { setCopy(undefined); saveFinished(result); }} />
-      : selected ? <AgentEditor key={`agent:${selected.id}`} source={selected} initialSaved={lastSaved?.id === selected.id} onSaved={saveFinished} onDeleted={() => { setLastSaved(undefined); reload(); }} onDuplicate={source => { setCopy(source); navigate('/settings/new-agent'); }} />
+      : selected ? <AgentEditor key={`agent:${selected.id}`} source={selected} initialSaved={lastSaved?.id === selected.id} onSaved={saveFinished} onRechecked={reload} onDeleted={() => { setLastSaved(undefined); reload(); }} onDuplicate={source => { setCopy(source); navigate('/settings/new-agent'); }} />
       : data && agentId && <p>{t('agentMissing')}</p>}
   </div>;
 }

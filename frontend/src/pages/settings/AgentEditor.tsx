@@ -18,8 +18,8 @@ function draft(source?: AgentEntry) {
     home: source?.home ?? 'shared', description: source?.description ?? '', skills: source?.config?.skills ?? [],
     mcp: source?.config?.mcp ?? [] } as AgentSettings, prompt: source?.prompt ?? '' };
 }
-export function AgentEditor({ source, creating = false, initialSaved = false, onSaved, onDuplicate, onDeleted }: {
-  source?: AgentEntry; creating?: boolean; initialSaved?: boolean; onSaved: (agent: AgentEntry) => void; onDuplicate?: (source: AgentEntry) => void; onDeleted?: () => void;
+export function AgentEditor({ source, creating = false, initialSaved = false, onSaved, onDuplicate, onDeleted, onRechecked }: {
+  source?: AgentEntry; creating?: boolean; initialSaved?: boolean; onSaved: (agent: AgentEntry) => void; onDuplicate?: (source: AgentEntry) => void; onDeleted?: () => void; onRechecked?: () => void;
 }) {
   const { t } = useI18n();
   const { api } = useData();
@@ -87,6 +87,13 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     catch (failure) { setOpenError(failure as Error); }
     finally { openingRef.current = false; setOpening(false); }
   }
+  async function recheck() {
+    if (creating || pending) return;
+    setPending(true); setError(undefined);
+    try { await api.call('recheck-agent', { id: source!.id }); onRechecked?.(); }
+    catch (failure) { setError(failure as Error); }
+    finally { setPending(false); }
+  }
   async function remove() {
     if (pending) return;
     setPending(true); setError(undefined);
@@ -100,6 +107,10 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   return <form className="settings-editor" aria-label={t('agentDetails')} onSubmit={save} noValidate aria-busy={pending}>
     <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} />
     <div className="settings-detail-head"><span className="settings-driver mono">{{ 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[value.config.driver]}</span><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted">{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}</div>
+    {!creating && <div className="settings-box">
+      {!source!.available && <p className="settings-reason">{source!.reason}{source!.command && <> <code>{source!.command}</code></>}</p>}
+      <button type="button" className="btn sm" disabled={pending} aria-busy={pending} onClick={() => void recheck()}>{t('recheck')}</button>
+    </div>}
     <fieldset disabled={pending} className="settings-fields">
       <label htmlFor="agent-id">{t('agentId')}<input {...fieldProps('id')} value={value.id} disabled={!creating} onChange={event => { setSaved(false); setValue({ ...value, id: event.target.value }); }} />{fieldError('id')}</label>
       <div className="settings-two">
