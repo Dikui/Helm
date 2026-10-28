@@ -186,7 +186,27 @@ test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留
   assert.equal((await daemon.events()).filter(event => event.action === 'gate-created' && event.details.kind === 'review').length, 2);
 });
 
-for (const checkedOut of [true, false]) test(`审核接受后合并并推送基准分支（项目目录${checkedOut ? '已' : '未'}检出基准分支）`, async t => {
+test('接受只记录决定；撤回后同一审核回到待决定，基准和远端不变', async t => {
+  const daemon = await fixture(t, [[review()]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  await writeFile(join(work.workPath, 'accepted.txt'), 'accepted result\n');
+  git(work.workPath, 'add', 'accepted.txt');
+  git(work.workPath, ...identity, 'commit', '-m', 'accepted result');
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  assert.equal((await daemon.getWork()).status, 'accepted');
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), daemon.baseline);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
+  assert.equal(existsSync(work.workPath), true);
+  ok(await daemon.call('withdraw-acceptance', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'awaiting-review');
+  assert.equal((await daemon.pendingReview()).id, gate.id);
+  assert.equal((await daemon.pendingReview()).decision, null);
+  assert.ok(!(await daemon.events()).some(event => event.action === 'base-merge-result'));
+});
+
+for (const checkedOut of [true, false]) test(`审核接受后分别合入和推送基准分支（项目目录${checkedOut ? '已' : '未'}检出基准分支）`, async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
@@ -203,11 +223,18 @@ for (const checkedOut of [true, false]) test(`审核接受后合并并推送基�
   assert.match(observed.review.diff, /\+reviewed result/);
   assert.equal(observed.review.workCommit, workTip);
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
-  assert.equal((await daemon.getWork()).status, 'completed');
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'merged');
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
   const merge = git(daemon.repo, 'rev-parse', 'main');
   assert.equal(git(daemon.repo, 'rev-parse', `${merge}^1`), daemon.baseline);
   assert.equal(git(daemon.repo, 'rev-parse', `${merge}^2`), workTip);
   assert.equal(git(daemon.repo, 'show', 'main:result.txt'), 'reviewed result');
+  code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: work.id }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), merge);
+  ok(await daemon.call('push-work', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'completed');
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), merge);
   assert.equal(git(daemon.repo, 'branch', '--show-current'), checkedOut ? 'main' : 'user-branch');
   assert.equal(git(daemon.repo, 'status', '--porcelain'), before);
@@ -226,7 +253,70 @@ for (const checkedOut of [true, false]) test(`审核接受后合并并推送基�
   assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);
 });
 
-for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 只报告一次，工作仍完成且保留工作分支`, async t => {
+test('基准已包含工作分支时记录已包含并等待单独推送', async t => {
+  const daemon = await fixture(t, [[review()]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  await writeFile(join(work.workPath, 'contained.txt'), 'already included\n');
+  git(work.workPath, 'add', 'contained.txt');
+  git(work.workPath, ...identity, 'commit', '-m', 'contained result');
+  git(daemon.repo, ...identity, 'merge', '--no-ff', '--no-edit', work.workBranch);
+  const base = git(daemon.repo, 'rev-parse', 'main');
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), base);
+  assert.equal((await daemon.getWork()).status, 'merged');
+  assert.equal((await daemon.getWork()).delivery.merge.status, 'already-contained');
+  assert.equal(existsSync(work.workPath), false);
+  assert.ok(!(await daemon.events()).some(event => event.action === 'base-push-result'));
+  ok(await daemon.call('push-work', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'completed');
+});
+
+for (const conflict of [false, true]) test(`同项目合入串行，第二项基于第一项的新基准${conflict ? '报告冲突' : '合入'}`, async t => {
+  const daemon = await fixture(t, [[review()], [
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '独立合入' }), check: ok },
+  ], [review()]]);
+  const firstGate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const projectId = (await daemon.getWork()).projectId;
+  const second = (await daemon.call('send-message', { projectId, key: 'second', body: '第二项工作' })).result.work;
+  const confirmation = await until(async () => (await daemon.call('list-pending')).result as any[], values => values.some(gate => gate.workId === second.id && gate.kind === 'work-confirmation' && gate.description));
+  const gate = confirmation.find(gate => gate.workId === second.id);
+  ok(await daemon.call('decide-gate', { workId: second.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
+  const secondGate = await until(async () => (await daemon.call('get-conversation', { workId: second.id })).result as any[], values => values.some(gate => gate.kind === 'review'));
+  const works = [await daemon.getWork(), (await daemon.call('get-work', { workId: second.id })).result];
+  for (const [index, work] of works.entries()) {
+    const file = conflict ? 'shared.txt' : `result-${index}.txt`;
+    await writeFile(join(work.workPath, file), `result ${index}\n`);
+    git(work.workPath, 'add', file);
+    git(work.workPath, ...identity, 'commit', '-m', `result ${index}`);
+    ok(await daemon.call('decide-gate', { workId: work.id, gateId: index === 0 ? firstGate.id : secondGate.find(gate => gate.kind === 'review').id, decision: 'accept' }));
+  }
+  const block = join(daemon.directory, 'block');
+  const marker = join(daemon.directory, 'hook-entered');
+  await writeFile(block, 'block');
+  await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-merge-commit'), `#!/bin/sh\necho reached > '${marker}'\nwhile [ -f '${block}' ]; do sleep 0.05; done\n`, { mode: 0o755 });
+  const firstMerge = daemon.call('merge-work', { workId: works[0].id });
+  await until(async () => existsSync(marker), Boolean);
+  const secondMerge = daemon.call('merge-work', { workId: works[1].id });
+  await until(async () => (await daemon.call('get-work', { workId: works[1].id })).result.status, status => status === 'merge-queued');
+  code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: works[1].id }));
+  const duplicate = daemon.call('merge-work', { workId: works[1].id });
+  await rm(block);
+  for (const result of await Promise.all([firstMerge, secondMerge, duplicate])) ok(result);
+  const firstTip = (await daemon.getWork()).delivery.merge.commit;
+  const after = (await daemon.call('get-work', { workId: works[1].id })).result;
+  assert.equal(after.status, conflict ? 'accepted' : 'merged');
+  assert.equal(after.delivery.merge.status, conflict ? 'conflict' : 'merged');
+  assert.equal((await daemon.call('get-events', { workId: works[1].id })).result.filter((event: any) => event.action === 'base-merge-result').length, 1);
+  if (conflict) assert.deepEqual(after.delivery.merge.conflictFiles, ['shared.txt']);
+  else assert.equal(git(daemon.repo, 'rev-parse', 'main^1'), firstTip);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
+});
+
+for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 保留阶段与工作分支，失败可重试`, async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
@@ -254,29 +344,38 @@ for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as con
   const baseBefore = git(daemon.repo, 'rev-parse', 'main');
   const statusBefore = git(daemon.repo, 'status', '--porcelain');
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
-  assert.equal((await daemon.getWork()).status, 'completed');
-  assert.equal(existsSync(work.workPath), false);
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, problem === 'push' ? 'merged' : 'accepted');
+  assert.equal(existsSync(work.workPath), problem !== 'push');
   assert.equal(git(daemon.repo, 'rev-parse', work.workBranch), workTip);
   assert.equal(git(daemon.repo, 'status', '--porcelain'), statusBefore);
   assert.throws(() => git(daemon.repo, 'rev-parse', '--verify', 'MERGE_HEAD'));
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
   assert.equal(git(daemon.repo, 'rev-parse', 'main') === baseBefore, problem !== 'push');
-  const events = await daemon.events();
-  const merge = events.find(event => event.action === 'base-merge-result').details;
-  const push = events.find(event => event.action === 'base-push-result').details;
+  const merge = (await daemon.getWork()).delivery.merge;
   assert.equal(merge.status, problem === 'conflict' ? 'conflict' : problem === 'push' ? 'merged' : 'failed');
-  assert.equal(push.status, problem === 'push' ? 'failed' : 'skipped');
-  const message = (await daemon.conversation()).find(item => item.type === 'message' && item.sender === 'runtime');
-  assert.ok(message, JSON.stringify(await daemon.conversation()));
   if (problem === 'conflict') {
     assert.deepEqual(merge.conflictFiles, [file]);
-    assert.ok(message.body.includes(file));
-    assert.ok(message.body.includes(work.workBranch));
+    ok(await daemon.call('withdraw-acceptance', { workId: work.id }));
+    assert.equal((await daemon.getWork()).status, 'awaiting-review');
+    return;
   }
-  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
-  assert.equal((await daemon.events()).filter(event => event.action === 'base-merge-result').length, 1);
-  assert.equal((await daemon.events()).filter(event => event.action === 'base-push-result').length, 1);
-  assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);
+  if (problem === 'push') {
+    ok(await daemon.call('push-work', { workId: work.id }));
+    assert.equal((await daemon.getWork()).status, 'merged');
+    assert.equal((await daemon.getWork()).delivery.push.status, 'failed');
+    assert.match((await daemon.getWork()).delivery.push.reason, /declined/);
+    await rm(join(daemon.remote, 'hooks', 'pre-receive'));
+  } else {
+    assert.match(merge.reason, problem === 'dirty-project' ? /overwritten/ : /Not committing merge/);
+    if (problem === 'dirty-project') git(daemon.repo, 'restore', file);
+    else await rm(join(daemon.repo, '.git', 'hooks', 'pre-merge-commit'));
+    ok(await daemon.call('merge-work', { workId: work.id }));
+    assert.equal((await daemon.getWork()).status, 'merged');
+  }
+  ok(await daemon.call('push-work', { workId: work.id }));
+  assert.equal((await daemon.getWork()).status, 'completed');
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), git(daemon.repo, 'rev-parse', 'main'));
 });
 
 test('审核附上真实 diff、整体验收结论与未声明派单数，接受时停止当前轮次且不再投递积压事件', async t => {
@@ -326,6 +425,10 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   const roundPaths = (await daemon.events()).filter(event => event.action === 'round-started').map(event => event.details.outputPath as string);
   const originalRounds = await Promise.all(roundPaths.map(path => readFile(path)));
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  assert.equal(existsSync(work.workPath), true);
+  assert.equal((await daemon.getWork()).status, 'accepted');
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  ok(await daemon.call('push-work', { workId: work.id }));
   assert.equal(existsSync(work.workPath), false);
   assert.equal((await daemon.getWork()).status, 'completed');
   for (const [index, dispatch] of dispatches.entries()) {
@@ -448,6 +551,10 @@ test('未结束验收的提前声明不能绕过终态检查，取消卡片后�
   assert.equal(dispatch.endReason, 'aborted');
   assert.equal(dispatch.abortReason, '卡片取消');
   assert.equal(dispatch.conclusion, 'undeclared');
+  assert.equal(existsSync(work.workPath), true);
+  assert.equal((await daemon.getWork()).status, 'accepted');
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  ok(await daemon.call('push-work', { workId: work.id }));
   assert.equal(existsSync(work.workPath), false);
   assert.equal((await daemon.getWork()).status, 'completed');
   assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);

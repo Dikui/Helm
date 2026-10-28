@@ -1,3 +1,4 @@
+import { WorkDelivery } from '../WorkDelivery.js';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
@@ -7,13 +8,14 @@ import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js
 import type { Work } from '../../../shared/types.js';
 import type { ReviewGate } from './types.js';
 
-export function WorkReview({ work }: { work: Pick<Work, 'id' | 'status'> }) {
+export function WorkReview({ work }: { work: Pick<Work, 'id' | 'status' | 'delivery'> }) {
   const { t } = useI18n();
   const conversation = useResource<(ReviewGate & { type: string })[]>('get-conversation', { workId: work.id });
   const files = useWorkFiles(work.id);
   const preview = useFilePreview(work.id);
   const gate = conversation.data?.findLast(item => item.type === 'gate' && item.kind === 'review');
   return <>
+    <WorkDelivery work={work} />
     {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
     {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
     {gate && <section className="work-review" aria-label={t('reviewTitle')}>

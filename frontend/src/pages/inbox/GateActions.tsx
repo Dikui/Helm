@@ -86,6 +86,7 @@ export function InboxDetails({ work }: { work: WorkSummary }) {
   const cards = graph.data?.filter(node => node.type === 'card') ?? [];
   const recent = recentProgress(events.data ?? []);
   return <><hr />{error && <ErrorNotice error={error} retry={reload} />}{events.error && <ErrorNotice error={events.error} retry={events.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
+    {['accepted', 'merged', 'merge-queued', 'merging', 'pushing'].includes(work.status) && <Link href={`/works/${encodeURIComponent(work.id)}/brief`}>{t('deliveryTitle')}</Link>}
     {(!data || !events.data) && !error && !events.error && <p role="status">{t('loading')}</p>}
     {recent.length > 0 && <ol className="tl" aria-label={t('inboxRecentSteps')}>{recent.map(event => {
       const details = event.details as { summary?: string; step?: number; question?: string; reason?: string } | null;

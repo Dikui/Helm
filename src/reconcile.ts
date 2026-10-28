@@ -6,7 +6,7 @@ import { dispatchGit, getDispatch } from './dispatch.js';
 import { finishDispatchCopy } from './execution.js';
 import { cardGraph, refreshCardReadiness } from './graph.js';
 import { cleanupRecordedProcessGroup, cleanupWorktreeProcesses } from './processes.js';
-import { completeReviewedWork } from './review.js';
+import { deliveryDetails, mergeReviewedWork, pushReviewedWork, setDeliveryStatus, cleanupReviewedCopy } from './delivery.js';
 import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
@@ -67,7 +67,14 @@ export async function reconcileStartup(store: TaskStore) {
     });
   }
 
-  for (const work of works) {
+  // Recover active Git operations before queued merges, regardless of work creation order.
+  const queuedAt = new Map(store.db.prepare(`SELECT work_id, MAX(id) AS sequence FROM events
+    WHERE action = 'delivery-status-changed' AND json_extract(details, '$.status') = 'merge-queued'
+    GROUP BY work_id`).all().map(row => [String(row.work_id), Number(row.sequence)]));
+  const recoveryRank = (status: string) => ['merging', 'pushing'].includes(status) ? 0 : status === 'merge-queued' ? 1 : 2;
+  const recoveryWorks = [...works].sort((a, b) => recoveryRank(a.status) - recoveryRank(b.status)
+    || (queuedAt.get(a.id) ?? 0) - (queuedAt.get(b.id) ?? 0));
+  for (const work of recoveryWorks) {
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
@@ -92,18 +99,21 @@ export async function reconcileStartup(store: TaskStore) {
           store.transaction(() => store.appendEvent(runtime, { type: 'work', id: work.id }, 'base-merge-aborted', { path: project }, { workId: work.id }));
         }
       }
-      if (work.status !== 'completed' || ['base-merge-result', 'base-push-result', 'work-completed'].some(action =>
-        !events.some(event => event.action === action && (event.details as { gateId?: string }).gateId === accepted.id))) {
-        completeReviewedWork(store, work.id, accepted.id);
-      }
+      const delivery = deliveryDetails(store, work.id);
+      if (delivery.push?.status === 'pushed' && work.status !== 'completed') await pushReviewedWork(store, work.id);
+      else if (delivery.merge && ['merged', 'already-contained'].includes(delivery.merge.status)) {
+        if (work.status === 'pushing') await pushReviewedWork(store, work.id);
+        else if (work.status !== 'completed') setDeliveryStatus(store, runtime, work.id, 'merged');
+      } else if (['merging', 'merge-queued'].includes(work.status)) await mergeReviewedWork(store, work.id);
     }
     for (const node of cardGraph(store, work.id)) {
       if (node.type !== 'card' || (!['completed', 'cancelled'].includes(node.status) && work.status !== 'cancelled')) continue;
       removeCardCopy(store, { ...node, workPath: node.workPath ?? join(root, work.id, node.id), cardBranch: node.cardBranch ?? `helm-card/${work.id}/${node.id}` });
     }
     const workPath = work.workPath ?? join(root, work.id, '_work');
-    if (['completed', 'cancelled'].includes(store.work(work.id).status) && existsSync(workPath)) {
-      dispatchGit(projectPath(store, work.id), 'worktree', 'remove', '--force', workPath);
+    if (['merged', 'pushing', 'completed', 'cancelled'].includes(store.work(work.id).status) && existsSync(workPath)) {
+      if (accepted) await cleanupReviewedCopy(store, work.id);
+      else dispatchGit(projectPath(store, work.id), 'worktree', 'remove', '--force', workPath);
     }
     await compressWorkOutputs(store, work.id);
   }

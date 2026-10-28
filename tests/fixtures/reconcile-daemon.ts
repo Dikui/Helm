@@ -13,6 +13,9 @@ const round: FakeScript = ctx => {
   if (brief.work.status === 'aligning') return [
     { type: 'tool', name: 'draft-work-description', arguments: { workId: brief.work.id, key: 'draft', requirements: '启动对账', boundary: '本机', criteria: '崩溃后可接续' } },
   ];
+  if (purpose === 'delivery') return [
+    { type: 'tool', name: 'request-review', arguments: { workId: brief.work.id, key: 'review', body: '检查合入顺序' } },
+  ];
   if (purpose === 'failures' && (++executingRounds <= 2 || existsSync(join(dataDir!, 'fail-round')))) return [{ type: 'end', reason: 'error' }];
   return [{ type: 'hang' }];
 };

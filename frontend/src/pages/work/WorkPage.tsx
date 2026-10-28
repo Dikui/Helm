@@ -1,3 +1,4 @@
+import { WorkDelivery } from './WorkDelivery.js';
 import type { CSSProperties } from 'react';
 import { elapsed, useClock } from '../../shared/clock.js';
 import { formatTokens } from '../../shared/i18n.js';
@@ -16,7 +17,7 @@ import { ConversationView } from './conversation/ConversationView.js';
 export function WorkPage({ route }: { route: RouteParams }) {
   return route.workId ? <SelectedWork key={route.workId} route={route} /> : <EmptyWork />;
 }
-const headerRing: Record<WorkStatus, string> = { aligning: 'att', executing: 'run busy', paused: '', 'awaiting-review': 'att', completed: 'ok', cancelled: 'cut' };
+const headerRing: Record<WorkStatus, string> = { aligning: 'att', executing: 'run busy', paused: '', 'awaiting-review': 'att', completed: 'ok', cancelled: 'cut', accepted: 'att', 'merge-queued': 'att', merging: 'run busy', merged: 'ok', pushing: 'run busy' };
 function SelectedWork({ route }: { route: RouteParams }) {
   const { t, language } = useI18n();
   const now = useClock();
@@ -37,6 +38,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
       </nav>}
       {work && work.status !== 'aligning' && <div className="stats work-stats"><span className="stat" title={t('cards')}>▦ {summary ? `${summary.completedCards}/${summary.totalCards}` : '—'}</span><span className="stat" title="tokens">◇ {formatTokens(work.usage.inputTokens + work.usage.outputTokens, language)}</span></div>}
       {work && <WorkActions work={work} reload={reload} />}</header>
+    {work && view !== 'brief' && <WorkDelivery work={work} />}
     {error && <ErrorNotice error={error} retry={reload} />}
     {work?.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} workBranch={work.workBranch} /> : work && (view === 'chat' ? <ConversationView work={work} />
       : view === 'brief' ? <BriefView work={work} /> : <CardGraphView key={work.id} work={work} />)}

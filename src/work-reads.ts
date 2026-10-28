@@ -1,3 +1,4 @@
+import { deliveryDetails } from './delivery.js';
 import type { HelmEvent, TaskStore, Work } from './store.js';
 
 export function readWork(store: TaskStore, id: string) {
@@ -5,7 +6,7 @@ export function readWork(store: TaskStore, id: string) {
   const message = store.db.prepare(`SELECT body FROM messages WHERE work_id = ? AND sender = 'user' ORDER BY sequence LIMIT 1`).get(id);
   const firstLine = Array.from(String(message?.body ?? '').split(/\r?\n/, 1)[0]!.trim());
   const title = firstLine.length > 80 ? firstLine.slice(0, 79).join('') + '…' : firstLine.join('');
-  return { ...work, title };
+  return { ...work, title, delivery: deliveryDetails(store, id) };
 }
 
 const eventLabels: Record<string, string> = {
@@ -38,7 +39,7 @@ function statusSince(store: TaskStore, work: Work) {
   const transitions = store.db.prepare(`SELECT e.time, e.action, e.details, g.kind FROM events e
     LEFT JOIN gates g ON e.object_type = 'gate' AND g.id = e.object_id
     WHERE e.work_id = ? AND e.action IN ('work-created', 'work-paused', 'work-resumed',
-      'work-completed', 'work-cancelled', 'gate-created', 'gate-decided') ORDER BY e.id`).all(work.id);
+      'work-completed', 'work-cancelled', 'gate-created', 'gate-decided', 'acceptance-withdrawn', 'delivery-status-changed', 'base-merge-result', 'base-push-result') ORDER BY e.id`).all(work.id);
   let status = 'aligning';
   let since = work.createdAt;
   let confirmed = false;
@@ -52,6 +53,11 @@ function statusSince(store: TaskStore, work: Work) {
       if (row.kind === 'review' && details.decision === 'return') review = false;
       if (status !== 'paused') next = confirmed ? review ? 'awaiting-review' : 'executing' : 'aligning';
     }
+    if (row.action === 'gate-decided' && row.kind === 'review' && details.decision === 'accept') next = 'accepted';
+    if (row.action === 'acceptance-withdrawn') next = 'awaiting-review';
+    if (row.action === 'delivery-status-changed') next = details.status;
+    if (row.action === 'base-merge-result') next = ['merged', 'already-contained'].includes(details.status) ? 'merged' : 'accepted';
+    if (row.action === 'base-push-result') next = details.status === 'pushed' ? 'completed' : 'merged';
     if (row.action === 'work-paused') next = 'paused';
     if (row.action === 'work-resumed') next = confirmed ? review ? 'awaiting-review' : 'executing' : 'aligning';
     if (row.action === 'work-completed') next = 'completed';
