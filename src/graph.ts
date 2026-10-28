@@ -18,8 +18,8 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,
-  (SELECT json_object('inputTokens', COALESCE(SUM(json_extract(usage, '$.inputTokens')), 0),
-    'outputTokens', COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0)) FROM dispatches WHERE card_id = cards.id) AS usage`;
+  (SELECT json_object('inputTokens', CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.inputTokens')) THEN SUM(json_extract(usage, '$.inputTokens')) END,
+    'outputTokens', CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.outputTokens')) THEN SUM(json_extract(usage, '$.outputTokens')) END) FROM dispatches WHERE card_id = cards.id) AS usage`;
 
 function readCard(row: Record<string, unknown>): Card {
   return { ...row, needsVerification: Boolean(row.needsVerification), writeScopes: JSON.parse(String(row.writeScopes)),
@@ -70,7 +70,7 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
   const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false,
-    writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: 0, outputTokens: 0 } };
+    writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: null, outputTokens: null } };
   store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id, write_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null,
       JSON.stringify(card.writeScopes));

@@ -1,3 +1,4 @@
+import { totalTokens } from '../../shared/token-usage.js';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { elapsed, useClock } from '../../shared/clock.js';
@@ -19,7 +20,7 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
   const { path } = useRouter();
   const [expanded, setExpanded] = useState(false);
   const category = group(work);
-  const tokens = work.usage.inputTokens + work.usage.outputTokens;
+  const tokens = totalTokens(work.usage);
   const tone = category === 'attention' ? 'att' : category === 'ended' ? (work.status === 'completed' ? 'ok' : 'idle') : work.status === 'paused' ? 'idle' : 'run';
   const ring = work.status === 'cancelled' ? 'cut' : tone === 'run' && !work.totalCards ? 'run busy' : tone;
   const progress = tone === 'run' && work.totalCards ? { '--p': `${Math.round(work.completedCards / work.totalCards * 100)}%` } as CSSProperties : undefined;
@@ -32,7 +33,7 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
       <span className="f"><span className={`pill ${tone}`}>
         {tone === 'run' && <span className="spin" aria-hidden="true" />}{t(work.status)}
         <time aria-label={t(category === 'ended' ? 'duration' : 'elapsed')} dateTime={work.statusSince}> · {category === 'ended' ? elapsed(work.createdAt, Date.parse(work.statusSince)) : elapsed(work.statusSince, now)}</time>
-      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={`tokens: ${tokens}`}>◇ {formatTokens(tokens, language)}</span></span></span>
+      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={`tokens: ${tokens ?? '—'}`}>Token {formatTokens(tokens, language)}</span></span></span>
     </Link><button type="button" className="chev" aria-expanded={expanded} aria-label={t('showDetails')} onClick={() => setExpanded(!expanded)}>⌄</button></div>
     {expanded && <div className="more"><InboxDetails work={work} /></div>}
   </div>;

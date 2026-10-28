@@ -53,7 +53,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
       { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: config.content ?? '检查页面', needsVerification: config.purpose === 'verification' }), saveAs: 'card', check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose: config.purpose,
         content: config.dispatchContent?.(JSON.parse(ctx.input)), needsBrowser: config.needsBrowser ?? false }), check: ok },
-      { type: 'end', reason: 'completed', finalAnswer: 'created' },
+      { type: 'end', reason: 'completed', finalAnswer: 'created', usage: { inputTokens: 0, outputTokens: 0 } },
     ], ...(config.after ? [config.after] : [])]),
   } satisfies Parameters<typeof startHelmd>[0];
   const daemon = await startHelmd(options);

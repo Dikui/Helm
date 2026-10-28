@@ -32,6 +32,7 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
   assert.deepEqual(dispatch.usage, { inputTokens: 120, outputTokens: 9 });
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
   assert.deepEqual(card.usage, { inputTokens: 120, outputTokens: 9 });
+  await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
   assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 120, outputTokens: 9 });
   if (purpose === 'execution') {
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');

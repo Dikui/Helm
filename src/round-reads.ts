@@ -39,7 +39,7 @@ export function listRounds(store: TaskStore, workId: string, includeCurrentSteps
   const rounds = rows.map(({ eventIds: _eventIds, outputPath: _outputPath, agentSnapshot, usage, ...round }, index) => ({
     ...round, number: index + 1,
     agentId: agentSnapshot ? JSON.parse(String(agentSnapshot)).id as string : null,
-    usage: usage ? JSON.parse(String(usage)) : { inputTokens: 0, outputTokens: 0 },
+    usage: usage ? JSON.parse(String(usage)) : { inputTokens: null, outputTokens: null },
   }));
   // Coordinator tool responses become output too. Returning that output to the
   // same coordinator would recursively embed earlier list-rounds responses.

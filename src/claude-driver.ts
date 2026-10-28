@@ -25,6 +25,7 @@ async function localClaude(env: Record<string, string>) {
 }
 
 function tokenUsage(message: SDKResultMessage): TokenUsage {
+  if (!message.modelUsage || !Object.keys(message.modelUsage).length) return { inputTokens: null, outputTokens: null };
   return Object.values(message.modelUsage).reduce((total, model) => ({
     inputTokens: total.inputTokens + model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens,
     outputTokens: total.outputTokens + model.outputTokens,

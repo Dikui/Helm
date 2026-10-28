@@ -725,6 +725,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     if (purpose === 'verification') assert.equal(dispatch.endCommit, dispatch.startCommit);
     else assert.notEqual(dispatch.endCommit, dispatch.startCommit);
     assert.deepEqual(card.usage, dispatch.usage);
+    await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
     assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, dispatch.usage);
   });
 });
@@ -754,4 +755,9 @@ test('Claude TodoWrite 归一完整计划、更新和清空，调度者可使用
   }) }), await fixture(t, 'coordinator'));
   assert.deepEqual(events.filter(event => event.type === 'plan').map(event => event.entries), [todos.map(({ content, status }) => ({ content, status })), []]);
   assert.ok(events.every((event, i) => event.step === i + 1));
+});
+
+test('Claude 未报告模型用量时保留未知，不把空 modelUsage 当成零', async t => {
+  const { end } = await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result({ modelUsage: {} })]) }), await fixture(t));
+  assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: null, outputTokens: null });
 });

@@ -129,3 +129,12 @@
 @media (max-width: 1100px) { .cg-view { grid-template-columns: minmax(0, 1fr); overflow: auto; } .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; } .cg-main { min-height: 440px; } }
 
 .cg-canvas-wrap { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+.cg-coordinator-node { align-self: center; display: grid; gap: 6px; margin: 16px; padding: 10px 14px; max-width: calc(100% - 32px); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); text-align: left; }
+.cg-coordinator-node:hover, .cg-coordinator-node.selected { border-color: var(--running); }
+.cg-token-summary { display: grid; gap: 6px; font-size: var(--text-sm); }
+.cg-token-summary p { margin: 0; }
+.cg-token-table { min-width: 0; overflow-x: auto; }
+.cg-token-table table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.cg-token-table th, .cg-token-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.cg-token-table th:first-child { text-align: left; font-weight: 500; }
+.cg-token-table thead { color: var(--muted); }

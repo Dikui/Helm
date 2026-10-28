@@ -341,3 +341,17 @@ test('Codex turn/plan/updated 归一 inProgress、替换和清空，忽略其他
   ], []]);
   assert.ok(events.every((event, i) => event.step === i + 1));
 });
+
+test('Codex 没有用量通知时保留未知，明确零用量时保留零', async t => {
+  for (const [notifications, usage] of [
+    [[completed()], { inputTokens: null, outputTokens: null }],
+    [[notification('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 0, outputTokens: 0 } } }), completed()], { inputTokens: 0, outputTokens: 0 }],
+  ] as const) {
+    const ctx = await fixture(t, [...notifications]);
+    const session = await ctx.driver.start(ctx.options);
+    t.after(() => session.cancel());
+    await session.send('用量');
+    const end = (await collect(session.events)).at(-1);
+    assert.deepEqual(end?.type === 'end' && end.usage, usage);
+  }
+});

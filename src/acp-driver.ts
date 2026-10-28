@@ -6,7 +6,7 @@ import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessio
 import { z } from 'zod';
 import { acpAgents, configValues } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, ModelContext } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, ModelContext, TokenUsage } from './driver.js';
 import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError } from './store.js';
@@ -207,7 +207,7 @@ export class AcpDriver implements Driver {
     let sent = false;
     let finished = false;
     let settling = false;
-    let previousUsage = { inputTokens: 0, outputTokens: 0 };
+    let previousUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
     let cancelled = false;
     let cancellation: Promise<void> | undefined;
     let cancelTimer: NodeJS.Timeout | undefined;
@@ -277,8 +277,8 @@ export class AcpDriver implements Driver {
         finally { clearTimeout(flushTimer); }
         try {
           const total = await profile.sessionUsage(env, id);
-          event.usage = { inputTokens: Math.max(0, total.inputTokens - previousUsage.inputTokens),
-            outputTokens: Math.max(0, total.outputTokens - previousUsage.outputTokens) };
+          event.usage = { inputTokens: total.inputTokens === null || previousUsage.inputTokens === null ? null : Math.max(0, total.inputTokens - previousUsage.inputTokens),
+            outputTokens: total.outputTokens === null || previousUsage.outputTokens === null ? null : Math.max(0, total.outputTokens - previousUsage.outputTokens) };
         } catch (error) { output({ method: 'helm/usage', error: `${profile.name} 用量读取失败：${String(error)}` }); }
       }
       finish(event);
@@ -291,7 +291,7 @@ export class AcpDriver implements Driver {
       if (finished || settling || cancelled) return;
       cancelled = true;
       cancellation = ended.then(() => closeAgent());
-      const aborted = () => { void settle({ type: 'end', reason: 'aborted', usage: { inputTokens: 0, outputTokens: 0 } }); };
+      const aborted = () => { void settle({ type: 'end', reason: 'aborted', usage: { inputTokens: null, outputTokens: null } }); };
       // Give a cooperative agent a bounded chance to persist the turn and its
       // usage. Process/cwd cleanup is still performed by the execution layer.
       cancelTimer = setTimeout(aborted, 1000);
@@ -334,7 +334,7 @@ export class AcpDriver implements Driver {
             output({ method: 'session/prompt', error: failure });
             const quota = (error instanceof RequestError && profile.quotaErrors.codes.includes(error.code)) || profile.quotaErrors.pattern.test(failure);
             await settle({ type: 'end', reason: cancelled ? 'aborted' : profile.contextOverflowErrors?.test(failure) ? 'context-overflow' : quota ? 'quota-exhausted' : 'error',
-              ...(!cancelled ? { failure } : {}), usage: { inputTokens: 0, outputTokens: 0 } });
+              ...(!cancelled ? { failure } : {}), usage: { inputTokens: null, outputTokens: null } });
           });
         },
         events: (async function* () {

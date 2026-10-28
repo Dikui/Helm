@@ -200,8 +200,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   return store.transaction(() => {
     store.db.prepare(`INSERT INTO dispatches
       (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, resume_session_id, session_id, created_at, output_path,
-        needs_browser, card_content_snapshot, work_description_id, work_description_version, start_commit)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        needs_browser, card_content_snapshot, work_description_id, work_description_version, start_commit, usage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, '{"inputTokens":null,"outputTokens":null}')`)
       .run(id, work.id, card.id, params.key, purpose, agent.id, JSON.stringify(agent), content,
         params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath,
         params.needsBrowser ? 1 : 0, cardContentSnapshot, description?.id ?? null, description?.version ?? null, startCommit);

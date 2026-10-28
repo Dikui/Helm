@@ -33,6 +33,7 @@ export async function deepseekUsage(env: Record<string, string>, sessionId: stri
     const [first, ...lines] = text.split('\n');
     const header = JSON.parse(first!);
     if (header.type !== 'session' || header.version !== 4 || header.id !== sessionId) throw new Error('DeepSeek usage log has an unexpected session header');
+    let reported = false;
     for (const line of lines) {
       if (!line.trim()) continue;
       const row = JSON.parse(line);
@@ -42,10 +43,11 @@ export async function deepseekUsage(env: Record<string, string>, sessionId: stri
       const value = row.data?.usage ?? row.data?.stream?.findLast((entry: any) => entry.type === 'chunk' && entry.chunk?.type === 'usage')?.chunk.usage;
       if (value === undefined) continue;
       const usage = usageSchema.parse(value);
+      reported = true;
       total.inputTokens += usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
       total.outputTokens += usage.outputTokens;
     }
-    return total;
+    return reported || allowMissing ? total : { inputTokens: null, outputTokens: null };
   }
   if (allowMissing) return total;
   throw new Error(`DeepSeek session ${sessionId} has no session.v4.jsonl.zstd usage log`);

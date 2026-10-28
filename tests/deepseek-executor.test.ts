@@ -458,6 +458,7 @@ test('DeepSeek 反问后 end_turn 正常完成、结论未声明，token 汇总�
   assert.deepEqual(dispatch.usage, { inputTokens: 45, outputTokens: 6 });
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
   assert.deepEqual(card.usage, { inputTokens: 45, outputTokens: 6 });
+  await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
   assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 45, outputTokens: 6 });
 });
 
@@ -519,4 +520,12 @@ test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显�
     assert.throws(() => new AgentCatalog(agentDir, ['deepseek']).get('deepseek-coordinator'), /只支持执行者/);
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize', 'session/new', 'session/set_config_option', 'session/close'].includes(r.method)));
   } finally { await daemon.close(); }
+});
+
+test('DeepSeek 用量日志没有报告用量时保留未知', async t => {
+  const ctx = await acpFixture(t, { configOptions, sessionLog: logSample([]).toString('base64') }, true, 'deepseek');
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('用量');
+  const end = (await collect(session.events)).at(-1);
+  assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: null, outputTokens: null });
 });

@@ -150,10 +150,10 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     expect(await within(panel).findByText('87.2万 / 1.23万')).toBeTruthy();
     expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('87.2万 / 1.23万');
     const inboxTokens = await screen.findByTitle('tokens: 884653');
-    expect(inboxTokens.textContent).toBe('◇ 88.5万');
+    expect(inboxTokens.textContent).toBe('Token 88.5万');
     await clickReady(screen.getByRole('button', { name: 'EN' }));
     expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('872K / 12.3K');
-    expect(screen.getByTitle('tokens: 884653').textContent).toBe('◇ 885K');
+    expect(screen.getByTitle('tokens: 884653').textContent).toBe('Token 885K');
     await clickReady(screen.getByRole('button', { name: '中文' }));
     // Focus moves without activating a remote panel; Enter/Space activates the focused tab.
     const coordinatorTab = within(tabs).getByRole('tab', { name: '调度者' });

@@ -222,7 +222,7 @@ for (const stopReason of ['end_turn', 'max_tokens', 'max_turn_requests', 'refusa
   if (end.type === 'end') {
     assert.equal(end.reason, stopReason === 'end_turn' ? 'completed' : stopReason === 'cancelled' ? 'aborted' : 'error');
     assert.equal(end.finalAnswer, stopReason === 'end_turn' ? 'quota exceeded 只是回答文字' : undefined);
-    assert.deepEqual(end.usage, { inputTokens: 0, outputTokens: 0 });
+    assert.deepEqual(end.usage, { inputTokens: null, outputTokens: null });
   }
 });
 
@@ -502,5 +502,18 @@ test('ACP plan 更新归一完整条目、替换和清空，忽略非本会话�
     const events = await collect(session.events);
     assert.deepEqual(events.filter(event => event.type === 'plan').map(event => event.entries), [entries.map(({ content, status }) => ({ content, status })), []]);
     assert.ok(events.every((event, i) => event.step === i + 1));
+  }
+});
+
+test('Grok 按字段保留未知用量，明确零用量不丢失', async t => {
+  for (const [usage, expected] of [
+    [{ inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }],
+    [{ inputTokens: 12 }, { inputTokens: 12, outputTokens: null }],
+  ]) {
+    const ctx = await acpFixture(t, { response: { stopReason: 'end_turn', _meta: { usage } } });
+    const session = await ctx.driver.start(ctx.options);
+    await session.send('用量');
+    const end = (await collect(session.events)).at(-1);
+    assert.deepEqual(end?.type === 'end' && end.usage, expected);
   }
 });
