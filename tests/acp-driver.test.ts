@@ -485,13 +485,6 @@ test('Grok 从 initialize 公布的模型状态列出模型和各自的推理强
   assert.deepEqual((await ctx.requests()).find(r => r.method === 'fixture/spawn').args, ['agent', 'stdio']);
 });
 
-test('DeepSeek 按 Helm 支持的路由列出模型，不启动 CLI', async t => {
-  const ctx = await acpFixture(t, {}, true, 'deepseek');
-  assert.deepEqual((await ctx.driver.listModels()).map(model => [model.id, model.efforts]),
-    ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'].map(id => [id, ['low', 'high', 'max']]));
-  assert.equal((await ctx.requests()).length, 0);
-});
-
 test('ACP plan 更新归一完整条目、替换和清空，忽略非本会话计划', async t => {
   const entries = [{ content: '读取', priority: 'high', status: 'completed' }, { content: '执行', priority: 'medium', status: 'in_progress' }, { content: '检查', priority: 'low', status: 'pending' }];
   for (const kind of ['grok', 'deepseek'] as const) {

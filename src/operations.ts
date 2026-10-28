@@ -366,8 +366,10 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'list-agent-models', description: '向驱动的 CLI 询问可选模型及各模型支持的推理强度（CLI 原生取值）；id 为 null 表示 CLI 默认模型', callers: ['user'], keyed: false, mutates: false,
-    schema: z.object({ driver: z.string().min(1) }).strict(),
-    execute: ({ userOperations }, { driver }) => userOperations.listModels(driver),
+    schema: z.object({ driver: z.string().min(1), agent: z.object({
+      id: saveAgentSchema.shape.id, home: saveAgentSchema.shape.config.shape.home,
+    }).strict().optional() }).strict(),
+    execute: ({ userOperations }, { driver, agent }) => userOperations.listModels(driver, agent),
   }),
   operation({
     name: 'check-environment', description: '检查各驱动 CLI 和浏览器检查用的 Chromium 是否已安装，返回版本、安装命令和登录命令', callers: ['user'], keyed: false, mutates: false,

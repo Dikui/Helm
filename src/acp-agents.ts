@@ -1,4 +1,4 @@
-import type { InitializeResponse, PromptResponse } from '@agentclientprotocol/sdk';
+import type { InitializeResponse, PromptResponse, SessionConfigOption } from '@agentclientprotocol/sdk';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -20,9 +20,8 @@ interface AcpAgentProfile {
   permissionAllowed?(input: unknown): boolean;
   unavailable(agent: AgentConfig): string | undefined;
   initializationUnavailable(agent: AgentConfig, response: InitializeResponse): string | undefined;
-  sessionSettings(agent: AgentConfig): { id: string; value: string; apply: boolean; matches?: (value: string) => boolean }[];
-  // Models from a fixed table, or read from the initialize response.
-  models: ModelOption[] | ((response: InitializeResponse) => ModelOption[]);
+  sessionSettings(agent: AgentConfig, options: SessionConfigOption[] | null | undefined): { id: string; value: string; apply: boolean; optional?: boolean }[];
+  models: ((response: InitializeResponse) => ModelOption[]) | { session(options: SessionConfigOption[] | null | undefined): ModelOption[] };
   usage(response: PromptResponse): TokenUsage;
   sessionUsage?(env: Record<string, string>, sessionId: string, allowMissing?: boolean): Promise<TokenUsage>;
   quotaErrors: { codes: number[]; pattern: RegExp };
@@ -35,10 +34,17 @@ interface AcpAgentProfile {
 const modelState = z.object({ availableModels: z.array(z.object({ modelId: z.string(), name: z.string().optional(),
   _meta: z.object({ reasoningEfforts: z.array(z.object({ value: z.string() })) }).optional(),
 })) });
-const deepseekEfforts = ['low', 'high', 'max'];
-const deepseekRoutes: Record<string, string> = {
-  'deepseek-flash': 'deepseek-account', 'deepseek-v4-pro': 'deepseek-account', 'deepseek-v4-flash': 'deepseek-official',
-};
+export function configValues(options: SessionConfigOption[] | null | undefined, id: string) {
+  const option = options?.find(option => option.id === id);
+  return option?.type === 'select' ? option.options.flatMap(value => 'group' in value ? value.options : [value]) : [];
+}
+
+function deepseekRoute(value: string): [string, string] | undefined {
+  try {
+    const route = z.tuple([z.string().min(1), z.string().min(1)]).safeParse(JSON.parse(value));
+    if (route.success) return route.data;
+  } catch { /* Legacy model ids do not contain a provider. */ }
+}
 
 export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   deepseek: {
@@ -69,22 +75,30 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     },
     unavailable(agent) {
       if (agent.role !== 'executor') return 'DeepSeek 本阶段只支持执行者，不支持调度者。';
-      if (!agent.model || !Object.hasOwn(deepseekRoutes, agent.model)) return `DeepSeek 不支持模型 id ${agent.model ?? '未指定'}；请指定 deepseek-flash、deepseek-v4-pro 或 deepseek-v4-flash。`;
-      if (!agent.reasoningEffort || !deepseekEfforts.includes(agent.reasoningEffort)) return `DeepSeek 不支持推理强度 ${agent.reasoningEffort ?? '未指定'}；请选 low、high 或 max。`;
-      if ((agent.home === 'dedicated') !== (deepseekRoutes[agent.model] === 'deepseek-official')) return 'DeepSeek 账号模型须用 home: shared；API 模型 deepseek-v4-flash 须用 home: agent 专用主目录。';
+      if (!agent.model) return 'DeepSeek Agent 必须指定模型 id 与路由，请在设置页选择 dsh 公布的模型。';
       if (agent.fast) return 'DeepSeek 不支持 Agent fast 档，请设为 false。';
     },
     initializationUnavailable() { return undefined; },
-    models: Object.keys(deepseekRoutes).map(id => ({ id, label: id, efforts: deepseekEfforts, defaultEffort: null })),
-    sessionSettings: agent => [
-      { id: 'model', value: agent.model!, apply: true, matches(value) {
-        try {
-          const route: unknown = JSON.parse(value);
-          return Array.isArray(route) && route.length === 2 && route[0] === deepseekRoutes[agent.model!] && route[1] === agent.model;
-        } catch { return false; }
-      } },
-      { id: 'reasoning_effort', value: agent.reasoningEffort!, apply: true },
-    ],
+    models: { session(options) {
+      return configValues(options, 'model').flatMap(option => {
+        const route = deepseekRoute(option.value);
+        return route ? [{ id: option.value, label: `${option.name} · ${route[0]} / ${route[1]}`,
+          efforts: [], defaultEffort: null }] : [];
+      });
+    } },
+    sessionSettings(agent, options) {
+      const route = deepseekRoute(agent.model!);
+      const matches = configValues(options, 'model').filter(option => {
+        const offered = deepseekRoute(option.value);
+        return offered && (route ? offered[0] === route[0] && offered[1] === route[1] : offered[1] === agent.model);
+      });
+      if (!matches.length) throw new Error(`DeepSeek 会话配置 model 没有公布取值 ${agent.model}；请在设置页重新选择模型与路由。`);
+      if (matches.length > 1) throw new Error(`DeepSeek 旧模型 id ${agent.model} 对应多个路由；请在设置页重新选择完整模型与路由后保存。`);
+      return [
+        { id: 'model', value: matches[0]!.value, apply: true },
+        { id: 'reasoning_effort', value: agent.reasoningEffort ?? '', apply: true, optional: agent.reasoningEffort === null },
+      ];
+    },
     usage: () => ({ inputTokens: 0, outputTokens: 0 }),
     sessionUsage: deepseekUsage,
     quotaErrors: { codes: [], pattern: /\b(?:ACCOUNT_QUOTA|QUOTA|insufficient[ _-](?:quota|balance|credits?)|(?:quota|usage[ _-]limit)[ _-](?:exceeded|exhausted|reached)|(?:balance|credits?)[ _-](?:exhausted|depleted))\b/i },

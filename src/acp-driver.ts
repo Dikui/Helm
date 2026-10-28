@@ -1,12 +1,12 @@
 import { normalizePlan } from './plans.js';
-import { mkdir, realpath, stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
-import { acpAgents } from './acp-agents.js';
+import { acpAgents, configValues } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, ModelContext } from './driver.js';
 import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError } from './store.js';
@@ -58,12 +58,12 @@ export class AcpDriver implements Driver {
 
   private async configureSession(acp: AcpClient, agent: AgentConfig, sessionId: string,
     configOptions: SessionConfigOption[] | null | undefined, output: (message: unknown) => void) {
-    const settings = this.profile.sessionSettings(agent);
+    const settings = this.profile.sessionSettings(agent, configOptions);
     const expected = new Map(settings.map(setting => [setting.id, setting.value]));
     for (const setting of settings.filter(setting => setting.apply)) {
-      const option = configOptions?.find(option => option.id === setting.id);
-      const values = option?.type === 'select' ? option.options.flatMap(value => 'group' in value ? value.options : [value]) : [];
-      const selected = values.find(value => setting.matches ? setting.matches(value.value) : value.value === setting.value);
+      const values = configValues(configOptions, setting.id);
+      if (setting.optional && !values.length) { expected.delete(setting.id); continue; }
+      const selected = values.find(value => value.value === setting.value);
       if (!selected) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 没有公布取值 ${setting.value}，不能使用 Agent 指定的设置。`);
       expected.set(setting.id, selected.value);
       const response = await acp.connection.agent.request('session/set_config_option', { sessionId, configId: setting.id, value: selected.value });
@@ -71,54 +71,113 @@ export class AcpDriver implements Driver {
       configOptions = response.configOptions;
     }
     // A model change can reset reasoning effort; verify the final full state.
-    for (const setting of settings) {
+    for (const setting of settings.filter(setting => expected.has(setting.id))) {
       const current = configOptions?.find(option => option.id === setting.id)?.currentValue;
       if (current !== expected.get(setting.id)) throw new Error(`${this.profile.name} 会话配置 ${setting.id} 与 Agent 不一致：期望 ${expected.get(setting.id)}，实际 ${current ?? '未公布'}。`);
     }
   }
 
-  async listModels(): Promise<ModelOption[]> {
-    if (Array.isArray(this.profile.models)) return this.profile.models;
-    // Model and effort are left unset so the CLI starts with its defaults just to answer initialize.
+  async listModels(context?: ModelContext): Promise<ModelOption[]> {
+    // Start with CLI defaults; DeepSeek publishes full routes only after session/new.
     const probe: AgentConfig = { id: `${this.agent}-models`, role: 'executor', driver: this.agent, model: null, reasoningEffort: null,
-      fast: false, home: 'shared', description: '', prompt: '', rules: { role: '', runtime: '' }, directory: homedir(), skillsPath: null };
-    const { acp, close } = await this.launch(probe, { cwd: homedir() }, this.environment(agentEnvironment(probe), probe),
+      fast: false, home: 'shared', description: '', prompt: '', rules: { role: '', runtime: '' }, directory: homedir(), skillsPath: null, ...context };
+    const env = this.environment(agentEnvironment(probe), probe);
+    const home = await this.homeAvailability(probe, env);
+    if (home) throw new Error(home.reason);
+    const { acp, close } = await this.launch(probe, { cwd: homedir() }, env,
       { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
     const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 30_000);
     try {
       const response = await acp.connection.agent.request('initialize', { protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: 'helm', version: '0.1.0' }, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
-      return this.profile.models(response);
+      if (typeof this.profile.models === 'function') return this.profile.models(response);
+      const session = await acp.connection.agent.request('session/new', { cwd: homedir(), mcpServers: [] });
+      try {
+        const models = this.profile.models.session(session.configOptions);
+        for (const model of models) {
+          try {
+            const configured = await acp.connection.agent.request('session/set_config_option', {
+              sessionId: session.sessionId, configId: 'model', value: model.id!,
+            });
+            if (configured.configOptions.find(option => option.id === 'model')?.currentValue !== model.id) {
+              model.unavailableReason = `${this.profile.name} 会话未应用模型路由 ${model.id}。`;
+              continue;
+            }
+            model.efforts = configValues(configured.configOptions, 'reasoning_effort').map(option => option.value).filter(Boolean);
+          } catch (error) {
+            // A provider may list models without valid login. Keep its advertised
+            // routes visible without hiding usable providers; preflight retries it.
+            if (!(error instanceof RequestError)) throw error;
+            model.unavailableReason = error.message;
+          }
+        }
+        return models;
+      } finally { await acp.connection.agent.request('session/close', { sessionId: session.sessionId }); }
     } finally { clearTimeout(timer); await close(); }
   }
 
-  async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {
-    const reason = this.profile.unavailable(agent);
-    if (reason) return { available: false, reason };
-    const env = this.environment(agentEnvironment(agent), agent);
+  private async homeAvailability(agent: AgentConfig, env: Record<string, string>): Promise<AgentAvailability | undefined> {
     if (this.profile.homeVariable && agent.home === 'dedicated') {
       const directory = env[this.profile.homeVariable]!;
       try {
         if (!(await stat(directory)).isDirectory()) throw new Error('not a directory');
         const configured = await Promise.all((this.profile.homeConfigFiles ?? []).map(file => stat(join(directory, file)).then(info => info.isFile(), () => false)));
         if (!configured.some(Boolean)) throw new Error('missing CLI configuration');
-      }
-      catch {
+      } catch {
         const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
-        return { available: false, reason: `API Agent 需要专用主目录 ${directory}；请按 dsh 格式配置接口和 key（Helm 不读取凭据）。`,
+        return { available: false, reason: `Agent 需要专用主目录 ${directory}；请按 dsh 格式配置接口和 key（Helm 不读取凭据）。`,
           command: `mkdir -p ${quoted} && DSH_HOME=${quoted} dsh web` };
       }
     }
-    const { acp, close } = await this.launch(agent, { cwd: homedir() }, env,
-      { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
-    const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 10_000);
+  }
+
+  // Preflight and dispatch use the same activation and final-state checks.
+  private async activateSession(acp: AcpClient, agent: AgentConfig, request: NewSessionRequest,
+    resumeSessionId: string | undefined, output: (message: unknown) => void) {
+    if (this.profile.authentication) await acp.connection.agent.request('authenticate', { methodId: this.profile.authentication });
+    const method = resumeSessionId === undefined ? 'session/new' : 'session/resume';
+    const session = resumeSessionId === undefined
+      ? await acp.connection.agent.request('session/new', request)
+      : await acp.connection.agent.request('session/resume', { ...request, sessionId: resumeSessionId });
+    const id = resumeSessionId ?? ('sessionId' in session ? session.sessionId : undefined);
+    if (typeof id !== 'string' || !id) throw new Error('ACP agent did not return a session id');
+    output({ method, result: session });
     try {
+      await this.configureSession(acp, agent, id, session.configOptions, output);
+      return id;
+    } catch (error) {
+      // Close a session even when validation fails, before terminating its CLI.
+      await acp.connection.agent.request('session/close', { sessionId: id }).catch(() => {});
+      throw error;
+    }
+  }
+
+  async checkAvailability(agent: AgentConfig): Promise<AgentAvailability> {
+    const reason = this.profile.unavailable(agent);
+    if (reason) return { available: false, reason };
+    const env = this.environment(agentEnvironment(agent), agent);
+    const home = await this.homeAvailability(agent, env);
+    if (home) return home;
+    let close: (() => Promise<void>) | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const launched = await this.launch(agent, { cwd: homedir() }, env,
+        { update() {}, output() {}, permission: () => ({ outcome: { outcome: 'cancelled' } }) });
+      close = launched.close;
+      const { acp } = launched;
+      timer = setTimeout(() => { void close!(); }, this.config.timeoutMs ?? 10_000);
       await this.initialize(acp, agent);
+      if (this.agent === 'deepseek') {
+        const id = await this.activateSession(acp, agent, { cwd: homedir(), mcpServers: [] }, undefined, () => {});
+        await acp.connection.agent.request('session/close', { sessionId: id });
+      }
       return { available: true };
     } catch (error) {
-      return { available: false, reason: `${this.profile.name} 无法完成 ACP initialize 或缺少${this.profile.authentication ? ` ${this.profile.authentication} /` : ''} HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`,
-        command: `${this.profile.installCommand} && ${this.profile.loginCommand}` };
-    } finally { clearTimeout(timer); await close(); }
+      const message = error instanceof Error ? error.message : String(error);
+      const reason = this.agent === 'deepseek' ? message
+        : `${this.profile.name} 无法完成 ACP initialize 或缺少 ${this.profile.authentication} / HTTP MCP；请检查 CLI 安装和模型参数，运行 ${this.profile.loginCommand} 登录。${String(error)}`;
+      return { available: false, reason, command: `${this.profile.installCommand} && ${this.profile.loginCommand}` };
+    } finally { clearTimeout(timer); await close?.(); }
   }
 
   async start(options: SessionOptions): Promise<DriverSession> {
@@ -166,7 +225,8 @@ export class AcpDriver implements Driver {
       void close();
     };
     const env = this.environment(options.env, agent);
-    if (this.profile.homeVariable && agent.home === 'dedicated') await mkdir(env[this.profile.homeVariable]!, { recursive: true, mode: 0o700 });
+    const home = await this.homeAvailability(agent, env);
+    if (home) throw new Error(home.reason);
     const { acp, close: closeAgent } = await this.launch(agent, { ...options, cwd }, env, {
       notifications: profile.compactionNotification ? [profile.compactionNotification.method] : [],
       output(message) {
@@ -248,23 +308,8 @@ export class AcpDriver implements Driver {
         throw new Error('ACP agent does not support session/resume');
       }
       if (cancelled) throw new Error('ACP session cancelled during startup');
-      if (this.profile.authentication) await acp.connection.agent.request('authenticate', { methodId: this.profile.authentication });
-      const request: NewSessionRequest = { cwd, mcpServers };
-      let configOptions: SessionConfigOption[] | null | undefined;
-      if (options.resumeSessionId !== undefined) {
-        id = options.resumeSessionId;
-        const session = await acp.connection.agent.request('session/resume', { ...request, sessionId: id });
-        output({ method: 'session/resume', result: session });
-        configOptions = session.configOptions;
-      } else {
-        const session = await acp.connection.agent.request('session/new', request);
-        if (!session.sessionId) throw new Error('ACP agent did not return a session id');
-        id = session.sessionId;
-        output({ method: 'session/new', result: session });
-        configOptions = session.configOptions;
-      }
+      id = await this.activateSession(acp, agent, { cwd, mcpServers }, options.resumeSessionId, output);
       if (cancelled) throw new Error('ACP session cancelled during startup');
-      await this.configureSession(acp, agent, id, configOptions, output);
       if (profile.sessionUsage) previousUsage = await profile.sessionUsage(env, id, true);
       if (cancelled) throw new Error('ACP session cancelled during startup');
       clearTimeout(timer);

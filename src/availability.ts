@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
-import type { DriverRegistry, AgentAvailability } from './driver.js';
+import type { DriverRegistry, AgentAvailability, ModelContext } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
 import { playwrightCommand } from './browser.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
@@ -71,10 +71,10 @@ export async function checkEnvironment(drivers: DriverRegistry) {
 }
 
 // Asks the CLI itself, so the choices match what is installed; nothing is cached or stored.
-export async function listModels(drivers: DriverRegistry, name: string) {
+export async function listModels(drivers: DriverRegistry, name: string, agent?: ModelContext) {
   const driver = Object.hasOwn(drivers, name) ? drivers[name] : undefined;
   if (!driver?.listModels) throw new RuleError('NOT_FOUND', `驱动 ${name} 不能列出模型。`, 404);
-  try { return await driver.listModels(); }
+  try { return await driver.listModels(agent); }
   catch (error) {
     throw new RuleError('MODELS_UNAVAILABLE', `无法从 ${name} 读取模型列表，请到「环境」确认 CLI 已安装并登录：${error instanceof Error ? error.message : String(error)}`.slice(0, 600), 409);
   }

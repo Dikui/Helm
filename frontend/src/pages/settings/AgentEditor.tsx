@@ -109,7 +109,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
           {['claude-sdk', 'codex', 'grok', 'deepseek'].map(driver => <option key={driver}>{driver}</option>)}</select>{fieldError('driver')}</label>
       </div>
       <CliStatus key={value.config.driver} driver={value.config.driver} />
-      <ModelFields settings={value.config} fieldProps={fieldProps} fieldError={fieldError}
+      <ModelFields settings={value.config} agentId={value.id} fieldProps={fieldProps} fieldError={fieldError}
         change={next => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, ...next } })); }} />
       <label className="settings-fast" htmlFor="agent-fast"><span>{t('fastMode')}<small className="muted">{t('fastModeHint')}</small></span><input className="settings-toggle" {...fieldProps('fast')} type="checkbox" checked={value.config.fast} onChange={event => config('fast', event.target.checked)} />{fieldError('fast')}</label>
       <fieldset className="settings-billing" {...fieldProps('home')} tabIndex={-1}><legend>{t('billing')}</legend>

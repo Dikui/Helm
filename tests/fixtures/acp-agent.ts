@@ -30,6 +30,7 @@ let configOptions = script.configOptions ?? [
 const pending = new Map<string, (result: unknown) => void>();
 let sequence = 0;
 let servers: any[] = [];
+let prompted = false;
 let promptId: number | string | undefined;
 let sessionId = script.uniqueSession ? `session-${process.pid}` : 'session-scripted';
 const request = (method: string, params: object) => new Promise(resolve => {
@@ -45,6 +46,7 @@ async function handle(line: string) {
   const message = JSON.parse(line);
   appendFileSync(script.record, `${line}\n`);
   if (!message.method) { pending.get(message.id)?.(message.result ?? message.error); pending.delete(message.id); return; }
+  if (message.method === 'session/prompt') prompted = true;
   await writeChunks(script.stdoutBefore?.[message.method] ?? []);
   if (message.method === script.exitOn) process.exit(2);
   if (message.method === script.hangOn) return;
@@ -58,7 +60,7 @@ async function handle(line: string) {
     return;
   }
   // Persist only at close, as dsh's session/close drains and flushes the log.
-  if (message.method === 'session/close' && script.sessionLog) {
+  if (message.method === 'session/close' && prompted && script.sessionLog) {
     if (script.closeDelayMs) await new Promise(resolve => setTimeout(resolve, script.closeDelayMs));
     const root = join(process.env.DSH_HOME ?? join(process.env.HOME!, '.dsh'), 'sessions', '--fixture-project--', sessionId);
     mkdirSync(root, { recursive: true });
@@ -74,7 +76,12 @@ async function handle(line: string) {
   }
   if (message.method === 'session/set_config_option') {
     const { configId, value } = message.params;
-    configOptions = script.configuredOptions ?? configOptions.map((option: any) => option.id === configId ? { ...option, currentValue: value } : option);
+    if (configId === 'model' && script.rejectModels?.includes(value)) {
+      emit({ id: message.id, error: { code: -32603, message: 'provider unavailable' } });
+      return;
+    }
+    configOptions = (configId === 'model' ? script.modelConfigOptions?.[value] : undefined)
+      ?? script.configuredOptions ?? configOptions.map((option: any) => option.id === configId ? { ...option, currentValue: value } : option);
     result = { configOptions };
   }
   if (message.method === 'session/prompt') {
