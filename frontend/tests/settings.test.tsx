@@ -386,37 +386,6 @@ test('模型和推理强度从 CLI 报出的选项中选择，换模型时只保
   expect([saved.model, saved.reasoningEffort]).toEqual(['gpt-luna', 'medium']);
 });
 
-test('Agent 外部编辑入口保留直接编辑和草稿，等待时禁用并显示启动失败原文，可重试', async () => {
-  let release!: () => void;
-  const wait = new Promise<void>(resolve => { release = resolve; });
-  const calls: { command: string; args: string[] }[] = [];
-  let fail = true;
-  daemon = await uiFixture([], undefined, { promptEditor: { platform: 'darwin', async launch(command, args) {
-    calls.push({ command, args });
-    if (fail) { await wait; throw new Error('editor unavailable: 原始错误 ENOENT'); }
-  } } });
-  window.history.replaceState(null, '', '/settings/agents/claude-executor');
-  render(<App baseUrl={daemon.url} />);
-  const editor = await screen.findByRole('form', { name: 'Agent 详情' });
-  const prompt = within(editor).getByLabelText('附加提示词（可选）') as HTMLTextAreaElement;
-  fireEvent.change(prompt, { target: { value: '界面里未保存的提示词' } });
-  const open = within(editor).getByRole('button', { name: '在编辑器中打开' });
-  fireEvent.click(open);
-  expect((open as HTMLButtonElement).disabled).toBe(true);
-  release();
-  expect((await within(editor).findByRole('alert')).textContent).toContain('editor unavailable: 原始错误 ENOENT');
-  expect(prompt.value).toBe('界面里未保存的提示词');
-  expect((await agent('claude-executor')).prompt).not.toBe(prompt.value);
-  fail = false;
-  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(open);
-  await waitFor(() => expect(calls).toHaveLength(2));
-  expect(calls[1]).toEqual({ command: 'open', args: ['-t', join(daemon!.directory, 'agents', 'claude-executor', 'prompt.md')] });
-  expect(prompt.value).toBe('界面里未保存的提示词');
-  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(within(editor).getByRole('button', { name: 'Open in editor' })).toBeTruthy();
-});
-
 test('DeepSeek 按草稿主目录读取并保存完整路由，模型名称显示 provider，切换主目录后重新查询', async () => {
   daemon = await uiFixture();
   const route = '["deepseek-official","deepseek-flash"]';

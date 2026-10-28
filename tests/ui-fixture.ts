@@ -6,7 +6,7 @@ import { FakeDriver, type Driver, type FakeScript } from '../src/driver.js';
 import { copyAgents, startTestHelmd } from './helmd-fixture.js';
 
 // Shared HTTP / whole-app boundary. Every driver is fake, and HOME is disposable.
-export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, options: { registerProject?: boolean; agentDir?: string; executorScripts?: FakeScript[]; codexDriver?: Driver; promptEditor?: import('../src/prompt-editor.js').PromptEditor } = {}) {
+export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, options: { registerProject?: boolean; agentDir?: string; executorScripts?: FakeScript[]; codexDriver?: Driver } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-')));
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
@@ -22,7 +22,7 @@ export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, 
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
     const agentDir = options.agentDir ?? await copyAgents(directory);
     daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir,
-      promptEditor: options.promptEditor, driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []),
+      driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []),
       ...(options.codexDriver ? { codexDriver: options.codexDriver } : {}), ...(staticDir ? { staticDir } : {}) });
     const url = daemon.url;
     const call = async (name: string, params: object = {}) => {

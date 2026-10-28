@@ -31,9 +31,6 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const [error, setError] = useState<Error>();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(initialSaved);
-  const [opening, setOpening] = useState(false);
-  const openingRef = useRef(false);
-  const [openError, setOpenError] = useState<Error>();
   const [deleting, setDeleting] = useState(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const config = <K extends keyof AgentSettings>(key: K, next: AgentSettings[K]) => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, [key]: next } })); };
@@ -80,13 +77,6 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     } catch (failure) { setError(failure as Error); }
     finally { setPending(false); }
   }
-  async function openPrompt() {
-    if (creating || pending || openingRef.current) return;
-    openingRef.current = true; setOpening(true); setOpenError(undefined);
-    try { await api.call('open-agent-prompt', { agentId: source!.id }); }
-    catch (failure) { setOpenError(failure as Error); }
-    finally { openingRef.current = false; setOpening(false); }
-  }
   async function recheck() {
     if (creating || pending) return;
     setPending(true); setError(undefined);
@@ -130,7 +120,6 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       </fieldset>
       <label htmlFor="agent-description">{t('description')}<textarea className="resize-none" {...fieldProps('description')} rows={3} value={value.config.description} onChange={event => config('description', event.target.value)} />{fieldError('description')}</label>
       <label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="resize-none mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
-      {!creating && <div className="settings-prompt-external"><code>prompt.md</code> <button type="button" className="btn sm" disabled={pending || opening} aria-busy={opening} onClick={() => void openPrompt()}>{t('openAgentPrompt')}</button><p className="hint">{t('openAgentPromptHint')}</p>{openError && <ErrorNotice error={openError} />}</div>}
       <AgentLibrarySelection ownSkills={creating ? [] : source?.skills ?? []} settings={value.config} change={config} />
       {!creating && !!source?.warnings?.length && <div className="settings-box" role="status" aria-label={t('agentWarnings')}>
         <h3>{t('agentWarnings')}</h3>{source.warnings.map(warning => <p key={warning}>{warning}</p>)}

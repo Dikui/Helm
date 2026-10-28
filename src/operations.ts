@@ -121,11 +121,6 @@ export const operations: readonly Operation[] = [
     execute: ({ actor, userOperations }, params) => userOperations.withdrawMessage(actor, params),
   }),
   operation({
-    name: 'open-agent-prompt', description: '在本机默认文本编辑器中打开此 Agent 已保存的 prompt.md', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ agentId: saveAgentSchema.shape.id }).strict(),
-    execute: ({ userOperations }, { agentId }) => userOperations.openAgentPrompt(agentId),
-  }),
-  operation({
     name: 'interrupt-round', description: '打断当前调度轮次并重投事件和用户消息', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ actor, userOperations }, { workId }) => userOperations.interruptRound(actor, workId),

@@ -10,17 +10,14 @@ import { decideReview, withdrawAcceptance } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry, ModelContext } from './driver.js';
-import { openAgentPrompt, type PromptEditor } from './prompt-editor.js';
 import { mergeReviewedWork, pushReviewedWork, recheckReviewedWork, setDeliveryStatus } from './delivery.js';
 
 export class UserOperations {
   private projectDeliveries = new Map<string, Promise<unknown>>();
   private workDeliveries = new Map<string, { phase: 'merge' | 'push' | 'detect'; promise: Promise<unknown> }>();
-  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry, private promptEditor?: PromptEditor) {}
+  constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry) {}
 
   async settleDeliveries() { await Promise.allSettled([...this.workDeliveries.values()].map(item => item.promise)); }
-
-  openAgentPrompt(agentId: string) { return openAgentPrompt(this.store.agents, agentId, this.promptEditor); }
 
   // invoke() holds BEGIN IMMEDIATE through all eligibility checks and the write.
   withdrawMessage(actor: Actor, { workId, messageId }: { workId: string; messageId: string }) {

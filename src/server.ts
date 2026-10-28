@@ -11,7 +11,6 @@ import { AcpDriver } from './acp-driver.js';
 import { RoundScheduler } from './rounds.js';
 import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
-import type { PromptEditor } from './prompt-editor.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
 import { AgentCatalog, migrateLegacyAgents } from './agents.js';
@@ -39,7 +38,7 @@ async function readBody(request: IncomingMessage, limit: number): Promise<unknow
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand; promptEditor?: PromptEditor } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
   const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
   const dataDir = options.dataDir ?? join(homedir(), '.helm');
   const library = new SkillLibrary(join(dataDir, 'library', 'skills'));
@@ -131,7 +130,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
   const url = `http://127.0.0.1:${address.port}`;
   scheduler = new RoundScheduler(store, drivers, `${url}/mcp`);
   executions = new ExecutionRunner(store, drivers, `${url}/mcp`, options.browserCommand);
-  userOperations = new UserOperations(store, executions, scheduler, drivers, options.promptEditor);
+  userOperations = new UserOperations(store, executions, scheduler, drivers);
   ready = true;
   let closing: Promise<void> | undefined;
   return {
