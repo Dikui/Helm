@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { ensureWorkCopy } from './alignment.js';
+import { deliveryDetails } from './delivery.js';
 import { cardGraph } from './graph.js';
 import { agentEnvironment } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
@@ -11,6 +12,7 @@ import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 
 export interface StartupBrief {
   work: Work;
+  delivery: ReturnType<typeof deliveryDetails>;
   workDescription: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
   activeWorkDescription: WorkDescription | null;
   cardGraph: ReturnType<typeof cardGraph>;
@@ -34,6 +36,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
     workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
     work,
+    delivery: deliveryDetails(store, workId),
     cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
     coordinatorNotes: String(store.notes(workId).body),
@@ -63,7 +66,7 @@ export class RoundScheduler {
   constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['conflict-resolution-requested', 'gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
       if (wakes.length) this.schedule();
     });
     this.schedule();
@@ -85,7 +88,7 @@ export class RoundScheduler {
         WHERE q.processed_by IS NULL AND (w.status IN ('aligning', 'executing', 'awaiting-review')
           OR (w.status = 'paused' AND e.action = 'message-sent' AND e.actor_type = 'user'
             AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
-        AND NOT EXISTS (SELECT 1 FROM gates g WHERE g.work_id = w.id AND g.kind = 'review' AND g.decision = 'accept')
+        AND (w.status IN ('executing', 'paused') OR NOT EXISTS (SELECT 1 FROM gates g WHERE g.work_id = w.id AND g.kind = 'review' AND g.decision = 'accept'))
         AND NOT EXISTS (SELECT 1 FROM coordinator_rounds r WHERE r.work_id = q.work_id AND r.status = 'running')`).all();
       for (const work of works) {
         const workId = String(work.id);

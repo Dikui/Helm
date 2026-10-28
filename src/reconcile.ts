@@ -44,7 +44,7 @@ export async function reconcileStartup(store: TaskStore) {
     // Also settle a queued dispatch whose revocation was interrupted before shutdown.
     const dispatches = store.db.prepare(`SELECT id, status FROM dispatches WHERE work_id = ? AND
       (status = 'running' OR (status = 'queued' AND (abort_reason IS NOT NULL OR ? IN ('completed', 'cancelled')
-        OR EXISTS (SELECT 1 FROM gates WHERE work_id = ? AND kind = 'review' AND decision = 'accept'))))`).all(work.id, work.status, work.id);
+        OR (? NOT IN ('executing', 'paused') AND EXISTS (SELECT 1 FROM gates WHERE work_id = ? AND kind = 'review' AND decision = 'accept')))))`).all(work.id, work.status, work.status, work.id);
     for (const row of dispatches) {
       const dispatch = getDispatch(store, work.id, String(row.id));
       const endCommit = dispatch.status === 'running' ? finishDispatchCopy(store, dispatch, 'aborted', restartReason) : null;

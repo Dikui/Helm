@@ -20,6 +20,7 @@ import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
 import { listWorkFiles, readWorkFile } from './work-files.js';
+import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -515,6 +516,26 @@ export const operations: readonly Operation[] = [
     name: 'get-work-descriptions', description: '读取工作说明的全部版本', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
   }),
+  operation({
+    name: 'recheck-work-merge', description: '重新检测本地合并；仅在基准已包含工作分支时记录已合入', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.deliverWork(actor, workId, 'detect'),
+  }),
+  operation({
+    name: 'resolve-merge-conflict', description: '选择由调度者派卡片解决合入冲突，或在本地自行处理', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), resolution: z.enum(['coordinator', 'manual']) }).strict(),
+    execute: ({ store, actor }, { workId, resolution }) => resolveMergeConflict(store, actor, workId, resolution),
+  }),
+  operation({
+    name: 'finish-conflict-resolution', description: '冲突卡片验收完成后回到待合入，保留接受决定，不重新审核', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, { workId }) => finishConflictResolution(store, actor, workId),
+  }),
+  operation({
+    name: 'get-conflict-resolution', description: '查看冲突解决的固定提交间改动及验收派单', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId }) => conflictResolutionChanges(store, workId),
+  }),
   ...(['merge', 'push'] as const).map(phase => operation({
     name: `${phase}-work`, description: phase === 'merge' ? '把工作分支合入基准分支，不推送' : '推送已合入的基准分支', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
@@ -637,7 +658,12 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
       const acceptedReview = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
       const repeatReview = name === 'decide-gate' && parsed.data.gateId === acceptedReview?.id;
       const managesOutputs = name === 'export-outputs' || name === 'delete-outputs' || name === 'delete-work';
-      if ((['completed', 'cancelled'].includes(work.status) || acceptedReview) && !repeatReview && !['withdraw-acceptance', 'merge-work', 'push-work'].includes(name) && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
+      const resolving = Boolean(acceptedReview) && resolvingConflict(store, work.id) && ['executing', 'paused'].includes(work.status);
+      if (resolving && ['request-review', 'draft-work-description'].includes(name)) throw new RuleError('CONFLICT_RESOLUTION_ACTIVE', '冲突解决后直接回到待合入，不重新审核或修改工作说明。');
+      if (resolving && ((name === 'create-card' && parsed.data.needsVerification !== true) || (name === 'update-card' && parsed.data.needsVerification === false))) {
+        throw new RuleError('VERIFICATION_REQUIRED', '冲突处理卡片必须安排验收。');
+      }
+      if ((['completed', 'cancelled'].includes(work.status) || (acceptedReview && !resolving)) && !repeatReview && !['withdraw-acceptance', 'merge-work', 'push-work', 'resolve-merge-conflict', 'recheck-work-merge', 'finish-conflict-resolution'].includes(name) && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
         throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       }
     }
