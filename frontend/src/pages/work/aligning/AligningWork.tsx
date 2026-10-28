@@ -6,19 +6,15 @@ import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview } from '../../../shared/files.js';
-import type { Project } from '../../new-work/types.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import './aligning.css';
 
-// The work branch only exists after the brief is confirmed.
-const noFiles: ReadonlySet<string> = new Set();
-
-export function AligningWork({ workId, projectId, workBranch }: { workId: string; projectId: string; workBranch?: string | null }) {
+export function AligningWork({ workId, workBranch }: { workId: string; projectId: string; workBranch?: string | null }) {
   const { api } = useData();
   const { t, language } = useI18n();
-  const projects = useResource<Project[]>('list-projects');
-  const project = projects.data?.find(item => item.id === projectId);
+  const workFiles = useResource<string[]>('list-work-files', { workId });
+  const linkedFiles = new Set(workFiles.data ?? []);
   const conversation = useResource<ConversationItem[]>('get-conversation', { workId });
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
   const [version, setVersion] = useState<number>();
@@ -53,6 +49,7 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
   const chat = useRef<HTMLElement>(null);
   const composer = useRef<HTMLFormElement>(null);
   const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
+  const copyNotice = workBranch && <p className="warn"><span>!</span><span>{t('alignmentCopyReady')}</span></p>;
   return <div className="aligning-work">
     <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
       <div className="aligning-thread">
@@ -60,7 +57,7 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
-          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><div className="aligning-who"><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b>{item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}<time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></div><Markdown text={item.body} workId={workId} files={noFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
+          ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><div className="aligning-who"><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b>{item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}<time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></div><Markdown text={item.body} workId={workId} files={linkedFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
           : item.kind === 'work-confirmation'
             ? item.status === 'pending' && <div className="aligning-gate gate-actions" key={item.id} role="group" aria-label={t('alignmentConfirmBrief')} onKeyDown={event => {
               if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
@@ -69,7 +66,7 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
             }}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
               <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
-              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span></p>}
+              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t('alignmentCopyRefresh')}</p>}
             </div>
             : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
@@ -95,6 +92,7 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
         {descriptions.error && <ErrorNotice error={descriptions.error} retry={descriptions.reload} />}
         {!descriptions.data && !descriptions.error && <p role="status">{t('loading')}</p>}
         {descriptions.data && !shown && <p>{t('noDescription')}</p>}
+        {!shown && copyNotice}
         {shown && <>
           {(['requirements', 'boundary', 'criteria'] as const).map(field => {
             const oldLines = previous?.[field].split(/\r?\n/) ?? [];
@@ -102,9 +100,7 @@ export function AligningWork({ workId, projectId, workBranch }: { workId: string
               <li key={index}>{previous && !oldLines.includes(line) ? <mark>{line}</mark> : line}</li>)}</ul></section>;
           })}
           <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>
-          {projects.error && <ErrorNotice error={projects.error} retry={projects.reload} />}
-          {project?.gitStatusReason && <p role="status">{project.gitStatusReason}</p>}
-          {!!project?.uncommittedChanges && <p className="warn"><span>!</span><span>{project.uncommittedChanges} {t('newWorkUncommittedHint')}</span></p>}
+          {copyNotice}
           <p className="muted">{t('alignmentNewEntriesHint')}</p>
           {latest?.id !== shown.id && <p>{t('alignmentHistoricalDraft')}</p>}
         </>}

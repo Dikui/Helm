@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,9 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
   for (let version = 1; version <= 10; version++) await t.test(`version ${version}`, async t => {
     const dataDir = await mkdtemp(join(tmpdir(), 'helm-migrations-'));
     t.after(() => rm(dataDir, { recursive: true, force: true }));
+    const repo = join(dataDir, 'project');
+    execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '--allow-empty', '-m', 'baseline'], { stdio: 'ignore' });
     const db = new DatabaseSync(join(dataDir, 'helm.db'));
     try {
       db.exec('PRAGMA foreign_keys = ON');
@@ -31,6 +35,7 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
         INSERT INTO messages (id, work_id, sender, body, key, created_at, sequence)
           VALUES ('message', 'work', 'user', '升级前的消息', 'old', '2026-01-01T00:00:00.000Z', 1);
       `);
+      db.prepare("UPDATE projects SET path = ? WHERE id = 'project'").run(repo);
     } finally { db.close(); }
     let daemon = await startHelmd({ dataDir, port: 0, driver: new FakeDriver(), executorDriver: new FakeDriver() });
     t.after(() => daemon.close());

@@ -1,4 +1,17 @@
 import { execFileSync } from 'node:child_process';
+import { RuleError } from './store.js';
+
+export function projectBranches(path: string) {
+  const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
+  }).trim();
+  try {
+    const branches = git('for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/').split('\n').filter(Boolean);
+    let currentBranch: string | null = null;
+    try { currentBranch = git('symbolic-ref', 'HEAD').replace(/^refs\/heads\//, ''); } catch { /* Detached HEAD. */ }
+    return { currentBranch, branches };
+  } catch { throw new RuleError('PROJECT_BRANCHES_UNAVAILABLE', '无法读取项目分支，请检查项目路径后重试。'); }
+}
 
 // Keep live git metadata out of persisted project settings and write responses.
 export function projectGitStatus(project: Record<string, unknown>) {

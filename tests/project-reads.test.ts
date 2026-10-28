@@ -28,6 +28,24 @@ test('HTTP 项目读取包含分支、HEAD 和改动数，git 不可读时保留
   assert.match(unavailable.gitStatusReason, /git/);
 });
 
+test('HTTP 可用基准只列本地分支并标识当前检出分支，空项目和读取失败可区分', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('branch', 'release/1.0');
+  git('tag', 'release-tag');
+  git('update-ref', 'refs/remotes/origin/remote-only', 'HEAD');
+  const read = () => daemon.call('list-project-branches', { projectId: daemon.project.id });
+  assert.deepEqual((await read()).result, { currentBranch: 'main', branches: ['main', 'release/1.0'] });
+  git('checkout', '--detach');
+  assert.equal((await read()).result.currentBranch, null);
+  git('branch', '-D', 'main', 'release/1.0');
+  assert.deepEqual((await read()).result.branches, []);
+  await rm(daemon.repo, { recursive: true, force: true });
+  assert.equal((await read()).error.code, 'PROJECT_BRANCHES_UNAVAILABLE');
+  assert.equal((await daemon.call('list-project-branches', { projectId: 'missing' })).error.code, 'NOT_FOUND');
+});
+
 test('HTTP 删除空项目只移除登记和记录事件，仓库文件保留；不存在时返回 NOT_FOUND', async t => {
   const daemon = await uiFixture();
   t.after(() => daemon.close());

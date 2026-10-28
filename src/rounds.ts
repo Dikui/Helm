@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
-import { projectPath } from './alignment.js';
+import { ensureWorkCopy } from './alignment.js';
 import { cardGraph } from './graph.js';
 import { agentEnvironment } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
@@ -196,6 +196,7 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
+      brief.work = this.store.transaction(() => ensureWorkCopy(this.store, workId));
       const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
@@ -206,7 +207,7 @@ export class RoundScheduler {
       });
       const session = await this.drivers[agent.driver]!.start({
         agent,
-        cwd: brief.work.workPath ?? projectPath(this.store, workId),
+        cwd: brief.work.workPath!,
         env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
@@ -218,7 +219,7 @@ export class RoundScheduler {
           this.store.transaction(() => {
             this.store.db.prepare('UPDATE coordinator_rounds SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, process.startedAt, id);
             this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'process-started',
-              { ...process, cwd: brief.work.workPath ?? projectPath(this.store, workId), role: 'coordinator' }, { workId });
+              { ...process, cwd: brief.work.workPath!, role: 'coordinator' }, { workId });
           });
         },
       });
