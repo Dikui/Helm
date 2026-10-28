@@ -374,3 +374,34 @@ test('Agent 外部编辑入口保留直接编辑和草稿，等待时禁用并�
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(editor).getByRole('button', { name: 'Open in editor' })).toBeTruthy();
 });
+
+test('DeepSeek 按草稿主目录读取并保存完整路由，模型名称显示 provider，切换主目录后重新查询', async () => {
+  daemon = await uiFixture();
+  const route = '["deepseek-official","deepseek-flash"]';
+  const requests: any[] = [];
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/api/list-agent-models')) {
+      const params = JSON.parse(String(init?.body));
+      requests.push(params);
+      return new Response(JSON.stringify({ ok: true, result: [
+        { id: route, label: 'Qoder Flash · deepseek-official / deepseek-flash', efforts: ['low', 'high'], defaultEffort: null },
+        { id: '["deepseek-account","deepseek-flash"]', label: 'Flash · deepseek-account / deepseek-flash', efforts: ['low'], defaultEffort: null },
+      ] }));
+    }
+    return fetch(input, init);
+  };
+  window.history.replaceState(null, '', '/settings/agents/deepseek-executor');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  const model = await screen.findByLabelText('模型', { selector: 'select' }) as HTMLSelectElement;
+  expect(requests.at(-1)).toEqual({ driver: 'deepseek', agent: { id: 'deepseek-executor', home: 'shared' } });
+  expect(within(model).getByRole('option', { name: 'Qoder Flash · deepseek-official / deepseek-flash' })).toBeTruthy();
+  change('模型', route);
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await screen.findByText('已保存');
+  expect((await agent('deepseek-executor')).model).toBe(route);
+  expect((await agent('deepseek-executor')).available).toBe(true);
+  change('计费方式', 'dedicated');
+  await waitFor(() => expect(requests.at(-1).agent.home).toBe('dedicated'));
+  await screen.findByLabelText('模型', { selector: 'select' });
+  expect(fieldValue('模型')).toBe(route);
+});

@@ -9,7 +9,7 @@ import { RuleError, TaskStore, type Actor } from './store.js';
 import { completeReviewedWork, decideReview } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
-import type { DriverRegistry } from './driver.js';
+import type { DriverRegistry, ModelContext } from './driver.js';
 import { openAgentPrompt, type PromptEditor } from './prompt-editor.js';
 
 export class UserOperations {
@@ -39,7 +39,7 @@ export class UserOperations {
 
   checkEnvironment() { return checkEnvironment(this.drivers); }
 
-  listModels(driver: string) { return listModels(this.drivers, driver); }
+  listModels(driver: string, agent?: ModelContext) { return listModels(this.drivers, driver, agent); }
 
   installTool(actor: Actor, name: string) { return installTool(this.store, this.drivers, actor, name); }
 
