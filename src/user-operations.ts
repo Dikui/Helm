@@ -163,6 +163,12 @@ export class UserOperations {
     await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '工作取消')]);
     for (const node of cardGraph(this.store, workId)) if (node.type === 'card') removeCardCopy(this.store, node);
     if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
+    if (!work.activeDescriptionId && work.workBranch) {
+      const project = projectPath(this.store, workId);
+      if (dispatchGit(project, 'for-each-ref', '--format=%(refname)', `refs/heads/${work.workBranch}`)) {
+        dispatchGit(project, 'branch', '-D', work.workBranch);
+      }
+    }
     await compressWorkOutputs(this.store, workId);
     return this.store.work(workId);
   }

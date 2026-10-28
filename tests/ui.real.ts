@@ -108,6 +108,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     git('remote', 'add', 'origin', remote);
     git('push', '-u', 'origin', 'main');
     const baseline = git('rev-parse', 'HEAD');
+    git('branch', 'release/1.0');
 
     // This is the same helmd HTTP/MCP/SSE/static server used by `helm serve`, with real drivers.
     // Limit the catalog to Claude so availability probes cannot start other agent CLIs.
@@ -143,14 +144,25 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await main.getByLabel('项目路径', { exact: true }).fill(repo);
     await click(main.getByRole('button', { name: '登记', exact: true }));
     await main.getByRole('combobox', { name: '调度者 Agent', exact: true }).selectOption('claude-coordinator');
+    const base = main.getByRole('combobox', { name: '基准分支', exact: true });
+    await eventually(page, async () => await base.isEnabled() && await base.inputValue() === 'main', '等待默认基准分支超时');
     await main.getByLabel('需求', { exact: true }).fill(`${title}\n只新增 smoke.txt，内容恰好是 helm-ui-smoke 加一个换行，其他文件不改。请直接起草工作说明，确认后交真实 Claude 执行和整体验收。完成后发 ${readyMessage} 并等待下一条用户消息再审核。`);
     await screenshot('02-new-work', main.getByRole('button', { name: '开始', exact: true }), main.getByText(repo, { exact: true }));
+    await base.selectOption('release/1.0');
+    assert.equal(await base.inputValue(), 'release/1.0');
+    await screenshot('02b-base-selected', base);
+    await base.selectOption('main');
     await click(main.getByRole('button', { name: '开始', exact: true }));
     await visible(workHeader(page));
     const brief = main.getByRole('complementary', { name: '工作说明', exact: true });
     const confirm = brief.getByRole('button', { name: '确认这一版', exact: true });
     await eventually(page, () => confirm.isEnabled().catch(() => false), '等待真实调度者起草工作说明超时');
     assert.match(await brief.innerText(), /smoke\.txt/);
+    await visible(main.getByText('工作副本已创建；对齐阶段只读此副本，项目目录的切分支和未提交改动不会影响它。', { exact: true }));
+    const workId = decodeURIComponent(new URL(page.url()).pathname.split('/').at(-1)!);
+    const workPath = join(evidence, 'data', 'worktrees', workId, '_work');
+    assert.equal(execFileSync('git', ['-C', workPath, 'branch', '--show-current'], { encoding: 'utf8' }).trim(), `helm/${workId}`);
+    assert.equal(await readFile(join(workPath, 'README.md'), 'utf8'), 'UI smoke baseline\n');
     // v2 puts the status and its elapsed time in the same pill.
     await screenshot('03-aligning', workHeader(page).getByText(/^对齐中(?:\s*·|$)/), brief.getByRole('heading', { name: '标准', exact: true }), confirm);
     await click(confirm);

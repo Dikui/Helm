@@ -29,7 +29,7 @@ function attachment(store: TaskStore, workId: string, path: string) {
 
 function branchFile(store: TaskStore, workId: string, path: string) {
   const branch = store.work(workId).workBranch;
-  if (!branch) throw new RuleError('FILE_NOT_FOUND', '工作说明确认后才有工作分支。', 404);
+  if (!branch) throw new RuleError('FILE_NOT_FOUND', '工作副本尚未创建。', 404);
   const object = `${branch}:${path}`;
   let size: number;
   try { size = Number(git(store, workId, ['cat-file', '-s', object]).toString().trim()); }

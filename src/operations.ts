@@ -4,7 +4,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
-import { confirmationDetails, confirmDescription, draftDescription } from './alignment.js';
+import { confirmationDetails, confirmDescription, draftDescription, ensureWorkCopy } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, markOutdated, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
@@ -15,7 +15,7 @@ import { requestReview, reviewDetails } from './review.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
-import { projectGitStatus } from './project-reads.js';
+import { projectBranches, projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
@@ -218,7 +218,7 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, artifactId, encoding }) => readArtifact(store, workId, artifactId, encoding),
   }),
   operation({
-    name: 'list-work-files', description: '列出工作分支上的文件路径；工作说明确认前为空', callers: ['user'], keyed: false, mutates: false,
+    name: 'list-work-files', description: '列出工作分支上的文件路径；创建工作副本后即可读取', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ store }, { workId }) => listWorkFiles(store, workId),
   }),
@@ -276,6 +276,15 @@ export const operations: readonly Operation[] = [
     name: 'list-projects', description: '列出项目', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
     execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all().map(projectGitStatus),
+  }),
+  operation({
+    name: 'list-project-branches', description: '读取项目当前检出分支及可用的本地基准分支', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ projectId: z.string().min(1) }).strict(),
+    execute({ store }, { projectId }) {
+      const project = store.db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId);
+      if (!project) throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
+      return projectBranches(String(project.path));
+    },
   }),
   operation({
     name: 'set-project-coordinator-agent', description: '设置项目默认调度者 Agent，仅影响之后创建的工作', callers: ['user'], keyed: false, mutates: true,
@@ -400,8 +409,10 @@ export const operations: readonly Operation[] = [
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
       cardId: z.string().min(1).optional(),
       coordinatorAgentId: z.string().min(1).optional(),
+      baseRef: z.string().min(1).optional(),
     }).strict().refine(params => Boolean(params.projectId) !== Boolean(params.workId), '必须且只能提供 projectId 或 workId。')
-      .refine(params => !params.coordinatorAgentId || Boolean(params.projectId), 'coordinatorAgentId 只能在创建工作时指定；已有工作请用 change-coordinator-agent。'),
+      .refine(params => !params.coordinatorAgentId || Boolean(params.projectId), 'coordinatorAgentId 只能在创建工作时指定；已有工作请用 change-coordinator-agent。')
+      .refine(params => !params.baseRef || Boolean(params.projectId), 'baseRef 只能在创建工作时指定。'),
     execute({ store, actor }, params) {
       let workId = params.workId;
       let isNew = false;
@@ -449,8 +460,9 @@ export const operations: readonly Operation[] = [
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
+        ensureWorkCopy(store, workId, params.baseRef);
       }
-      return { work, message: store.message(workId, params.key) };
+      return { work: store.work(workId), message: store.message(workId, params.key) };
     },
   }),
   operation({

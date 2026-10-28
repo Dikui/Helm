@@ -57,7 +57,8 @@ async function fixture(t: TestContext) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-test-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const repo = join(directory, 'project');
-  await exec('git', ['init', repo]);
+  await exec('git', ['init', '-b', 'main', repo]);
+  await exec('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '--allow-empty', '-m', 'baseline']);
   const dataDir = join(directory, 'data');
   await copyAgents(dataDir);
   const daemon = await startDaemon(t, dataDir);

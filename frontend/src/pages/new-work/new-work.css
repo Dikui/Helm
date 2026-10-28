@@ -12,6 +12,7 @@
 .new-work select:disabled { cursor: not-allowed; }
 .new-base { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
 .new-base h3 { font-size: var(--text-sm); color: var(--muted); }
+.new-base-field { display: grid; gap: var(--space-2); font-size: var(--text-sm); }
 .new-warning { color: var(--attention); background: var(--attention-soft); padding: var(--space-3); border-radius: var(--radius-sm); }
 .new-tools .btn { min-width: 100px; }
 .project-registration { display: grid; gap: var(--space-4); }

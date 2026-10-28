@@ -8,6 +8,7 @@ import type { CoordinatorAgent, Project } from './types.js';
 import { useSendMessage } from './useSendMessage.js';
 import { AttachmentPicker, encodeFiles } from '../../shared/attachments.js';
 import { RegisterProjectDialog, RegisterProjectForm } from './RegisterProject.js';
+import { BaseBranchField, type BaseSelection } from './BaseBranchField.js';
 import './new-work.css';
 
 export function NewWorkPage() {
@@ -17,6 +18,7 @@ export function NewWorkPage() {
   const agents = useResource<CoordinatorAgent[]>('list-agents');
   const [projectId, setProjectId] = useState('');
   const [agentId, setAgentId] = useState<string>();
+  const [base, setBase] = useState<BaseSelection>();
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [registering, setRegistering] = useState(false);
@@ -29,10 +31,11 @@ export function NewWorkPage() {
     : coordinators.find(item => item.available)?.id ?? projectDefault);
   const chosen = coordinators.find(item => item.id === selectedAgent);
   const available = Boolean(chosen?.available);
+  const branchReady = base?.projectId === project?.id && Boolean(base?.baseRef);
   const locked = submission.pending || submission.uncertain;
   const send = async () => {
-    if (!project || (!submission.uncertain && !available) || !body.trim()) return;
-    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, body: body.trim(), attachments: await encodeFiles(files) });
+    if (!project || (!submission.uncertain && (!available || !branchReady)) || !body.trim()) return;
+    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, baseRef: base?.baseRef, body: body.trim(), attachments: await encodeFiles(files) });
     if (result) navigate(`/works/${encodeURIComponent(result.work.id)}`);
   };
   const registered = (id: string) => {
@@ -61,7 +64,7 @@ export function NewWorkPage() {
             {agents.data && !coordinators.some(item => item.id === selectedAgent) && <option value={selectedAgent} disabled>{selectedAgent} · {t('newWorkAgentMissing')}</option>}
             {coordinators.map(item => <option key={item.id} value={item.id} disabled={!item.available}>{item.id}{!item.available ? ` · ${item.reason || t('newWorkAgentUnavailable')}` : ''}</option>)}
           </select></label>
-          <button className="btn primary new-send" disabled={submission.pending || (!submission.uncertain && !available) || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'newWorkStart')}</span><span aria-hidden="true">↑</span></button>
+          <button className="btn primary new-send" disabled={submission.pending || (!submission.uncertain && (!available || !branchReady)) || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'newWorkStart')}</span><span aria-hidden="true">↑</span></button>
         </div>
         {agents.data && coordinators.length === 0 ? <p className="hint">{t('newWorkNoCoordinator')} <Link href="/settings/new-agent">{t('newAgent')}</Link></p>
           : !available && agents.data && <p className="hint">{chosen?.reason} {t('newWorkChooseAvailableAgent')}</p>}
@@ -69,10 +72,7 @@ export function NewWorkPage() {
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>
-      <div className="new-context"><section className="new-base" aria-label={t('newWorkBase')}><h3>{t('newWorkBase')}</h3><p className="row"><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="ref" title={project.headCommit ?? undefined}>{project.headCommit?.slice(0, 7) ?? '—'}</span></p>
-        <p className="mono">{project.path}</p><p className="muted">{t('newWorkBaseHint')}</p>
-        {project.gitStatusReason && <p role="status">{project.gitStatusReason}</p>}
-      </section>
+      <div className="new-context"><BaseBranchField key={project.id} project={project} selection={base} onSelect={setBase} locked={locked} />
       {Boolean(project.uncommittedChanges) && <p className="warn"><span>!</span><span>{project.uncommittedChanges} {t('newWorkUncommittedHint')}</span></p>}</div>
       <div className="new-tips"><span><kbd>⏎</kbd> {t('newWorkStart')}</span><span><kbd>⇧⏎</kbd> {t('conversationNewline')}</span><span>{t('newWorkAlignmentNext')}</span></div>
     </div>}

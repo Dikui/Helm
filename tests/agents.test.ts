@@ -775,6 +775,7 @@ test('换调度者 Agent 只影响下一轮，当前运行或启动中的轮次�
     // startWork waits for round completion; register without waiting for this held round.
     const repo = join(daemon.directory, 'project');
     execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '--allow-empty', '-m', 'baseline'], { stdio: 'ignore' });
     const project = (await daemon.call('register-project', { path: repo })).result;
     const work = (await daemon.call('send-message', { projectId: project.id, key: 'start', body: '开始调度' })).result.work;
     const params = { workId: work.id };

@@ -1,6 +1,8 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-coordinator.
 // Requires Claude login in a disposable HOME. No browser is started.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -238,4 +240,64 @@ test('冒烟③调度者：_work 内 Bash 写入被真实沙箱拦截，读取�
     assert.ok(readResult && !readResult.is_error);
     assert.match(JSON.stringify(readResult.content), /coordinator read-only baseline/);
     assert.equal(daemon.git('-C', daemon.work.workPath, 'status', '--porcelain'), '');
+  });
+
+test('冒烟④：创建后首个真实对齐轮次只读工作副本，项目切分支和改文件不影响它，确认跟上基准',
+  { skip: !enabled, timeout: 240_000 }, async t => {
+    const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+    const command = 'printf forbidden > alignment-write.txt';
+    let project = '';
+    const observed = observedDriver(brief => {
+      assert.equal(brief.work.status, 'aligning');
+      assert.equal(brief.work.activeDescriptionId, null);
+      assert.equal(brief.work.baseRef, 'main');
+      assert.equal(git(brief.work.workPath!, 'branch', '--show-current'), brief.work.workBranch);
+      project = git(brief.work.workPath!, 'worktree', 'list', '--porcelain').split('\n')[0]!.slice('worktree '.length);
+      // Change the user's checkout after the copy exists, before the CLI reads it.
+      git(project, 'checkout', '-b', 'user-switched');
+      writeFileSync(join(project, 'README.md'), 'user checkout modified during alignment\n');
+      writeFileSync(join(project, 'uncommitted.txt'), 'must not enter the copy\n');
+      return `这是创建工作时的对齐副本冒烟。${restrictions}
+1. 用 Bash 执行 pwd，再用 Bash 执行 git branch --show-current。
+2. 用 Read 读取当前目录的 README.md。
+3. 必须用 Bash 原样尝试一次：${command}
+预期写入被沙箱拒绝；禁止 dangerouslyDisableSandbox、重试或其他写法。拒绝后继续。
+4. 调用 draft-work-description，key=alignment-copy，requirements=只读工作副本，boundary=临时项目，criteria=读取创建时的代码且不能写入。
+然后简短回答读到的内容并退出。`;
+    });
+    const daemon = await fixture(t, observed.driver, 1, { realFirstRound: true });
+    const events = await daemon.events();
+    const end = events.find(event => event.action === 'round-ended')!;
+    assert.equal(end.details.reason, 'completed', JSON.stringify(end.details));
+    const round = observed.rounds[0]!;
+    connected(round);
+    const calls = toolCalls(round.messages);
+    const pwd = calls.find(call => call.name === 'Bash' && (call.input as any).command === 'pwd');
+    assert.ok(pwd, '真实 CLI 必须报告 cwd');
+    assert.ok(JSON.stringify(toolResult(round.messages, pwd.id)?.content).includes(round.brief.work.workPath!));
+    const read = calls.find(call => call.name === 'Read' && String((call.input as any).file_path).endsWith('README.md'));
+    assert.ok(read);
+    const content = toolResult(round.messages, read.id);
+    assert.ok(content && !content.is_error);
+    assert.match(JSON.stringify(content.content), /coordinator read-only baseline/);
+    assert.doesNotMatch(JSON.stringify(content.content), /user checkout modified/);
+    const write = calls.find(call => call.name === 'Bash' && (call.input as any).command === command);
+    assert.ok(write);
+    const denied = toolResult(round.messages, write.id);
+    assert.equal(denied?.is_error, true);
+    assert.match(JSON.stringify(denied.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
+    assert.ok(!round.permissions.some(item => item.tool === 'Bash' && item.input.command === command && item.behavior === 'deny'));
+    assert.equal(existsSync(join(daemon.work.workPath, 'alignment-write.txt')), false);
+    assert.equal(existsSync(join(daemon.work.workPath, 'uncommitted.txt')), false);
+    successfulTool(round, 'draft-work-description', 1);
+
+    const original = daemon.work.baseCommit;
+    const latest = git(project, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit-tree', `${original}^{tree}`, '-p', original, '-m', 'advance base');
+    git(project, 'update-ref', 'refs/heads/main', latest, original);
+    const gate = (await daemon.call('list-pending')).find((item: any) => item.workId === daemon.work.id);
+    const confirmed = await daemon.call('decide-gate', { ...daemon.params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
+    assert.equal(confirmed.baseCommit, latest);
+    assert.equal(git(daemon.work.workPath, 'rev-parse', 'HEAD'), latest);
+    assert.equal(git(project, 'branch', '--show-current'), 'user-switched');
+    assert.equal(await readFile(join(project, 'README.md'), 'utf8'), 'user checkout modified during alignment\n');
   });

@@ -14,8 +14,8 @@ test('HTTP 读取工作分支上的文件和本工作的附件，拒绝范围外
   const sent = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '见附件',
     attachments: [{ name: 'spec.md', content: Buffer.from('# 规格\n').toString('base64') }] })).result;
   const workId = sent.work.id;
-  assert.deepEqual((await daemon.call('list-work-files', { workId })).result, []);
-  assert.equal((await daemon.call('read-work-file', { workId, path: 'README.md' })).error.code, 'FILE_NOT_FOUND');
+  assert.deepEqual((await daemon.call('list-work-files', { workId })).result, ['README.md']);
+  assert.equal((await daemon.call('read-work-file', { workId, path: 'README.md' })).result.content, 'baseline\n');
   assert.equal((await daemon.call('read-work-file', { workId, path: sent.message.attachments[0].path })).result.content, '# 规格\n');
 
   const descriptions = await until(() => daemon.call('get-work-descriptions', { workId }), value => value.result.length === 1);
