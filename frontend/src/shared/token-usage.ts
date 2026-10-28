@@ -17,8 +17,9 @@ export function sumUsage(rows: { usage: Usage }[]): Usage {
     ? { ...usage, incomplete: true } : usage;
 }
 
-// "1.2M+" when part of the usage is unknown, "—" when all of it is.
+// "1.2M+" when part of the usage is unknown, "—" when all of it is (a known 0 plus unknowns is still nothing to show).
 export function formatUsage(usage: Usage, language: Language) {
   const total = totalTokens(usage);
+  if (total === 0 && incomplete(usage)) return formatTokens(null, language);
   return formatTokens(total, language) + (total !== null && incomplete(usage) ? '+' : '');
 }

@@ -88,3 +88,11 @@ test('尚无卡片和轮次时保留独立调度者节点，用量显示 —', (
   expect(screen.getByText('Token 合计 —')).toBeTruthy();
   expect(screen.getAllByText('还没有调度轮次。').length).toBeGreaterThan(0);
 });
+
+test('已知部分为 0 且有缺项时显示 —，不显示 0+', async () => {
+  const { formatUsage } = await import('../src/shared/token-usage.js');
+  expect(formatUsage({ inputTokens: 0, outputTokens: 0, incomplete: true }, 'zh')).toBe('—');
+  expect(formatUsage({ inputTokens: 0, outputTokens: null }, 'zh')).toBe('—');
+  expect(formatUsage({ inputTokens: 0, outputTokens: 0 }, 'zh')).toBe('0');
+  expect(formatUsage({ inputTokens: 1200, outputTokens: 0, incomplete: true }, 'zh')).toBe('1200+');
+});
