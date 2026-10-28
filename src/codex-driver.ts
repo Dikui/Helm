@@ -12,6 +12,7 @@ import { CodexRpc, type CodexCommand } from './codex-rpc.js';
 import { runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import type { AgentConfig } from './agents.js';
+import { helmVersion } from './version.js';
 
 function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);
@@ -52,7 +53,7 @@ export class CodexDriver implements Driver {
     const rpc = new CodexRpc(this.config.command ?? { file: 'codex', args: ['app-server'] }, { cwd: homedir() }, runtimeEnvironment());
     const timer = setTimeout(() => rpc.close(), 30_000);
     try {
-      await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+      await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: helmVersion }, capabilities: { experimentalApi: true } });
       rpc.notify('initialized', {});
       const models: CodexModel[] = [];
       let cursor: string | null = null;
@@ -104,7 +105,7 @@ export class CodexDriver implements Driver {
     try {
       if (options.signal?.aborted) cancel();
       const before = performance.now();
-      await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+      await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: helmVersion }, capabilities: { experimentalApi: true } });
       const initializeDurationMs = Math.round(performance.now() - before);
       rpc.notify('initialized', {});
       await rpc.request('skills/extraRoots/set', { extraRoots: agent.skillsPath ? [agent.skillsPath] : [] });

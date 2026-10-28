@@ -7,11 +7,12 @@ import { invoke, operations, rejectOperation } from './operations.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import type { BrowserProcess } from './browser.js';
 import type { UserOperations } from './user-operations.js';
+import { helmVersion } from './version.js';
 
 // Stateless transport; the HTTP layer resolves and validates round and dispatch tokens.
 export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor,
   userOperations: UserOperations, browserFor: () => BrowserProcess | undefined = () => undefined) {
-  const server = new Server({ name: 'helm', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'helm', version: helmVersion }, { capabilities: { tools: {} } });
   const workId = actor.type === 'coordinator-round' || actor.type === 'dispatch' ? actor.workId : undefined;
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: operations.filter(operation => operation.callers.includes(actor.type)).map<Tool>(operation => {

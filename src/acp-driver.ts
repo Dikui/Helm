@@ -10,6 +10,7 @@ import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailabil
 import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError } from './store.js';
+import { helmVersion } from './version.js';
 
 type EventContent<Event = DriverEvent> = Event extends DriverEvent ? Omit<Event, 'step'> : never;
 const extensionUpdate = z.object({ sessionId: z.string(), update: z.object({ sessionUpdate: z.string() }) });
@@ -44,7 +45,7 @@ export class AcpDriver implements Driver {
 
   private async initialize(acp: AcpClient, agent: AgentConfig): Promise<InitializeResponse> {
     const result = await acp.connection.agent.request('initialize', { protocolVersion: PROTOCOL_VERSION,
-      clientInfo: { name: 'helm', version: '0.1.0' },
+      clientInfo: { name: 'helm', version: helmVersion },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
     if (result.protocolVersion !== PROTOCOL_VERSION) throw new Error('ACP agent does not support protocol v1');
     if (this.profile.authentication && !result.authMethods?.some(method => method.id === this.profile.authentication)) {
@@ -89,7 +90,7 @@ export class AcpDriver implements Driver {
     const timer = setTimeout(() => { void close(); }, this.config.timeoutMs ?? 30_000);
     try {
       const response = await acp.connection.agent.request('initialize', { protocolVersion: PROTOCOL_VERSION,
-        clientInfo: { name: 'helm', version: '0.1.0' }, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+        clientInfo: { name: 'helm', version: helmVersion }, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
       if (typeof this.profile.models === 'function') return this.profile.models(response);
       const session = await acp.connection.agent.request('session/new', { cwd: homedir(), mcpServers: [] });
       try {

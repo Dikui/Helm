@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { processStartTime, processTargetExists, signalProcess } from './processes.js';
+import { helmVersion } from './version.js';
 
 export interface BrowserCommand { file: string; args: string[] }
 const require = createRequire(import.meta.url);
@@ -25,7 +26,7 @@ const inspectionTools = new Set([
 export class BrowserProcess {
   private child: ChildProcess;
   private controller = new AbortController();
-  private client = new Client({ name: 'helm-browser-forwarder', version: '0.1.0' });
+  private client = new Client({ name: 'helm-browser-forwarder', version: helmVersion });
   private endpoint: Promise<string>;
   private closing?: Promise<void>;
   private tools: Tool[] = [];
