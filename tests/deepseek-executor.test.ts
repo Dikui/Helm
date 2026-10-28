@@ -27,6 +27,92 @@ const configOptions = [
     options: ['low', 'high', 'max'].map(value => ({ value, name: value })) },
 ];
 
+const missingCredential = { code: -32603, message: 'Internal error: turn failed: llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_API_KEY in the launching environment' };
+
+test('DeepSeek 缺 key 派单失败立即提醒并阻止后续预检；普通刷新保留标记，重新检测后恢复', async t => {
+  const acp = await acpFixture(t, { configOptions, rejectOn: 'session/prompt', error: missingCredential }, false, 'deepseek');
+  const daemon = await acpExecutorFixture(t, acp.driver, { agent: 'deepseek', model: '["deepseek-official","deepseek-v4-flash"]' });
+  await daemon.confirm();
+  const [dispatch] = await daemon.ended();
+  assert.equal(dispatch.endReason, 'error');
+  assert.equal(JSON.parse(dispatch.failure).message, missingCredential.message);
+  const notices = (await daemon.call('get-events')).result.filter((event: any) => event.action === 'needs-user-attention'
+    && event.details.kind === 'agent-unavailable' && event.details.agentId === 'deepseek-executor');
+  assert.equal(notices.length, 1, '无需刷新设置页就立即记录提醒');
+  for (let i = 0; i < 2; i++) {
+    const entry = (await daemon.call('list-agents')).result.find((agent: any) => agent.id === 'deepseek-executor');
+    assert.equal(entry.available, false);
+    assert.match(entry.reason, /deepseek-official.*API key.*dsh web.*Models/);
+    assert.equal(entry.command, 'dsh web');
+    const pending = (await daemon.call('list-pending')).result.find((item: any) => item.agentId === entry.id);
+    assert.equal(pending.reason, entry.reason);
+    assert.equal(pending.command, entry.command);
+  }
+  await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
+  daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id,
+    cardId: dispatch.cardId, agentId: 'deepseek-executor', key: 'blocked' }, check: (value: any) => {
+      assert.equal(value.error.code, 'AGENT_UNAVAILABLE');
+      assert.equal(value.error.details.command, 'dsh web');
+    } }]);
+  const before = (await daemon.events()).filter(e => e.action === 'round-ended').length;
+  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'retry', body: '再检查执行者' }));
+  await until(daemon.events, events => events.filter(e => e.action === 'round-ended').length > before);
+  assert.equal((await daemon.dispatches()).length, 1);
+  assert.ok((await daemon.events()).some(event => event.action === 'operation-rejected' && event.details.code === 'AGENT_UNAVAILABLE'));
+  const rechecked = await daemon.call('recheck-agent', { id: 'deepseek-executor' });
+  ok(rechecked);
+  assert.equal(rechecked.result.available, true);
+  assert.equal((await daemon.call('list-pending')).result.some((item: any) => item.agentId === 'deepseek-executor'), false);
+});
+
+test('Agent 更换模型或主目录后清除缺凭据标记；恢复旧设置和迟到派单都不会重新禁用', async t => {
+  const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
+  const catalog = new AgentCatalog(join(ctx.directory, 'agents'), ['deepseek']);
+  const original = catalog.save({ id: ctx.agent.id, config: { role: 'executor', driver: 'deepseek',
+    model: '["deepseek-official","deepseek-v4-flash"]', reasoningEffort: 'low', fast: false, home: 'shared',
+    description: '测试执行者', skills: [], mcp: [] }, prompt: '', mode: 'create' });
+  const recovery = { reason: 'deepseek-official 缺 key', command: 'dsh web' };
+  catalog.markUnavailable(original, recovery);
+  const unchanged = catalog.save({ id: original.id, config: { ...original.config, description: '仅改职责' },
+    prompt: '仅改提示词', mode: 'update', baseRevision: original.revision });
+  assert.equal(catalog.list()[0]!.available, false, '无关配置修改不清除标记');
+  const other = catalog.save({ id: 'another-agent', config: original.config, prompt: '', mode: 'create' });
+  await catalog.check(other.id);
+  assert.equal(catalog.list().find(entry => entry.id === other.id)!.available, true, '相同路由的其他 Agent 不受影响');
+  catalog.remove(other.id);
+  assert.equal(new AgentCatalog(catalog.directory, ['deepseek']).list()[0]!.available, true, '重建运行层后内存标记丢失');
+  for (const change of [{ model: '["deepseek-account","deepseek-flash"]' }, { home: 'dedicated' as const }]) {
+    const source = catalog.list()[0]!;
+    catalog.markUnavailable(catalog.get(source.id), recovery);
+    assert.equal(catalog.list()[0]!.available, false);
+    const changed = catalog.save({ id: source.id, config: { ...original.config, ...change }, prompt: '', mode: 'update', baseRevision: source.revision! });
+    // Restore without first refreshing: saving a changed route/home must clear the marker.
+    catalog.save({ id: source.id, config: unchanged.config, prompt: '', mode: 'update', baseRevision: changed.revision! });
+    assert.equal(catalog.list()[0]!.available, true);
+    catalog.markUnavailable({ ...original, ...change }, recovery);
+    assert.equal(catalog.list()[0]!.available, true, '旧设置的迟到失败不影响当前设置');
+  }
+});
+
+test('迟到的旧模型可用性探测不会清除新模型的缺凭据标记', async t => {
+  const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
+  const catalog = new AgentCatalog(join(ctx.directory, 'agents'), ['deepseek']);
+  const original = catalog.save({ id: 'deepseek-executor', mode: 'create', prompt: '', config: {
+    role: 'executor', driver: 'deepseek', model: '["deepseek-account","deepseek-flash"]', reasoningEffort: 'low',
+    fast: false, home: 'shared', description: '测试执行者', skills: [], mcp: [] } });
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(release);
+  catalog.monitor(async () => { await hold; return { available: true }; }, () => {});
+  const probing = catalog.check(original.id);
+  catalog.save({ id: original.id, mode: 'update', prompt: '', baseRevision: original.revision,
+    config: { ...original.config, model: '["deepseek-official","deepseek-v4-flash"]' } });
+  catalog.markUnavailable(catalog.get(original.id), { reason: '新模型缺 key', command: 'dsh web' });
+  release();
+  await assert.rejects(probing, /新模型缺 key/);
+  assert.equal((await catalog.refresh())[0]!.available, false);
+});
+
 test('DeepSeek 从 session 公布的完整路由列出模型，读取每个路由的原生强度并关闭探测会话', async t => {
   const ctx = await acpFixture(t, { configOptions: [
     { ...configOptions[0], options: [
@@ -344,8 +430,27 @@ for (const [error, reason] of [
   if (end.type !== 'end') return;
   assert.equal(end.reason, reason);
   assert.ok(end.failure?.includes(error.message));
+  assert.equal(end.unavailable, undefined, '额度、溢出与普通错误不标记缺凭据');
   assert.equal(end.finalAnswer, undefined);
   assert.deepEqual(end.usage, { inputTokens: 8, outputTokens: 2 });
+});
+
+test('DeepSeek MISSING_CREDENTIAL 错误码提供对应专用主目录的 dsh web 命令', async t => {
+  const ctx = await acpFixture(t, { configOptions, rejectOn: 'session/prompt',
+    error: { code: -32603, message: 'turn failed', data: { code: 'MISSING_CREDENTIAL' } } }, true, 'deepseek');
+  const home = join(ctx.directory, "home with ' quote");
+  const agent = { ...ctx.agent, model: '["deepseek-official","deepseek-v4-flash"]', home: 'dedicated' as const };
+  const directory = join(home, '.helm', 'agent-homes', agent.id);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, '.env'), '');
+  const session = await ctx.driver.start({ ...ctx.options, agent, env: { ...ctx.options.env, HOME: home } });
+  await session.send('派单');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type, 'end');
+  if (end.type !== 'end') return;
+  assert.equal(end.reason, 'error');
+  assert.match(end.unavailable!.reason, /deepseek-official.*API key.*Models/);
+  assert.equal(end.unavailable!.command, `DSH_HOME='${ctx.directory}/home with '\\'' quote/.helm/agent-homes/deepseek-executor' dsh web`);
 });
 
 for (const script of [{ exitOn: 'session/prompt' }, { malformedOn: 'session/prompt' }, { response: { stopReason: 'max_tokens' } }])
@@ -406,6 +511,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
   assert.equal(ended.finalAnswer, null);
   assert.deepEqual(ended.usage, { inputTokens: 6778, outputTokens: 204 });
   const output = await daemon.output(ended.id);
+  assert.equal(output.find(e => e.type === 'end').unavailable, undefined, '超时与中止不标记缺凭据');
   assert.ok(output.some(e => e.type === 'output' && JSON.parse(e.text).method === 'agent/stdout-log'));
   assert.deepEqual(output.find(e => e.type === 'end').usage, ended.usage);
   const event = (await daemon.events()).find(e => e.action === 'dispatch-ended' && e.dispatchId === ended.id);

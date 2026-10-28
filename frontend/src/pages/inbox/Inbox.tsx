@@ -7,6 +7,7 @@ import { formatTokens, useI18n } from '../../shared/i18n.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { HelmEvent, Settings, WorkSummary } from '../../shared/types.js';
 import { InboxDetails } from './GateActions.js';
+import { AgentNotices } from './AgentNotices.js';
 
 type Group = 'attention' | 'running' | 'ended';
 function group(work: WorkSummary): Group {
@@ -57,6 +58,7 @@ export function Inbox() {
     <div className="search"><input ref={input} type="search" aria-label={t('search')} placeholder={t('search')} value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="clear-search" aria-label={t('clearSearch')} onClick={() => { setSearch(''); input.current?.focus(); }}>×</button>}<kbd>⌘K</kbd></div>
     <div className="connection" role="status">{t(connection)}</div>
     <div className="inbox">
+      <AgentNotices />
       {error && <ErrorNotice error={error} retry={reload} />}
       {!works && !error && <p role="status">{t('loading')}</p>}
       {works && works.length === 0 && <p className="hint">{t('empty')}</p>}

@@ -265,6 +265,7 @@ export class ExecutionRunner {
             if (event.type === 'artifact' && artifact) saveArtifact(this.store, dispatch, event.kind, artifact.name, artifact.content);
           });
           if (event.type === 'end') {
+            if (event.unavailable && !stop.signal.aborted) this.store.agents.markUnavailable(configuredAgent, event.unavailable);
             reason = event.reason;
             usage = event.usage;
             failure = event.failure ?? failure;
