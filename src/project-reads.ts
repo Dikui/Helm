@@ -1,5 +1,18 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { RuleError } from './store.js';
+
+// shortcut: symlinked directories are not listed; follow them if users keep projects behind links.
+export function listDirectories(path = homedir()) {
+  const directory = resolve(path);
+  let entries;
+  try { entries = readdirSync(directory, { withFileTypes: true }); } catch { throw new RuleError('DIRECTORY_UNAVAILABLE', '无法读取这个目录。', 400); }
+  return { path: directory, directories: entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map(entry => ({ name: entry.name, git: existsSync(join(directory, entry.name, '.git')) }))
+    .sort((a, b) => a.name.localeCompare(b.name)) };
+}
 
 export function projectBranches(path: string) {
   const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], {

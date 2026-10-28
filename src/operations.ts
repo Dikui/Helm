@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
@@ -16,7 +16,7 @@ import { reviewReportSchema } from './review-report.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
-import { projectBranches, projectGitStatus } from './project-reads.js';
+import { listDirectories, projectBranches, projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
@@ -237,16 +237,26 @@ export const operations: readonly Operation[] = [
     name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,
     schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), initGit: z.boolean().optional() }).strict(),
     execute({ store, actor }, params) {
+      const requested = resolve(params.path);
+      const created = !existsSync(requested);
+      if (created) {
+        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '项目路径不存在。', 400, { initializable: true, missing: true });
+        try { mkdirSync(requested, { recursive: true }); } catch (error) { throw new RuleError('INVALID_PROJECT', `创建目录失败：${(error as Error).message}`, 400); }
+      }
       let candidate: string;
       try {
-        candidate = realpathSync(resolve(params.path));
+        candidate = realpathSync(requested);
         if (!statSync(candidate).isDirectory()) throw new Error();
       } catch { throw new RuleError('INVALID_PROJECT', '项目路径不存在或不是目录。', 400); }
       const git = (...args: string[]) => execFileSync('git', ['-C', candidate, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
       let path: string;
-      try { path = realpathSync(git('rev-parse', '--show-toplevel')); } catch {
-        let insideGit = true;
-        try { git('rev-parse', '--git-dir'); } catch { insideGit = false; }
+      try {
+        // A directory created for a new project gets its own repository, even inside another work tree.
+        if (created) throw new Error('new directory');
+        path = realpathSync(git('rev-parse', '--show-toplevel'));
+      } catch {
+        let insideGit = !created;
+        if (insideGit) try { git('rev-parse', '--git-dir'); } catch { insideGit = false; }
         if (insideGit) throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400);
         if (!params.initGit) throw new RuleError('INVALID_PROJECT', '这个目录还不是 git 仓库。Helm 需要用 git 记录开工起点并开工作分支。', 400, { initializable: true });
         // Helm needs a commit to fix the base on; an empty one leaves the user's files untouched.
@@ -264,6 +274,11 @@ export const operations: readonly Operation[] = [
       store.appendEvent(actor, { type: 'project', id }, 'project-registered', { path, name: params.name ?? basename(path) });
       return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(id);
     },
+  }),
+  operation({
+    name: 'list-directories', description: '列出本机目录下的子目录（不含隐藏目录），git 表示子目录根部有 .git；不传 path 时列出用户主目录', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ path: z.string().min(1).optional() }).strict(),
+    execute: (_, { path }) => listDirectories(path),
   }),
   operation({
     name: 'delete-project', description: '删除没有工作的项目登记，只删除数据库记录，不删除磁盘上的仓库或文件', callers: ['user'], keyed: false, mutates: true,

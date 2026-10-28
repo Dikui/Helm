@@ -220,6 +220,28 @@ test('无项目时直接登记，非 git 路径保留输入并显示原始原因
   await waitFor(() => expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe(registered.id));
 });
 
+test('项目路径下拉列出子目录，选择后进入下一级；不存在的路径可新建目录并登记', async () => {
+  daemon = await uiFixture([], undefined, { registerProject: false });
+  window.history.replaceState(null, '', '/new');
+  render(<App baseUrl={daemon.url} />);
+  const path = await screen.findByLabelText('项目路径') as HTMLInputElement;
+  await mkdir(join(daemon.directory, 'apps', 'web'), { recursive: true });
+  fireEvent.change(path, { target: { value: `${daemon.directory}/a` } });
+  fireEvent.click(await screen.findByRole('option', { name: 'apps/' }));
+  expect(path.value).toBe(`${daemon.directory}/apps/`);
+  fireEvent.keyDown(await screen.findByRole('option', { name: 'web/' }), { key: 'ArrowDown' });
+  fireEvent.keyDown(path, { key: 'ArrowDown' });
+  fireEvent.keyDown(path, { key: 'Enter' });
+  expect(path.value).toBe(`${daemon.directory}/apps/web/`);
+  const created = join(daemon.directory, 'apps', 'fresh');
+  fireEvent.change(path, { target: { value: created } });
+  fireEvent.click(screen.getByRole('button', { name: '登记' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('项目路径不存在。');
+  fireEvent.click(screen.getByRole('button', { name: '新建目录并登记' }));
+  expect(await screen.findByLabelText('需求')).toBeTruthy();
+  expect(execFileSync('git', ['-C', created, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('1');
+});
+
 test('草稿更新但网络未送达页面时，确认被运行层拒绝，显示原因且保持对齐', async () => {
   daemon = await uiFixture([[draft('first', '最初的需求')], [draft('second', '更新后的需求')]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '过期草稿', key: 'start' })).result.work;

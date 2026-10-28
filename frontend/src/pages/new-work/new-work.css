@@ -18,6 +18,10 @@
 .project-registration { display: grid; gap: var(--space-4); }
 .project-registration label { display: grid; gap: var(--space-2); }
 .project-registration input { min-width: 0; width: 100%; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-family: var(--mono); }
+.project-path-options { list-style: none; margin: calc(-1 * var(--space-3)) 0 0; padding: var(--space-1); max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-family: var(--mono); font-size: var(--text-sm); }
+.project-path-options li { display: flex; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); cursor: pointer; overflow-wrap: anywhere; }
+.project-path-options li:hover { background: var(--hover); }
+.project-path-options li[aria-selected="true"] { background: var(--selected); }
 .register-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: var(--space-5); background: var(--overlay); }
 .register-dialog { width: min(100%, 480px); max-height: calc(100dvh - 48px); overflow: auto; display: grid; gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-float); }
 .register-dialog h2 { font-size: var(--text-lg); }

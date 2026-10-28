@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { uiFixture } from './ui-fixture.js';
@@ -81,4 +82,24 @@ test('HTTP 删除有工作的项目被拒绝，工作数包含已取消的工作
   assert.equal((await daemon.call('list-projects')).result[0].id, daemon.project.id);
   assert.equal((await daemon.call('list-works')).result.length, 2);
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'project-deleted').length, 0);
+});
+
+test('HTTP 列出子目录并标出 git 仓库；登记不存在的路径时先拒绝，确认后新建目录并独立初始化', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  await mkdir(join(daemon.directory, '.hidden'));
+  const listing = (await daemon.call('list-directories', { path: `${daemon.directory}/` })).result;
+  assert.equal(listing.path, daemon.directory);
+  assert.deepEqual(listing.directories.find((entry: any) => entry.name === 'project'), { name: 'project', git: true });
+  assert.ok(!listing.directories.some((entry: any) => entry.name === '.hidden'));
+  assert.equal((await daemon.call('list-directories', { path: join(daemon.directory, 'missing') })).error.code, 'DIRECTORY_UNAVAILABLE');
+  // Created inside the registered repo: must become its own repository, not normalize to the parent.
+  const created = join(daemon.repo, 'new', 'app');
+  const refused = await daemon.call('register-project', { path: created });
+  assert.equal(refused.error.code, 'INVALID_PROJECT');
+  assert.deepEqual(refused.error.details, { initializable: true, missing: true });
+  assert.equal(existsSync(created), false);
+  const project = (await daemon.call('register-project', { path: created, initGit: true })).result;
+  assert.equal(project.path, created);
+  assert.equal(execFileSync('git', ['-C', created, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(), created);
 });
