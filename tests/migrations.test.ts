@@ -9,10 +9,45 @@ import { FakeDriver } from '../src/driver.js';
 import { migrations } from '../src/migrations.js';
 import { startHelmd as startRealHelmd } from '../src/server.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { TaskStore } from '../src/store.js';
+import { AgentCatalog } from '../src/agents.js';
+import { reviewReport } from './fixtures/review-report.js';
 
 // Kept outside dist: this is a frozen historical fixture, not production SQL.
 const legacySql = (await readFile(new URL('../../tests/fixtures/legacy-migrations.sql', import.meta.url), 'utf8'))
   .split('\n-- migration\n').slice(1);
+
+test('结构化报告迁移保留旧版审核正文，新版报告在重启后可读取', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-report-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  try {
+    // Seed the last schema before structured reports, including a historical review.
+    const beforeReport = migrations.findIndex(sql => sql.includes('ADD COLUMN report TEXT'));
+    assert.ok(beforeReport > 0);
+    for (const [index, sql] of migrations.slice(0, beforeReport).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`
+      INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/old/project', '2026-01-01');
+      INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'project', 'cancelled', 'start', '2026-01-01');
+      INSERT INTO events (id, time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+        VALUES (1, '2026-01-01', 'coordinator-round', 'old-round', 'gate', 'legacy', 'gate-created', '{}', 'work');
+      INSERT INTO gates (id, work_id, kind, status, question, body, options, created_at, sequence)
+        VALUES ('legacy', 'work', 'review', 'pending', '审核', '## 旧版报告\n\n**保留原文**', '["accept","return"]', '2026-01-01', 1);
+    `);
+  } finally { db.close(); }
+  const agents = new AgentCatalog(join(directory, 'agents'));
+  let store = new TaskStore(directory, agents);
+  const legacy = store.gate('work', 'legacy');
+  assert.equal(legacy.report, null);
+  assert.equal(legacy.body, '## 旧版报告\n\n**保留原文**');
+  // Seed a persisted new-format row, then verify only through the store's read interface.
+  const report = reviewReport();
+  store.db.prepare('UPDATE gates SET report = ? WHERE id = ?').run(JSON.stringify(report), 'legacy');
+  store.close();
+  store = new TaskStore(directory, agents);
+  try { assert.deepEqual(store.gate('work', 'legacy').report, report); }
+  finally { store.close(); }
+});
 
 test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读写', async t => {
   for (let version = 1; version <= 10; version++) await t.test(`version ${version}`, async t => {

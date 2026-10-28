@@ -212,4 +212,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE cards ADD COLUMN write_scopes TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  ALTER TABLE gates ADD COLUMN report TEXT;
+  `,
 ];

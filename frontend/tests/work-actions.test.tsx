@@ -107,11 +107,14 @@ test('已结束工作导出到本机路径，错误保留输入；已导出后�
   dialog = await screen.findByRole('dialog', { name: '删除输出' });
   fireEvent.click(within(dialog).getByRole('button', { name: '确认删除输出' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(await screen.findByText('已删除')).toBeTruthy();
+  // The round output also says "已删除"; verify the persistent work status in the header.
+  let header = await screen.findByRole('heading', { level: 1 });
+  expect(await within(header.closest('header')!).findByText('已删除')).toBeTruthy();
   expect((await daemon!.call('get-work', { workId: work.id })).result.outputsDeletedAt).toBeTruthy();
   cleanup();
   render(<App baseUrl={daemon!.url} />);
-  expect(await screen.findByText('已删除')).toBeTruthy();
+  header = await screen.findByRole('heading', { level: 1 });
+  expect(await within(header.closest('header')!).findByText('已删除')).toBeTruthy();
   expect((within(actions()).getByRole('button', { name: '删除输出' }) as HTMLButtonElement).disabled).toBe(true);
 });
 

@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+import { marked, Renderer } from 'marked';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ActionDialog } from '../pages/work/ActionDialog.js';
 import { useData, useResource } from './data.js';
@@ -12,6 +12,8 @@ const extension = (path: string) => path.slice(path.lastIndexOf('.') + 1).toLowe
 type Open = (path: string, opener: HTMLElement) => void;
 // useResource re-reads whenever its predicate changes identity, so predicates must stay stable.
 const never = () => false;
+const inlineRenderer = new Renderer();
+inlineRenderer.html = () => '';
 
 function resolvePath(base: string, href: string) {
   if (/^[a-z][a-z0-9+.-]*:|^[/#?]/i.test(href)) return null;
@@ -20,8 +22,10 @@ function resolvePath(base: string, href: string) {
 }
 
 // Paths in code spans, links and images that exist on the work branch become file links.
-export function renderMarkdown(text: string, files: ReadonlySet<string>, base = '') {
-  const fragment = DOMPurify.sanitize(marked.parse(text, { async: false }), { RETURN_DOM_FRAGMENT: true });
+export function renderMarkdown(text: string, files: ReadonlySet<string>, base = '', inline = false) {
+  const html = inline ? marked.parseInline(text, { async: false, renderer: inlineRenderer }) : marked.parse(text, { async: false });
+  const fragment = DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true,
+    ...(inline ? { ALLOWED_TAGS: ['strong', 'em', 'code', 'a', 'del', 'br'], ALLOWED_ATTR: ['href', 'title'] } : {}) });
   const find = (target: string) => [resolvePath(base, target), resolvePath('', target)].find(path => path && files.has(path));
   for (const link of fragment.querySelectorAll('a[href]')) {
     const path = find(link.getAttribute('href')!);
@@ -48,10 +52,10 @@ export function renderMarkdown(text: string, files: ReadonlySet<string>, base = 
   return container.innerHTML;
 }
 
-export function Markdown({ text, workId, files, base = '', onOpen }: { text: string; workId: string; files: ReadonlySet<string>; base?: string; onOpen: Open }) {
+export function Markdown({ text, workId, files, base = '', inline = false, onOpen }: { text: string; workId: string; files: ReadonlySet<string>; base?: string; inline?: boolean; onOpen: Open }) {
   const { api } = useData();
   const container = useRef<HTMLDivElement>(null);
-  const html = useMemo(() => renderMarkdown(text, files, base), [text, files, base]);
+  const html = useMemo(() => renderMarkdown(text, files, base, inline), [text, files, base, inline]);
   useEffect(() => {
     let live = true;
     for (const image of container.current!.querySelectorAll<HTMLImageElement>('img[data-file]')) {

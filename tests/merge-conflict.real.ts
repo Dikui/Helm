@@ -31,7 +31,7 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), `这是合入冲突真实冒烟。
 对齐时 draft-work-description：需求是合并 shared.txt 并保留双方内容，边界只改 shared.txt，标准是解决后内容恰为 work + base 加一个换行，基准提交是工作分支的祖先。
-首次确认后（没有 delivery.resolution）直接 request-review，key=initial-review，body 写“冲突冒烟的起始审核”；初始代码由测试夹具准备，不建卡不派单。
+首次确认后（没有 delivery.resolution）直接 request-review，key=initial-review，按工具 schema 提交 report：verdict=accept，summary 写“冲突冒烟的起始审核”，exceptions=[]，criteria 填工作说明标准、status=passed、evidence=[{label:"初始代码",kind:"file",ref:"shared.txt"}]，cards=[]，suggestions=[]；初始代码由测试夹具准备，不建卡不派单。不提交 body。
 收到 conflict-resolution-requested 后严格按角色规则的“接受后的合入冲突”执行。
 只建一张 needsVerification=true 的冲突卡片，key=resolve，首行“解决 shared.txt 冲突”。只派 claude-executor，执行 key=resolve-execute。
 执行者只编辑 shared.txt 为 work + base 加一个换行，禁止自行 git merge/add/commit，使用运行层预备的合并。

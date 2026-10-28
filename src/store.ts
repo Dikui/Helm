@@ -4,6 +4,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { TokenUsage } from './driver.js';
 import { migrations } from './migrations.js';
 import type { AgentCatalog } from './agents.js';
+import type { ReviewReport } from './review-report.js';
 
 export type ActorType = 'user' | 'coordinator-round' | 'dispatch' | 'runtime';
 export interface Actor { type: ActorType; id: string; workId?: string }
@@ -25,15 +26,17 @@ export interface Gate {
   question: string; body: string; options: string[]; creator: Actor;
   createdAt: string; sequence: number; descriptionId: string | null;
   decision: string | null; withdrawalReason: string | null; comment: string | null;
+  report: ReviewReport | null;
 }
 
 const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options,
   creator_type AS creatorType, creator_id AS creatorId, created_at AS createdAt, sequence,
-  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment`;
+  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment, report`;
 
 function readGate(row: Record<string, unknown>): Gate {
-  const { creatorType, creatorId, options, ...fields } = row;
-  return { ...fields, options: JSON.parse(String(options)), creator: { type: creatorType, id: creatorId } } as Gate;
+  const { creatorType, creatorId, options, report, ...fields } = row;
+  return { ...fields, options: JSON.parse(String(options)), report: report ? JSON.parse(String(report)) : null,
+    creator: { type: creatorType, id: creatorId } } as Gate;
 }
 export interface EventFilter {
   after?: number;

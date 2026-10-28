@@ -1,3 +1,4 @@
+import { reviewReport } from '../../tests/fixtures/review-report.js';
 import { afterEach, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
@@ -192,7 +193,7 @@ test('事件触发的数据读取失败时保留游标，恢复后补读而不�
 
 test('审核归等你处理，行内退回附意见后恢复进行中', async () => {
   daemon = await uiFixture([[draft('v1')], [
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', body: '汇总报告原文' }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', report: reviewReport('汇总报告原文') }) },
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '等待审核的工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);

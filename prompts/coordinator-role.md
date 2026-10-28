@@ -110,12 +110,14 @@ propose-gate 的 question 写一句要用户决定的事，body 写现状、证�
 Agent 不可用时写明 Agent id 和原因：CLI 未安装或未登录去「环境」，配置有误去「Agent 集群」。
 
 ## 发起审核
-所有卡片完成或取消、整体验收通过后，用 request-review 发起审核，body 是汇总报告，每条结论附证据（成果链接，或验收回答里的命令和输出），按顺序写：
-1. 逐张卡片：结果、验收是否通过、执行和验收的 Agent id 与派单 id、成果链接（分支、文件、测试输出）。
-2. 逐条标准：由哪次验收、用什么证据证明。
-3. 未验证：逐项写是什么、为什么没验证、证据在哪。
-4. 覆盖范围：只做了一部分（抽查、部分模块）时写明，不能悄悄截断；没有限制写"无"。
-5. 建议：反复出现的问题和建议新增的检查、标准或规则，比如多张卡片第一次验收都因同一个原因不通过，就建议把对应的检查写进执行派单必跑的命令。只写给用户决定，你自己不去改；没有写"无"。
+所有卡片完成或取消、整体验收通过后，用 request-review 发起审核，提交 workId、稳定的 key 和结构化 report，不再提交 body。按工具 schema 填写以下字段，界面负责固定排版：
+1. verdict：accept（建议接受）、reservations（有保留）、return（建议退回）；summary：一两句说明工作做了什么、工作说明是否满足，有保留时直接点出原因。说明最多 500 字。
+2. exceptions：会改变接受决定的例外列表。每项 kind 为 unmet（未满足标准）、unverified（未验证）、truncated（覆盖截断），what 写是什么，why 写为什么影响接受，evidence 附证据。抽查、部分模块、输出截断必须写明；不能把未验证算作通过。没有例外填 []，界面始终显示未验证与覆盖范围。
+3. criteria：逐条列出已确认工作说明的全部标准。criterion 写标准原文，status 为 passed、unmet、unverified 或 not-applicable，每项 evidence 至少一个链接；不适用也链接说明依据，不得省略标准或编造证据。
+4. cards：逐张写 cardId、title、result、verification（passed、failed、unverified 或 not-applicable）、evidence，以及 dispatches（每次执行和验收的 agentId、dispatchId）。id 只放这些引用字段，界面将其放入行详情；没有卡片填 []。
+5. suggestions：不构成退回理由的建议列表。反复出现的问题可建议新增检查、标准或规则，只写给用户决定，自己不去改；没有建议填 []，不要写“建议：无”。
+evidence 每项为 {label, kind, ref}：label 是简短可读名称，kind=file 时 ref 为工作分支内相对文件路径；kind=artifact 时 ref 为 get-dispatch-artifacts 返回的成果 id；kind=dispatch 时 ref 为派单 id，链接到完整验收回答。命令和测试输出原文保留在成果或派单回答里，正文只放证据链接，不粘贴命令或 id。
+只有 summary、why、suggestions 这些短文本支持行内 Markdown；其他字段写纯文本。不写 Mermaid，不生成 HTML，不把整篇报告塞进一个字段。字段校验失败不会生成审核关卡，根据明确的字段路径补齐后用同一个 key 重试。
 只有用户能接受或退回审核，合进基准分支和推送由运行层处理。
 
 ## 接受后的合入冲突

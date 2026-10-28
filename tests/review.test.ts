@@ -9,6 +9,7 @@ import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { reviewReport } from './fixtures/review-report.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -32,7 +33,67 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 }
 
 const review = (key = 'review', check: (value: any) => void = ok): Extract<FakeStep, { type: 'tool' }> => ({ type: 'tool', name: 'request-review',
-  arguments: ctx => ({ workId: workIdOf(ctx), key, body: `汇总报告 ${key}：[成果](helm://artifact/result)` }), saveAs: key, check });
+  arguments: ctx => ({ workId: workIdOf(ctx), key, report: reviewReport(`汇总报告 ${key}`) }), saveAs: key, check });
+
+test('发起审核逐字段校验汇总报告，缺结论说明或标准证据时不生成关卡', async t => {
+  const report = reviewReport();
+  const daemon = await fixture(t, [[
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'structured',
+      report: { ...report, summary: '', criteria: [{ criterion: '登录可用', status: 'passed', evidence: [] }] } }),
+      check: (value: any) => {
+        code('INVALID_PARAMS')(value);
+        assert.match(value.error.reason, /report.summary/);
+        assert.match(value.error.reason, /report.criteria.0.evidence/);
+      } },
+    { type: 'hang' },
+  ]]);
+  const events = await until(daemon.events, events => events.some(event => event.action === 'operation-rejected'));
+  const failure = events.find(event => event.action === 'operation-rejected').details;
+  assert.match(failure.reason, /report.summary/);
+  assert.match(failure.reason, /report.criteria.0.evidence/);
+  assert.equal((await daemon.getWork()).status, 'executing');
+  assert.ok(!(await daemon.conversation()).some(item => item.kind === 'review'));
+});
+
+test('汇总报告按字段保存并在对话和待决定列表中返回；重试保留初稿，退回后可提交新报告', async t => {
+  const daemon = await fixture(t, [[review()], [review('revision')]]);
+  const gate = await daemon.pendingReview();
+  assert.deepEqual(gate.report, reviewReport('汇总报告 review'));
+  const pending = (await daemon.call('list-pending')).result.find((item: any) => item.id === gate.id);
+  assert.deepEqual(pending.report, gate.report);
+  assert.deepEqual((await daemon.events()).find(event => event.action === 'gate-created' && event.object.id === gate.id).details.report, gate.report);
+  await daemon.roundsEnded(2);
+  ok(await daemon.call('decide-gate', { workId: daemon.work.id, gateId: gate.id, decision: 'return', comment: '补充证据' }));
+  const revision = await until(daemon.conversation, items => items.filter(item => item.kind === 'review').length === 2);
+  assert.deepEqual(revision.find(item => item.id === gate.id).report, gate.report);
+  assert.deepEqual(revision.find(item => item.key === 'revision').report, reviewReport('汇总报告 revision'));
+});
+
+test('发起审核拒绝新提交的纯文本、缺失字段和无效枚举，错误逐项指向报告字段且同 key 可重试', async t => {
+  const report = reviewReport();
+  const invalid: { input: object; path: string }[] = [
+    { input: { body: '旧式新提交' }, path: 'report' },
+    ...['verdict', 'summary', 'exceptions', 'criteria', 'cards', 'suggestions'].map(field => {
+      const missing: Record<string, unknown> = { ...report };
+      delete missing[field];
+      return { input: { report: missing }, path: `report.${field}` };
+    }),
+    { input: { report: { ...report, verdict: 'approved' } }, path: 'report.verdict' },
+    { input: { report: { ...report, exceptions: [{ kind: 'unverified', what: '外网收信', why: ' ', evidence: [] }] } }, path: 'report.exceptions.0.why' },
+    { input: { report: { ...report, criteria: [{ criterion: '登录可用', status: 'passed', evidence: [{ label: '证据', kind: 'command', ref: '' }] }] } }, path: 'report.criteria.0.evidence.0.kind' },
+    { input: { report: { ...report, cards: [{ cardId: 'card', title: '登录', result: '完成', dispatches: [], evidence: report.criteria[0]!.evidence }] } }, path: 'report.cards.0.verification' },
+  ];
+  const daemon = await fixture(t, [[...invalid.map(({ input }): FakeStep => ({ type: 'tool', name: 'request-review',
+    arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...input }) })), review()]]);
+  const gate = await daemon.pendingReview();
+  assert.deepEqual(gate.report, reviewReport('汇总报告 review'));
+  const failures = (await daemon.events()).filter(event => event.action === 'operation-rejected' && event.object.id === 'request-review');
+  assert.equal(failures.length, invalid.length);
+  for (const [index, failure] of failures.entries()) {
+    assert.equal(failure.details.code, 'INVALID_PARAMS');
+    assert.ok(failure.details.reason.includes(invalid[index]!.path), failure.details.reason);
+  }
+});
 
 async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScript[] = []) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm review-')));
@@ -250,8 +311,8 @@ test('非终态卡片阻止审核，错误和拒绝事件列出卡片，全部�
 test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留报告和意见并唤醒新一轮', async t => {
   const daemon = await fixture(t, [[
     review(),
-    { ...review(), arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', body: '重复调用不覆盖报告' }),
-      check: (value: any) => { ok(value); assert.match(value.result.body, /汇总报告 review/); } },
+    { ...review(), arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('重复调用不覆盖报告') }),
+      check: (value: any) => { ok(value); assert.match(value.result.body, /汇总报告 review/); assert.deepEqual(value.result.report, reviewReport('汇总报告 review')); } },
     review('second-pending', code('REVIEW_PENDING')),
     { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'review').id, reason: '撤回' }), check: code('FIXED_GATE') },
     { type: 'tool', name: 'update-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'review').id, options: ['绕过审核'] }), check: code('FIXED_GATE') },

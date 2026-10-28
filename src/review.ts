@@ -4,6 +4,7 @@ import { projectPath } from './alignment.js';
 import { listDispatches } from './dispatch.js';
 import { cardGraph } from './graph.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import type { ReviewReport } from './review-report.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -35,7 +36,7 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
   } };
 }
 
-export function requestReview(store: TaskStore, actor: Actor, params: { workId: string; key: string; body: string }) {
+export function requestReview(store: TaskStore, actor: Actor, params: { workId: string; key: string; report: ReviewReport }) {
   const gates = store.gates(params.workId);
   const existing = gates.find(gate => gate.key === params.key);
   if (existing) {
@@ -50,11 +51,11 @@ export function requestReview(store: TaskStore, actor: Actor, params: { workId: 
   if (nonTerminalCards.length) throw new RuleError('NON_TERMINAL_CARDS', '所有卡片必须完成或取消后才能发起审核。', 409, { nonTerminalCards });
   const id = randomUUID();
   const options = ['accept', 'return'];
-  const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'review', question: '审核', body: params.body, options }, { workId: params.workId });
+  const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'review', question: '审核', body: params.report.summary, report: params.report, options }, { workId: params.workId });
   store.db.prepare(`INSERT INTO gates
-    (id, work_id, kind, status, key, question, body, options, creator_type, creator_id, created_at, sequence)
-    VALUES (?, ?, 'review', 'pending', ?, '审核', ?, ?, ?, ?, ?, ?)`)
-    .run(id, params.workId, params.key, params.body, JSON.stringify(options), actor.type, actor.id, event.time, event.id);
+    (id, work_id, kind, status, key, question, body, options, creator_type, creator_id, created_at, sequence, report)
+    VALUES (?, ?, 'review', 'pending', ?, '审核', ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, params.workId, params.key, params.report.summary, JSON.stringify(options), actor.type, actor.id, event.time, event.id, JSON.stringify(params.report));
   store.db.prepare(`UPDATE works SET status = 'awaiting-review' WHERE id = ?`).run(params.workId);
   store.appendEvent(runtime, { type: 'gate', id }, 'needs-user-attention', { kind: 'review' }, { workId: params.workId });
   return store.gate(params.workId, id);

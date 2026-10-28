@@ -12,6 +12,7 @@ import { promptNames, readPrompt, writePrompt } from './prompts.js';
 import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
+import { reviewReportSchema } from './review-report.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
@@ -559,7 +560,7 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'request-review', description: '以汇总报告发起审核，只能由用户接受或退回', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), body: z.string().trim().min(1) }).strict(),
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), report: reviewReportSchema }).strict(),
     execute: ({ store, actor }, params) => requestReview(store, actor, params),
   }),
   operation({

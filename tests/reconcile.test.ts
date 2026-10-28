@@ -1,3 +1,4 @@
+import { reviewReport } from './fixtures/review-report.js';
 import assert from 'node:assert/strict';
 import { execFileSync, fork, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -119,7 +120,7 @@ console.log(readFileSync(path, 'utf8'));
 test('已接受工作的冲突处理崩溃后保留接受、清理半截合并并唤醒调度者', async t => {
   const daemon = await fixture(t);
   const previousRound = await daemon.waitRound();
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '原审核' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('原审核') });
   for (const [path, content] of [[daemon.work.workPath, 'work\n'], [daemon.repo, 'base\n']]) {
     await writeFile(join(path, 'baseline.txt'), content);
     git(path, 'add', 'baseline.txt'); git(path, ...identity, 'commit', '-m', content.trim());
@@ -232,7 +233,7 @@ test('合入中崩溃，重启只恢复合入并停在待推送', async t => {
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
   const hook = await blockingHook(daemon, 'pre-merge-commit');
   await writeFile(join(daemon.repo, 'baseline.txt'), 'unrelated user edit\n');
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
@@ -263,7 +264,7 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`独立合入或推
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
   const baseline = git(daemon.remote, 'rev-parse', 'main');
   const hook = await blockingHook(daemon, interruptedAt);
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
@@ -329,7 +330,7 @@ test('重启保留已接受、已合入和推送失败的阶段，只有显式�
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
   const baseline = git(daemon.repo, 'rev-parse', 'main');
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await daemon.restart();
@@ -375,7 +376,7 @@ test('用户自己发起、同样指向工作分支的合并在重启时保留',
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
   git(daemon.repo, ...identity, 'merge', '--no-ff', '--no-commit', daemon.work.workBranch);
   const mergeHead = resolve(daemon.repo, git(daemon.repo, 'rev-parse', '--git-path', 'MERGE_HEAD'));
   const target = await readFile(mergeHead, 'utf8');
@@ -392,7 +393,7 @@ test('终态卡片和已结束工作的残留副本与卡片分支在重启时�
   const cardPath = join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId);
   const cardBranch = git(cardPath, 'symbolic-ref', '--short', 'HEAD');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', body: '检查成果' });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await daemon.call('merge-work', daemon.scope);
   await daemon.call('push-work', daemon.scope);

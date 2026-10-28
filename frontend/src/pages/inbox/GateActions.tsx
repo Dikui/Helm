@@ -5,6 +5,7 @@ import { useI18n } from '../../shared/i18n.js';
 import type { Gate, HelmEvent, WorkSummary, WorkStatus } from '../../shared/types.js';
 import { Link } from '../../shared/router.js';
 import { ReviewDetails } from '../work/brief/ReviewDetails.js';
+import { ReviewReport } from '../work/brief/ReviewReport.js';
 import { WorkActions } from '../work/WorkActions.js';
 import { ago, useClock } from '../../shared/clock.js';
 import { Markdown, useFilePreview } from '../../shared/files.js';
@@ -47,10 +48,11 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
   if (decided) return null;
   return <section role="group" aria-busy={pending} className="gate-actions" aria-label={gate.kind === 'review' ? t('reviewTitle') : gate.question} onKeyDown={shortcut}>
     <strong>{gate.kind === 'review' ? t('reviewTitle') : gate.question}</strong>
-    {gate.kind === 'review' && <b>{t('reviewReport')}</b>}
-    {gate.body && <Markdown text={gate.body} workId={gate.workId} files={noFiles} onOpen={preview.open} />}
+    {gate.kind === 'review' && !gate.report && <b>{t('reportLegacy')}</b>}
+    {gate.kind === 'review' && gate.report ? <ReviewReport key={gate.id} report={gate.report} workId={gate.workId} compact={!detailedReview} />
+      : gate.body && <Markdown text={gate.body} workId={gate.workId} files={noFiles} onOpen={preview.open} />}
     {preview.preview}
-    {gate.kind === 'review' && gate.review && <ReviewDetails review={gate.review} detailed={detailedReview} />}
+    {gate.kind === 'review' && gate.review && (gate.report ? <details className="report-fold"><summary>{t('reportAudit')}</summary><ReviewDetails review={gate.review} detailed={detailedReview} /></details> : <ReviewDetails review={gate.review} detailed={detailedReview} />)}
     {gate.kind === 'review' && !detailedReview && <Link href={`/works/${encodeURIComponent(gate.workId)}/brief`}>{t('reviewOpenDetails')}</Link>}
     {gate.description && <dl className="brief-preview">
       <dt>{t('requirements')}</dt><dd>{gate.description.requirements}</dd>

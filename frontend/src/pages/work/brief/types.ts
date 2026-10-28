@@ -8,4 +8,4 @@ export interface ReviewData {
   }[];
   rejectedOperationCount: number; undeclaredDispatchCount: number;
 }
-export type ReviewGate = Gate & { review?: ReviewData; decision?: string | null; comment?: string | null };
+export type ReviewGate = Gate & { sequence?: number; review?: ReviewData; decision?: string | null; comment?: string | null };

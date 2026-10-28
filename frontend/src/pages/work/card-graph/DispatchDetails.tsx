@@ -86,13 +86,14 @@ function DispatchArtifacts({ workId, dispatchId, affects }: { workId: string; di
     {selected && <ReadArtifact key={selected} workId={workId} artifactId={selected} />}
   </section>;
 }
-function ReadArtifact({ workId, artifactId }: { workId: string; artifactId: string }) {
+export function ReadArtifact({ workId, artifactId }: { workId: string; artifactId: string }) {
   const { t } = useI18n();
   const [encoding, setEncoding] = useState<'utf8' | 'base64'>('utf8');
   const artifact = useResource<ArtifactContent>('read-artifact', { workId, artifactId, encoding });
   return <div className="cg-artifact-content">
-    <div className="row"><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button></div>
+    {artifact.data?.kind !== 'branch' && <div className="row"><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button></div>}
     {artifact.error && <ErrorNotice error={artifact.error} retry={artifact.reload} />}
-    {artifact.data ? <pre aria-label={artifact.data.name}>{artifact.data.content}</pre> : <p role="status">{artifact.error ? '' : t('loading')}</p>}
+    {artifact.data ? artifact.data.kind === 'branch' ? <div className="cg-prose"><span>{t('graphBranch')}</span><p><code>{artifact.data.ref}</code></p><code>{artifact.data.commitSha}</code></div>
+      : <pre aria-label={artifact.data.name}>{artifact.data.content}</pre> : <p role="status">{artifact.error ? '' : t('loading')}</p>}
   </div>;
 }

@@ -40,7 +40,7 @@ content 要求用 Read 核对 smoke.txt，用 Node 读取后严格比较含换�
 并用 git diff --name-only origin/main HEAD 确认只改 smoke.txt；必须 submit-conclusion(passed 或 failed)。
 验收结束且 passed 后 complete-card 第二张。异常或受阻只报告，不额外派单、不重试、不假装成功。
 两张卡片都完成后 send-message（key=ui-ready，body 原样为：${readyMessage} \`smoke.txt\`），写笔记后退出。
-只有用户最新消息的正文完全等于「${reviewMessage}」才 request-review（key=ui-review），body 记录实际派单和验收证据。
+只有用户最新消息的正文完全等于「${reviewMessage}」才 request-review（key=ui-review），按工具 schema 填结构化 report：verdict=accept；summary 一两句结论；exceptions=[]；criteria 覆盖工作说明的标准且 status=passed，每项 evidence 链接实际成果或验收派单回答；cards 列出实际卡片结果、验收、evidence 和 dispatches；suggestions=[]。不提交 body，命令原文和 id 只放证据引用与行详情字段。
 每次从启动简报读当前卡片和派单状态，不重复执行已完成的阶段；等待时立即退出，不轮询。
 最多一张执行卡片和一张整体验收卡片、一次执行派单和一次验收派单。不要新增技能、文件或测试。`;
 
@@ -208,13 +208,32 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await click(workHeader(page).getByRole('link', { name: '工作说明', exact: true }));
     const review = main.getByRole('region', { name: '审核', exact: true });
     const gate = review.getByRole('group', { name: '审核', exact: true });
-    await visible(review.getByText('通过', { exact: true }));
+    await visible(review.getByRole('heading', { name: '建议接受', exact: true }));
+    const reportResponse = await fetch(`${daemon.url}/api/get-conversation`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workId }) });
+    const report = await reportResponse.json() as any;
+    assert.equal(report.ok, true, JSON.stringify(report));
+    const reportGate = report.result.find((item: any) => item.kind === 'review');
+    assert.equal(reportGate.report.verdict, 'accept');
+    assert.ok(reportGate.report.criteria.length > 0);
+    assert.ok(reportGate.report.criteria.every((item: any) => item.evidence.length > 0));
+    const criteriaSummary = gate.getByText(/^\d+ 条标准均有验收证据$/);
+    await visible(criteriaSummary);
+    assert.equal(await criteriaSummary.evaluate(element => element.closest('details')!.open), false);
+    assert.equal(await gate.getByText(/^卡片表 · \d+ 张卡片$/).evaluate(element => element.closest('details')!.open), false);
+    assert.equal(await gate.getByText('建议 · 不构成退回理由', { exact: true }).count(), 0);
+    const verdictBox = await gate.getByRole('heading', { name: '建议接受', exact: true }).boundingBox();
+    const acceptBox = await gate.getByRole('button', { name: '接受', exact: true }).boundingBox();
+    assert.ok(verdictBox && acceptBox && verdictBox.y >= 0 && acceptBox.y + acceptBox.height <= page.viewportSize()!.height,
+      '审核首屏应同时容纳结论、例外、折叠标准和接受入口');
+    await screenshot('07-review-overview', review);
+    await click(gate.getByText('审核记录与全部改动', { exact: true }));
+    await visible(review.getByText('通过', { exact: true }).last());
     await click(gate.getByRole('button', { name: '查看 diff', exact: true }));
     const diff = gate.getByLabel('Diff 内容', { exact: true });
     await visible(diff);
     assert.match(await diff.innerText(), /\+helm-ui-smoke/);
     assert.equal(await gate.getByLabel('未声明结论的派单', { exact: true }).innerText(), '0');
-    // Show the diff and decision controls, which can be below a long model-written report.
+    // Audit details expand only after the compact overview has been checked.
     await gate.getByRole('button', { name: '接受', exact: true }).scrollIntoViewIfNeeded();
     await screenshot('07-review', gate.getByRole('button', { name: '接受', exact: true }), review.getByRole('heading', { name: '整体验收', exact: true }), diff);
     await click(gate.getByRole('button', { name: '接受', exact: true }));

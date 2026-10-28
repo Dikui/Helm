@@ -1,3 +1,4 @@
+import { reviewReport } from './review-report.js';
 // A separate helmd process lets recovery tests stop it without running close().
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -14,7 +15,7 @@ const round: FakeScript = ctx => {
     { type: 'tool', name: 'draft-work-description', arguments: { workId: brief.work.id, key: 'draft', requirements: '启动对账', boundary: '本机', criteria: '崩溃后可接续' } },
   ];
   if (purpose === 'delivery') return [
-    { type: 'tool', name: 'request-review', arguments: { workId: brief.work.id, key: 'review', body: '检查合入顺序' } },
+    { type: 'tool', name: 'request-review', arguments: { workId: brief.work.id, key: 'review', report: reviewReport('检查合入顺序') } },
   ];
   if (purpose === 'failures' && (++executingRounds <= 2 || existsSync(join(dataDir!, 'fail-round')))) return [{ type: 'end', reason: 'error' }];
   return [{ type: 'hang' }];
