@@ -68,14 +68,15 @@ test('对齐阶段的顶部和收件箱始终显示 Token 标签，未报告用�
   await waitFor(() => expect(screen.getAllByText('Token —')).toHaveLength(2));
 });
 
-test('调度者的合计不会用已知轮次掩盖缺项，明细保留已知输入和真实零输出', () => {
+test('调度者的合计计入已知部分并标出缺项，明细保留已知输入和真实零输出', () => {
   const rounds: Round[] = [
     { id: 'one', number: 1, agentId: 'coordinator', status: 'ended', startedAt: '', endedAt: '', reason: 'completed', usage: { inputTokens: 100, outputTokens: 20 } },
     { id: 'two', number: 2, agentId: 'coordinator', status: 'ended', startedAt: '', endedAt: '', reason: 'error', usage: { inputTokens: null, outputTokens: 0 } },
   ];
   render(<I18nProvider><CoordinatorTokens rounds={rounds} /></I18nProvider>);
-  expect(screen.getByText('Token 合计 —')).toBeTruthy();
-  expect(screen.getByText('输入 — · 输出 20')).toBeTruthy();
+  expect(screen.getByText('Token 合计 120+')).toBeTruthy();
+  expect(screen.getByText('输入 100 · 输出 20')).toBeTruthy();
+  expect(screen.getByText('部分轮次或派单没有报告用量，数字只计已报告的部分')).toBeTruthy();
   const rows = within(screen.getByRole('table')).getAllByRole('row');
   expect(rows[2]?.textContent).toBe('#2 · 出错退出—0');
 });

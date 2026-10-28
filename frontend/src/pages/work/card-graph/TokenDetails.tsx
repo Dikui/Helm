@@ -1,5 +1,5 @@
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
-import { sumUsage, totalTokens } from '../../../shared/token-usage.js';
+import { formatUsage, sumUsage, totalTokens } from '../../../shared/token-usage.js';
 import type { Usage } from '../../../shared/types.js';
 import type { Round } from '../conversation/types.js';
 import { endLabels } from './labels.js';
@@ -7,9 +7,9 @@ import type { Dispatch } from './types.js';
 
 export function UsageSummary({ usage }: { usage: Usage }) {
   const { t, language } = useI18n();
-  return <div className="cg-token-summary"><p>{t('tokenTotal')} {formatTokens(totalTokens(usage), language)}</p>
+  return <div className="cg-token-summary"><p>{t('tokenTotal')} {formatUsage(usage, language)}</p>
     <p className="muted">{t('tokenInput')} {formatTokens(usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(usage.outputTokens, language)}</p>
-    {totalTokens(usage) === null && <p className="hint">{t('tokenUnknown')}</p>}
+    {totalTokens(usage) === null ? <p className="hint">{t('tokenUnknown')}</p> : usage.incomplete && <p className="hint">{t('tokenIncomplete')}</p>}
   </div>;
 }
 

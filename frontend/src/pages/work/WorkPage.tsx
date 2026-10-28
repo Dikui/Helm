@@ -1,4 +1,4 @@
-import { totalTokens } from '../../shared/token-usage.js';
+import { formatUsage, totalTokens } from '../../shared/token-usage.js';
 import { WorkDelivery } from './WorkDelivery.js';
 import type { CSSProperties } from 'react';
 import { elapsed, useClock } from '../../shared/clock.js';
@@ -37,7 +37,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
       {work && work.status !== 'aligning' && <nav className="seg conversation-view-switch" aria-label={t('conversationViews')}>
         {(['chat', 'structure', 'brief'] as const).map(item => <Link key={item} href={`/works/${work.id}/${item}`} aria-current={view === item ? 'page' : undefined}>{t(item)}{item === 'structure' && summary && <span className="count" aria-hidden="true">{summary.totalCards}</span>}</Link>)}
       </nav>}
-      {work && <div className="stats work-stats">{work.status !== 'aligning' && <span className="stat" title={t('cards')}>▦ {summary ? `${summary.completedCards}/${summary.totalCards}` : '—'}</span>}<span className="stat" title="tokens">Token {formatTokens(totalTokens(work.usage), language)}</span></div>}
+      {work && <div className="stats work-stats">{work.status !== 'aligning' && <span className="stat" title={t('cards')}>▦ {summary ? `${summary.completedCards}/${summary.totalCards}` : '—'}</span>}<span className="stat" title={work.usage.incomplete ? t('tokenIncomplete') : 'tokens'}>Token {formatUsage(work.usage, language)}</span></div>}
       {work && <WorkActions work={work} reload={reload} />}</header>
     {work && view !== 'brief' && <WorkDelivery work={work} />}
     {error && <ErrorNotice error={error} retry={reload} />}

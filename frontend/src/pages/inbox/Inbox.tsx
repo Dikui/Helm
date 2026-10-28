@@ -1,4 +1,4 @@
-import { totalTokens } from '../../shared/token-usage.js';
+import { formatUsage, totalTokens } from '../../shared/token-usage.js';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { elapsed, useClock } from '../../shared/clock.js';
@@ -33,7 +33,7 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
       <span className="f"><span className={`pill ${tone}`}>
         {tone === 'run' && <span className="spin" aria-hidden="true" />}{t(work.status)}
         <time aria-label={t(category === 'ended' ? 'duration' : 'elapsed')} dateTime={work.statusSince}> · {category === 'ended' ? elapsed(work.createdAt, Date.parse(work.statusSince)) : elapsed(work.statusSince, now)}</time>
-      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={`tokens: ${tokens ?? '—'}`}>Token {formatTokens(tokens, language)}</span></span></span>
+      </span><span className="stats"><span title={t('cards')}>▦ {work.completedCards}/{work.totalCards}</span><span title={work.usage.incomplete ? t('tokenIncomplete') : `tokens: ${tokens ?? '—'}`}>Token {formatUsage(work.usage, language)}</span></span></span>
     </Link><button type="button" className="chev" aria-expanded={expanded} aria-label={t('showDetails')} onClick={() => setExpanded(!expanded)}>⌄</button></div>
     {expanded && <div className="more"><InboxDetails work={work} /></div>}
   </div>;

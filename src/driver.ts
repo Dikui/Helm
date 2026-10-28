@@ -9,7 +9,8 @@ import type { ManagedProcess } from './processes.js';
 
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 // null means the driver has not reported that count; a reported zero stays zero.
-export interface TokenUsage { inputTokens: number | null; outputTokens: number | null }
+// incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
+export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; incomplete?: boolean }
 interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
 export type McpServerConfig = HttpMcpServer | Extract<McpConfig, { type: 'stdio' }>;
 export interface SessionOptions {

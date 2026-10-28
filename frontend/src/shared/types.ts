@@ -1,4 +1,4 @@
-export interface Usage { inputTokens: number | null; outputTokens: number | null }
+export interface Usage { inputTokens: number | null; outputTokens: number | null; incomplete?: boolean }
 export type WorkStatus = 'aligning' | 'executing' | 'paused' | 'awaiting-review' | 'accepted' | 'merge-queued' | 'merging' | 'merged' | 'pushing' | 'completed' | 'cancelled';
 export interface Delivery {
   merge?: { status: 'merged' | 'already-contained' | 'conflict' | 'failed'; baseBranch: string | null; workBranch: string; commit?: string; reason?: string; conflictFiles?: string[] };

@@ -149,11 +149,12 @@ COMMIT;`);
   }
 
   workUsage(workId: string): TokenUsage {
-    return this.db.prepare(`SELECT CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.inputTokens')) THEN SUM(json_extract(usage, '$.inputTokens')) END AS inputTokens,
-      CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.outputTokens')) THEN SUM(json_extract(usage, '$.outputTokens')) END AS outputTokens FROM (
+    const row = this.db.prepare(`SELECT SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
+      COUNT(*) > MIN(COUNT(json_extract(usage, '$.inputTokens')), COUNT(json_extract(usage, '$.outputTokens'))) AS incomplete FROM (
         SELECT usage FROM dispatches WHERE work_id = ? UNION ALL
         SELECT usage FROM coordinator_rounds WHERE work_id = ?
-      )`).get(workId, workId) as unknown as TokenUsage;
+      )`).get(workId, workId) as { inputTokens: number | null; outputTokens: number | null; incomplete: number };
+    return { inputTokens: row.inputTokens, outputTokens: row.outputTokens, ...(row.incomplete && (row.inputTokens !== null || row.outputTokens !== null) ? { incomplete: true } : {}) };
   }
 
   descriptions(workId: string): WorkDescription[] {

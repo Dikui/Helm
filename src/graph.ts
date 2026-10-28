@@ -18,12 +18,14 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,
-  (SELECT json_object('inputTokens', CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.inputTokens')) THEN SUM(json_extract(usage, '$.inputTokens')) END,
-    'outputTokens', CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.outputTokens')) THEN SUM(json_extract(usage, '$.outputTokens')) END) FROM dispatches WHERE card_id = cards.id) AS usage`;
+  (SELECT json_object('inputTokens', SUM(json_extract(usage, '$.inputTokens')), 'outputTokens', SUM(json_extract(usage, '$.outputTokens')),
+    'incomplete', COUNT(*) > MIN(COUNT(json_extract(usage, '$.inputTokens')), COUNT(json_extract(usage, '$.outputTokens'))))
+    FROM dispatches WHERE card_id = cards.id) AS usage`;
 
 function readCard(row: Record<string, unknown>): Card {
+  const { incomplete, ...usage } = JSON.parse(String(row.usage));
   return { ...row, needsVerification: Boolean(row.needsVerification), writeScopes: JSON.parse(String(row.writeScopes)),
-    usage: JSON.parse(String(row.usage)) } as unknown as Card;
+    usage: incomplete && (usage.inputTokens !== null || usage.outputTokens !== null) ? { ...usage, incomplete: true } : usage } as unknown as Card;
 }
 
 // Repo-relative path prefixes; advisory only, so malformed input is rejected rather than guessed at.

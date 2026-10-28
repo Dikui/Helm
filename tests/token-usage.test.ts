@@ -66,9 +66,9 @@ test('卡片合计包含执行和失败验收，工作合计另加所有调度�
   ok(await daemon.call('send-message', { ...params, body: 'missing', key: 'missing' }));
   await until(() => daemon.call('list-dispatches', params), value => value.result.length === 3 && value.result[2].status === 'ended');
   await until(() => daemon.call('list-rounds', params), value => value.result.rounds.every((round: any) => round.status === 'ended'));
-  assert.deepEqual((await daemon.call('get-card', { ...params, cardId: card.id })).result.usage, { inputTokens: 45, outputTokens: null });
-  const settled = await until(() => daemon.call('get-work', params), value => value.result.usage.inputTokens !== null);
-  assert.deepEqual(settled.result.usage, { inputTokens: 195, outputTokens: null });
-  const inbox = await until(() => daemon.call('list-works'), value => value.result.find((row: any) => row.id === work.id).usage.inputTokens !== null);
-  assert.deepEqual(inbox.result.find((row: any) => row.id === work.id).usage, { inputTokens: 195, outputTokens: null });
+  assert.deepEqual((await daemon.call('get-card', { ...params, cardId: card.id })).result.usage, { inputTokens: 45, outputTokens: 7, incomplete: true });
+  const settled = await until(() => daemon.call('get-work', params), value => value.result.usage.inputTokens === 195);
+  assert.deepEqual(settled.result.usage, { inputTokens: 195, outputTokens: 37, incomplete: true });
+  const inbox = await until(() => daemon.call('list-works'), value => value.result.find((row: any) => row.id === work.id).usage.inputTokens === 195);
+  assert.deepEqual(inbox.result.find((row: any) => row.id === work.id).usage, { inputTokens: 195, outputTokens: 37, incomplete: true });
 });

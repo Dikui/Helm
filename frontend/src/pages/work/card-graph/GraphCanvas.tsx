@@ -1,4 +1,4 @@
-import { totalTokens } from '../../../shared/token-usage.js';
+import { formatUsage } from '../../../shared/token-usage.js';
 import type { Usage } from '../../../shared/types.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { graphlib, layout, type Point } from '@dagrejs/dagre';
@@ -77,7 +77,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   return <section className="cg-graph" aria-label={t('graphTitle')}>
     {coordinator && <button className={`cg-coordinator-node ${coordinator.selected ? 'selected' : ''}`} aria-label={t('tokenCoordinator')} aria-pressed={coordinator.selected} onClick={coordinator.select}>
       <span className="cg-node-name">{t('structureCoordinator')} · {coordinator.count ?? '—'} {t('structureRounds')}</span>
-      <span className="cg-node-meta">Token {formatTokens(totalTokens(coordinator.usage), language)} · {t('tokenByRound')}</span>
+      <span className="cg-node-meta">Token {formatUsage(coordinator.usage, language)} · {t('tokenByRound')}</span>
     </button>}
     <div className="cg-canvas-wrap"><div className="cg-viewport" ref={viewport} tabIndex={0} aria-label={t('graphPanHelp')}
       onPointerDown={event => {
@@ -118,7 +118,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
                 {node.type === 'card' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}
               </span>
-              {node.type === 'card' && <span className="cg-node-meta">Token {formatTokens(totalTokens(node.usage), language)}</span>}
+              {node.type === 'card' && <span className="cg-node-meta">Token {formatUsage(node.usage, language)}</span>}
             </button>;
           })}
         </div>
