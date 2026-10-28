@@ -7,6 +7,7 @@ import { GateDecision } from '../../inbox/GateActions.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
 import { Thinking } from './RoundProgress.js';
+import { ConversationScroll } from './ConversationScroll.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
@@ -80,7 +81,7 @@ export function ConversationView({ work }: { work: Work }) {
     if (immediate) await interrupt();
   };
   return <section className="conversation-view" aria-label={t('chat')} ref={view}>
-    <div className="conversation-thread">
+    <ConversationScroll key={work.id} className="conversation-thread">
       <h2 className="sr">{t('chat')}</h2>
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
@@ -96,7 +97,7 @@ export function ConversationView({ work }: { work: Work }) {
             {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
       </article>)}
       <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
-    </div>
+    </ConversationScroll>
     {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={120} onResize={setDockHeight}

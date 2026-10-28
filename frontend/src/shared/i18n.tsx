@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    conversationHistory: '对话记录', conversationJumpLatest: '回到最新内容',
     conversationWithdrawMessage: '撤回', conversationPlan: '本轮计划', conversationRawSteps: '执行步骤',
     conversationPlanPosition: '{current} / {total}', planPending: '待做', planInProgress: '进行中', planCompleted: '已完成',
     openAgentPrompt: '在编辑器中打开', openAgentPromptHint: '打开磁盘上已保存的文件；外部修改后重新加载 Agent，界面中未保存的编辑仍保留。',
@@ -158,6 +159,7 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
+    conversationHistory: 'Conversation history', conversationJumpLatest: 'Back to latest',
     conversationWithdrawMessage: 'Withdraw', conversationPlan: 'Round plan', conversationRawSteps: 'Execution steps',
     conversationPlanPosition: '{current} / {total}', planPending: 'Pending', planInProgress: 'In progress', planCompleted: 'Completed',
     openAgentPrompt: 'Open in editor', openAgentPromptHint: 'Opens the saved file on disk. Reload the agent after external changes; unsaved edits here are kept.',

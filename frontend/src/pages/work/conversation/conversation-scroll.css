@@ -1,0 +1,4 @@
+.conversation-scroll { position: relative; display: flex; flex: 1; min-height: 100px; min-width: 0; }
+.conversation-scroll > [role='region'] { flex: 1; min-width: 0; overflow: auto; overflow-anchor: none; }
+.conversation-thread-content { display: flow-root; }
+.conversation-scroll > .conversation-jump-latest { position: absolute; bottom: 12px; inset-inline: 0; margin-inline: auto; display: grid; place-items: center; width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 50%; box-shadow: var(--shadow-card); font-size: 20px; line-height: 1; }
