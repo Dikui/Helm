@@ -1,3 +1,5 @@
+import { UsageSummary } from './TokenDetails.js';
+import { sumUsage } from '../../../shared/token-usage.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { useCallback, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
@@ -33,12 +35,14 @@ export function CoordinatorView({ work, initialRoundId }: { work: Work; initialR
     {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : <>
+      <UsageSummary usage={sumUsage(rounds.data.rounds)} />
       <h3 className="sect">{t('structureRounds')} <span className="count">{rounds.data.rounds.length}</span></h3>
       {!rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds">
         {rounds.data.rounds.slice().reverse().map(round => <li key={round.id}>
           <button className="btn sm" aria-pressed={selected?.id === round.id} aria-label={`${t('structureRound')} #${round.number}`} onClick={() => selectRound(round.id)}>#{round.number}</button>
           <span>{round.agentId}</span><span className={`pill ${round.status === 'running' ? 'run' : ''}`}>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span>
           <time className="mono">{elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}</time>
+          <span className="muted">{t('tokenInput')} {formatTokens(round.usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(round.usage.outputTokens, language)}</span>
           <small className="muted"><time dateTime={round.startedAt}>{date(round.startedAt)}</time> → {round.endedAt ? <time dateTime={round.endedAt}>{date(round.endedAt)}</time> : t('structureNow')}</small>
         </li>)}
       </ol>}

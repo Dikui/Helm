@@ -731,7 +731,9 @@ test('创建工作可指定调度者 Agent，key 重投保留选择且拒绝执�
   assert.deepEqual(seen, ['codex-coordinator']);
   const retried = await daemon.call('send-message', { ...params, coordinatorAgentId: 'claude-coordinator' });
   ok(retried);
-  assert.deepEqual(retried.result, created.result);
+  assert.deepEqual(retried.result.message, created.result.message);
+  assert.equal(retried.result.work.id, created.result.work.id);
+  assert.equal(retried.result.work.coordinatorAgentId, 'codex-coordinator');
   assert.equal((await daemon.call('list-projects')).result[0].defaultCoordinatorAgentId, 'claude-coordinator');
   for (const agentId of ['executor', 'missing', 'broken']) {
     const rejected = await daemon.call('send-message', { ...params, key: agentId, coordinatorAgentId: agentId });

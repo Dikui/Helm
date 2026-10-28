@@ -1,5 +1,6 @@
+import { UsageTable } from './TokenDetails.js';
 import { Fragment, useCallback, useState } from 'react';
-import { useI18n } from '../../../shared/i18n.js';
+import { formatTokens, useI18n } from '../../../shared/i18n.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { DispatchDetails } from './DispatchDetails.js';
 import { CardActions } from './CardActions.js';
@@ -19,6 +20,7 @@ export function CardInspector({ card, dispatches, initialDispatchId, initialStep
   const [detailOpen, setDetailOpen] = useState(Boolean(initialDispatchId || initialStep));
   return <>
     <dl className="cg-kv"><dt>{t('executors')}</dt><dd>{card.agentId ?? t('graphNoAgent')}</dd><dt>{t('graphStep')}</dt><dd>{card.currentStep || '—'}</dd><dt>{t('graphLatestStep')}</dt><dd>{card.latestStepSummary || t('graphNoSteps')}</dd></dl>
+    {dispatches && dispatches.length > 0 && <UsageTable kind="dispatch" rows={dispatches.map((dispatch, index) => ({ ...dispatch, label: `#${index + 1} · ${t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}` }))} />}
     <h3 className="sect">{t('graphDispatches')} <span className="count">{dispatches?.length ?? '—'}</span></h3>
     {!dispatches ? <p role="status">{t('loading')}</p> : !dispatches.length ? <p className="muted">{t('graphNoDispatches')}</p> : <ol className="cg-history">
       {dispatches.map((dispatch, index) => <Fragment key={dispatch.id}>
@@ -29,6 +31,7 @@ export function CardInspector({ card, dispatches, initialDispatchId, initialStep
           <span className="mono">{elapsed(dispatch.startedAt ?? dispatch.createdAt, dispatch.endedAt ? Date.parse(dispatch.endedAt) : now)}</span></div>
           <div className="row"><DispatchStatus dispatch={dispatch} /></div>
           <span className="muted">{dispatch.agentId} · {dispatch.status === 'ended' ? t(conclusionLabels[dispatch.conclusion]) : '—'}</span>
+          <span className="muted">{t('tokenInput')} {formatTokens(dispatch.usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(dispatch.usage.outputTokens, language)}</span>
           {dispatch.conclusionReason && <p className={dispatch.conclusion === 'failed' ? 'cg-why' : 'cg-prose'}>{dispatch.conclusionReason}</p>}
           {dispatch.status === 'running' && <RecentDispatchSteps card={card} dispatch={dispatch} />}
           <time className="muted" dateTime={dispatch.startedAt ?? dispatch.createdAt}>{new Date(dispatch.startedAt ?? dispatch.createdAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en')}</time></div>

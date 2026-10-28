@@ -116,7 +116,7 @@ export class RoundScheduler {
     });
     this.tokens.set(token, { type: 'coordinator-round', id, workId });
     let reason: EndReason = 'error';
-    let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+    let usage: TokenUsage = { inputTokens: null, outputTokens: null };
     let finalAnswer: string | undefined;
     let failure: string | undefined;
     let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;

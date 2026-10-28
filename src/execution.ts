@@ -135,7 +135,7 @@ export class ExecutionRunner {
     const token = randomBytes(32).toString('hex');
     let reason: EndReason = 'error';
     let finalAnswer: string | null = null;
-    let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+    let usage: TokenUsage = { inputTokens: null, outputTokens: null };
     let failure: string | null = null;
     let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
     let browserFailed = false;

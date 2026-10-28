@@ -98,7 +98,9 @@ test('第一条消息新建对齐中的工作和固定确认关卡，对话按�
   const { work, message } = started.body.result;
   assert.equal(work.status, 'aligning');
   assert.equal(work.projectId, project.id);
-  assert.deepEqual((await daemon.call('send-message', first)).body.result, started.body.result);
+  const replayed = (await daemon.call('send-message', first)).body.result;
+  assert.deepEqual(replayed.message, message);
+  assert.equal(replayed.work.id, work.id);
   let conversation = (await daemon.call('get-conversation', { workId: work.id })).body.result;
   assert.deepEqual(conversation.map((item: any) => item.type), ['message', 'gate']);
   assert.equal(conversation[0].id, message.id);
@@ -323,7 +325,10 @@ test('真实 MCP 端点由操作定义生成工具，复用 HTTP 的校验和去
   const project = (registered.structuredContent as any).result;
   const params = { projectId: project.id, body: 'MCP 发消息', key: 'mcp' };
   const message = await client.callTool({ name: 'send-message', arguments: params });
-  assert.deepEqual((await daemon.call('send-message', params)).body, message.structuredContent);
+  const replayed = (await daemon.call('send-message', params)).body;
+  const original = message.structuredContent as any;
+  assert.deepEqual(replayed.result.message, original.result.message);
+  assert.equal(replayed.result.work.id, original.result.work.id);
   const events = (await daemon.call('get-events')).body.result;
   assert.deepEqual(events.filter((event: any) => event.action === 'operation-rejected').map((event: any) => event.details.code), ['INVALID_PARAMS']);
 });

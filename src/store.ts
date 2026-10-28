@@ -146,8 +146,8 @@ COMMIT;`);
   }
 
   workUsage(workId: string): TokenUsage {
-    return this.db.prepare(`SELECT COALESCE(SUM(json_extract(usage, '$.inputTokens')), 0) AS inputTokens,
-      COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0) AS outputTokens FROM (
+    return this.db.prepare(`SELECT CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.inputTokens')) THEN SUM(json_extract(usage, '$.inputTokens')) END AS inputTokens,
+      CASE WHEN COUNT(*) = COUNT(json_extract(usage, '$.outputTokens')) THEN SUM(json_extract(usage, '$.outputTokens')) END AS outputTokens FROM (
         SELECT usage FROM dispatches WHERE work_id = ? UNION ALL
         SELECT usage FROM coordinator_rounds WHERE work_id = ?
       )`).get(workId, workId) as unknown as TokenUsage;

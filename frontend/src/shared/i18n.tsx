@@ -148,6 +148,7 @@ export const messages = {
     graphPause: '暂停卡片', graphResume: '恢复卡片', graphCancel: '取消卡片', graphKeepCard: '保留卡片', graphConfirmCancel: '确认取消卡片',
     graphCancelConsequence: '取消后会中止这张卡片的派单、删除卡片副本，且不能恢复。卡片会保留在图中。', graphCancelReason: '取消理由', graphReasonRequired: '请填写取消理由。', graphDefaultCancelReason: '用户取消卡片',
     graphPausedFeedback: '卡片已暂停。', graphResumedFeedback: '卡片已恢复。', graphCancelledFeedback: '卡片已取消。',
+    tokenTotal: 'Token 合计', tokenInput: '输入', tokenOutput: '输出', tokenUnknown: '尚无用量记录或驱动未报告用量；合计有缺项时显示 —。', tokenDispatches: '派单 Token', tokenRounds: '调度轮次 Token', tokenCoordinator: '调度者 Token 明细', tokenByRound: '按轮次查看 Token',
     structureTimeline: '时间线', structureCoordinator: '调度者', structureEvents: '事件', structureRoundOutput: '调度轮次输出',
     structureRunning: '运行中', structureFailurePause: '连败暂停', structureNow: '现在', structureRounds: '轮次', structureRound: '调度轮次',
     structureNoRounds: '还没有调度轮次。', structureTokens: 'Token（输入 / 输出）', structureNotes: '调度笔记', structureNotesVersion: '调度笔记版本', structureNoNotes: '还没有调度笔记。',
@@ -304,6 +305,7 @@ export const messages = {
     graphPause: 'Pause card', graphResume: 'Resume card', graphCancel: 'Cancel card', graphKeepCard: 'Keep card', graphConfirmCancel: 'Confirm cancel card',
     graphCancelConsequence: 'Cancelling aborts this card’s dispatches and removes its card copy. It cannot be resumed. The card stays in the graph.', graphCancelReason: 'Cancellation reason', graphReasonRequired: 'Enter a cancellation reason.', graphDefaultCancelReason: 'Card cancelled by user',
     graphPausedFeedback: 'Card paused.', graphResumedFeedback: 'Card resumed.', graphCancelledFeedback: 'Card cancelled.',
+    tokenTotal: 'Token total', tokenInput: 'Input', tokenOutput: 'Output', tokenUnknown: 'No usage recorded or reported by the driver; totals with missing values show —.', tokenDispatches: 'Dispatch tokens', tokenRounds: 'Round tokens', tokenCoordinator: 'Coordinator token details', tokenByRound: 'Tokens by round',
     structureTimeline: 'Timeline', structureCoordinator: 'Coordinator', structureEvents: 'Events', structureRoundOutput: 'Round output',
     structureRunning: 'Running', structureFailurePause: 'Paused after failures', structureNow: 'Now', structureRounds: 'Rounds', structureRound: 'Round',
     structureNoRounds: 'No rounds yet.', structureTokens: 'Tokens (input / output)', structureNotes: 'Coordinator notes', structureNotesVersion: 'Notes version', structureNoNotes: 'No coordinator notes yet.',
@@ -314,7 +316,8 @@ export const messages = {
   },
 } as const;
 export type Language = keyof typeof messages;
-export function formatTokens(value: number, language: Language) {
+export function formatTokens(value: number | null | undefined, language: Language) {
+  if (value == null) return '—';
   return new Intl.NumberFormat(language === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumSignificantDigits: 3 }).format(value);
 }
 export type MessageKey = keyof typeof messages.zh;

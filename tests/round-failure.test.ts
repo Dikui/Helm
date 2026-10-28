@@ -385,7 +385,8 @@ test('卡片汇总全部派单 token，工作另加全部轮次 token，压缩�
     const params = { workId: work.id, cardId };
     assert.deepEqual((await daemon.call('get-card', params)).result.usage, { inputTokens: 16, outputTokens: 10 });
     assert.deepEqual((await daemon.call('get-card-graph', { workId: work.id })).result.find((item: any) => item.id === cardId).usage, { inputTokens: 16, outputTokens: 10 });
-    assert.deepEqual((await daemon.call('get-work', { workId: work.id })).result.usage, { inputTokens: 46, outputTokens: 22 });
+    const settled = await until(() => daemon.call('get-work', { workId: work.id }), value => value.result.usage.inputTokens !== null);
+    assert.deepEqual(settled.result.usage, { inputTokens: 46, outputTokens: 22 });
     assert.deepEqual((await daemon.call('list-works')).result[0].usage, { inputTokens: 46, outputTokens: 22 });
   };
   await checkTotals();

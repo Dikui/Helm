@@ -51,7 +51,7 @@ test('假驱动按指定方式结束，挂住时可取消，崩溃通过驱动�
     for await (const event of session.events) events.push(event);
     assert.equal(events.length, 1);
     assert.deepEqual(events[0], { type: 'end', step: 1, reason,
-      ...(reason === 'completed' ? { finalAnswer: '只有正常完成有效' } : {}), usage: { inputTokens: 0, outputTokens: 0 } });
+      ...(reason === 'completed' ? { finalAnswer: '只有正常完成有效' } : {}), usage: { inputTokens: null, outputTokens: null } });
   }
   const hung = await driver.start(options);
   await hung.send('挂住');

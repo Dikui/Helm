@@ -85,7 +85,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       } },
       { id: 'reasoning_effort', value: agent.reasoningEffort!, apply: true },
     ],
-    usage: () => ({ inputTokens: 0, outputTokens: 0 }),
+    usage: () => ({ inputTokens: null, outputTokens: null }),
     sessionUsage: deepseekUsage,
     quotaErrors: { codes: [], pattern: /\b(?:ACCOUNT_QUOTA|QUOTA|insufficient[ _-](?:quota|balance|credits?)|(?:quota|usage[ _-]limit)[ _-](?:exceeded|exhausted|reached)|(?:balance|credits?)[ _-](?:exhausted|depleted))\b/i },
     contextOverflowErrors: /\bCONTEXT_WINDOW_EXCEEDED\b|context[ _-](?:window|length)[ _-](?:exceeded|overflow)|maximum context length/i,
@@ -122,7 +122,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     ],
     usage(response) {
       const usage = response._meta?.usage as Record<string, unknown> | undefined;
-      const tokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+      const tokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
       return { inputTokens: tokens(usage?.inputTokens), outputTokens: tokens(usage?.outputTokens) };
     },
     // xai-grok-shell/src/sampling/error.rs: HTTP 429 maps to -32003;
