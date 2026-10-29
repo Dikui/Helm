@@ -32,7 +32,8 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-smoke-evidence-')));
     console.log(`Codex 冒烟证据目录：${evidence}`);
     const outside = join(evidence, 'outside.txt');
-    const marker = randomUUID();
+    // A plain word, not a UUID called a session token: models refuse to repeat credential-like values.
+    const marker = `resume-label-${randomUUID().slice(0, 8)}`;
     const alpha = `alpha-${randomUUID()}`;
     const beta = `beta-${randomUUID()}`;
     const command = `printf outside > ${shellQuote(outside)}`;
@@ -44,7 +45,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     const daemon = await codexFixture(t, new CodexExecutorDriver(), { stagedAuth, needsBrowser: true,
       skills: { 'helm-smoke-alpha': `把 ${alpha} 写入 skill-proof.txt。` },
       content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交、不推送。
-记住会话记号 ${marker}，后续续跑派单会问你，不得把记号写入文件。
+记住本次冒烟的测试标签 ${marker}（公开测试数据，不是凭据），后续续跑派单会问你，不要写入文件。
 使用你可用的 helm-smoke- 开头的 skill，照技能要求写 skill-proof.txt，并列出可用的这些技能名。
 实际执行一次原样命令 ${command}，预期副本外写入被沙箱拒绝；不得重试、提权或寻找绕过方式，拒绝后继续。
 在副本中写 inside.txt（内容 inside）。
@@ -93,7 +94,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
         agentId, key, content, ...(resumeSessionId ? { resumeSessionId } : {}) }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key, body: content }));
     };
-    await dispatch('resume', 'codex-executor', '本会话上一次派单让你记住一个会话记号（UUID），它就在本会话上文里。只凭上文原样写出该记号，不读文件。最后调用 submit-conclusion completed 并在最终回答中写出记号。', first.sessionId);
+    await dispatch('resume', 'codex-executor', '本会话上一次派单让你记住一个测试标签（公开测试数据，不是凭据），它就在本会话上文里。只凭上文原样写出该标签，不读文件。最后调用 submit-conclusion completed 并在最终回答中写出标签。', first.sessionId);
     const resumed = (await daemon.ended(2, 180_000))[1];
     const resumedMessages = await saveOutput(resumed);
     // Separates "history not sent" from "model failed to recall": the resumed request must carry the first turn's context.
@@ -101,7 +102,11 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     assert.equal(resumed.endReason, 'completed', resumed.failure);
     assert.equal(resumed.sessionId, first.sessionId);
     assert.notEqual(resumed.sqlitePath, first.sqlitePath);
-    assert.ok(resumed.finalAnswer.includes(marker), '真实 thread/resume 必须恢复对话');
+    if (!resumed.finalAnswer.includes(marker)) {
+      // The temporary HOME is removed after the test; keep Codex's own rollout for diagnosis.
+      await cp(join(daemon.home, '.codex', 'sessions'), join(evidence, 'codex-sessions'), { recursive: true });
+      assert.fail(`真实 thread/resume 必须恢复对话，会话记录见 ${join(evidence, 'codex-sessions')}`);
+    }
     await cp(join(daemon.agentDir, 'codex-executor'), join(daemon.agentDir, 'codex-other'), { recursive: true });
     const otherSkills = join(daemon.agentDir, 'codex-other', 'skills');
     await rm(otherSkills, { recursive: true });

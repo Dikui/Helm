@@ -2,7 +2,7 @@
 // Requires Claude login in a disposable HOME and the bundled, headed Chromium.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { copyFile, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -165,12 +165,17 @@ test('冒烟③执行者：宽松项目设置不能放行副本外 Write 或 Bas
     assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? dispatch.endReason);
     assert.equal(dispatch.conclusion, 'completed');
     assert.ok(observed.permissions.some(item => item.tool === 'Write' && item.input.file_path === outsideWrite && item.behavior === 'deny'), '必须实际触发 canUseTool 的副本外 Write 拒绝');
-    const bash = toolCalls(observed.messages).find(call => call.name === 'Bash' && (call.input as Record<string, unknown>).command === outsideCommand);
-    assert.ok(bash, '必须实际尝试副本外 Bash 写入');
+    // The model may requote the command; match on its target file instead of the exact string.
+    const bash = toolCalls(observed.messages).find(call => call.name === 'Bash' && String((call.input as Record<string, unknown>).command).includes(outsideBash));
+    if (!bash) {
+      const saved = join(await mkdtemp(join(tmpdir(), 'helm-claude-smoke-evidence-')), 'messages.json');
+      await writeFile(saved, JSON.stringify(observed.messages, null, 2));
+      assert.fail(`必须实际尝试副本外 Bash 写入，模型消息见 ${saved}`);
+    }
     const denied = toolResult(observed.messages, bash.id);
     assert.equal(denied?.is_error, true);
     assert.match(JSON.stringify(denied?.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
-    assert.ok(!observed.permissions.some(item => item.tool === 'Bash' && item.input.command === outsideCommand && item.behavior === 'deny'), 'Bash 越界必须由真实沙箱拒绝');
+    assert.ok(!observed.permissions.some(item => item.tool === 'Bash' && item.input.command === (bash.input as Record<string, unknown>).command && item.behavior === 'deny'), 'Bash 越界必须由真实沙箱拒绝');
     await assert.rejects(readFile(outsideWrite), { code: 'ENOENT' });
     await assert.rejects(readFile(outsideBash), { code: 'ENOENT' });
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
