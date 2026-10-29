@@ -159,7 +159,8 @@ export class CodexDriver implements Driver {
               }
               if (message.method === 'thread/tokenUsage/updated' && params.tokenUsage?.total) {
                 const total = params.tokenUsage.total;
-                usage = { inputTokens: total.inputTokens ?? null, outputTokens: total.outputTokens ?? null, ...(total.cachedInputTokens != null ? { cacheReadTokens: total.cachedInputTokens } : {}) };
+                usage = { inputTokens: total.inputTokens ?? null, outputTokens: total.outputTokens ?? null, ...(total.cachedInputTokens != null ? { cacheReadTokens: total.cachedInputTokens } : {}),
+                  ...(total.cacheWriteInputTokens != null ? { cacheWriteTokens: total.cacheWriteInputTokens } : {}) };
               }
               if (message.method === 'error' && !params.willRetry) terminalError = params.error;
               if (message.method === 'item/completed' && params.item?.type === 'agentMessage' && params.item.phase !== 'commentary') finalAnswer = params.item.text;

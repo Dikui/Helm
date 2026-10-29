@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { useResource } from '../../../shared/data.js';
 import type { Rounds } from '../conversation/types.js';
-import { timelineRange } from './presentation.js';
+import { timelineScale } from './presentation.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
@@ -18,8 +18,9 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
   const now = useClock();
   const cards = nodes.filter((node): node is CardNode => node.type === 'card');
   const rounds = useResource<Rounds>('list-rounds', { workId });
-  const { start, span } = timelineRange(dispatches ?? [], rounds.data?.rounds ?? [], now);
-  const position = (time: number) => `${(time - start) / span * 100}%`;
+  const scale = timelineScale(dispatches ?? [], rounds.data?.rounds ?? [], now);
+  const position = (time: number) => `${scale.position(time) * 100}%`;
+  const width = (from: number, to: number) => `${(scale.position(to) - scale.position(from)) * 100}%`;
   const loops = sendBackDispatchIds(dispatches ?? []);
   const time = (value: number) => new Date(value).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour12: false });
   const date = (value: string) => new Date(value).toLocaleString(language === 'zh' ? 'zh-CN' : 'en');
@@ -27,9 +28,9 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     {!dispatches ? <p className="hint" role="status">{t('loading')}</p> : !cards.length ? <p className="hint">{t('structureNoCards')}</p> : <>
       <div className="cs-lanes">
-        <div className="cs-axis"><span /><div className="cs-track">{[0, .25, .5, .75, 1].map(tick => <span key={tick} style={{ left: `${tick * 100}%` }}>{time(start + span * tick)}</span>)}</div></div>
+        <div className="cs-axis"><span /><div className="cs-track">{[0, .25, .5, .75, 1].map(tick => <span key={tick} style={{ left: `${tick * 100}%` }}>{time(scale.timeAt(tick))}</span>)}</div></div>
         <div className="cs-lane cs-round-lane"><span className="cs-lane-label"><span className={`spark ${rounds.data?.rounds.some(round => round.status === 'running') ? 'run busy' : ''}`} aria-hidden="true" />{t('structureCoordinator')}</span><div className="cs-track">
-          {rounds.data?.rounds.map(round => <button key={round.id} className={`cs-block round ${round.status}`} style={{ left: position(Date.parse(round.startedAt)), width: position(start + Math.max(0, (round.endedAt ? Date.parse(round.endedAt) : now) - Date.parse(round.startedAt))) }}
+          {rounds.data?.rounds.map(round => <button key={round.id} className={`cs-block round ${round.status}`} style={{ left: position(Date.parse(round.startedAt)), width: width(Date.parse(round.startedAt), round.endedAt ? Date.parse(round.endedAt) : now) }}
             aria-label={`${t('structureRound')} #${round.number}`} title={`${t('structureRound')} #${round.number} · ${round.agentId ?? ''} · ${elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}`} onClick={() => inspectRound(round.id)}>#{round.number}</button>)}
         </div></div>
         {cards.map((card, index) => {
@@ -43,7 +44,7 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
                 const end = dispatch.endedAt ? Date.parse(dispatch.endedAt) : now;
                 const label = `${loops.has(dispatch.id) ? '↺ ' : ''}${t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}${dispatch.conclusion === 'failed' ? ' ✗' : dispatch.conclusion === 'passed' ? ' ✓' : ''}`;
                 const name = `${t('graphDispatch')} #${history.indexOf(dispatch) + 1} · ${label}`;
-                return <button key={dispatch.id} className={`cs-block ${dispatch.purpose} ${dispatch.conclusion} ${dispatch.status}`} style={{ left: position(begin), width: position(start + Math.max(0, end - begin)) }}
+                return <button key={dispatch.id} className={`cs-block ${dispatch.purpose} ${dispatch.conclusion} ${dispatch.status}`} style={{ left: position(begin), width: width(begin, Math.max(begin, end)) }}
                   aria-label={name} title={`${name} · ${dispatch.agentId}\n${date(dispatch.startedAt!)} → ${dispatch.endedAt ? date(dispatch.endedAt) : t('structureNow')} · ${elapsed(dispatch.startedAt!, end)}`}
                   onClick={() => select(card.id, dispatch.id)}>{label}</button>;
               })}
@@ -58,7 +59,9 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
             </div>
           </div>;
         })}
-        {now <= start + span && <div className="cs-now" style={{ '--cs-now': position(now) } as CSSProperties}><span /><div><time aria-label={t('structureNow')} dateTime={new Date(now).toISOString()}>{t('structureNow')} · {time(now)}</time></div></div>}
+        {scale.breaks.map(gap => { const label = `${t('structureIdle')} ${elapsed(new Date(gap.from).toISOString(), gap.to)}`;
+          return <div key={gap.from} className="cs-break" style={{ '--cs-at': `${gap.at * 100}%` } as CSSProperties}><span /><div><span role="img" aria-label={label} title={label}>⋯</span></div></div>; })}
+        {scale.position(now) <= 1 && <div className="cs-now" style={{ '--cs-now': position(now) } as CSSProperties}><span /><div><time aria-label={t('structureNow')} dateTime={new Date(now).toISOString()}>{t('structureNow')} · {time(now)}</time></div></div>}
       </div>
       <div className="cg-legend cs-timeline-legend"><span><i className="cs-block execution" />{t('graphExecution')}</span><span><i className="cs-block verification passed">✓</i>{t('graphReportedPassed')}</span><span><i className="cs-block verification failed">✗</i>{t('structureSendBack')}</span><span><i className="cs-block skipped cg-skip-fill" />{t('structureSkippedLegend')}</span><span>{t('structureTimelineLegend')}</span></div>
     </>}

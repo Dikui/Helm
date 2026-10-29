@@ -10,6 +10,8 @@
 
 API 模板不变：每个模板一个 `~/.helm/agent-homes/<模板 id>/`，接口和 key 由用户按 CLI 自己的格式写在里面，Helm 不读。Helm 仍然不打开、不复制、不转发凭据。
 
+Claude 调度者后来不再加载全局配置，见 [ADR 0014](0014-coordinator-without-global-config.md)。
+
 ## Considered Options
 
 - **保留专用目录，逐个来源补漏**（ADR 0004）：会话记录分开，但每家 CLI 顺着 `HOME` 读的东西都要单独处理，Claude 要另登录一次，后面接 Grok、dsh 问题只会更多。

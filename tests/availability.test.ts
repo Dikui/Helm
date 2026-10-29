@@ -107,11 +107,11 @@ test('启动检查 Agent，原因进入待处理和事件并去重；MCP 拒绝�
   assert.ok(daemon.started.includes('claude-executor'));
   assert.equal((await daemon.call('list-pending')).result.some((p: any) => p.agentId === 'claude-executor'), false);
   daemon.states.set('claude-executor', { ...unavailable, reason: 'settings.json 缺失' });
-  await daemon.call('list-agents');
-  await daemon.call('list-agents');
+  await daemon.call('recheck-agent', { id: 'claude-executor' });
+  await daemon.call('recheck-agent', { id: 'claude-executor' });
   assert.equal((await notices()).length, 2, '新原因只通知一次');
   daemon.states.set('claude-executor', { available: false, reason: 'settings.json 缺失', command: '更新后的配置命令' });
-  await daemon.call('list-agents');
+  await daemon.call('recheck-agent', { id: 'claude-executor' });
   assert.equal((await notices()).length, 2, '仅命令变化不重复通知同一原因');
 });
 
@@ -154,7 +154,7 @@ test('异步可用性检查期间的重复派单仍按 key 去重，关闭时等
   t.after(() => finishProbe());
   daemon.probes.set('claude-executor', async () => { checked++; await finalProbe; return unavailable; });
   const before = checked;
-  const listing = daemon.call('list-agents').catch(() => undefined);
+  const listing = daemon.call('recheck-agent', { id: 'claude-executor' }).catch(() => undefined);
   await until(async () => checked, count => count > before);
   let closed = false;
   const closing = daemon.close().then(() => { closed = true; });

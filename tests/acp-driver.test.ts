@@ -195,7 +195,7 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   await session.send('实现派单');
   const events = await collect(session.events);
   assert.equal(session.id, 'session-scripted');
-  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80 } });
+  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 } });
   const [spawn, ...requests] = await ctx.requests();
   assert.deepEqual(processes, [spawn.pid]);
   assert.deepEqual(spawn.args, ['agent', '--effort', 'low', 'stdio']);

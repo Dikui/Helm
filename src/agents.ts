@@ -3,7 +3,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, re
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { RuleError, type TaskStore } from './store.js';
+import { RuleError, type Actor, type TaskStore } from './store.js';
 import { runtimeEnvironment } from './environment.js';
 import type { AgentAvailability, SessionOptions } from './driver.js';
 import { acpAgents } from './acp-agents.js';
@@ -43,6 +43,7 @@ export class AgentCatalog {
   // shortcut: Runtime credential failures are memory-only and are lost when helmd restarts.
   private runtimeUnavailable = new Map<string, { context: string; result: AgentAvailability }>();
   private checks = new Set<Promise<AgentConfig>>();
+  private refreshedAt = 0;
   private checker?: (agent: AgentConfig) => Promise<AgentAvailability>;
   private report?: (id: string, result: AgentAvailability) => void;
 
@@ -160,7 +161,8 @@ export class AgentCatalog {
     let result: AgentAvailability;
     try { agent = this.get(id); }
     catch (error) {
-      if (error instanceof RuleError) this.record(id, { available: false, reason: error.message });
+      // Config errors are re-derived on every list(); caching one would outlive the fix until the next probe.
+      if (error instanceof RuleError) { this.report?.(id, { available: false, reason: error.message }); this.availability.delete(id); }
       throw error;
     }
     if (role && agent.role !== role) throw new RuleError('AGENT_UNAVAILABLE', `Agent 角色必须为 ${role}。`, 409, { agentId: id });
@@ -180,7 +182,14 @@ export class AgentCatalog {
     this.report?.(id, result);
   }
 
+  // Reads answer from the last probe so pages never wait on CLIs; a stale catalog re-probes in the background and reports changes as events.
+  cached() {
+    if (Date.now() - this.refreshedAt > 60_000) void this.refresh().catch(() => {});
+    return this.list();
+  }
+
   async refresh() {
+    this.refreshedAt = Date.now();
     const entries = this.list();
     for (const id of this.availability.keys()) if (!entries.some(entry => entry.id === id)) {
       this.record(id, { available: true });
@@ -367,14 +376,17 @@ export function migrateLegacyAgents(store: TaskStore) {
   }
 }
 
-export async function listAgents(store: TaskStore) {
-  const agents = await store.agents.refresh();
+// The coordinator gets fresh availability and only what it needs to pick an executor, not every Agent's role rules.
+const coordinatorOmits = new Set(['config', 'prompt', 'rules', 'revision', 'directory', 'skillsPath']);
+export async function listAgents(store: TaskStore, actor: Actor) {
+  const coordinator = actor.type === 'coordinator-round';
+  const agents = coordinator ? await store.agents.refresh() : store.agents.cached();
   const dispatches = new Map(store.db.prepare(`SELECT agent_id AS id, count(*) AS count FROM dispatches
     WHERE status = 'running' GROUP BY agent_id`).all().map(row => [String(row.id), Number(row.count)]));
   const works = new Map(store.db.prepare(`SELECT coordinator_agent_id AS id, count(*) AS count FROM works
     WHERE status NOT IN ('completed', 'cancelled') GROUP BY coordinator_agent_id`).all().map(row => [String(row.id), Number(row.count)]));
-  return agents.map(agent => ({ ...agent, runningDispatches: dispatches.get(agent.id) ?? 0,
-    activeWorks: works.get(agent.id) ?? 0 }));
+  return agents.map(agent => ({ ...coordinator ? Object.fromEntries(Object.entries(agent).filter(([key]) => !coordinatorOmits.has(key))) : agent,
+    runningDispatches: dispatches.get(agent.id) ?? 0, activeWorks: works.get(agent.id) ?? 0 }));
 }
 export const findAgent = (store: TaskStore, id: string, role?: AgentConfig['role']) => store.agents.get(id, role);
 

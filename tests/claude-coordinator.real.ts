@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -45,7 +46,8 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number) => 
     assert.equal(sdk.effort, 'low');
     assert.equal(sdk.cwd, brief.work.workPath);
     assert.ok(sdk.cwd!.endsWith('/_work'));
-    assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
+    assert.deepEqual(sdk.settingSources, []);
+    assert.equal(sdk.strictMcpConfig, true);
     assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [sdk.cwd] });
     assert.deepEqual(Object.keys(sdk.mcpServers ?? {}), ['helm']);
     const endpoint = sdk.mcpServers!.helm!;
@@ -98,6 +100,10 @@ function connected(round: Observation) {
   assert.ok(!servers.some(server => server.name === 'helm' && server.status === 'needs-auth'),
     'needs-auth reproduced: replace per-round HTTP injection with the specified token-preserving stdio forwarder before accepting this smoke');
   assert.ok(servers.some(server => server.name === 'helm' && server.status === 'connected'), JSON.stringify(servers));
+  // ADR 0014: the user's global plugins and connectors stay out of the coordinator's context.
+  assert.deepEqual(servers.map(server => server.name), ['helm']);
+  const plugins = round.messages.flatMap(message => message.type === 'system' && message.subtype === 'init' ? message.plugins : []);
+  assert.ok(plugins.every(plugin => !plugin.path.startsWith(join(homedir(), '.claude'))), JSON.stringify(plugins));
 }
 
 function successfulTool(round: Observation, name: string, count: number) {

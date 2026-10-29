@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { displayTopology, dispatchDuration, graphSummary, timelineRange } from '../src/pages/work/card-graph/presentation.js';
+import { displayTopology, dispatchDuration, graphSummary, idleCap, timelineScale } from '../src/pages/work/card-graph/presentation.js';
 import { recentProgress } from '../src/pages/inbox/recent-progress.js';
 import type { Dispatch, GraphNode } from '../src/pages/work/card-graph/types.js';
 import type { HelmEvent } from '../src/shared/types.js';
@@ -39,8 +39,25 @@ test('用时跳过排队，完成后的时间线重开不随当前时间拉长�
   expect(dispatchDuration(runs, 60_000)).toBe(50_000);
   const finished = [{ startedAt: at(10), endedAt: at(40) }] as Dispatch[];
   const rounds = [{ startedAt: at(0), endedAt: at(50) }];
-  expect(timelineRange(finished, rounds, 100_000)).toEqual(timelineRange(finished, rounds, 100_000_000));
-  expect(timelineRange([], [], 100_000).span).toBeGreaterThan(0);
+  const scale = (now: number) => { const { position, breaks } = timelineScale(finished, rounds, now); return { end: position(50_000), breaks }; };
+  expect(scale(100_000)).toEqual(scale(100_000_000));
+  expect(timelineScale([], [], 100_000).position(100_000)).toBe(0);
+});
+
+test('时间线把超过上限的空闲压成固定宽度，刻度跳过被压掉的时间', () => {
+  const at = (minutes: number) => new Date(minutes * 60_000).toISOString();
+  // 10 minutes of work, 3 hours waiting for the user, 10 more minutes of work.
+  const rounds = [{ startedAt: at(0), endedAt: at(10) }, { startedAt: at(190), endedAt: at(200) }];
+  const { position, timeAt, breaks } = timelineScale([], rounds, 0);
+  expect(breaks).toEqual([{ from: 600_000, to: 11_400_000, at: position(600_000 + idleCap / 2) }]);
+  const width = (from: number, to: number) => position(to * 60_000) - position(from * 60_000);
+  expect(width(0, 10)).toBeCloseTo(width(190, 200));
+  expect(width(10, 190)).toBeCloseTo(width(0, idleCap / 60_000));
+  expect(width(0, 10) / position(200 * 60_000)).toBeGreaterThan(.4);
+  expect(timeAt(position(195 * 60_000))).toBeCloseTo(195 * 60_000);
+  expect(timeAt(position(5 * 60_000))).toBeCloseTo(5 * 60_000);
+  // Short gaps stay to scale.
+  expect(timelineScale([], [{ startedAt: at(0), endedAt: at(10) }, { startedAt: at(11), endedAt: at(20) }], 0).breaks).toEqual([]);
 });
 
 test('收件箱只取最近三条进展，忽略噪声且不修改事件顺序', () => {

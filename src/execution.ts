@@ -361,7 +361,10 @@ export class ExecutionRunner {
         const result = getDispatch(this.store, dispatch.workId, dispatch.id);
         refreshCardReadiness(this.store, dispatch.workId);
         const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', { ...result, ...(ruleFailure ? { error: ruleFailure } : {}) }, scope);
-        this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
+        // A vote batch is judged together: only the last verification to end wakes the coordinator; earlier ones reach it as recent events.
+        const batchOpen = dispatch.purpose === 'verification' && this.store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ?
+          AND purpose = 'verification' AND status IN ('queued', 'running')`).get(dispatch.cardId);
+        if (!batchOpen) this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
         checkOutputUsage(this.store);
       });
       releaseEnvironment();

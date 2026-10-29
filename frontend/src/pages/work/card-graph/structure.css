@@ -40,6 +40,10 @@
 .cs-now > div { position: relative; }
 .cs-now > div::before { content: ''; position: absolute; top: 24px; bottom: 0; left: var(--cs-now); border-left: 1px solid var(--running); }
 .cs-now time { position: absolute; left: var(--cs-now); transform: translateX(-100%); white-space: nowrap; color: var(--running); font: var(--text-sm) var(--mono); }
+.cs-break { position: absolute; inset: 0; pointer-events: none; display: grid; grid-template-columns: 132px minmax(0, 1fr); }
+.cs-break > div { position: relative; }
+.cs-break > div::before { content: ''; position: absolute; top: 24px; bottom: 0; left: var(--cs-at); width: 8px; transform: translateX(-50%); border-inline: 1px dashed var(--border-strong); background: var(--surface); }
+.cs-break > div > span { position: absolute; top: 4px; left: var(--cs-at); transform: translateX(-50%); color: var(--muted); font: var(--text-sm) var(--mono); pointer-events: auto; cursor: default; }
 .cs-sendback { color: var(--danger); }
 .cs-events { display: grid; gap: var(--space-4); padding: var(--space-4); }
 .cs-filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; }

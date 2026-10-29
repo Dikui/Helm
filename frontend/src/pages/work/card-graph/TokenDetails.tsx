@@ -1,5 +1,5 @@
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
-import { formatUsage, sumUsage, totalTokens } from '../../../shared/token-usage.js';
+import { formatUsage, sumUsage, totalTokens, uncachedTokens } from '../../../shared/token-usage.js';
 import type { Usage } from '../../../shared/types.js';
 import type { Round } from '../conversation/types.js';
 import { endLabels } from './labels.js';
@@ -8,7 +8,8 @@ import type { Dispatch } from './types.js';
 export function UsageSummary({ usage }: { usage: Usage }) {
   const { t, language } = useI18n();
   return <div className="cg-token-summary"><p>{t('tokenTotal')} {formatUsage(usage, language)}</p>
-    <p className="muted">{t('tokenInput')} {formatTokens(usage.inputTokens, language)}{usage.cacheReadTokens != null && ` (${t('tokenCacheRead')} ${formatTokens(usage.cacheReadTokens, language)})`} · {t('tokenOutput')} {formatTokens(usage.outputTokens, language)}</p>
+    <p className="muted">{t('tokenInput')} {formatTokens(usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(usage.outputTokens, language)}</p>
+    {(usage.cacheReadTokens != null || usage.cacheWriteTokens != null) && <p className="muted">{t('tokenUncached')} {formatTokens(uncachedTokens(usage), language)} · {t('tokenCacheRead')} {formatTokens(usage.cacheReadTokens ?? null, language)} · {t('tokenCacheWrite')} {formatTokens(usage.cacheWriteTokens ?? null, language)}</p>}
     {totalTokens(usage) === null ? <p className="hint">{t('tokenUnknown')}</p> : usage.incomplete && <p className="hint">{t('tokenIncomplete')}</p>}
   </div>;
 }
@@ -16,8 +17,9 @@ export function UsageSummary({ usage }: { usage: Usage }) {
 export function UsageTable({ kind, rows }: { kind: 'dispatch' | 'round'; rows: { id: string; label: string; usage: Usage }[] }) {
   const { t, language } = useI18n();
   return rows.length ? <div className="cg-token-table"><table aria-label={t(kind === 'dispatch' ? 'tokenDispatches' : 'tokenRounds')}>
-    <thead><tr><th>{t(kind === 'dispatch' ? 'graphDispatch' : 'structureRound')}</th><th>{t('tokenInput')} Token</th><th>{t('tokenCacheRead')}</th><th>{t('tokenOutput')} Token</th></tr></thead>
-    <tbody>{rows.map(row => <tr key={row.id}><th scope="row">{row.label}</th><td>{formatTokens(row.usage.inputTokens, language)}</td><td>{formatTokens(row.usage.cacheReadTokens ?? null, language)}</td><td>{formatTokens(row.usage.outputTokens, language)}</td></tr>)}</tbody>
+    <thead><tr><th>{t(kind === 'dispatch' ? 'graphDispatch' : 'structureRound')}</th><th>{t('tokenInput')}</th><th>{t('tokenUncached')}</th><th>{t('tokenCacheRead')}</th><th>{t('tokenCacheWrite')}</th><th>{t('tokenOutput')}</th></tr></thead>
+    <tbody>{rows.map(row => <tr key={row.id}><th scope="row">{row.label}</th><td>{formatTokens(row.usage.inputTokens, language)}</td><td>{formatTokens(uncachedTokens(row.usage), language)}</td>
+      <td>{formatTokens(row.usage.cacheReadTokens ?? null, language)}</td><td>{formatTokens(row.usage.cacheWriteTokens ?? null, language)}</td><td>{formatTokens(row.usage.outputTokens, language)}</td></tr>)}</tbody>
   </table></div> : <p className="hint">{t(kind === 'dispatch' ? 'graphNoDispatches' : 'structureNoRounds')}</p>;
 }
 

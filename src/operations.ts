@@ -59,6 +59,11 @@ const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id
 const projectSettings = (store: TaskStore, project: Record<string, unknown>) =>
   ({ ...project, environmentNames: projectEnvironmentNames(store, String(project.id)) });
 
+// Coordinator reads carry results, not the Agent snapshot (role rules), process bookkeeping or, in lists, its own long texts.
+const coordinatorDetailOmits = ['agent', 'sqlitePath', 'outputPath', 'browserPgid', 'browserStartedAt', 'portStart', 'portEnd', 'pgid', 'processStartedAt'];
+const coordinatorListOmits = [...coordinatorDetailOmits, 'content', 'cardContentSnapshot', 'finalAnswer'];
+const omit = (value: object, keys: string[]) => Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
+
 export const operations: readonly Operation[] = [
   operation({
     name: 'list-library', description: '列出库条目及引用它们的 Agent', callers: ['user'], keyed: false, mutates: false,
@@ -184,7 +189,7 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'list-agents', description: '读取文件中的 Agent、计费方式和可用性', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store }) => listAgents(store),
+    schema: z.object({ workId: z.string().min(1).optional() }).strict(), execute: ({ store, actor }) => listAgents(store, actor),
   }),
   operation({
     name: 'create-dispatch', description: '给卡片派执行或验收单；执行可续跑并独占卡片，验收一律新开对话，同一卡片可同时跑多个验收，各自检查派单时固定的提交', callers: ['coordinator-round'], keyed: true, mutates: true, transactional: false,
@@ -203,14 +208,18 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => submitConclusion(store, actor, params),
   }),
   operation({
-    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结果；验收派单的 startCommit 是它检查的提交，outdated=true 表示卡片已有新提交、结论已过期', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结论；完整回答和派单内容用 get-dispatch 读；验收派单的 startCommit 是它检查的提交，outdated=true 表示卡片已有新提交、结论已过期', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1).optional() }).strict(),
-    execute: ({ store }, { workId, cardId }) => markOutdated(store, listDispatches(store, workId, cardId)),
+    execute: ({ store, actor }, { workId, cardId }) => markOutdated(store, listDispatches(store, workId, cardId))
+      .map(dispatch => actor.type === 'coordinator-round' ? omit(dispatch, coordinatorListOmits) : dispatch),
   }),
   operation({
     name: 'get-dispatch', description: '读取派单详情和完整最终回答', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1) }).strict(),
-    execute: ({ store }, { workId, dispatchId }) => markOutdated(store, [getDispatch(store, workId, dispatchId)])[0],
+    execute: ({ store, actor }, { workId, dispatchId }) => {
+      const dispatch = markOutdated(store, [getDispatch(store, workId, dispatchId)])[0]!;
+      return actor.type === 'coordinator-round' ? omit(dispatch, coordinatorDetailOmits) : dispatch;
+    },
   }),
   operation({
     name: 'get-dispatch-output', description: '按步骤读取派单输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
@@ -533,7 +542,7 @@ export const operations: readonly Operation[] = [
         FROM works WHERE status = 'paused' AND runtime_pause_reason IS NOT NULL ORDER BY created_at, id`).all()
         .map(work => ({ type: 'work', kind: 'runtime-pause', ...work })),
       ...pendingOutputWarning(store),
-      ...await pendingAgents(store),
+      ...pendingAgents(store),
     ],
   }),
   operation({

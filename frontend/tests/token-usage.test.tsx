@@ -48,12 +48,12 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
   expect(within(inspector).getByText('Token 合计 47')).toBeTruthy();
   const table = within(inspector).getByRole('table', { name: '派单 Token' });
-  expect(within(table).getAllByRole('row').map(row => row.textContent)).toEqual(['派单输入 Token其中缓存读取输出 Token', '#1 · 执行30—5', '#2 · 验收10—2']);
+  expect(within(table).getAllByRole('row').map(row => row.textContent)).toEqual(['派单总输入未缓存缓存读取缓存写入输出', '#1 · 执行30———5', '#2 · 验收10———2']);
   fireEvent.click(within(graph).getByRole('button', { name: '调度者 Token 明细' }));
   const coordinator = screen.getByRole('complementary', { name: '调度者 Token 明细' });
   expect(within(coordinator).getByText('Token 合计 180')).toBeTruthy();
   const rounds = within(coordinator).getByRole('table', { name: '调度轮次 Token' });
-  expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['#1100—20', '#250—10']);
+  expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['#1100———20', '#250———10']);
   fireEvent.click(card);
   expect(screen.getByRole('complementary', { name: '卡片检查器' })).toBeTruthy();
   await waitFor(() => expect(screen.getAllByText('Token 227')).toHaveLength(2));
@@ -70,15 +70,16 @@ test('对齐阶段的顶部和收件箱始终显示 Token 标签，未报告用�
 
 test('调度者的合计计入已知部分并标出缺项，明细保留已知输入和真实零输出', () => {
   const rounds: Round[] = [
-    { id: 'one', number: 1, agentId: 'coordinator', status: 'ended', startedAt: '', endedAt: '', reason: 'completed', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } },
+    { id: 'one', number: 1, agentId: 'coordinator', status: 'ended', startedAt: '', endedAt: '', reason: 'completed', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 15 } },
     { id: 'two', number: 2, agentId: 'coordinator', status: 'ended', startedAt: '', endedAt: '', reason: 'error', usage: { inputTokens: null, outputTokens: 0 } },
   ];
   render(<I18nProvider><CoordinatorTokens rounds={rounds} /></I18nProvider>);
   expect(screen.getByText('Token 合计 120+')).toBeTruthy();
-  expect(screen.getByText('输入 100 (其中缓存读取 80) · 输出 20')).toBeTruthy();
+  expect(screen.getByText('总输入 100 · 输出 20')).toBeTruthy();
+  expect(screen.getByText('未缓存 5 · 缓存读取 80 · 缓存写入 15')).toBeTruthy();
   expect(screen.getByText('部分轮次或派单没有报告用量，数字只计已报告的部分')).toBeTruthy();
   const rows = within(screen.getByRole('table')).getAllByRole('row');
-  expect(rows.map(row => row.textContent)).toEqual(['调度轮次输入 Token其中缓存读取输出 Token', '#11008020', '#2 · 出错退出——0']);
+  expect(rows.map(row => row.textContent)).toEqual(['调度轮次总输入未缓存缓存读取缓存写入输出', '#11005801520', '#2 · 出错退出————0']);
 });
 
 test('尚无卡片和轮次时保留独立调度者节点，用量显示 —', () => {

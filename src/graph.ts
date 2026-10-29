@@ -19,13 +19,14 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
   (SELECT conclusion FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastConclusion,
   (SELECT json_object('inputTokens', SUM(json_extract(usage, '$.inputTokens')), 'outputTokens', SUM(json_extract(usage, '$.outputTokens')),
-    'cacheReadTokens', SUM(json_extract(usage, '$.cacheReadTokens')),
+    'cacheReadTokens', SUM(json_extract(usage, '$.cacheReadTokens')), 'cacheWriteTokens', SUM(json_extract(usage, '$.cacheWriteTokens')),
     'incomplete', COUNT(*) > MIN(COUNT(json_extract(usage, '$.inputTokens')), COUNT(json_extract(usage, '$.outputTokens'))))
     FROM dispatches WHERE card_id = cards.id) AS usage`;
 
 function readCard(row: Record<string, unknown>): Card {
-  const { incomplete, cacheReadTokens, ...usage } = JSON.parse(String(row.usage));
+  const { incomplete, cacheReadTokens, cacheWriteTokens, ...usage } = JSON.parse(String(row.usage));
   if (cacheReadTokens !== null) usage.cacheReadTokens = cacheReadTokens;
+  if (cacheWriteTokens !== null) usage.cacheWriteTokens = cacheWriteTokens;
   return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), writeScopes: JSON.parse(String(row.writeScopes)),
     usage: incomplete && (usage.inputTokens !== null || usage.outputTokens !== null) ? { ...usage, incomplete: true } : usage } as unknown as Card;
 }
