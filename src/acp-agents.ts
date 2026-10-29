@@ -121,7 +121,8 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     // native process when adding agent skills (grok agent --help).
     arguments: agent => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []),
       ...(agent.skillsPath ? ['--no-leader', '--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
-    environment: { set: { GROK_SANDBOX: 'workspace' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
+    // Subagents and background workflows run outside Helm's usage, sandbox and process cleanup.
+    environment: { set: { GROK_SANDBOX: 'workspace', GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
     unavailable(agent) {
       if (agent.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
       if (!agent.model) return 'Grok Agent 必须指定模型 id，不能使用 CLI 默认模型。';

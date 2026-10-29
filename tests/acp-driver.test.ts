@@ -167,6 +167,8 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   assert.deepEqual(spawn.args, ['agent', '--effort', 'low', 'stdio']);
   assert.equal(spawn.env.HOME, ctx.home);
   assert.equal(spawn.env.GROK_SANDBOX, 'workspace');
+  assert.equal(spawn.env.GROK_SUBAGENTS, '0');
+  assert.equal(spawn.env.GROK_WORKFLOWS, '0');
   assert.equal(spawn.env.XAI_API_KEY, undefined);
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
   assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
