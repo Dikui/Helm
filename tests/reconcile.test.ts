@@ -544,7 +544,8 @@ for (const status of ['merged', 'pushing']) test(`旧 ${status} 工作升级后�
   try {
     db.prepare('UPDATE works SET status = ? WHERE id = ?').run(status, daemon.work.id);
     db.prepare("DELETE FROM events WHERE work_id = ? AND action = 'work-completed'").run(daemon.work.id);
-    db.exec(`PRAGMA user_version = ${migrations.length - 1}`);
+    // Replay only the delivery migration; later migrations may already exist in this schema.
+    db.exec(migrations.find(sql => sql.includes("WHERE status IN ('merged', 'pushing')"))!);
   } finally { db.close(); }
   const marker = join(daemon.directory, 'unexpected-push');
   const hook = join(daemon.repo, '.git', 'hooks', 'pre-push');
