@@ -48,7 +48,6 @@ function observedDriver() {
           record.command = `printf forbidden > ${shellQuote(join(options.cwd, 'coordinator-write.txt'))}`;
           await session.send(`这是低消耗 Helm 调度者冒烟。只执行下列步骤，不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。
 所有 MCP 操作只用注入的 helm 端点，工作由轮次令牌确定，调用不传 workId。工具失败即报告退出，不寻找绕过方式。
-先列出可用的 helm-smoke- 开头的 skills；如有，读取并遵循。
 ${attempt === 1 ? `先用 shell 原样尝试一次命令：${record.command}
 预期被 read-only 沙箱拒绝；不得重试或提权。拒绝后读取 README.md 并继续以下操作。` : ''}
 无论简报是否已有对象，每轮都必须按顺序实际重放：
