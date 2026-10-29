@@ -122,10 +122,12 @@ test('暂停、完成、取消、排队及运行派单保持原状态，活动�
 });
 
 test('跳过卡片不阻止审核、不算整体验收必需卡片，结束后不误报工作停住；仍有待办时会报告', t => {
-  const { store, card, link, cancel } = fixture(t);
+  const { store, card, link, cancel, dispatch } = fixture(t);
   const source = card('source'), child = card('child'), overall = card('overall', true, true);
   link(source, child); cancel(source);
   // overall has no dependencies on the inactive cards; neither is required coverage.
+  // Review details list verification dispatches, so provide a vote for overall.
+  dispatch(overall, 'verification', 'ended');
   const details = (reviewDetails(store, { kind: 'review', workId: 'w' }) as { review?: { overallVerification: { cardId: string }[] } }).review!;
   assert.deepEqual(details.overallVerification.map(item => item.cardId), [overall.id]);
   noticeStall(store, 'w', 'unfinished');

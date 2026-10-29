@@ -167,6 +167,7 @@ test('轮次看门狗设置持久化，空闲超时及总时长超时都会自�
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
     const ended = events.filter(event => event.action === 'round-ended');
     assert.equal(ended[0].details.reason, 'timed-out');
+    assert.match(ended[0].details.failure, /可在设置的运行页调整超时/);
     assert.equal(ended[0].details.processed, false);
     assert.equal(ended[1].details.reason, 'completed');
     await daemon.restart(new FakeDriver());

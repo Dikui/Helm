@@ -454,7 +454,7 @@ test('取消工作清理中崩溃，启动对账保留有新提交的卡片分�
   assert.equal(git(daemon.repo, 'branch', '--list', cards[1].cardBranch), '');
 });
 
-test('崩溃中的验收派单和残留的验收副本在重启时删除，卡片副本和分支不变', async t => {
+test('崩溃中的验收派单和残留的验收副本在重启时删除，只验收卡片始终没有副本或分支', async t => {
   const daemon = await fixture(t, 'verification');
   const { dispatch, read } = await daemon.create();
   const running = await until(read, value => value.conclusion === 'passed');
@@ -473,9 +473,13 @@ test('崩溃中的验收派单和残留的验收副本在重启时删除，卡�
   assert.equal(existsSync(copies), false);
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(copies));
   const cardPath = join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId);
-  assert.match(git(cardPath, 'symbolic-ref', '--short', 'HEAD'), /^helm-card\//);
-  assert.equal(git(cardPath, 'rev-parse', 'HEAD'), running.startCommit);
-  assert.equal(git(cardPath, 'status', '--porcelain'), '');
+  assert.equal(existsSync(cardPath), false);
+  assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', `refs/heads/helm-card/${daemon.work.id}/${dispatch.cardId}`), '');
+  const card = await daemon.call('get-card', { ...daemon.scope, cardId: dispatch.cardId });
+  assert.equal(card.workPath, null);
+  assert.equal(card.cardBranch, null);
+  assert.equal(git(daemon.work.workPath, 'rev-parse', 'HEAD'), running.startCommit);
+  assert.equal(git(daemon.work.workPath, 'status', '--porcelain'), '');
 });
 
 test('重启保留排队派单的身份，在回收的并发与端口段上启动它', async t => {

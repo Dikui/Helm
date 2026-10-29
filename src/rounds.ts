@@ -199,6 +199,7 @@ export class RoundScheduler {
           if (reason === 'completed') { reason = 'error'; finalAnswer = undefined; }
         }
       }
+      if (reason === 'timed-out') failure = [failure, '调度轮次超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       let failures = 0;
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ? WHERE id = ?`)

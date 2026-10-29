@@ -195,9 +195,9 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
   const cardContentSnapshot = card.content;
   content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
-  const copy = cardCopy(store, work.id, card.id);
+  const copy = purpose === 'execution' ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.
-  const startCommit = purpose === 'verification' ? verificationCommit(store, { ...card, cardBranch: copy.cardBranch }) : null;
+  const startCommit = purpose === 'verification' ? verificationCommit(store, card) : null;
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
   mkdirSync(outputPath, { recursive: true });
@@ -210,7 +210,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
         params.resumeSessionId ?? null, params.resumeSessionId ?? null, new Date().toISOString(), outputPath,
         params.needsBrowser ? 1 : 0, cardContentSnapshot, description?.id ?? null, description?.version ?? null, startCommit);
     store.db.prepare(`UPDATE cards SET work_path = ?, card_branch = ?, agent_id = ?, latest_dispatch_id = ?, current_step = 0, latest_step_summary = NULL WHERE id = ?`)
-      .run(copy.workPath, copy.cardBranch, agent.id, id, card.id);
+      .run(copy.workPath ?? null, copy.cardBranch ?? null, agent.id, id, card.id);
     const dispatch = getDispatch(store, work.id, id);
     store.appendEvent(actor, { type: 'dispatch', id }, 'dispatch-created', dispatch, { workId: work.id, cardId: card.id, dispatchId: id });
     return dispatch;

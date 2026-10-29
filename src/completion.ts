@@ -49,27 +49,31 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (card.needsVerification && !passed.length) {
     throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须至少有一票正常结束且通过的验收才能标完成；计票由调度者负责。');
   }
-  if (!work.workPath || !work.workBranch || !card.cardBranch) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
+  const executed = dispatches.some(item => item.purpose === 'execution');
+  if (!work.workPath || !work.workBranch || (executed && !card.cardBranch)) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
   if (dispatchGit(work.workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(work.workPath, 'status', '--porcelain')) {
     throw new RuleError('WORK_COPY_DIRTY', '工作分支的 _work 必须干净且检出工作分支。');
   }
   // A retry after cleanup can still merge the saved commit; the branch may already be gone.
-  const branchExists = dispatchGit(work.workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
-  const target = branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit;
+  const branchExists = executed && dispatchGit(work.workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
+  const target = executed ? (branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit) : work.workBranch;
   if (!target) throw new RuleError('GIT_ERROR', '找不到卡片的提交。');
   // Keep the checked commit readable after completion removes the card branch.
-  const checkedCommit = card.needsVerification ? branchExists ? verificationCommit(store, card) : target : null;
+  const checkedCommit = card.needsVerification ? (!executed || branchExists ? verificationCommit(store, card) : target) : null;
   if (card.needsVerification && !passed.some(item => item.startCommit === checkedCommit)) {
     throw new RuleError('VERIFICATION_OUTDATED', '当前提交没有有效的通过验收票，须重新验收。');
   }
-  try {
-    dispatchGit(work.workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
-      'merge', '--no-ff', '--no-edit', target);
-  } catch (error) {
-    const conflicts = dispatchGit(work.workPath, 'diff', '--name-only', '--diff-filter=U');
-    if (existsSync(dispatchGit(work.workPath, 'rev-parse', '--git-path', 'MERGE_HEAD'))) dispatchGit(work.workPath, 'merge', '--abort');
-    if (conflicts) throw new RuleError('WORK_BRANCH_CONFLICT', '与工作分支冲突');
-    throw error;
+  // Verification-only cards already checked the work branch; there is nothing to merge.
+  if (executed) {
+    try {
+      dispatchGit(work.workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
+        'merge', '--no-ff', '--no-edit', target);
+    } catch (error) {
+      const conflicts = dispatchGit(work.workPath, 'diff', '--name-only', '--diff-filter=U');
+      if (existsSync(dispatchGit(work.workPath, 'rev-parse', '--git-path', 'MERGE_HEAD'))) dispatchGit(work.workPath, 'merge', '--abort');
+      if (conflicts) throw new RuleError('WORK_BRANCH_CONFLICT', '与工作分支冲突');
+      throw error;
+    }
   }
   const mergeCommit = dispatchGit(work.workPath, 'rev-parse', 'HEAD');
   removeCardCopy(store, card);

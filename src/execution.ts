@@ -37,7 +37,8 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
   const card = cardDetails(store, dispatch.workId, dispatch.cardId);
   if (dispatch.purpose === 'verification') {
     removeVerificationCopy(store, dispatch.workId, verificationPath(store, dispatch));
-    if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', card.cardBranch!, card.cardBranch!, dispatch.startCommit!));
+    const branch = card.cardBranch ?? store.work(dispatch.workId).workBranch!;
+    if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }
   const workPath = card.workPath!;
@@ -349,6 +350,7 @@ export class ExecutionRunner {
         current = getDispatch(this.store, dispatch.workId, dispatch.id);
       }
       if (current.abortReason) reason = 'aborted';
+      if (reason === 'timed-out') failure = [failure, '派单超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       if (reason !== 'completed') finalAnswer = null;
       if (failure) failure = redact(failure);
       this.store.transaction(() => {

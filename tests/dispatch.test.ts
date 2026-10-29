@@ -170,6 +170,7 @@ test('派单看门狗分别限制无输出和墙钟总时长，超时保留改�
     const events = await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
     const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
     assert.equal(result.endReason, 'timed-out');
+    assert.match(result.failure, /可在设置的运行页调整超时/);
     assert.equal(result.finalAnswer, null);
     assert.equal(result.conclusion, 'undeclared');
     assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '超时前进度');

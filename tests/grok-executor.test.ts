@@ -39,8 +39,11 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
     assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), 'inside');
     assert.notEqual(dispatch.startCommit, dispatch.endCommit, '执行改动由运行层提交');
   } else {
-    await assert.rejects(stat(join(card.workPath, 'inside.txt')), { code: 'ENOENT' });
-    assert.equal(dispatch.startCommit, dispatch.endCommit, '验收改动被运行层重置');
+    assert.equal(card.workPath, null);
+    assert.equal(card.cardBranch, null);
+    const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+    await assert.rejects(stat(join(work.workPath, 'inside.txt')), { code: 'ENOENT' });
+    assert.equal(dispatch.startCommit, dispatch.endCommit, '验收改动被运行层丢弃');
     assert.equal(dispatch.resumeSessionId, null);
   }
   const requests = await acp.requests();

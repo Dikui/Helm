@@ -597,7 +597,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
   });
 }
 
-test('Claude 进程组登记接入验收收尾：正常、额度用完、看门狗和暂停都先杀进程再重置', async t => {
+test('Claude 进程组登记接入验收收尾：正常、额度用完、看门狗和暂停都先杀进程再删除副本', async t => {
   for (const mode of ['completed', 'quota-exhausted', 'timed-out', 'pause-card'] as const) await t.test(mode, async t => {
     const evidence = (await fixture(t)).cwd;
     let group = 0;
@@ -665,8 +665,11 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
     assert.deepEqual({ start: dispatch.portStart, end: dispatch.portEnd }, envRange);
     assert.equal(dispatch.endCommit, dispatch.startCommit);
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
-    assert.equal(await readFile(join(card.workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
-    assert.equal(await readFile(join(evidence, 'terminated.txt'), 'utf8'), 'temporary SDK edit', '进程必须在 reset 前退出');
+    assert.equal(card.workPath, null);
+    assert.equal(card.cardBranch, null);
+    const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+    assert.equal(await readFile(join(work.workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
+    assert.equal(await readFile(join(evidence, 'terminated.txt'), 'utf8'), 'temporary SDK edit', '进程必须在删除副本前退出');
     assert.throws(() => process.kill(group, 0), { code: 'ESRCH' });
     assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
     const events = await daemon.events();
@@ -721,7 +724,9 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     assert.ok((await daemon.events()).some(event => event.action === 'context-compacted' && event.dispatchId === dispatch.id));
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');
-    assert.equal(await readFile(join(card.workPath, 'index.html'), 'utf8'), purpose === 'verification' ? '<h1>Helm browser dispatch</h1>' : 'temporary SDK edit');
+    if (purpose === 'verification') assert.equal(card.workPath, null);
+    const copyPath = card.workPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath;
+    assert.equal(await readFile(join(copyPath, 'index.html'), 'utf8'), purpose === 'verification' ? '<h1>Helm browser dispatch</h1>' : 'temporary SDK edit');
     if (purpose === 'verification') assert.equal(dispatch.endCommit, dispatch.startCommit);
     else assert.notEqual(dispatch.endCommit, dispatch.startCommit);
     assert.deepEqual(card.usage, dispatch.usage);

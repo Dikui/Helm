@@ -37,6 +37,13 @@ const dispatch = (key: string, purpose = 'verification', cardKey = 'card'): Extr
 const complete = (check: (value: any) => void = ok, key = 'card'): FakeStep => ({ type: 'tool', name: 'complete-card',
   arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, key).id }), check });
 
+function assertNoCardCopy(daemon: { repo: string; dataDir: string; work: { id: string } }, card: any) {
+  assert.equal(card.workPath, null);
+  assert.equal(card.cardBranch, null);
+  assert.equal(existsSync(join(daemon.dataDir, 'worktrees', daemon.work.id, card.id)), false);
+  assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', `refs/heads/helm-card/${daemon.work.id}/${card.id}`), '');
+}
+
 async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[], config: { beforeConfirm?: (call: (name: string, params?: object) => Promise<any>) => Promise<void> } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm verification-')));
   const repo = join(directory, 'project');
@@ -67,7 +74,7 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   };
   const cards = async () => (await call('get-card-graph', { workId: work.id })).result.filter((node: any) => node.type === 'card') as any[];
   const dispatches = async () => (await call('list-dispatches', { workId: work.id })).result as any[];
-  return { ...daemon, call, work, repo, events, finished, cards, dispatches, description: gate.description };
+  return { ...daemon, call, work, repo, dataDir: join(directory, 'data'), events, finished, cards, dispatches, description: gate.description };
 }
 
 for (const conclusions of [['failed', 'passed'], ['passed', 'failed'], ['failed', 'undeclared'], ['passed-error', 'failed']]) {
@@ -170,7 +177,7 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
   assert.equal(git(daemon.repo, 'show', `helm/${daemon.work.id}:result.txt`), 'implementation');
 });
 
-test('验收在一次性副本里运行，结束后整个删除，卡片副本和分支不变，保留检查证据', async t => {
+test('验收在一次性副本里运行，结束后整个删除，不建卡片副本或分支，保留检查证据', async t => {
   let workPath = '';
   let startCommit = '';
   let reviewerCommit = '';
@@ -197,18 +204,18 @@ test('验收在一次性副本里运行，结束后整个删除，卡片副本�
   assert.notEqual(reviewerCommit, startCommit);
   assert.equal(result.startCommit, startCommit);
   assert.equal(result.endCommit, startCommit);
-  const [{ workPath: cardPath, cardBranch }] = await daemon.cards();
-  assert.notEqual(workPath, cardPath);
+  assertNoCardCopy(daemon, (await daemon.cards())[0]);
   assert.equal(existsSync(workPath), false);
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
-  assert.equal(git(cardPath, 'symbolic-ref', '--short', 'HEAD'), cardBranch);
-  assert.equal(git(cardPath, 'rev-parse', cardBranch), startCommit);
-  assert.equal(git(cardPath, 'status', '--porcelain'), '');
-  assert.equal(await readFile(join(cardPath, 'result.txt'), 'utf8'), 'baseline\n');
+  const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+  assert.equal(git(work.workPath, 'rev-parse', work.workBranch), startCommit);
+  assert.equal(git(work.workPath, 'status', '--porcelain'), '');
+  assert.equal(await readFile(join(work.workPath, 'result.txt'), 'utf8'), 'baseline\n');
   const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
   const evidence = artifacts.find((item: any) => item.kind === 'test-output');
   assert.equal((await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: evidence.id })).result.content, 'tests: passed\n');
   assert.equal(artifacts.find((item: any) => item.kind === 'branch').commitSha, startCommit);
+  assert.equal(artifacts.find((item: any) => item.kind === 'branch').ref, work.workBranch);
   assert.ok(!artifacts.some((item: any) => item.kind === 'file'));
 });
 
@@ -270,7 +277,8 @@ test('后续验收未声明、不通过或异常结束不影响当前提交已�
       assert.equal(latest.conclusion, outcome === 'failed' ? 'failed' : 'undeclared');
       const before = (await daemon.cards())[0];
       assert.equal(before.status, 'verifying');
-      assert.equal(await readFile(join(before.workPath, 'result.txt'), 'utf8'), 'baseline\n');
+      assertNoCardCopy(daemon, before);
+      assert.equal(git(daemon.repo, 'show', `helm/${daemon.work.id}:result.txt`), 'baseline');
       last.release();
       await daemon.finished();
       assert.equal((await daemon.cards())[0].status, 'completed');
@@ -311,17 +319,23 @@ test('整体验收用普通卡片依赖所有成果，只派验收单且完成�
   assert.ok(checkedHead);
   const workBranch = `helm/${daemon.work.id}`;
   assert.equal(git(daemon.repo, 'rev-parse', workBranch), checkedHead);
+  assertNoCardCopy(daemon, (await daemon.cards()).find(value => value.key === 'overall'));
   verified.release();
   await daemon.finished();
   assert.equal(git(daemon.repo, 'rev-parse', workBranch), checkedHead);
   const overall = (await daemon.cards()).find(value => value.key === 'overall');
   assert.equal(overall.status, 'completed');
+  assertNoCardCopy(daemon, overall);
   assert.equal(overall.dependencies.length, 2);
   assert.deepEqual((await daemon.dispatches()).filter(value => value.cardId === overall.id).map(value => value.purpose), ['verification']);
   await assert.rejects(readFile(join(overallPath, 'one.txt')));
   const result = (await daemon.dispatches()).find(value => value.cardId === overall.id);
   const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
   assert.equal(artifacts.find((value: any) => value.kind === 'branch').commitSha, checkedHead);
+  assert.equal(artifacts.find((value: any) => value.kind === 'branch').ref, workBranch);
+  const completed = (await daemon.events()).find(event => event.action === 'card-completed' && event.cardId === overall.id);
+  assert.equal(completed.details.checkedCommit, checkedHead);
+  assert.equal((await daemon.dispatches()).find(value => value.cardId === overall.id).outdated, false);
 });
 
 test('只派验收单的卡片新增上游成果后旧验收过期，复验检查新的工作分支，完成时跳过合并', async t => {
@@ -379,6 +393,56 @@ test('只派验收单的卡片新增上游成果后旧验收过期，复验检�
     cardId: vote.cardId, dispatchId: vote.id, status: vote.status, endReason: vote.endReason,
     conclusion: vote.conclusion, reason: vote.conclusionReason,
   })));
+});
+
+test('只验收的卡片之后派执行单才创建卡片副本，再验收并合并自己的成果', async t => {
+  const firstVerified = hold();
+  const executing = hold();
+  const executed = hold();
+  const reverified = hold();
+  t.after(() => { firstVerified.release(); executing.release(); executed.release(); reverified.release(); });
+  const passed: FakeStep = { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '检查通过' }, check: ok };
+  let executionPath = '';
+  let verificationPath = '';
+  const daemon = await fixture(t, [
+    card(), dispatch('first'), { type: 'hang', until: firstVerified.promise },
+    dispatch('execute', 'execution'), { type: 'hang', until: executed.promise },
+    complete(code('VERIFICATION_OUTDATED')), dispatch('again'), { type: 'hang', until: reverified.promise }, complete(),
+  ], [[passed], ctx => {
+    executionPath = ctx.options.cwd;
+    return [{ type: 'write', path: 'result.txt', content: 'implementation after verification\n' }, { type: 'hang', until: executing.promise }];
+  }, ctx => {
+    verificationPath = ctx.options.cwd;
+    assert.notEqual(verificationPath, executionPath);
+    assert.equal(git(verificationPath, 'show', 'HEAD:result.txt'), 'implementation after verification');
+    return [passed];
+  }]);
+  await until(daemon.dispatches, values => values[0]?.status === 'ended');
+  assertNoCardCopy(daemon, (await daemon.cards())[0]);
+  firstVerified.release();
+  await until(async () => executionPath, Boolean);
+  const cardWithCopy = (await daemon.cards())[0];
+  assert.equal(cardWithCopy.workPath, executionPath);
+  assert.equal(cardWithCopy.cardBranch, `helm-card/${daemon.work.id}/${cardWithCopy.id}`);
+  assert.equal(git(executionPath, 'symbolic-ref', '--short', 'HEAD'), cardWithCopy.cardBranch);
+  executing.release();
+  const records = await until(daemon.dispatches, values => values[1]?.status === 'ended');
+  assert.equal(records[1].endReason, 'completed', records[1].failure);
+  assert.notEqual(records[1].endCommit, records[0].startCommit);
+  assert.equal(records[0].outdated, true);
+  executed.release();
+  const verified = await until(daemon.dispatches, values => values[2]?.status === 'ended');
+  assert.equal(verified[2].startCommit, records[1].endCommit);
+  assert.equal((await daemon.cards())[0].workPath, executionPath);
+  reverified.release();
+  await daemon.finished();
+  assert.equal((await daemon.cards())[0].status, 'completed');
+  const workBranch = `helm/${daemon.work.id}`;
+  assert.equal(git(daemon.repo, 'show', `${workBranch}:result.txt`), 'implementation after verification');
+  assert.equal(git(daemon.repo, 'rev-parse', `${workBranch}^2`), records[1].endCommit);
+  assert.equal(existsSync(executionPath), false);
+  assert.equal(existsSync(verificationPath), false);
+  assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', `refs/heads/${cardWithCopy.cardBranch}`), '');
 });
 
 test('派过执行单的卡片多次验收始终检查自己的成果，不随工作分支刷新', async t => {
@@ -553,7 +617,8 @@ test('验收和执行共享并发及端口段，暂停排队验收不启动执�
   const paused = await daemon.call('pause-card', { workId: daemon.work.id, cardId });
   ok(paused);
   assert.equal(paused.result.status, 'paused');
-  assert.equal(await readFile(join(paused.result.workPath, 'result.txt'), 'utf8'), 'baseline\n');
+  assertNoCardCopy(daemon, paused.result);
+  assert.equal(git(daemon.repo, 'show', `helm/${daemon.work.id}:result.txt`), 'baseline');
   records = await until(daemon.dispatches, values => values[1].sessionId);
   assert.equal(records[0].abortReason, '卡片暂停');
   assert.equal(records[0].endCommit, records[0].startCommit);
@@ -599,6 +664,7 @@ test('验收看门狗限制无输出和总时长，超时先清进程再删除�
     })); } });
     const result = (await until(daemon.dispatches, values => values[0]?.status === 'ended'))[0];
     assert.equal(result.endReason, 'timed-out', result.failure);
+    assert.match(result.failure, /可在设置的运行页调整超时/);
     assert.equal(result.conclusion, 'undeclared');
     assert.equal(result.finalAnswer, null);
     assert.equal(result.endCommit, result.startCommit);
@@ -618,6 +684,7 @@ test('工作暂停及卡片或工作取消均中止验收并删除验收副本',
     }]);
     const running = (await until(daemon.dispatches, values => values[0]?.conclusion === 'passed'))[0];
     const params = { workId: daemon.work.id, cardId: running.cardId, reason: '停止检查' };
+    assertNoCardCopy(daemon, (await daemon.cards())[0]);
     ok(await daemon.call(operation, operation === 'cancel-card' ? params : { workId: params.workId }));
     const result = (await daemon.dispatches())[0];
     assert.equal(result.endReason, 'aborted', result.failure);
@@ -625,11 +692,21 @@ test('工作暂停及卡片或工作取消均中止验收并删除验收副本',
     assert.equal(result.endCommit, result.startCommit);
     assert.equal(result.abortReason, operation === 'pause-work' ? '工作暂停' : operation === 'cancel-card' ? '卡片取消' : '工作取消');
     assert.equal(existsSync(workPath), false);
+    assert.doesNotMatch(result.failure ?? '', /git 操作失败|找不到卡片/);
+    assertNoCardCopy(daemon, (await daemon.cards())[0]);
+    if (operation === 'cancel-work') {
+      const deleted = await daemon.call('delete-work', { workId: params.workId, confirm: true });
+      ok(deleted);
+      assert.equal(deleted.result.status, 'deleted');
+      assert.deepEqual(deleted.result.keptBranches, []);
+      assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', 'refs/heads/helm-card/'), '');
+      assert.equal(existsSync(join(daemon.dataDir, 'worktrees', params.workId)), false);
+    }
     if (operation === 'pause-work') assert.equal((await daemon.cards())[0].status, 'verifying');
   });
 });
 
-test('验收留下 index.lock 和未完成合并时仍整个删除副本，卡片分支不变', async t => {
+test('验收留下 index.lock 和未完成合并时仍整个删除副本，工作分支不变', async t => {
   let workPath = '';
   const daemon = await fixture(t, [card(), dispatch('verify')], [ctx => {
     workPath = ctx.options.cwd;
@@ -652,7 +729,8 @@ test('验收留下 index.lock 和未完成合并时仍整个删除副本，卡�
   assert.equal(result.endCommit, result.startCommit);
   assert.equal(existsSync(workPath), false);
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
-  const [{ workPath: cardPath, cardBranch }] = await daemon.cards();
-  assert.equal(git(cardPath, 'rev-parse', cardBranch), result.startCommit);
-  assert.equal(git(cardPath, 'status', '--porcelain'), '');
+  assertNoCardCopy(daemon, (await daemon.cards())[0]);
+  const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+  assert.equal(git(work.workPath, 'rev-parse', work.workBranch), result.startCommit);
+  assert.equal(git(work.workPath, 'status', '--porcelain'), '');
 });
