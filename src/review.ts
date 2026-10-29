@@ -26,10 +26,16 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
         endReason: latest?.endReason ?? null, conclusion: latest?.status === 'ended' ? latest.conclusion : 'undeclared',
         reason: latest?.status === 'ended' ? latest.conclusionReason : null };
     });
-  const workCommit = git(project, 'rev-parse', `refs/heads/${work.workBranch}`).trim();
+  // A finished work's branch or project may since have been removed; the rest of the conversation must stay readable.
+  let workCommit: string | null = null, diff: string | null = null, diffUnavailableReason: string | null = null;
+  try {
+    workCommit = git(project, 'rev-parse', `refs/heads/${work.workBranch}`).trim();
+    diff = git(project, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', work.baseCommit!, workCommit, '--');
+  } catch (error) {
+    diffUnavailableReason = `无法读取工作分支的 diff：${error instanceof Error && 'stderr' in error ? String(error.stderr).trim() : String(error)}`;
+  }
   return { ...gate, review: {
-    baseRef: work.baseRef, baseCommit: work.baseCommit, workBranch: work.workBranch, workCommit,
-    diff: git(project, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', work.baseCommit!, workCommit, '--'),
+    baseRef: work.baseRef, baseCommit: work.baseCommit, workBranch: work.workBranch, workCommit, diff, diffUnavailableReason,
     overallVerification,
     rejectedOperationCount: store.events({ workId: work.id }).filter(event => event.action === 'operation-rejected').length,
     undeclaredDispatchCount: dispatches.filter(dispatch => dispatch.status === 'ended' && dispatch.conclusion === 'undeclared').length,

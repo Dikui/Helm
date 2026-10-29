@@ -44,8 +44,8 @@ export function ReviewDetails({ review, detailed = false }: { review: ReviewData
       </section>
       <section><h3>{t('reviewDiff')}</h3>
         <dl className="brief-base"><dt>{t('newWorkBase')}</dt><dd className="mono">{review.baseRef} · {review.baseCommit}</dd>
-          <dt>{t('briefWorkBranch')}</dt><dd className="mono">{review.workBranch} · {review.workCommit}</dd></dl>
-        <ReviewDiff key={review.workCommit} diff={review.diff} />
+          <dt>{t('briefWorkBranch')}</dt><dd className="mono">{review.workBranch}{review.workCommit && ` · ${review.workCommit}`}</dd></dl>
+        {review.diff === null ? <p className="muted">{review.diffUnavailableReason}</p> : <ReviewDiff key={review.workCommit} diff={review.diff} />}
       </section>
     </>}
   </div>;

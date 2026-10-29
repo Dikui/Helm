@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -397,6 +397,22 @@ test('接受只记录决定；撤回后同一审核回到待决定，基准和�
   assert.equal((await daemon.pendingReview()).id, gate.id);
   assert.equal((await daemon.pendingReview()).decision, null);
   assert.ok(!(await daemon.events()).some(event => event.action === 'base-merge-result'));
+});
+
+test('项目目录不在时，会话和待办仍可读，审核说明 diff 读不到', async t => {
+  const daemon = await fixture(t, [[review()]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  await rename(daemon.repo, `${daemon.repo}-moved`);
+  try {
+    const conversation = await daemon.call('get-conversation', { workId: work.id });
+    ok(conversation);
+    const observed = conversation.result.find((item: any) => item.id === gate.id);
+    assert.equal(observed.review.diff, null);
+    assert.match(observed.review.diffUnavailableReason, /无法读取工作分支的 diff/);
+    ok(await daemon.call('list-pending'));
+  } finally { await rename(`${daemon.repo}-moved`, daemon.repo); }
 });
 
 for (const checkedOut of [true, false]) test(`审核接受后分别合入和推送基准分支（项目目录${checkedOut ? '已' : '未'}检出基准分支）`, async t => {
