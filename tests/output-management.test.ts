@@ -192,7 +192,7 @@ test('删除工作：未导出先提示，确认后删除记录、输出和文�
   const events = await daemon.events();
   const roundPaths = events.filter(event => event.action === 'round-started').map(event => event.details.outputPath as string);
   assert.ok(roundPaths.length > 0);
-  // Give the work branch a commit the base branch lacks, so `branch -d` must refuse it.
+  // Give the work branch a commit the base branch lacks.
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8' }).trim();
   const unmerged = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit-tree', `${workBranch}^{tree}`, '-p', workBranch, '-m', 'unmerged');
   git('update-ref', `refs/heads/${workBranch}`, unmerged);
@@ -200,7 +200,8 @@ test('删除工作：未导出先提示，确认后删除记录、输出和文�
   const prompt = await daemon.call('delete-work', daemon.params);
   assert.equal(prompt.requiresConfirmation, true);
   assert.equal((await daemon.call('get-work', daemon.params)).id, daemon.params.workId);
-  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranch: workBranch });
+  const keptBranches = [{ branch: workBranch, reason: '尚未合入基准分支 main' }];
+  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranches });
   const missing = await daemon.request('get-work', daemon.params);
   assert.equal(missing.status, 404);
   assert.equal(missing.error.code, 'NOT_FOUND');
@@ -211,6 +212,7 @@ test('删除工作：未导出先提示，确认后删除记录、输出和文�
   const remaining = await daemon.call('get-events', daemon.params);
   assert.ok(!remaining.some((event: any) => event.id <= events.at(-1)!.id), '旧事件应全部删除');
   assert.equal(remaining.filter((event: any) => event.action === 'work-deleted').length, 1);
+  assert.deepEqual(remaining.find((event: any) => event.action === 'work-deleted').details.keptBranches, keptBranches);
 
   await daemon.restart();
   assert.deepEqual(await daemon.call('list-works'), []);
@@ -222,8 +224,104 @@ test('删除工作时，没有独有提交的工作分支已并入基准，一�
   await daemon.call('cancel-work', daemon.params);
   const { workBranch } = await daemon.call('get-work', daemon.params);
   assert.ok(workBranch);
-  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranch: null });
+  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranches: [] });
   assert.equal(execFileSync('git', ['-C', daemon.repo, 'branch', '--list', workBranch], { encoding: 'utf8' }), '');
+});
+
+for (const containedIn of ['base', 'neither', 'checkout']) test(`项目目录检出其他分支，工作提交包含于 ${containedIn} 时只按基准决定删除`, async t => {
+  const daemon = await fixture(t, []);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  await daemon.call('cancel-work', daemon.params);
+  const { workBranch } = await daemon.call('get-work', daemon.params);
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  const baseline = git('rev-parse', 'main');
+  const commit = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid',
+    'commit-tree', `${workBranch}^{tree}`, '-p', workBranch, '-m', 'work result');
+  git('update-ref', `refs/heads/${workBranch}`, commit);
+  git('checkout', '-b', 'user-branch', baseline);
+  if (containedIn === 'base') git('update-ref', 'refs/heads/main', commit);
+  if (containedIn === 'checkout') git('merge', '--ff-only', workBranch);
+  if (containedIn !== 'neither') git('branch', '--set-upstream-to=user-branch', workBranch);
+
+  const result = await daemon.call('delete-work', { ...daemon.params, confirm: true });
+  assert.deepEqual(result.keptBranches, containedIn === 'base' ? [] : [{ branch: workBranch, reason: '尚未合入基准分支 main' }]);
+  assert.equal(git('branch', '--list', workBranch) !== '', containedIn !== 'base');
+  assert.equal(git('branch', '--show-current'), 'user-branch');
+  assert.equal(git('rev-parse', 'HEAD'), containedIn === 'checkout' ? commit : baseline);
+});
+
+test('删除工作清理基准已包含的工作及卡片分支，副本目录丢失也会 prune 后删除', async t => {
+  const daemon = await fixture(t, [{ type: 'write', path: 'progress.txt', content: 'saved progress\n' }]);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  const work = await daemon.call('get-work', daemon.params);
+  const card = (await daemon.call('get-card-graph', daemon.params)).find((node: any) => node.type === 'card');
+  await daemon.call('cancel-work', daemon.params);
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('checkout', '-b', 'user-branch');
+  git('update-ref', 'refs/heads/main', git('rev-parse', card.cardBranch));
+  for (const [path, branch] of [[work.workPath, work.workBranch], [card.workPath, card.cardBranch]]) {
+    git('worktree', 'add', path, branch);
+    await rm(path, { recursive: true, force: true });
+    assert.ok(git('worktree', 'list', '--porcelain').includes(`worktree ${path}`));
+  }
+
+  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranches: [] });
+  for (const branch of [work.workBranch, card.cardBranch]) assert.equal(git('branch', '--list', branch), '');
+  assert.ok(!git('worktree', 'list', '--porcelain').includes(work.workPath));
+  assert.ok(!git('worktree', 'list', '--porcelain').includes(card.workPath));
+});
+
+test('删除工作返回全部未合入基准的工作及卡片分支，work-deleted 事件记录同一列表', async t => {
+  const daemon = await fixture(t, [{ type: 'write', path: 'progress.txt', content: 'keep this card\n' }]);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  const { workBranch } = await daemon.call('get-work', daemon.params);
+  const card = (await daemon.call('get-card-graph', daemon.params)).find((node: any) => node.type === 'card');
+  await daemon.call('cancel-work', daemon.params);
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  const workCommit = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid',
+    'commit-tree', `${workBranch}^{tree}`, '-p', workBranch, '-m', 'keep this work');
+  git('update-ref', `refs/heads/${workBranch}`, workCommit);
+  git('checkout', '-b', 'user-branch', card.cardBranch);
+  const keptBranches = [workBranch, card.cardBranch].map(branch => ({ branch, reason: '尚未合入基准分支 main' }));
+  assert.deepEqual(await daemon.call('delete-work', { ...daemon.params, confirm: true }), { status: 'deleted', keptBranches });
+  assert.equal(git('rev-parse', workBranch), workCommit);
+  assert.equal(git('show', `${card.cardBranch}:progress.txt`), 'keep this card');
+  const event = (await daemon.events()).find(event => event.action === 'work-deleted');
+  assert.deepEqual(event.details.keptBranches, keptBranches);
+});
+
+test('已合入基准的分支仍被其他副本占用时，删除结果保留真实错误', async t => {
+  const daemon = await fixture(t, []);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  await daemon.call('cancel-work', daemon.params);
+  const { workBranch } = await daemon.call('get-work', daemon.params);
+  const externalCopy = join(daemon.directory, 'external-copy');
+  execFileSync('git', ['-C', daemon.repo, 'worktree', 'add', externalCopy, workBranch], { stdio: 'pipe' });
+
+  const result = await daemon.call('delete-work', { ...daemon.params, confirm: true });
+  assert.equal(result.keptBranches.length, 1);
+  assert.equal(result.keptBranches[0].branch, workBranch);
+  assert.match(result.keptBranches[0].reason, /used by worktree|checked out/);
+  assert.ok(result.keptBranches[0].reason.includes(externalCopy));
+  assert.ok(!result.keptBranches[0].reason.includes('尚未合入'));
+  const event = (await daemon.events()).find(event => event.action === 'work-deleted');
+  assert.deepEqual(event.details.keptBranches, result.keptBranches);
+});
+
+test('基准分支丢失时保留工作分支，结果报告检测错误而非未合入', async t => {
+  const daemon = await fixture(t, []);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  await daemon.call('cancel-work', daemon.params);
+  const { workBranch } = await daemon.call('get-work', daemon.params);
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('checkout', '-b', 'user-branch');
+  git('branch', '-D', 'main');
+  const result = await daemon.call('delete-work', { ...daemon.params, confirm: true });
+  assert.equal(result.keptBranches.length, 1);
+  assert.equal(result.keptBranches[0].branch, workBranch);
+  assert.match(result.keptBranches[0].reason, /refs\/heads\/main/);
+  assert.ok(!result.keptBranches[0].reason.includes('尚未合入'));
+  assert.ok(git('branch', '--list', workBranch));
 });
 
 test('执行中、暂停和对齐中的工作均不能导出或删除，显式确认也不能越过终态限制', async t => {

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
+import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { compressWorkOutputs } from './outputs.js';
 import type { ConflictResolution } from './conflict-resolution.js';
@@ -19,7 +20,7 @@ function failureReason(error: unknown) {
 
 export interface MergeResult {
   status: 'merged' | 'already-contained' | 'conflict' | 'failed';
-  baseBranch: string | null; workBranch: string; commit?: string; conflictFiles?: string[]; reason?: string;
+  baseBranch: string | null; workBranch: string; workCommit?: string; commit?: string; conflictFiles?: string[]; reason?: string;
 }
 
 async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeResult> {
@@ -32,6 +33,7 @@ async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeRes
     result.baseBranch = baseBranch;
     const baseCommit = (await git(project, 'rev-parse', '--verify', `${baseBranch}^{commit}`)).trim();
     const workCommit = (await git(project, 'rev-parse', '--verify', `refs/heads/${work.workBranch}^{commit}`)).trim();
+    result.workCommit = workCommit;
     let tree: string;
     try {
       tree = (await git(project, 'merge-tree', '--write-tree', '--name-only', '-z', baseCommit, workCommit)).split('\0')[0]!;
@@ -111,7 +113,14 @@ export async function cleanupReviewedCopy(store: TaskStore, workId: string) {
   const work = store.work(workId);
   let reason: string | undefined;
   try {
-    if (work.workPath && existsSync(work.workPath)) await git(projectPath(store, workId), 'worktree', 'remove', '--force', work.workPath);
+    const project = projectPath(store, workId);
+    if (work.workPath && existsSync(work.workPath)) await git(project, 'worktree', 'remove', '--force', work.workPath);
+    const { merge, completedWithoutMerge } = deliveryDetails(store, workId);
+    if (!completedWithoutMerge && merge && ['merged', 'already-contained'].includes(merge.status)
+      && work.workBranch && branchExists(project, work.workBranch)) {
+      if (branchIsContained(project, work.workBranch, work.baseRef)) deleteBranch(project, work.workBranch);
+      else reason = `工作分支 ${work.workBranch} 尚未合入基准分支 ${work.baseRef}，已保留。`;
+    }
   } catch (error) { reason = failureReason(error); }
   store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'work-copy-cleanup', { reason }, { workId }));
 }
@@ -166,7 +175,7 @@ export async function recheckReviewedWork(store: TaskStore, workId: string) {
     if ((error as { status?: number }).status === 1) return work;
     throw error;
   }
-  const contained = { status: 'already-contained', baseBranch: merge.baseBranch, workBranch: work.workBranch, commit: baseCommit };
+  const contained = { status: 'already-contained', baseBranch: merge.baseBranch, workBranch: work.workBranch, workCommit, commit: baseCommit };
   store.transaction(() => {
     store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId: gate.id, ...contained }, { workId });
     completeReviewedWork(store, runtime, workId, { gateId: gate.id, merge: contained });

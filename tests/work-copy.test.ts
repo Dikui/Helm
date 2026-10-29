@@ -103,7 +103,7 @@ test('取消对齐中的工作清理副本和分支，重复取消及删除均�
   assert.equal((await daemon.call('cancel-work', params)).ok, true);
   const deleted = await daemon.call('delete-work', { ...params, confirm: true });
   assert.equal(deleted.ok, true);
-  assert.equal(deleted.result.keptBranch, null);
+  assert.deepEqual(deleted.result.keptBranches, []);
   assert.equal((await daemon.call('list-works')).result.length, 0);
 });
 

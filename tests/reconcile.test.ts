@@ -399,7 +399,7 @@ test('用户自己发起、同样指向工作分支的合并在重启时保留',
   assert.equal((await daemon.events()).some(event => event.action === 'base-merge-aborted'), false);
 });
 
-test('终态卡片和已结束工作的残留副本与卡片分支在重启时补删，工作分支保留', async t => {
+for (const copyMissing of [false, true]) test(`合入后重启补删残留的工作及卡片分支，副本目录${copyMissing ? '已丢失' : '仍存在'}`, async t => {
   const daemon = await fixture(t, 'settled');
   const { card, dispatch, read } = await daemon.create();
   const ended = await until(read, value => value.status === 'ended');
@@ -413,13 +413,45 @@ test('终态卡片和已结束工作的残留副本与卡片分支在重启时�
   // Recreate the external resources left by a crash before worktree removal.
   git(daemon.repo, 'branch', cardBranch, ended.endCommit);
   git(daemon.repo, 'worktree', 'add', cardPath, cardBranch);
+  git(daemon.repo, 'branch', daemon.work.workBranch, 'main');
   git(daemon.repo, 'worktree', 'add', daemon.work.workPath, daemon.work.workBranch);
+  if (copyMissing) {
+    await rm(cardPath, { recursive: true, force: true });
+    await rm(daemon.work.workPath, { recursive: true, force: true });
+  }
+  git(daemon.repo, 'checkout', '-b', 'user-branch', daemon.work.baseCommit);
   await daemon.restart();
   assert.equal(existsSync(cardPath), false);
   assert.equal(existsSync(daemon.work.workPath), false);
   assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', `refs/heads/${cardBranch}`), '');
-  assert.ok(git(daemon.repo, 'rev-parse', daemon.work.workBranch));
+  assert.equal(git(daemon.repo, 'branch', '--list', daemon.work.workBranch), '');
   assert.equal((await daemon.call('get-card', { ...daemon.scope, cardId: card.id })).status, 'completed');
+});
+
+test('取消工作清理中崩溃，启动对账保留有新提交的卡片分支并删除无新提交的分支', async t => {
+  const daemon = await fixture(t);
+  const one = await daemon.create('one');
+  const two = await daemon.create('two');
+  await until(one.read, value => value.conclusion === 'completed');
+  await until(two.read, value => value.conclusion === 'completed');
+  const cards = await Promise.all([one, two].map(item => daemon.call('get-card', { ...daemon.scope, cardId: item.card.id })));
+  await daemon.stop();
+  // Reproduce cancellation recorded before the active dispatches and copies settled.
+  const db = new DatabaseSync(join(daemon.dataDir, 'helm.db'));
+  try { db.prepare("UPDATE works SET status = 'cancelled' WHERE id = ?").run(daemon.work.id); }
+  finally { db.close(); }
+  await rm(join(cards[1].workPath, 'progress.txt'));
+  git(daemon.repo, 'checkout', '-b', 'user-branch');
+  await daemon.start();
+
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'cancelled');
+  assert.equal(git(daemon.repo, 'show', `${cards[0].cardBranch}:progress.txt`), 'saved progress');
+  assert.equal(git(daemon.repo, 'branch', '--list', cards[1].cardBranch), '');
+  for (const card of cards) assert.equal(existsSync(card.workPath), false);
+  assert.equal(existsSync(daemon.work.workPath), false);
+  await daemon.restart();
+  assert.equal(git(daemon.repo, 'show', `${cards[0].cardBranch}:progress.txt`), 'saved progress');
+  assert.equal(git(daemon.repo, 'branch', '--list', cards[1].cardBranch), '');
 });
 
 test('崩溃中的验收派单和残留的验收副本在重启时删除，卡片副本和分支不变', async t => {

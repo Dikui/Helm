@@ -111,9 +111,9 @@ export async function reconcileStartup(store: TaskStore) {
       removeCardCopy(store, { ...node, workPath: node.workPath ?? join(root, work.id, node.id), cardBranch: node.cardBranch ?? `helm-card/${work.id}/${node.id}` });
     }
     const workPath = work.workPath ?? join(root, work.id, '_work');
-    if (['completed', 'cancelled'].includes(store.work(work.id).status) && existsSync(workPath)) {
+    if (['completed', 'cancelled'].includes(store.work(work.id).status)) {
       if (accepted) await cleanupReviewedCopy(store, work.id);
-      else dispatchGit(projectPath(store, work.id), 'worktree', 'remove', '--force', workPath);
+      else if (existsSync(workPath)) dispatchGit(projectPath(store, work.id), 'worktree', 'remove', '--force', workPath);
     }
     await compressWorkOutputs(store, work.id);
   }

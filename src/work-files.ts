@@ -4,14 +4,15 @@ import { isAbsolute, relative } from 'node:path';
 import { RuleError, type TaskStore } from './store.js';
 import { projectPath } from './alignment.js';
 import { attachmentDirectory, maxAttachmentBytes } from './attachments.js';
+import { workContentRef } from './work-reads.js';
 
-// Read from the work branch rather than the work copy, so files stay readable after the copy is removed.
+// Read from Git so files stay readable after the copy and merged branch are removed.
 function git(store: TaskStore, workId: string, args: string[]) {
   return execFileSync('git', ['-C', projectPath(store, workId), ...args], { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: maxAttachmentBytes + 1024, timeout: 10_000 });
 }
 
 export function listWorkFiles(store: TaskStore, workId: string): string[] {
-  const branch = store.work(workId).workBranch;
+  const branch = workContentRef(store, workId);
   if (!branch) return [];
   try { return git(store, workId, ['ls-tree', '-r', '--name-only', '-z', branch]).toString('utf8').split('\0').filter(Boolean); }
   catch { return []; }
@@ -28,7 +29,7 @@ function attachment(store: TaskStore, workId: string, path: string) {
 }
 
 function branchFile(store: TaskStore, workId: string, path: string) {
-  const branch = store.work(workId).workBranch;
+  const branch = workContentRef(store, workId);
   if (!branch) throw new RuleError('FILE_NOT_FOUND', '工作副本尚未创建。', 404);
   const object = `${branch}:${path}`;
   let size: number;

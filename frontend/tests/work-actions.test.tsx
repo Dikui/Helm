@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { execFileSync } from 'node:child_process';
 import { App } from '../src/App.js';
+import type { FakeScript } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
@@ -17,8 +19,8 @@ afterEach(async () => {
   window.history.replaceState(null, '', '/');
 });
 
-async function startWork() {
-  daemon = await uiFixture();
+async function startWork(scripts: FakeScript[] = [], executorScripts: FakeScript[] = []) {
+  daemon = await uiFixture(scripts, undefined, { executorScripts });
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '管理输出的工作', key: 'start' })).result.work;
   await until(() => daemon!.call('get-events', { workId: work.id }), value => value.result.some((event: any) => event.action === 'round-ended'));
   window.history.replaceState(null, '', `/works/${work.id}`);
@@ -214,4 +216,38 @@ test('删除已结束的工作须确认，删除后回到收件箱，工作不�
   fireEvent.click(await within(dialog).findByRole('button', { name: '仍然删除' }));
   await waitFor(() => expect(window.location.pathname).toBe('/'));
   expect((await daemon!.call('get-work', { workId: work.id })).error.code).toBe('NOT_FOUND');
+});
+
+test('删除工作后逐项显示保留的工作及卡片分支和原因，返回后回到收件箱', async () => {
+  const work = await startWork([[
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      key: 'draft', requirements: '保留分支', boundary: '本机', criteria: '逐项列出' }) },
+  ], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '保留卡片进度' }), saveAs: 'card' },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', agentId: 'claude-executor' }) },
+  ]], [[{ type: 'write', path: 'progress.txt', content: '保留进度' }, { type: 'hang' }]]);
+  const params = { workId: work.id };
+  const gate = (await daemon!.call('list-pending')).result[0];
+  expect((await daemon!.call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' })).ok).toBe(true);
+  await until(() => daemon!.call('get-events', params), value => value.result.some((event: any) => event.action === 'dispatch-step' && event.details.summary === 'Wrote progress.txt'));
+  const card = (await daemon!.call('get-card-graph', params)).result.find((node: any) => node.type === 'card');
+  expect((await daemon!.call('cancel-work', params)).ok).toBe(true);
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  const workCommit = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid',
+    'commit-tree', `${work.workBranch}^{tree}`, '-p', work.workBranch, '-m', 'unmerged work');
+  git('update-ref', `refs/heads/${work.workBranch}`, workCommit);
+  render(<App baseUrl={daemon!.url} />);
+  await screen.findByRole('heading', { name: '管理输出的工作' });
+  fireEvent.click(within(actions()).getByRole('button', { name: '删除工作' }));
+  const dialog = await screen.findByRole('dialog', { name: '删除工作' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认删除工作' }));
+  fireEvent.click(await within(dialog).findByRole('button', { name: '仍然删除' }));
+  expect(await within(dialog).findByText('工作已删除。以下分支已保留：')).toBeTruthy();
+  expect(within(dialog).getByText(work.workBranch)).toBeTruthy();
+  expect(within(dialog).getByText(card.cardBranch)).toBeTruthy();
+  expect(within(dialog).getAllByText(/尚未合入基准分支 main/)).toHaveLength(2);
+  expect(within(dialog).queryByRole('button', { name: '仍然删除' })).toBeNull();
+  fireEvent.click(within(dialog).getAllByRole('button', { name: '返回' })[0]!);
+  await waitFor(() => expect(window.location.pathname).toBe('/'));
 });

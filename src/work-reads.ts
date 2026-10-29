@@ -1,6 +1,18 @@
 import { deliveryDetails } from './delivery.js';
 import type { HelmEvent, TaskStore, Work } from './store.js';
 
+// Merged branches are removed; use the recorded commit for historical file and diff reads.
+export function workContentRef(store: TaskStore, workId: string) {
+  const work = store.work(workId);
+  if (work.status === 'completed') {
+    const { merge, completedWithoutMerge } = deliveryDetails(store, workId);
+    if (!completedWithoutMerge && merge && ['merged', 'already-contained'].includes(merge.status)) {
+      return merge.workCommit ?? merge.commit ?? null;
+    }
+  }
+  return work.workBranch ? `refs/heads/${work.workBranch}` : null;
+}
+
 export function readWork(store: TaskStore, id: string) {
   const work = store.work(id);
   const message = store.db.prepare(`SELECT body FROM messages WHERE work_id = ? AND sender = 'user' ORDER BY sequence LIMIT 1`).get(id);

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { projectPath } from './alignment.js';
+import { branchExists, deleteBranch } from './branch-cleanup.js';
 import { cardDetails, cardGraph, refreshCardReadiness } from './graph.js';
 import { cancelCard, removeCardCopy } from './completion.js';
 import { dispatchGit, listDispatches, revokeDispatch } from './dispatch.js';
@@ -172,9 +173,7 @@ export class UserOperations {
     if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
     if (!work.activeDescriptionId && work.workBranch) {
       const project = projectPath(this.store, workId);
-      if (dispatchGit(project, 'for-each-ref', '--format=%(refname)', `refs/heads/${work.workBranch}`)) {
-        dispatchGit(project, 'branch', '-D', work.workBranch);
-      }
+      if (branchExists(project, work.workBranch)) deleteBranch(project, work.workBranch);
     }
     await compressWorkOutputs(this.store, workId);
     return this.store.work(workId);

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.js';
 import { refreshCardReadiness } from './graph.js';
+import { deleteBranch } from './branch-cleanup.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -61,7 +62,7 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
     if (addingCopy) {
       try { git(project, 'worktree', 'remove', '--force', workPath); } catch { /* git may have failed before registering it. */ }
     }
-    if (createdBranch) git(project, 'branch', '-D', workBranch);
+    if (createdBranch) deleteBranch(project, workBranch);
     throw error;
   }
   store.db.prepare('UPDATE works SET base_ref = ?, base_commit = ?, work_branch = ?, work_path = ? WHERE id = ?')

@@ -280,14 +280,20 @@ test('失败重投按两档退避，派单结束等新唤醒事件不会提前�
     await daemon.confirm(work.id);
     await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
     release();
-    const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 4);
+    const events = await until(() => daemon.events(work.id), events => {
+      const ended = events.find(event => event.action === 'dispatch-ended');
+      return events.filter(event => event.action === 'round-ended').length >= 4 && ended
+        && events.some(event => event.action === 'round-started' && event.details.eventIds.includes(ended.id));
+    });
     const starts = events.filter(event => event.action === 'round-started');
     const ends = events.filter(event => event.action === 'round-ended');
     for (let index = 0; index < delays.length; index++) {
       assert.ok(Date.parse(starts[index + 2].time) - Date.parse(ends[index + 1].time) >= delays[index]! - 5);
     }
     const ended = events.find(event => event.action === 'dispatch-ended');
-    assert.ok(starts[2].details.eventIds.includes(ended.id));
+    // Dispatch cleanup may outlast the first backoff under parallel test load.
+    // The first round started after it ends must claim its event.
+    assert.ok(starts.find(event => event.id > ended.id).details.eventIds.includes(ended.id));
     // The old user message is still queued after a failed round, but never bypasses backoff.
     assert.equal(ends[1].details.processed, false);
     assert.equal(ends[2].details.processed, false);

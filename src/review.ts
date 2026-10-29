@@ -5,6 +5,7 @@ import { listDispatches, markOutdated } from './dispatch.js';
 import { cardGraph } from './graph.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import type { ReviewReport } from './review-report.js';
+import { workContentRef } from './work-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -27,7 +28,9 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
   // A finished work's branch or project may since have been removed; the rest of the conversation must stay readable.
   let workCommit: string | null = null, diff: string | null = null, diffUnavailableReason: string | null = null;
   try {
-    workCommit = git(project, 'rev-parse', `refs/heads/${work.workBranch}`).trim();
+    const ref = workContentRef(store, work.id);
+    if (!ref) throw new Error('找不到工作分支或合入提交。');
+    workCommit = git(project, 'rev-parse', ref).trim();
     diff = git(project, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', work.baseCommit!, workCommit, '--');
   } catch (error) {
     diffUnavailableReason = `无法读取工作分支的 diff：${error instanceof Error && 'stderr' in error ? String(error.stderr).trim() : String(error)}`;

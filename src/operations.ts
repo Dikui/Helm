@@ -90,7 +90,7 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, { workId, confirm }) => deleteWorkOutputs(store, actor, workId, confirm),
   }),
   operation({
-    name: 'delete-work', description: '删除已结束的工作及其记录和输出；已合并的工作分支一并删除，未合并的保留；未导出时先提示，confirm: true 确认删除', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    name: 'delete-work', description: '删除已结束的工作及其记录和输出；工作和卡片分支已被基准包含的删除，其余保留并列出原因；未导出时先提示，confirm: true 确认删除', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1), confirm: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, { workId, confirm }) => deleteWork(store, actor, workId, confirm),
   }),

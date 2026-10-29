@@ -8,6 +8,7 @@ import { createGzip, gunzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import { projectPath } from './alignment.js';
+import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
 import { readWork } from './work-reads.js';
 import { attachmentDirectory } from './attachments.js';
 
@@ -199,13 +200,21 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
     }
     await rm(join(store.dataDir, 'worktrees', workId), { recursive: true, force: true });
     await rm(attachmentDirectory(store, workId), { recursive: true, force: true });
-    // `branch -d` refuses unmerged branches, so cancelled or unmerged work keeps its code.
-    let keptBranch: string | null = null;
-    if (work.workBranch) {
-      try { await exec('git', ['-C', projectPath(store, workId), 'branch', '-d', work.workBranch]); }
-      catch (error) {
-        const missingBranch = error instanceof Error && 'stderr' in error && /not found/.test(String(error.stderr));
-        if (!missingBranch) keptBranch = work.workBranch;
+    const branches = new Set([
+      ...(work.workBranch ? [work.workBranch] : []),
+      ...store.db.prepare('SELECT id, card_branch FROM cards WHERE work_id = ? ORDER BY rowid').all(workId)
+        .map(row => row.card_branch ? String(row.card_branch) : `helm-card/${workId}/${row.id}`),
+    ]);
+    const keptBranches: { branch: string; reason: string }[] = [];
+    const project = projectPath(store, workId);
+    for (const branch of branches) {
+      try {
+        if (!branchExists(project, branch)) continue;
+        if (branchIsContained(project, branch, work.baseRef)) deleteBranch(project, branch);
+        else keptBranches.push({ branch, reason: `尚未合入基准分支 ${work.baseRef}` });
+      } catch (error) {
+        const failure = error as { stderr?: string; message?: string };
+        keptBranches.push({ branch, reason: String(failure.stderr || failure.message || error).trim() });
       }
     }
     store.transaction(() => {
@@ -222,10 +231,10 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
       remove('DELETE FROM gates WHERE work_id = ?');
       remove('DELETE FROM events WHERE work_id = ?');
       remove('DELETE FROM works WHERE id = ?');
-      store.appendEvent(actor, { type: 'work', id: workId }, 'work-deleted', { title, keptBranch }, { workId });
+      store.appendEvent(actor, { type: 'work', id: workId }, 'work-deleted', { title, keptBranches }, { workId });
       checkOutputUsage(store);
     });
-    return { status: 'deleted', keptBranch };
+    return { status: 'deleted', keptBranches };
   });
 }
 

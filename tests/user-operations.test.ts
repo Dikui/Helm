@@ -192,7 +192,7 @@ test('打断立即取消轮次、废除令牌，将原事件和用户消息合�
   assert.equal((await daemon.call('get-work', daemon.params)).result.status, 'executing');
 });
 
-test('取消工作等待全部派单与轮次停止，再删副本和 _work，保留工作分支、事件及输出且不再唤醒', async t => {
+test('取消工作等待全部派单与轮次停止，删除副本及无新提交的卡片分支，保留有提交的分支且重启不丢失', async t => {
   let token = '';
   const daemon = await fixture(t, [create('one'), dispatch('one'), create('two'), dispatch('two'),
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'pending', question: '还继续吗？' }), check: ok },
@@ -201,6 +201,8 @@ test('取消工作等待全部派单与轮次停止，再删副本和 _work，�
     return [{ type: 'hang' }];
   }]);
   await until(async () => token, value => Boolean(value));
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-step' && event.details.summary === 'Wrote one.txt')
+    && events.filter(event => event.action === 'dispatch-started').length === 2);
   const work = (await daemon.call('get-work', daemon.params)).result;
   const cards = [await daemon.card('one'), await daemon.card('two')];
   const gate = (await daemon.call('list-pending')).result[0];
@@ -216,8 +218,9 @@ test('取消工作等待全部派单与轮次停止，再删副本和 _work，�
   assert.equal(existsSync(work.workPath), false);
   for (const card of cards) {
     assert.equal(existsSync(card.workPath), false);
-    assert.equal(daemon.git('for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`), '');
   }
+  assert.equal(daemon.git('show', `${cards[0].cardBranch}:one.txt`), '进度');
+  assert.equal(daemon.git('for-each-ref', '--format=%(refname)', `refs/heads/${cards[1].cardBranch}`), '');
   assert.ok(daemon.git('rev-parse', work.workBranch));
   assert.equal(daemon.git('branch', '--show-current'), 'main');
   assert.equal((await daemon.call('get-work', daemon.params, token)).status, 401);
@@ -237,6 +240,8 @@ test('取消工作等待全部派单与轮次停止，再删副本和 _work，�
   const response = await fetch(`${restarted.url}/api/get-events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(daemon.params) });
   const reopenedEvents = (await response.json() as any).result;
   assert.equal(reopenedEvents.filter((event: any) => event.action === 'round-started').length, events.filter(event => event.action === 'round-started').length);
+  assert.equal(daemon.git('show', `${cards[0].cardBranch}:one.txt`), '进度');
+  assert.equal(daemon.git('for-each-ref', '--format=%(refname)', `refs/heads/${cards[1].cardBranch}`), '');
   await restarted.close();
 });
 
