@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { revokeDispatch } from './dispatch.js';
 import { TaskStore } from './store.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
@@ -12,9 +11,6 @@ export function pauseWorkFromRuntime(store: TaskStore, workId: string, roundId: 
     status = 'paused', runtime_pause_reason = ? WHERE id = ?`)
     .run(reason, workId);
   store.appendEvent(runtime, { type: 'work', id: workId }, 'work-paused', { reason, roundId }, { workId });
-  for (const row of store.db.prepare(`SELECT id FROM dispatches WHERE work_id = ? AND status IN ('queued', 'running')`).all(workId)) {
-    revokeDispatch(store, runtime, { workId, dispatchId: String(row.id), reason: '工作暂停' });
-  }
   runtimeMessage(store, workId, `runtime-pause:${roundId}`, `工作已由运行层暂停：${reason}。请手动恢复工作。`);
   store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'runtime-pause', reason, roundId }, { workId });
 }

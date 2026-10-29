@@ -33,7 +33,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (card.status === 'completed') return card;
   if (card.status === 'cancelled') throw new RuleError('TERMINAL_CARD', '完成或已取消的卡片不能再修改。');
   const work = store.work(card.workId);
-  if (work.status !== 'executing') throw new RuleError('WORK_NOT_EXECUTING', '只能在执行中的工作里标记卡片完成。');
+  const runtimePaused = work.status === 'paused' && work.runtimePauseReason
+    && store.db.prepare('SELECT paused_from_status FROM works WHERE id = ?').get(work.id)!.paused_from_status === 'executing';
+  if (work.status !== 'executing' && !runtimePaused) throw new RuleError('WORK_NOT_EXECUTING', '只能在执行中或由运行层暂停的工作里标记卡片完成。');
   const dispatches = listDispatches(store, work.id, card.id);
   if (dispatches.some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '派单结束后才能标记卡片完成。');
   if (['waiting', 'paused'].includes(card.status)) throw new RuleError('CARD_NOT_COMPLETABLE', '等待前置或暂停的卡片不能标记完成。');

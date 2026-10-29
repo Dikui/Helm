@@ -23,7 +23,7 @@ async function fixture(t: TestContext, scripts: AlignmentScript[]) {
   const dataDir = join(directory, 'data');
   const driverScripts: FakeScript[] = scripts.map(script => typeof script === 'function'
     ? context => script({ ...context, brief: JSON.parse(context.input) }) : script);
-  const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(driverScripts) });
+  const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(driverScripts), roundRetryDelaysMs: [20, 40] });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
     const response = await fetch(`${daemon.url}/api/${name}`, {

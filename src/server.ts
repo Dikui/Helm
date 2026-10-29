@@ -38,7 +38,7 @@ async function readBody(request: IncomingMessage, limit: number): Promise<unknow
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
-export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand } = {}) {
+export async function startHelmd(options: { port?: number; dataDir?: string; agentDir?: string; staticDir?: string; drivers?: DriverRegistry; browserCommand?: BrowserCommand; roundRetryDelaysMs?: readonly [number, number] } = {}) {
   const drivers = options.drivers ?? { 'claude-sdk': new ClaudeDriver(), codex: new CodexDriver(), grok: new AcpDriver('grok'), deepseek: new AcpDriver('deepseek') };
   const dataDir = options.dataDir ?? join(homedir(), '.helm');
   const library = new SkillLibrary(join(dataDir, 'library', 'skills'));
@@ -143,7 +143,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('helmd has no TCP address');
   const url = `http://127.0.0.1:${address.port}`;
-  scheduler = new RoundScheduler(store, drivers, `${url}/mcp`);
+  scheduler = new RoundScheduler(store, drivers, `${url}/mcp`, options.roundRetryDelaysMs);
   executions = new ExecutionRunner(store, drivers, `${url}/mcp`, options.browserCommand);
   userOperations = new UserOperations(store, executions, scheduler, drivers);
   ready = true;

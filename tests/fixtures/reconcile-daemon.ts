@@ -26,6 +26,7 @@ const executor: FakeScript = [
   ...(purpose === 'settled' ? [] : [{ type: 'hang' as const }]),
 ];
 const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(Array(100).fill(round)),
+  roundRetryDelaysMs: [20, 40],
   executorDriver: new FakeDriver(Array(100).fill(executor)),
   browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./browser-mcp.js', import.meta.url)), '--stubborn'] },
 });

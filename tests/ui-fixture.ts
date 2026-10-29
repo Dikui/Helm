@@ -21,7 +21,7 @@ export async function uiFixture(scripts: FakeScript[] = [], staticDir?: string, 
     git('add', 'README.md');
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
     const agentDir = options.agentDir ?? await copyAgents(directory);
-    daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir,
+    daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir, roundRetryDelaysMs: [20, 40],
       driver: new FakeDriver(scripts), executorDriver: new FakeDriver(options.executorScripts ?? []),
       ...(options.codexDriver ? { codexDriver: options.codexDriver } : {}), ...(staticDir ? { staticDir } : {}) });
     const url = daemon.url;

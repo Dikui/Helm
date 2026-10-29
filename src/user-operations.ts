@@ -124,10 +124,11 @@ export class UserOperations {
 
   async pauseWork(actor: Actor, workId: string) {
     const work = this.store.work(workId);
-    if (work.status !== 'paused') this.store.transaction(() => {
-      this.store.db.prepare(`UPDATE works SET paused_from_status = status, status = 'paused' WHERE id = ?`).run(workId);
+    this.store.transaction(() => {
+      if (work.status !== 'paused') this.store.db.prepare(`UPDATE works SET paused_from_status = status, status = 'paused' WHERE id = ?`).run(workId);
+      this.store.db.prepare('UPDATE works SET runtime_pause_reason = NULL WHERE id = ?').run(workId);
       this.abortDispatches(actor, workId, '工作暂停');
-      this.wake(actor, 'work', workId, 'work-paused', workId);
+      if (work.status !== 'paused') this.wake(actor, 'work', workId, 'work-paused', workId);
     });
     await this.executions.settle(workId);
     return this.store.work(workId);

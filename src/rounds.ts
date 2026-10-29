@@ -65,11 +65,13 @@ export class RoundScheduler {
   private running = new Map<string, Promise<void>>();
   private sessions = new Map<string, DriverSession>();
   private cancellations = new Map<string, (reason?: string) => void>();
+  private retryTimers = new Map<string, NodeJS.Timeout>();
   private scheduled = false;
   private stopping = false;
   private unsubscribe: () => void;
 
-  constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string) {
+  constructor(private store: TaskStore, private drivers: DriverRegistry, private mcpUrl: string,
+    private retryDelaysMs: readonly [number, number] = [30_000, 120_000]) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
         || ['conflict-resolution-requested', 'gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
@@ -99,6 +101,17 @@ export class RoundScheduler {
       for (const work of works) {
         const workId = String(work.id);
         if (this.running.has(workId)) continue;
+        if (this.retryTimers.has(workId)) {
+          // Failed rounds keep their wakes queued. Only a user message sent
+          // after the latest round claimed its events may bypass backoff.
+          const message = this.store.db.prepare(`SELECT 1 FROM wake_queue q JOIN events e ON e.id = q.event_id
+            WHERE q.work_id = ? AND q.processed_by IS NULL AND e.action = 'message-sent' AND e.actor_type = 'user'
+            AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events
+              WHERE work_id = q.work_id AND action = 'round-started') LIMIT 1`).get(workId);
+          if (!message) continue;
+          clearTimeout(this.retryTimers.get(workId));
+          this.retryTimers.delete(workId);
+        }
         const promise = this.run(workId).finally(() => { this.running.delete(workId); this.schedule(); });
         this.running.set(workId, promise);
       }
@@ -183,6 +196,7 @@ export class RoundScheduler {
           if (reason === 'completed') { reason = 'error'; finalAnswer = undefined; }
         }
       }
+      let failures = 0;
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ? WHERE id = ?`)
           .run(new Date().toISOString(), reason, JSON.stringify(usage), id);
@@ -199,9 +213,17 @@ export class RoundScheduler {
         }
         else if (['error', 'timed-out', 'context-overflow'].includes(reason)) {
           const row = this.store.db.prepare(`UPDATE works SET consecutive_round_failures = consecutive_round_failures + 1 WHERE id = ? RETURNING consecutive_round_failures`).get(workId)!;
-          if (Number(row.consecutive_round_failures) >= 3) pauseWorkFromRuntime(this.store, workId, id, '调度者连续失败 3 次');
+          failures = Number(row.consecutive_round_failures);
+          if (failures >= 3) pauseWorkFromRuntime(this.store, workId, id, '调度者连续失败 3 次');
         } else if (reason === 'quota-exhausted') pauseWorkFromRuntime(this.store, workId, id, '调度者额度用完');
       });
+      if (!this.stopping && failures > 0 && failures < 3) {
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(workId);
+          this.schedule();
+        }, this.retryDelaysMs[failures - 1]);
+        this.retryTimers.set(workId, timer);
+      }
     }
 
     async function consume(this: RoundScheduler) {
@@ -275,6 +297,8 @@ export class RoundScheduler {
   async close() {
     this.stopping = true;
     this.unsubscribe();
+    for (const timer of this.retryTimers.values()) clearTimeout(timer);
+    this.retryTimers.clear();
     for (const cancel of this.cancellations.values()) cancel();
     await Promise.all(this.running.values());
     this.tokens.clear();

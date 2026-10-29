@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
+import { RuleError } from '../src/store.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
@@ -22,7 +23,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
   }
 }
 
-async function fixture(t: TestContext, scripts: FakeScript[], executors: FakeScript[] = [], driver?: Driver) {
+async function fixture(t: TestContext, scripts: FakeScript[], executors: FakeScript[] = [], driver?: Driver, roundRetryDelaysMs: readonly [number, number] = [20, 40]) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-round-failure-')));
   const repo = join(directory, 'project');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
@@ -31,7 +32,7 @@ async function fixture(t: TestContext, scripts: FakeScript[], executors: FakeScr
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const dataDir = join(directory, 'data');
-  let daemon = await startHelmd({ port: 0, dataDir, driver: driver ?? new FakeDriver(scripts), executorDriver: new FakeDriver(executors) });
+  let daemon = await startHelmd({ port: 0, dataDir, driver: driver ?? new FakeDriver(scripts), executorDriver: new FakeDriver(executors), roundRetryDelaysMs });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
     const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
@@ -49,7 +50,7 @@ async function fixture(t: TestContext, scripts: FakeScript[], executors: FakeScr
     close: () => daemon.close(),
     async restart(next: Driver) {
       await daemon.close();
-      daemon = await startHelmd({ port: 0, dataDir, driver: next });
+      daemon = await startHelmd({ port: 0, dataDir, driver: next, roundRetryDelaysMs });
     },
   };
 }
@@ -265,30 +266,214 @@ test('运行层停止不计轮次失败，重启后重投未处理事件', async
   assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'aligning');
 });
 
-test('运行层暂停工作会中止正在运行的派单，保留执行改动和卡片状态', async t => {
-  for (const purpose of ['execution', 'verification'] as const) await t.test(purpose, async t => {
-    let ready!: () => void;
-    const executorReady = new Promise<void>(resolve => { ready = resolve; });
-    const daemon = await fixture(t, [[draft], [create, { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'dispatch', agentId: 'claude-executor', purpose }) }, { type: 'hang', until: executorReady }, { type: 'end', reason: 'quota-exhausted' }]], [[
-      { type: 'write', path: 'progress.txt', content: '暂停前的进度' },
-      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'verification' ? 'passed' : 'completed', reason: '尚未结束' }, check: value => { ok(value); ready(); } },
-      { type: 'hang' },
-    ]]);
+test('失败重投按两档退避，派单结束等新唤醒事件不会提前重试', async t => {
+  for (const reason of ['error', 'timed-out', 'context-overflow'] as const) await t.test(reason, async t => {
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    t.after(() => release());
+    const delays = [500, 700] as const;
+    const daemon = await fixture(t, [[draft], [create, dispatch, { type: 'end', reason }],
+      [{ type: 'end', reason: 'error' }], [],
+    ], [[{ type: 'hang', until: hold }]], undefined, delays);
     const work = await daemon.begin();
     await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
     await daemon.confirm(work.id);
-    const events = await until(() => daemon.events(work.id), events => events.some(event => event.action === 'dispatch-ended'));
-    const result = events.find(event => event.action === 'dispatch-ended').details;
-    assert.equal(result.endReason, 'aborted');
-    assert.equal(result.abortReason, '工作暂停');
-    assert.equal(result.conclusion, 'undeclared');
-    const card = (await daemon.call('get-card', { workId: work.id, cardId: result.cardId })).result;
-    assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');
-    if (purpose === 'verification') {
-      assert.equal(result.endCommit, result.startCommit);
-      assert.throws(() => execFileSync('git', ['-C', card.workPath, 'show', `${result.endCommit}:progress.txt`], { stdio: 'pipe' }));
-    } else assert.equal(execFileSync('git', ['-C', card.workPath, 'show', `${result.endCommit}:progress.txt`], { encoding: 'utf8' }), '暂停前的进度');
-    assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'paused');
+    await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
+    release();
+    const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 4);
+    const starts = events.filter(event => event.action === 'round-started');
+    const ends = events.filter(event => event.action === 'round-ended');
+    for (let index = 0; index < delays.length; index++) {
+      assert.ok(Date.parse(starts[index + 2].time) - Date.parse(ends[index + 1].time) >= delays[index]! - 5);
+    }
+    const ended = events.find(event => event.action === 'dispatch-ended');
+    assert.ok(starts[2].details.eventIds.includes(ended.id));
+    // The old user message is still queued after a failed round, but never bypasses backoff.
+    assert.equal(ends[1].details.processed, false);
+    assert.equal(ends[2].details.processed, false);
+    assert.equal(ends[3].details.processed, true);
+    assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'executing');
+  });
+});
+
+test('退避期间用户新消息立即触发轮次，并投递原失败事件和派单结束事件', async t => {
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  let retryBrief: StartupBrief | undefined;
+  const daemon = await fixture(t, [[draft], [create, dispatch, { type: 'end', reason: 'error' }],
+    ctx => { retryBrief = JSON.parse(ctx.input); return []; },
+  ], [[{ type: 'hang', until: hold }]], undefined, [60_000, 120_000]);
+  const work = await daemon.begin();
+  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+  await daemon.confirm(work.id);
+  await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
+  release();
+  const waiting = await until(() => daemon.events(work.id), events => events.some(event => event.action === 'dispatch-ended'));
+  assert.equal(waiting.filter(event => event.action === 'round-started').length, 2);
+  const sentAt = Date.now();
+  ok(await daemon.call('send-message', { workId: work.id, key: 'now', body: '我在，请立即继续' }));
+  const retried = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 3);
+  assert.ok(Date.parse(retried.filter(event => event.action === 'round-started')[2].time) - sentAt < 5_000);
+  assert.ok(retryBrief!.wakeEvents.some(event => event.action === 'dispatch-ended'));
+  assert.ok(retryBrief!.wakeEvents.some(event => event.action === 'gate-decided'));
+  assert.ok(retryBrief!.wakeEvents.some(event => event.action === 'message-sent' && (event.details as any).body === '我在，请立即继续'));
+});
+
+test('轮次运行期间收到的用户新消息也能越过随后失败的退避，下一次失败仍要等待', async t => {
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const daemon = await fixture(t, [[{ type: 'hang', until: hold }, { type: 'end', reason: 'error' }],
+    [{ type: 'end', reason: 'context-overflow' }], [],
+  ], [], undefined, [60_000, 120_000]);
+  const work = await daemon.begin();
+  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-started'));
+  ok(await daemon.call('send-message', { workId: work.id, key: 'during-round', body: '继续' }));
+  release();
+  await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await daemon.events(work.id)).filter(event => event.action === 'round-started').length, 2);
+  ok(await daemon.call('send-message', { workId: work.id, key: 'another', body: '再次继续' }));
+  await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 3);
+});
+
+test('停止时清理退避定时器，重启可立即处理失败轮次的积压事件', async t => {
+  const daemon = await fixture(t, [[{ type: 'end', reason: 'error' }]], [], undefined, [60_000, 120_000]);
+  const work = await daemon.begin();
+  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+  await daemon.restart(new FakeDriver([[]]));
+  const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
+  assert.deepEqual(events.filter(event => event.action === 'round-ended').map(event => event.details.reason), ['error', 'completed']);
+});
+
+test('运行层暂停保留运行中派单，允许提交结论、自动提交与卡片收尾，恢复后投递结束事件', async t => {
+  for (const cause of ['quota-exhausted', 'consecutive-failures', 'agent-unavailable'] as const) {
+    for (const purpose of ['execution', 'verification'] as const) await t.test(`${cause}/${purpose}`, async t => {
+      let ready!: () => void;
+      const executorReady = new Promise<void>(resolve => { ready = resolve; });
+      let release!: () => void;
+      const hold = new Promise<void>(resolve => { release = resolve; });
+      t.after(() => release());
+      let pausedBrief: StartupBrief | undefined;
+      let resumedBrief: StartupBrief | undefined;
+      const failures: FakeScript[] = cause === 'consecutive-failures'
+        ? [[{ type: 'end', reason: 'error' }], [{ type: 'end', reason: 'timed-out' }], [{ type: 'end', reason: 'context-overflow' }]]
+        : cause === 'agent-unavailable' ? [[{ type: 'tool', name: 'get-work', arguments: ctx => ({ workId: workIdOf(ctx) }),
+          check: () => { throw new RuleError('AGENT_UNAVAILABLE', '测试 Agent 不可用'); } }]]
+        : [[{ type: 'end', reason: 'quota-exhausted' }]];
+      const daemon = await fixture(t, [
+        [draft], [create, { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
+          key: 'dispatch', agentId: 'claude-executor', purpose }) }, { type: 'hang', until: executorReady }, ...failures[0] as FakeStep[]],
+        ...failures.slice(1),
+        ctx => {
+          pausedBrief = JSON.parse(ctx.input);
+          return [{ type: 'tool', name: 'complete-card', arguments: { workId: workIdOf(ctx),
+            cardId: pausedBrief!.cardGraph.find(node => node.type === 'card')!.id }, check: ok }];
+        },
+        ctx => { resumedBrief = JSON.parse(ctx.input); return []; },
+      ], [() => {
+        ready();
+        return [{ type: 'hang', until: hold }, { type: 'write', path: 'progress.txt', content: '暂停后完成的进度' },
+          { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'verification' ? 'passed' : 'completed', reason: '暂停后正常结束' }, check: ok }];
+      }]);
+      const work = await daemon.begin();
+      await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+      await daemon.confirm(work.id);
+      const paused = await until(() => daemon.call('get-work', { workId: work.id }), value => value.result.status === 'paused');
+      assert.match(paused.result.runtimePauseReason, cause === 'quota-exhausted' ? /额度用完/ : cause === 'agent-unavailable' ? /Agent 不可用/ : /连续失败 3 次/);
+      const before = (await daemon.events(work.id)).filter(event => event.action === 'round-started').length;
+      assert.equal((await daemon.call('list-dispatches', { workId: work.id })).result[0].status, 'running');
+      release();
+      const events = await until(() => daemon.events(work.id), events => events.some(event => event.action === 'dispatch-ended'));
+      const ended = events.find(event => event.action === 'dispatch-ended');
+      const result = ended.details;
+      assert.equal(result.endReason, 'completed');
+      assert.equal(result.abortReason, null);
+      assert.equal(result.conclusion, purpose === 'verification' ? 'passed' : 'completed');
+      assert.equal(result.conclusionReason, '暂停后正常结束');
+      assert.equal(events.some(event => event.action === 'dispatch-revoked'), false);
+      if (purpose === 'verification') assert.equal(result.endCommit, result.startCommit);
+      else {
+        assert.notEqual(result.endCommit, result.startCommit);
+        assert.equal(execFileSync('git', ['-C', daemon.repo, 'show', `${result.endCommit}:progress.txt`], { encoding: 'utf8' }), '暂停后完成的进度');
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal((await daemon.events(work.id)).filter(event => event.action === 'round-started').length, before);
+      // A user can ask the paused coordinator to finish a card, without consuming its queued dispatch-ended event.
+      ok(await daemon.call('send-message', { workId: work.id, key: 'finish-card', body: '收尾卡片' }));
+      await until(() => daemon.events(work.id), events => events.some(event => event.action === 'card-completed'));
+      assert.equal(pausedBrief!.work.status, 'paused');
+      assert.deepEqual(pausedBrief!.wakeEvents.map(event => event.action), ['message-sent']);
+      assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'paused');
+      ok(await daemon.call('resume-work', { workId: work.id }));
+      await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-started' && event.details.eventIds.includes(ended.id))
+        && events.filter(event => event.action === 'round-ended').length === before + 2);
+      assert.ok(resumedBrief!.wakeEvents.some(event => event.id === ended.id));
+      assert.equal(resumedBrief!.work.status, 'executing');
+    });
+  }
+});
+
+test('运行层暂停期间排队派单不启动，恢复时即使没有新派单也会启动', async t => {
+  let ready!: () => void;
+  const executorReady = new Promise<void>(resolve => { ready = resolve; });
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  let resumedBrief: StartupBrief | undefined;
+  const daemon = await fixture(t, [[draft], [create, dispatch,
+    { ...create, arguments: ctx => ({ workId: workIdOf(ctx), key: 'queued-card', content: '排队卡片' }) },
+    { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'queued', agentId: 'claude-executor' }) },
+    { type: 'hang', until: executorReady }, { type: 'end', reason: 'quota-exhausted' }],
+    ctx => { resumedBrief = JSON.parse(ctx.input); return []; },
+  ], [() => { ready(); return [{ type: 'hang', until: hold }]; }, [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '恢复后执行' }, check: ok }]]);
+  ok(await daemon.call('set-concurrency', { limit: 1 }));
+  const work = await daemon.begin();
+  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+  await daemon.confirm(work.id);
+  await until(() => daemon.call('get-work', { workId: work.id }), value => value.result.status === 'paused');
+  const dispatches = () => daemon.call('list-dispatches', { workId: work.id });
+  assert.deepEqual((await dispatches()).result.map((item: any) => item.status), ['running', 'queued']);
+  release();
+  await until(dispatches, value => value.result[0].status === 'ended');
+  // Force another queue scan while paused, in addition to the first dispatch's completion scan.
+  ok(await daemon.call('set-concurrency', { limit: 2 }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await dispatches()).result[1].status, 'queued');
+  ok(await daemon.call('resume-work', { workId: work.id }));
+  const done = await until(dispatches, value => value.result.every((item: any) => item.status === 'ended'));
+  assert.equal(done.result[1].endReason, 'completed');
+  assert.equal(done.result[1].conclusion, 'completed');
+  assert.ok(resumedBrief!.wakeEvents.some(event => event.action === 'dispatch-ended'));
+});
+
+test('用户手动暂停仍撤销运行中和排队派单，包括已被运行层暂停的工作', async t => {
+  for (const runtimePaused of [false, true]) await t.test(String(runtimePaused), async t => {
+    let ready!: () => void;
+    const executorReady = new Promise<void>(resolve => { ready = resolve; });
+    const daemon = await fixture(t, [[draft], [create, dispatch,
+      { ...create, arguments: ctx => ({ workId: workIdOf(ctx), key: 'queued-card', content: '排队卡片' }) },
+      { ...dispatch, arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'queued', agentId: 'claude-executor' }) },
+      { type: 'hang', until: executorReady }, ...(runtimePaused ? [{ type: 'end', reason: 'quota-exhausted' } as FakeStep] : [])],
+    ], [() => { ready(); return [{ type: 'write', path: 'partial.txt', content: '保留半成品' }, { type: 'hang' }]; }]);
+    ok(await daemon.call('set-concurrency', { limit: 1 }));
+    const work = await daemon.begin();
+    await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+    await daemon.confirm(work.id);
+    await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2
+      && events.some(event => event.action === 'dispatch-step'));
+    assert.deepEqual((await daemon.call('list-dispatches', { workId: work.id })).result.map((item: any) => item.status), ['running', 'queued']);
+    ok(await daemon.call('pause-work', { workId: work.id }));
+    const results = (await daemon.call('list-dispatches', { workId: work.id })).result;
+    for (const result of results) {
+      assert.equal(result.status, 'ended');
+      assert.equal(result.endReason, 'aborted');
+      assert.equal(result.abortReason, '工作暂停');
+      assert.equal(result.conclusion, 'undeclared');
+    }
+    assert.equal(execFileSync('git', ['-C', daemon.repo, 'show', `${results[0].endCommit}:partial.txt`], { encoding: 'utf8' }), '保留半成品');
+    assert.equal((await daemon.call('get-work', { workId: work.id })).result.runtimePauseReason, null);
   });
 });
 

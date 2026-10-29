@@ -82,7 +82,7 @@ export class ExecutionRunner {
           void this.browsers.get(event.dispatchId)?.close().catch(() => {});
         }
       }
-      if (events.some(event => ['dispatch-created', 'concurrency-set'].includes(event.action))) this.schedule();
+      if (events.some(event => ['dispatch-created', 'concurrency-set', 'work-resumed'].includes(event.action))) this.schedule();
     });
     this.schedule();
   }
