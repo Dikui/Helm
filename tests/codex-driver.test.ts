@@ -80,7 +80,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   for await (const event of session.events) events.push(event);
   assert.equal(session.id, 'thread-scripted');
   assert.equal(session.sqlitePath, join(ctx.directory, 'dispatch', 'codex-sqlite'));
-  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9 } });
+  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80 } });
   const requests = await ctx.requests();
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'thread/start', 'turn/start']);
   assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.agent!.skillsPath] });

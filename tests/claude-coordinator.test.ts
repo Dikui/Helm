@@ -66,7 +66,7 @@ test('Claude 调度者接入运行层：带令牌 MCP 改卡片图，打断后�
   assert.equal(ends[0]!.details.reason, 'aborted');
   assert.equal(ends[0]!.details.processed, false);
   assert.equal(ends[1]!.details.reason, 'completed');
-  assert.deepEqual(ends[1]!.details.usage, { inputTokens: 14, outputTokens: 3 });
+  assert.deepEqual(ends[1]!.details.usage, { inputTokens: 14, outputTokens: 3, cacheReadTokens: 5 });
   assert.notEqual(sessions[0], sessions[1]);
   assert.notEqual(tokens[0], tokens[1]);
   for (const event of briefs[0]!.wakeEvents) assert.ok(briefs[1]!.wakeEvents.some(replayed => replayed.id === event.id));

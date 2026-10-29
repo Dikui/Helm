@@ -390,7 +390,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
     assert.equal(events.filter(event => event.type === 'compaction').length, 1);
     assert.deepEqual(events.map(event => event.step), [1, 2, 3, 4, 5]);
     assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
-    assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5 } });
+    assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 } });
   });
 }
 
@@ -469,7 +469,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
     for (const { messages, reason } of cases) {
       const { end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
       assert.equal(end?.reason, reason, JSON.stringify(messages));
-      assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
+      assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
       assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
     }
   });
@@ -512,7 +512,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
         const { events, end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
         assert.equal(end?.reason, reason, `${name}: ${sample.source}`);
         assert.equal(end?.finalAnswer, answer);
-        assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5 });
+        assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
         assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
       }
     });
@@ -676,7 +676,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
     assert.equal(closed, true);
     if (mode === 'quota-exhausted') {
       assert.equal((await daemon.call('get-work', { workId: daemon.work.id })).result.status, 'executing');
-      assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5 });
+      assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
     }
   });
 });
@@ -717,7 +717,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     assert.equal(dispatch.endReason, 'completed', dispatch.failure);
     assert.equal(dispatch.conclusion, purpose === 'verification' ? 'passed' : 'completed');
     assert.equal(dispatch.conclusionReason, 'SDK MCP round trip');
-    assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5 });
+    assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
     assert.ok((await daemon.events()).some(event => event.action === 'context-compacted' && event.dispatchId === dispatch.id));
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');

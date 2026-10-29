@@ -10,9 +10,9 @@ const incomplete = (usage: Usage) => Boolean(usage.incomplete) || (usage.inputTo
 
 // Sums what was reported; marks the result incomplete when any run left a count unknown.
 export function sumUsage(rows: { usage: Usage }[]): Usage {
-  const sum = (key: 'inputTokens' | 'outputTokens') => rows.some(row => row.usage[key] != null)
+  const sum = (key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens') => rows.some(row => row.usage[key] != null)
     ? rows.reduce((total, row) => total + (row.usage[key] ?? 0), 0) : null;
-  const usage: Usage = { inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens') };
+  const usage: Usage = { inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), cacheReadTokens: sum('cacheReadTokens') };
   return rows.some(row => row.usage.inputTokens == null || row.usage.outputTokens == null || row.usage.incomplete) && totalTokens(usage) !== null
     ? { ...usage, incomplete: true } : usage;
 }

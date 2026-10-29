@@ -278,8 +278,12 @@ export class AcpDriver implements Driver {
         finally { clearTimeout(flushTimer); }
         try {
           const total = await profile.sessionUsage(env, id);
-          event.usage = { inputTokens: total.inputTokens === null || previousUsage.inputTokens === null ? null : Math.max(0, total.inputTokens - previousUsage.inputTokens),
-            outputTokens: total.outputTokens === null || previousUsage.outputTokens === null ? null : Math.max(0, total.outputTokens - previousUsage.outputTokens) };
+          const delta = (key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens') => {
+            const now = total[key], before = previousUsage[key];
+            return now == null || before === null ? null : Math.max(0, now - (before ?? 0));
+          };
+          const cacheReadTokens = delta('cacheReadTokens');
+          event.usage = { inputTokens: delta('inputTokens'), outputTokens: delta('outputTokens'), ...(cacheReadTokens !== null ? { cacheReadTokens } : {}) };
         } catch (error) { output({ method: 'helm/usage', error: `${profile.name} 用量读取失败：${String(error)}` }); }
       }
       finish(event);

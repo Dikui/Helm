@@ -190,7 +190,7 @@ test('DeepSeek 从关闭后刷盘的 v4 zstd 累加每步用量，缓存输入�
   const session = await ctx.driver.start(ctx.options);
   await session.send('多步派单');
   const end = (await collect(session.events)).at(-1)!;
-  assert.deepEqual(end.type === 'end' && end.usage, { inputTokens: 130, outputTokens: 9 });
+  assert.deepEqual(end.type === 'end' && end.usage, { inputTokens: 130, outputTokens: 9, cacheReadTokens: 70 });
   assert.equal((await ctx.requests()).at(-1).method, 'session/close');
 });
 

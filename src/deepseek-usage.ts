@@ -17,7 +17,7 @@ export async function deepseekUsage(env: Record<string, string>, sessionId: stri
   const encodedId = sessionId === '.' || sessionId === '..' ? sessionId.replaceAll('.', '~002E')
     : sessionId.split('').map(char => /^[A-Za-z0-9._-]$/.test(char) ? char : `~${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join('');
   if (!encodedId) throw new Error('DeepSeek session id is empty');
-  const total = { inputTokens: 0, outputTokens: 0 };
+  const total: TokenUsage & { inputTokens: number; outputTokens: number } = { inputTokens: 0, outputTokens: 0 };
   let projects;
   try { projects = await readdir(root, { withFileTypes: true }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -46,6 +46,7 @@ export async function deepseekUsage(env: Record<string, string>, sessionId: stri
       reported = true;
       total.inputTokens += usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
       total.outputTokens += usage.outputTokens;
+      if (usage.cacheReadTokens !== undefined) total.cacheReadTokens = (total.cacheReadTokens ?? 0) + usage.cacheReadTokens;
     }
     return reported || allowMissing ? total : { inputTokens: null, outputTokens: null };
   }

@@ -148,7 +148,8 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     usage(response) {
       const usage = response._meta?.usage as Record<string, unknown> | undefined;
       const tokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
-      return { inputTokens: tokens(usage?.inputTokens), outputTokens: tokens(usage?.outputTokens) };
+      const cacheReadTokens = tokens(usage?.cachedReadTokens);
+      return { inputTokens: tokens(usage?.inputTokens), outputTokens: tokens(usage?.outputTokens), ...(cacheReadTokens !== null ? { cacheReadTokens } : {}) };
     },
     // xai-grok-shell/src/sampling/error.rs: HTTP 429 maps to -32003;
     // subscription exhaustion can also appear in the RPC error's data.

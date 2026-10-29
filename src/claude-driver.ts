@@ -29,7 +29,8 @@ function tokenUsage(message: SDKResultMessage): TokenUsage {
   return Object.values(message.modelUsage).reduce((total, model) => ({
     inputTokens: total.inputTokens + model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens,
     outputTokens: total.outputTokens + model.outputTokens,
-  }), { inputTokens: 0, outputTokens: 0 });
+    cacheReadTokens: total.cacheReadTokens + model.cacheReadInputTokens,
+  }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
 }
 
 function quotaExhausted(text: string) {
