@@ -1,4 +1,4 @@
-import { cp, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
@@ -6,6 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 // Agent configs for tests; the role rules are built into src/prompts.ts.
 export const fixtureAgentDir = fileURLToPath(new URL('../../tests/fixtures/agents/', import.meta.url));
+
+// A logged-in Codex in a fresh home re-downloads its plugin catalog and curated plugins (~50 MB) on
+// every start. Share those caches across test homes; login, config and sessions stay per test.
+export async function shareCodexCaches(codexHome: string, realHome: string) {
+  const shared = join(realHome, '.cache', 'helm-tests', 'codex');
+  for (const name of ['cache', 'plugins', '.tmp']) {
+    await mkdir(join(shared, name), { recursive: true });
+    await symlink(join(shared, name), join(codexHome, name));
+  }
+}
 
 export interface FirstMessage {
   body: string;

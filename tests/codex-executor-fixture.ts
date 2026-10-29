@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -40,7 +40,10 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   const previousHome = process.env.HOME;
   const home = join(directory, 'home');
   await mkdir(join(home, '.codex'), { recursive: true });
-  if (config.stagedAuth) await symlink(config.stagedAuth, join(home, '.codex', 'auth.json'));
+  if (config.stagedAuth) {
+    await symlink(config.stagedAuth, join(home, '.codex', 'auth.json'));
+    await shareCodexCaches(join(home, '.codex'), previousHome ?? homedir());
+  }
   else await writeFile(join(home, '.codex', 'auth.json'), 'fake credential; never open');
   process.env.HOME = home;
   let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;

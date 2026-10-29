@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 // All Codex metadata and credentials live in a temporary HOME. A real smoke may
@@ -24,7 +24,10 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
     await rm(directory, { recursive: true, force: true });
   });
   await mkdir(join(home, '.codex'), { recursive: true });
-  if (config.stagedAuth) await symlink(config.stagedAuth, join(home, '.codex', 'auth.json'));
+  if (config.stagedAuth) {
+    await symlink(config.stagedAuth, join(home, '.codex', 'auth.json'));
+    await shareCodexCaches(join(home, '.codex'), previousHome ?? homedir());
+  }
   else await writeFile(join(home, '.codex', 'auth.json'), 'fake credential; never open');
   process.env.HOME = home;
   const repo = join(directory, 'project');
