@@ -17,3 +17,7 @@ Claude 调度者后来不再加载全局配置，见 [ADR 0014](0014-coordinator
 - **保留专用目录，逐个来源补漏**（ADR 0004）：会话记录分开，但每家 CLI 顺着 `HOME` 读的东西都要单独处理，Claude 要另登录一次，后面接 Grok、dsh 问题只会更多。
 - **Claude 默认目录加 SDK 隔离模式，Codex 用 Helm 空目录加软链接登录**：两家都可控、模板即全部定义，但 `~/.agents/skills` 这类来源照样漏，以后仍要决定补不补；用户选择第一版先彻底开放。
 - **给 agent 进程换一个假 `HOME`**：能一刀切隔离，但执行者要用用户的 git 配置、ssh key、`gh` 登录和各种包缓存，换掉 `HOME` 这些都会失效。
+
+## 2026-10-29：Helm 启动的 Codex 关闭插件
+
+Codex 0.165 开着插件时，每次启动 app-server 都会重新下载并安装账号下的远程连接器插件（约 18 MB），缓存再全也一样；Helm 每次派单、调度轮次和列模型都会启动一次，10-22 起每天多耗 2–6 GB 流量。实测只有 `features.plugins=false` 能阻止（`features.apps=false` 无效，也没有只关远程插件的配置项），所以 Helm 启动 app-server 时一律加这个开关。代价是用户在 `~/.codex/config.toml` 里启用的本地插件（如 gungnir）不进入 Helm 的 Codex 会话；Helm 库技能经 `skills/extraRoots` 传入，`~/.agents/skills` 等全局技能照常加载，不受影响。

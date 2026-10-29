@@ -14,6 +14,10 @@ import { agentPrompt } from './prompts.js';
 import type { AgentConfig } from './agents.js';
 import { helmVersion } from './version.js';
 
+// With plugins on, every app-server start reinstalls the account's remote connector plugins (~18 MB),
+// even with a warm cache. Helm passes library skills through skills/extraRoots, not plugins.
+const appServer = { file: 'codex', args: ['app-server', '-c', 'features.plugins=false'] };
+
 function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);
 }
@@ -50,7 +54,7 @@ export class CodexDriver implements Driver {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    const rpc = new CodexRpc(this.config.command ?? { file: 'codex', args: ['app-server'] }, { cwd: homedir() }, runtimeEnvironment());
+    const rpc = new CodexRpc(this.config.command ?? appServer, { cwd: homedir() }, runtimeEnvironment());
     const timer = setTimeout(() => rpc.close(), 30_000);
     try {
       await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: helmVersion }, capabilities: { experimentalApi: true } });
@@ -94,7 +98,7 @@ export class CodexDriver implements Driver {
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     options.signal?.throwIfAborted();
-    const rpc = new CodexRpc(this.config.command ?? { file: 'codex', args: ['app-server'] }, { ...options, cwd }, env);
+    const rpc = new CodexRpc(this.config.command ?? appServer, { ...options, cwd }, env);
     let cancelled = false;
     const cancel = () => {
       cancelled = true;
