@@ -9,8 +9,10 @@ import { agentEnvironment } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
+import { projectEnvironmentNames } from './project-environment.js';
 
 export interface StartupBrief {
+  projectEnvironmentNames: string[];
   work: Work;
   delivery: ReturnType<typeof deliveryDetails>;
   workDescription: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
@@ -35,6 +37,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   const brief = (event: HelmEvent) => event.action.startsWith('dispatch-') && event.details && typeof event.details === 'object' && 'agent' in event.details
     ? { ...event, details: { ...event.details, agent: undefined } } : event;
   return {
+    projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),
     activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
     workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
     work,

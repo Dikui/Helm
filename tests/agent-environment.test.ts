@@ -8,8 +8,8 @@ import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from 
 import { fixture as executorFixture } from './browser-fixture.js';
 import { fixture as coordinatorFixture, until } from './claude-coordinator-fixture.js';
 
-for (const role of ['coordinator', 'executor'] as const) {
-  test(`${role}: 父环境只传运行必需项，实际子进程无桌面会话变量且关闭自动记忆`, async t => {
+for (const { role, purpose } of [{ role: 'coordinator', purpose: undefined }, { role: 'executor', purpose: 'execution' }, { role: 'executor', purpose: 'verification' }] as const) {
+  test(`${role} ${purpose ?? ''}: 子进程只传运行必需项和执行者项目变量，无桌面会话变量且关闭自动记忆`, async t => {
     const home = await mkdtemp(join(tmpdir(), 'helm-environment-'));
     t.after(() => rm(home, { recursive: true, force: true }));
     const injected = {
@@ -19,6 +19,7 @@ for (const role of ['coordinator', 'executor'] as const) {
       HELM_PORT_START: '9999', NODE_OPTIONS: '--no-warnings',
       LANG: 'en_US.UTF-8', LC_CTYPE: 'UTF-8', HTTPS_PROXY: 'http://proxy.invalid',
       NO_PROXY: 'upper.test', no_proxy: 'lower.test',
+      PROJECT_RUNTIME_KEY: 'parent-project-value-must-not-inherit',
     };
     const previous = Object.keys(injected).map(key => process.env[key]);
     Object.assign(process.env, injected);
@@ -46,14 +47,16 @@ for (const role of ['coordinator', 'executor'] as const) {
       },
     });
     const config = { pathToClaudeCodeExecutable: '/fake/claude', query };
+    const projectEnvironment = { PROJECT_RUNTIME_KEY: 'claude-project-env-shell-value-25476' };
     if (role === 'executor') {
-      const daemon = await executorFixture(t, [], { executorDriver: new ClaudeExecutorDriver(config) });
+      const daemon = await executorFixture(t, [], { executorDriver: new ClaudeExecutorDriver(config), purpose, projectEnvironment });
       assert.equal((await daemon.ended()).endReason, 'completed');
     } else {
-      const daemon = await coordinatorFixture(t, new ClaudeCoordinatorDriver(config));
+      const daemon = await coordinatorFixture(t, new ClaudeCoordinatorDriver(config), 1, { projectEnvironment });
       await until(daemon.events, events => events.some(event => event.action === 'round-ended' && event.details.finalAnswer === '环境探针完成'));
     }
     assert.ok(childEnv, '必须实际运行 Node 子进程探针');
+    assert.equal(childEnv.PROJECT_RUNTIME_KEY, role === 'executor' ? projectEnvironment.PROJECT_RUNTIME_KEY : undefined);
     for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CLAUDE_CODE_DESKTOP_SESSION', 'HELM_TEST_ARBITRARY', 'ANTHROPIC_API_KEY', 'NODE_OPTIONS']) {
       assert.equal(childEnv[key], undefined, key);
     }

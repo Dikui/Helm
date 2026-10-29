@@ -28,6 +28,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   watchdog?: { wallTimeoutMs: number; idleTimeoutMs: number };
   executorDriver?: Driver; content?: string; model?: string;
   projectSettings?: object;
+  projectEnvironment?: Record<string, string>;
   firstMessage?: FirstMessage; dispatchContent?: (brief: StartupBrief) => string;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-browser-')));
@@ -63,6 +64,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
     return { status: response.status, ...await response.json() as any };
   };
   const project = (await call('register-project', { path: repo })).result;
+  for (const [name, value] of Object.entries(config.projectEnvironment ?? {})) ok(await call('set-project-environment', { projectId: project.id, name, value }));
   const work = (await call('send-message', { projectId: project.id, key: 'start',
     ...(config.firstMessage ?? { body: '检查页面' }) })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;

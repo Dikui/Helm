@@ -2,7 +2,8 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -86,6 +87,25 @@ async function handle(line: string) {
   }
   if (message.method === 'session/prompt') {
     promptId = message.id;
+    if (script.shellProbe) {
+      const shell = { resolve: (request: any) => ({ ...request }) };
+      const disposers: (() => void)[] = [];
+      for (const patch of patches) for (const plugin of patch.content.flatMap((operation: any) => operation.insert ?? [])) {
+        if (plugin.id !== 'helm-project-environment') continue;
+        const source = readFileSync(plugin.name, 'utf8');
+        appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/environment-plugin', source })}\n`);
+        const module = await import(pathToFileURL(plugin.name).href);
+        module.apply({ shell, effect: (apply: () => () => void) => { disposers.push(apply()); } });
+      }
+      // Match dsh's ambient credential scrub; explicit shell spec.env merges later.
+      const policy = process.env.GROK_CONFIG ? JSON.parse(process.env.GROK_CONFIG).shell_environment_policy : undefined;
+      const scrub = script.scrubShellEnvironment || !policy?.ignore_default_excludes;
+      const parent = Object.fromEntries(Object.entries(process.env).filter(([key]) => !scrub || !/KEY|PASSWORD|SECRET|TOKEN|^DSH_/i.test(key)));
+      const spec = shell.resolve({ command: 'probe', env: {} });
+      const text = execFileSync('/bin/sh', ['-c', 'printf %s "$PROJECT_RUNTIME_KEY"'], { env: { ...parent, ...spec.env }, encoding: 'utf8' });
+      appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/shell', text })}\n`);
+      for (const dispose of disposers) dispose();
+    }
     if (script.spawnChild) {
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
       child.unref();

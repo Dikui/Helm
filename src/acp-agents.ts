@@ -11,8 +11,8 @@ import type { AgentConfig } from './agents.js';
 interface AcpAgentProfile {
   name: string;
   command: string;
-  arguments(agent: AgentConfig): string[];
-  prepare?(agent: AgentConfig): Promise<{ args: string[]; cleanup(): Promise<void> } | undefined>;
+  arguments(agent: AgentConfig, projectEnvironmentNames?: string[]): string[];
+  prepare?(agent: AgentConfig, projectEnvironmentNames?: string[]): Promise<{ args: string[]; cleanup(): Promise<void> } | undefined>;
   authentication?: string;
   environment: { set: Record<string, string>; unset: string[] };
   homeVariable?: string;
@@ -50,18 +50,28 @@ function deepseekRoute(value: string): [string, string] | undefined {
 export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   deepseek: {
     name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
-    async prepare(agent) {
-      if (!agent.skillsPath) return;
+    async prepare(agent, environmentNames = []) {
+      if (!agent.skillsPath && !environmentNames.length) return;
       const directory = await mkdtemp(join(tmpdir(), 'helm-dsh-skills-'));
       const cleanup = () => rm(directory, { recursive: true, force: true });
       try {
         const path = join(directory, 'skills.json');
         // --patch accepts a JSON patch list. Add a separate provider so user
         // skill-filesystem settings, default roots and bundled skills survive.
-        await writeFile(path, JSON.stringify([{ insert: [{ id: 'helm-agent-skills',
+        const plugins: { id: string; name: string; config?: object }[] = [];
+        if (agent.skillsPath) plugins.push({ id: 'helm-agent-skills',
           name: '@deepseek-ai/dsh-skill-filesystem', config: {
             providerName: 'helm-agent', includeDefaultRoots: false, customSkillDirs: [resolve(agent.skillsPath)],
-          } }] }]), { mode: 0o600 });
+          } });
+        if (environmentNames.length) {
+          // dsh scrubs KEY/PASSWORD/SECRET/TOKEN from ambient child env. Its
+          // shell's explicit env merges after that scrub. This plugin stores
+          // only names and reads values from this executor process at runtime.
+          const plugin = join(directory, 'project-environment.mjs');
+          await writeFile(plugin, deepseekEnvironmentPlugin(environmentNames), { mode: 0o600 });
+          plugins.push({ id: 'helm-project-environment', name: plugin });
+        }
+        await writeFile(path, JSON.stringify([{ insert: plugins }]), { mode: 0o600 });
         return { args: ['--patch', path], cleanup };
       } catch (error) { await cleanup(); throw error; }
     },
@@ -119,10 +129,15 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     name: 'Grok', command: 'grok', authentication: 'cached_token',
     // Process plugins are ignored by a shared leader, so explicitly use the
     // native process when adding agent skills (grok agent --help).
-    arguments: agent => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []),
-      ...(agent.skillsPath ? ['--no-leader', '--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
+    arguments: (agent, environmentNames = []) => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []),
+      ...(agent.skillsPath || environmentNames.length ? ['--no-leader'] : []),
+      ...(agent.skillsPath ? ['--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
     // Subagents and background workflows run outside Helm's usage, sandbox and process cleanup.
-    environment: { set: { GROK_SANDBOX: 'workspace', GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0' }, unset: ['XAI_API_KEY', 'GROK_HOME'] },
+    environment: { set: { GROK_SANDBOX: 'workspace', GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0',
+      // Grok's allowlisted config overlay changes filters, never embeds values.
+      GROK_CONFIG: JSON.stringify({ shell_environment_policy: { inherit: 'all', ignore_default_excludes: true, exclude: [], include_only: [] },
+        toolset: { bash: { login_shell_capture: false } } }),
+    }, unset: ['XAI_API_KEY', 'GROK_HOME', 'GROK_CONFIG_PATH'] },
     unavailable(agent) {
       if (agent.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
       if (!agent.model) return 'Grok Agent 必须指定模型 id，不能使用 CLI 默认模型。';
@@ -158,3 +173,21 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     installCommand: 'curl -fsSL https://x.ai/cli/install.sh | bash', loginCommand: 'grok login',
   },
 };
+
+export function deepseekEnvironmentPlugin(names: string[]) {
+  return `export const name = 'helm-project-environment';
+export const inject = ['shell'];
+export function apply(ctx) {
+  const shell = ctx.shell;
+  const original = shell.resolve;
+  ctx.effect(() => {
+    shell.resolve = function(request) {
+      const spec = original.call(this, request);
+      const env = Object.fromEntries(${JSON.stringify(names)}.filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]]));
+      return { ...spec, env: { ...spec.env, ...env } };
+    };
+    return () => { shell.resolve = original; };
+  });
+}
+`;
+}

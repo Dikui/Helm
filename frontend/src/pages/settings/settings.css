@@ -124,7 +124,7 @@
 .settings-project-config { border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }
 .settings-project-config > summary { color: var(--muted); }
 .settings-project-config > summary::after { content: '⌄'; margin-left: 8px; }
-.settings-project-config > div { display: grid; gap: 12px; padding-top: 12px; }
+.settings-project-config > div, .settings-project-config > form { display: grid; gap: 12px; padding-top: 12px; }
 .settings-prompt-group > label h3 { color: var(--text); }
 @container settings (min-width: 900px) { .settings-agents { grid-template-columns: minmax(0, 1fr) 400px; } .settings-editor { position: sticky; top: 0; height: 100%; max-height: 100%; border-left: 1px solid var(--border); border-top: 0; overflow: auto; } }
 @media (max-width: 1240px) { .settings-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } .settings-page .settings-nav { display: flex; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); } .settings-agents { grid-template-columns: minmax(0, 1fr); } .settings-editor { border-left: 0; border-top: 1px solid var(--border); } }

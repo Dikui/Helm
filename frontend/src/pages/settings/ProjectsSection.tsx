@@ -46,7 +46,7 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
   const [selected, setSelected] = useState<string>();
   const save = useSettingsSave();
   const coordinators = agents.filter(agent => agent.role === 'coordinator');
-  return <form className="settings-box" aria-label={`${t('projects')} ${project.name}`} noValidate aria-busy={save.pending} onSubmit={event => {
+  return <div className="settings-box"><form aria-label={`${t('projects')} ${project.name}`} noValidate aria-busy={save.pending} onSubmit={event => {
     event.preventDefault(); void save.run(async () => { await api.call('set-project-coordinator-agent', { projectId: project.id, agentId: selected ?? project.defaultCoordinatorAgentId }); onSaved(); });
   }}><div className="settings-project-summary"><div><h3>{project.name}</h3><code>{project.path}</code></div><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="muted">{workCount === undefined ? t('loading') : `${workCount} ${t('projectWorkCount')}`}</span></div>
     <details className="settings-project-config"><summary>{t('projectSettings')}</summary><div>
@@ -59,5 +59,36 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
       <button type="button" className="btn work-danger" disabled={save.pending || workCount !== 0} aria-describedby={`project-delete-${project.id}`} onClick={() => void save.run(async () => {
         await api.call('delete-project', { projectId: project.id }); onDeleted();
       })}>{t('deleteProject')}</button></div></div></details>
-  </form>;
+  </form><ProjectEnvironment project={project} onSaved={onSaved} /></div>;
+}
+
+function ProjectEnvironment({ project, onSaved }: { project: Project; onSaved: () => void }) {
+  const { t } = useI18n();
+  const { api } = useData();
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const nameInput = useRef<HTMLInputElement>(null);
+  const save = useSettingsSave();
+  const names = project.environmentNames ?? [];
+  return <details className="settings-project-config"><summary>{t('projectEnvironment')}</summary>
+    <form aria-label={`${t('projectEnvironment')} ${project.name}`} aria-busy={save.pending} onSubmit={event => {
+      event.preventDefault();
+      void save.run(async () => {
+        await api.call('set-project-environment', { projectId: project.id, name, value });
+        setName(''); setValue(''); onSaved();
+      });
+    }}>
+      <small className="muted">{t('projectEnvironmentHelp')}</small>
+      {names.length ? <ul>{names.map(variable => <li key={variable}><code>{variable}</code> <button type="button" className="btn sm" disabled={save.pending} aria-label={`${t('overwriteEnvironment')} ${variable}`} onClick={() => {
+        setName(variable); setValue(''); save.clear(); nameInput.current?.focus();
+      }}>{t('overwriteEnvironment')}</button> <button type="button" className="btn sm work-danger" disabled={save.pending} aria-label={`${t('deleteEnvironment')} ${variable}`} onClick={() => void save.run(async () => {
+        await api.call('delete-project-environment', { projectId: project.id, name: variable });
+        if (name === variable) { setName(''); setValue(''); }
+        onSaved();
+      })}>{t('deleteEnvironment')}</button></li>)}</ul> : <p>{t('emptyEnvironment')}</p>}
+      <label>{t('environmentName')}<input ref={nameInput} required pattern="[A-Za-z_][A-Za-z0-9_]*" value={name} disabled={save.pending} autoComplete="off" spellCheck={false} onChange={event => { setName(event.target.value); save.clear(); }} /></label>
+      <label>{t('environmentValue')}<input type="password" value={value} disabled={save.pending} autoComplete="new-password" onChange={event => { setValue(event.target.value); save.clear(); }} /></label>
+      <SaveFeedback {...save} /><button className="btn" disabled={save.pending || !name}>{t(names.includes(name) ? 'overwriteEnvironment' : 'addEnvironment')}</button>
+    </form>
+  </details>;
 }

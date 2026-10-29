@@ -24,6 +24,54 @@ const fieldValue = (label: string) => {
 const expandProject = (project: HTMLElement) => { fireEvent.click(within(project).getByText('项目设置', { selector: 'summary' })); return project; };
 const agent = async (id: string) => (await daemon!.call('list-agents')).result.find((item: any) => item.id === id);
 
+test('项目环境变量用密码框添加、覆盖和删除，保存和重新载入都只显示名字', async () => {
+  daemon = await uiFixture();
+  window.history.replaceState(null, '', '/settings/projects');
+  const view = render(<App baseUrl={daemon.url} />);
+  const formName = `项目环境变量 ${daemon.project.name}`;
+  const form = await screen.findByRole('form', { name: formName, hidden: true });
+  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  const secret = within(form).getByLabelText('变量值') as HTMLInputElement;
+  expect(secret.type).toBe('password');
+  fireEvent.change(within(form).getByLabelText('变量名'), { target: { value: 'PROJECT_RUNTIME_KEY' } });
+  fireEvent.change(secret, { target: { value: 'ui-project-env-first-19062' } });
+  fireEvent.click(within(form).getByRole('button', { name: '添加变量' }));
+  await within(form).findByText('PROJECT_RUNTIME_KEY');
+  await waitFor(() => expect(secret.value).toBe(''));
+  expect(document.body.textContent).not.toContain('ui-project-env-first-19062');
+  expect((await daemon.call('list-projects')).result[0].environmentNames).toEqual(['PROJECT_RUNTIME_KEY']);
+  fireEvent.click(within(form).getByRole('button', { name: '覆盖值 PROJECT_RUNTIME_KEY' }));
+  expect((within(form).getByLabelText('变量名') as HTMLInputElement).value).toBe('PROJECT_RUNTIME_KEY');
+  expect(secret.value).toBe('');
+  fireEvent.change(secret, { target: { value: 'ui-project-env-replacement-72841' } });
+  fireEvent.click(within(form).getByRole('button', { name: '覆盖值' }));
+  await waitFor(() => expect(secret.value).toBe(''));
+  expect(document.body.textContent).not.toContain('ui-project-env-replacement-72841');
+  view.unmount();
+  render(<App baseUrl={daemon.url} />);
+  const reloaded = await screen.findByRole('form', { name: formName, hidden: true });
+  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  expect((within(reloaded).getByLabelText('变量值') as HTMLInputElement).value).toBe('');
+  expect(within(reloaded).getByText('PROJECT_RUNTIME_KEY')).toBeTruthy();
+  fireEvent.click(within(reloaded).getByRole('button', { name: '删除变量 PROJECT_RUNTIME_KEY' }));
+  await within(reloaded).findByText('尚未配置环境变量。');
+  expect((await daemon.call('list-projects')).result[0].environmentNames).toEqual([]);
+});
+
+test('项目环境变量拒绝受管名字，显示服务端原因且不会把输入值显示为文本', async () => {
+  daemon = await uiFixture();
+  window.history.replaceState(null, '', '/settings/projects');
+  render(<App baseUrl={daemon.url} />);
+  const form = await screen.findByRole('form', { name: `项目环境变量 ${daemon.project.name}`, hidden: true });
+  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  fireEvent.change(within(form).getByLabelText('变量名'), { target: { value: 'HOME' } });
+  fireEvent.change(within(form).getByLabelText('变量值'), { target: { value: 'ui-project-env-rejected-72513' } });
+  fireEvent.click(within(form).getByRole('button', { name: '添加变量' }));
+  expect((await within(form).findByRole('alert')).textContent).toContain('不能由项目覆盖');
+  expect(document.body.textContent).not.toContain('ui-project-env-rejected-72513');
+  expect((await daemon.call('list-projects')).result[0].environmentNames).toEqual([]);
+});
+
 test('Agent 详情重新检测保留未保存输入，检测中禁用操作，失败后可重试并显示恢复状态', async () => {
   daemon = await uiFixture();
   const original = await agent('claude-executor');

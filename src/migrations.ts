@@ -215,4 +215,11 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE gates ADD COLUMN report TEXT;
   `,
+  `
+  CREATE TABLE project_environment (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, value TEXT NOT NULL,
+    PRIMARY KEY (project_id, name)
+  ) STRICT;
+  `,
 ];

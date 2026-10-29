@@ -40,6 +40,27 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
 
+test('Codex 执行者的 shell 策略保留项目 KEY，RPC 配置只有策略，没有变量值', async t => {
+  const value = 'codex-project-env-shell-probe-17489';
+  const ctx = await fixture(t, [completed()], { shellProbe: true });
+  for (const resumeSessionId of [undefined, 'thread-scripted']) {
+    const session = await ctx.driver.start({ ...ctx.options, env: { ...ctx.options.env, PROJECT_RUNTIME_KEY: value },
+      projectEnvironmentNames: ['PROJECT_RUNTIME_KEY'], resumeSessionId });
+    await session.send('读取项目变量，不输出值');
+    const events = await collect(session.events);
+    const probe = events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)).find(message => message.method === 'fixture/shell');
+    assert.equal(probe.params.text, value);
+    session.cancel();
+  }
+  const requests = await ctx.requests();
+  assert.ok(!JSON.stringify(requests).includes(value));
+  for (const thread of requests.filter(request => ['thread/start', 'thread/resume'].includes(request.method))) {
+    assert.equal(thread.params.config.shell_environment_policy.inherit, 'all');
+    assert.equal(thread.params.config.shell_environment_policy.ignore_default_excludes, true);
+    assert.deepEqual(thread.params.config.shell_environment_policy.set, {});
+  }
+});
+
 test('Codex 两种角色将 HTTP 和 stdio MCP 写入会话配置，保留 command、args、env 和省略项', async t => {
   for (const role of ['coordinator', 'executor'] as const) {
     for (const home of ['shared', 'dedicated'] as const) {

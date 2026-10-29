@@ -26,6 +26,7 @@ export async function until<T>(read: () => Promise<T>, ready: (value: T) => bool
 // realFirstRound instead exercises alignment itself and leaves its draft unconfirmed.
 export async function fixture(t: TestContext, driver: Driver, rounds = 1, config: {
   realFirstRound?: boolean; firstMessage?: FirstMessage; roundTimeout?: number;
+  projectEnvironment?: Record<string, string>;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-coordinator-')));
   const repo = join(directory, 'project');
@@ -61,6 +62,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
     return body.result;
   };
   const project = await call('register-project', { path: repo });
+  for (const [name, value] of Object.entries(config.projectEnvironment ?? {})) await call('set-project-environment', { projectId: project.id, name, value });
   const initial = (await call('send-message', { projectId: project.id, key: 'start',
     ...(config.firstMessage ?? { body: '调度者驱动冒烟' }) })).work;
   const params = { workId: initial.id };

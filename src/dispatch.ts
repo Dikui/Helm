@@ -8,6 +8,7 @@ import { cardDetails } from './graph.js';
 import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
+import { redactDispatchContent, redactDispatchText } from './project-environment.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -222,6 +223,7 @@ export function activeDispatch(store: TaskStore, actor: Actor) {
 
 export function submitConclusion(store: TaskStore, actor: Actor, params: { conclusion: Exclude<Dispatch['conclusion'], 'undeclared'>; reason: string }) {
   const dispatch = activeDispatch(store, actor);
+  params = { ...params, reason: redactDispatchText(store, dispatch.id, params.reason) };
   const allowed = dispatch.purpose === 'verification' ? ['passed', 'failed'] : ['completed', 'blocked'];
   if (!allowed.includes(params.conclusion)) {
     throw new RuleError('INVALID_PARAMS', `这是${dispatch.purpose === 'verification' ? '验收' : '执行'}派单，结论只能是 ${allowed.join(' 或 ')}。`, 400);
@@ -261,6 +263,8 @@ export function dispatchArtifacts(store: TaskStore, workId: string, dispatchId: 
 }
 
 export function saveArtifact(store: TaskStore, dispatch: Dispatch, kind: 'branch' | 'file' | 'test-output', name: string, value: string | Buffer, commit?: string) {
+  name = redactDispatchText(store, dispatch.id, name);
+  if (kind !== 'branch') value = redactDispatchContent(store, dispatch.id, value);
   const id = randomUUID();
   const path = kind === 'branch' ? null : join(store.dataDir, 'dispatches', dispatch.id, 'artifacts', id);
   if (path) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); }

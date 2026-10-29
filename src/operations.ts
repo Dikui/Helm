@@ -22,6 +22,7 @@ import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, 
 import { attachmentsSchema, saveAttachments } from './attachments.js';
 import { listWorkFiles, readWorkFile } from './work-files.js';
 import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
+import { changeProjectEnvironment, projectEnvironmentName, projectEnvironmentNames } from './project-environment.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -54,6 +55,8 @@ const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 const writeScopesSchema = z.array(z.string().trim().min(1)).max(50).optional();
 const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id AS defaultCoordinatorAgentId';
+const projectSettings = (store: TaskStore, project: Record<string, unknown>) =>
+  ({ ...project, environmentNames: projectEnvironmentNames(store, String(project.id)) });
 
 export const operations: readonly Operation[] = [
   operation({
@@ -267,12 +270,12 @@ export const operations: readonly Operation[] = [
         path = candidate;
       }
       const existing = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE path = ?`).get(path);
-      if (existing) return existing;
+      if (existing) return projectSettings(store, existing);
       const id = randomUUID();
       const time = new Date().toISOString();
       store.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(id, params.name ?? basename(path), path, time);
       store.appendEvent(actor, { type: 'project', id }, 'project-registered', { path, name: params.name ?? basename(path) });
-      return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(id);
+      return projectSettings(store, store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(id)!);
     },
   }),
   operation({
@@ -296,7 +299,18 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'list-projects', description: '列出项目', callers: ['user'], keyed: false, mutates: false,
     schema: z.object({}).strict(),
-    execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all().map(projectGitStatus),
+    execute: ({ store }) => store.db.prepare(`SELECT ${projectColumns} FROM projects ORDER BY created_at, id`).all()
+      .map(project => projectGitStatus(projectSettings(store, project))),
+  }),
+  operation({
+    name: 'set-project-environment', description: '设置或覆盖一个项目环境变量，只返回名字；仅注入之后启动的执行及验收派单', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ projectId: z.string().min(1), name: projectEnvironmentName, value: z.string().refine(value => !value.includes('\0'), '变量值不能包含 NUL 字符。') }).strict(),
+    execute: ({ store, actor }, { projectId, name, value }) => changeProjectEnvironment(store, actor, projectId, name, value),
+  }),
+  operation({
+    name: 'delete-project-environment', description: '删除一个项目环境变量，只返回剩余名字', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ projectId: z.string().min(1), name: projectEnvironmentName }).strict(),
+    execute: ({ store, actor }, { projectId, name }) => changeProjectEnvironment(store, actor, projectId, name),
   }),
   operation({
     name: 'list-project-branches', description: '读取项目当前检出分支及可用的本地基准分支', callers: ['user'], keyed: false, mutates: false,
@@ -319,7 +333,7 @@ export const operations: readonly Operation[] = [
         store.appendEvent(actor, { type: 'project', id: projectId }, 'project-coordinator-agent-set',
           { previousAgentId: project.defaultCoordinatorAgentId, agentId });
       }
-      return store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
+      return projectSettings(store, store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId)!);
     },
   }),
   operation({

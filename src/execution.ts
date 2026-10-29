@@ -13,6 +13,7 @@ import { createVerificationCopy, removeVerificationCopy, verificationPath } from
 import { checkOutputUsage } from './outputs.js';
 import { outputSummary } from './output-summary.js';
 import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
+import { projectEnvironment, protectDispatchEnvironment, redactEnvironmentEvent } from './project-environment.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -148,6 +149,8 @@ export class ExecutionRunner {
     let browserFailed = false;
     let startCommit: string | null = null;
     let endCommit: string | null = null;
+    let redact = (text: string) => text;
+    let releaseEnvironment = () => {};
     const card = cardDetails(this.store, dispatch.workId, dispatch.cardId);
     const workPath = dispatch.purpose === 'verification' ? verificationPath(this.store, dispatch) : card.workPath!;
     const processes: ManagedProcess[] = [];
@@ -215,10 +218,15 @@ export class ExecutionRunner {
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
         const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
+        const environment = projectEnvironment(this.store, this.store.work(dispatch.workId).projectId);
+        const protection = protectDispatchEnvironment(this.store, dispatch.id, environment);
+        redact = protection.redact;
+        releaseEnvironment = protection.release;
         const starting = this.drivers[dispatch.agent.driver]!.start({
           dataDir: join(dispatch.outputPath, '..'),
-          agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls),
+          agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls), ...environment,
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
+          projectEnvironmentNames: Object.keys(environment),
           sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
@@ -249,7 +257,7 @@ export class ExecutionRunner {
         for (;;) {
           const next = await abortable(events.next(), eventStop.signal);
           if (next.done) break;
-          const event = next.value;
+          const event = redactEnvironmentEvent(next.value, redact);
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
           if (!Number.isSafeInteger(event.step) || event.step <= previousStep) throw new Error('Driver step numbers must increase');
@@ -257,7 +265,7 @@ export class ExecutionRunner {
           writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
           const summary = stepSummary(event) || latestSummary;
           latestSummary = summary;
-          const artifact = event.type === 'artifact' ? reportedArtifact(workPath, event.path) : undefined;
+          const artifact = next.value.type === 'artifact' ? reportedArtifact(workPath, next.value.path) : undefined;
           this.store.transaction(() => {
             this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
             this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step: event.step, summary }, scope);
@@ -275,8 +283,8 @@ export class ExecutionRunner {
         }
       }
     } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-      if (error instanceof RuleError) ruleFailure = { code: error.code, reason: error.message, details: error.details };
+      failure = redact(error instanceof Error ? error.message : String(error));
+      if (error instanceof RuleError) ruleFailure = { code: error.code, reason: redact(error.message), details: error.details };
     }
     finally {
       clearTimeout(wallTimer);
@@ -342,6 +350,7 @@ export class ExecutionRunner {
       }
       if (current.abortReason) reason = 'aborted';
       if (reason !== 'completed') finalAnswer = null;
+      if (failure) failure = redact(failure);
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, final_answer = ?, usage = ?, failure = ?, end_commit = ?,
           conclusion = CASE WHEN ? = 'completed' THEN conclusion ELSE 'undeclared' END,
@@ -353,6 +362,7 @@ export class ExecutionRunner {
         this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
         checkOutputUsage(this.store);
       });
+      releaseEnvironment();
     }
   }
 

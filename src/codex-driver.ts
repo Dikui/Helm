@@ -114,6 +114,10 @@ export class CodexDriver implements Driver {
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
+          // The app-server environment is already filtered by Helm. Forward it
+          // to shell commands, including project KEY/SECRET/TOKEN variables.
+          ...(!coordinator ? { shell_environment_policy: { inherit: 'all', ignore_default_excludes: true,
+            exclude: [], include_only: [], set: {}, experimental_use_profile: false } } : {}),
           ...(agent.fast ? { service_tier: 'fast' } : {}),
           ...(!coordinator ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {

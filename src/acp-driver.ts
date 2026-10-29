@@ -31,13 +31,13 @@ export class AcpDriver implements Driver {
     return env;
   }
 
-  private async launch(agent: AgentConfig, options: Pick<SessionOptions, 'cwd' | 'onProcess'>,
+  private async launch(agent: AgentConfig, options: Pick<SessionOptions, 'cwd' | 'onProcess' | 'projectEnvironmentNames'>,
     env: Record<string, string>, handlers: ConstructorParameters<typeof AcpClient>[3]) {
     const command = this.config.command ?? { file: this.profile.command, args: [] };
-    const prepared = await this.profile.prepare?.(agent);
+    const prepared = await this.profile.prepare?.(agent, options.projectEnvironmentNames);
     try {
       const acp = new AcpClient({ file: command.file,
-        args: [...command.args, ...this.profile.arguments(agent), ...(prepared?.args ?? [])] }, options, env, handlers);
+        args: [...command.args, ...this.profile.arguments(agent, options.projectEnvironmentNames), ...(prepared?.args ?? [])] }, options, env, handlers);
       let closing: Promise<void> | undefined;
       return { acp, close: () => closing ??= acp.close().finally(() => prepared?.cleanup()) };
     } catch (error) { await prepared?.cleanup(); throw error; }

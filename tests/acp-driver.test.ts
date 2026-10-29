@@ -9,6 +9,40 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
 
+test('ACP 执行者 shell 读取项目 KEY，DeepSeek 用仅含名字的插件越过内部凭据过滤', async t => {
+  for (const kind of ['grok', 'deepseek'] as const) {
+    const value = `project-env-${kind}-shell-probe-9193`;
+    const ctx = await acpFixture(t, { shellProbe: true, scrubShellEnvironment: kind === 'deepseek',
+      ...(kind === 'deepseek' ? { configOptions: [
+        { id: 'model', name: 'Model', type: 'select', currentValue: '["account","deepseek-flash"]',
+          options: [{ value: '["account","deepseek-flash"]', name: 'Flash' }] },
+        { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }] },
+      ] } : {}),
+    }, true, kind);
+    const session = await ctx.driver.start({ ...ctx.options, env: { ...ctx.options.env, PROJECT_RUNTIME_KEY: value }, projectEnvironmentNames: ['PROJECT_RUNTIME_KEY'] });
+    await session.send('读取项目环境变量');
+    const events = await collect(session.events);
+    assert.equal((events.at(-1) as any).reason, 'completed');
+    const requests = await ctx.requests();
+    assert.equal(requests.find(request => request.method === 'fixture/shell').text, value);
+    for (const request of requests.filter(request => !request.method.startsWith('fixture/'))) assert.ok(!JSON.stringify(request).includes(value));
+    const spawn = requests.find(request => request.method === 'fixture/spawn');
+    if (kind === 'grok') {
+      assert.ok(spawn.args.includes('--no-leader'));
+      assert.equal(JSON.parse(spawn.env.GROK_CONFIG).shell_environment_policy.ignore_default_excludes, true);
+      assert.ok(!spawn.env.GROK_CONFIG.includes(value));
+    }
+    if (kind === 'deepseek') {
+      const plugin = requests.find(request => request.method === 'fixture/environment-plugin');
+      assert.ok(plugin.source.includes('PROJECT_RUNTIME_KEY'));
+      assert.ok(!plugin.source.includes(value));
+      assert.ok(!JSON.stringify(spawn.patches).includes(value));
+      await until(async () => stat(spawn.patches[0].path).then(() => false, () => true), Boolean);
+    }
+    session.cancel();
+  }
+});
+
 test('ACP 收到 stdio MCP 时在启动子进程前抛出结构化错误，不泄露环境变量', async t => {
   for (const kind of ['grok', 'deepseek'] as const) {
     const ctx = await acpFixture(t, {}, false, kind);

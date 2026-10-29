@@ -18,6 +18,8 @@ export interface SessionOptions {
   agent: AgentConfig;
   cwd: string;
   env: Record<string, string>;
+  // Names only for drivers that must explicitly forward project variables to shell tools.
+  projectEnvironmentNames?: string[];
   // Per-dispatch storage outside the writable card copy (CLI state, not code).
   dataDir?: string;
   sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
