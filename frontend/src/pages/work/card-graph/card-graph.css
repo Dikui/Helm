@@ -15,7 +15,7 @@
 .cg-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
 .cg-edge.flow { stroke: var(--running); stroke-dasharray: 4 5; animation: cg-flow .9s linear infinite; }
 .cg-edge.att { stroke: var(--attention); stroke-dasharray: 2 4; }
-.cg-edge.cut { stroke: var(--faint); stroke-dasharray: 3 4; }
+.cg-edge.cut { stroke: var(--faint); stroke-dasharray: 3 4; opacity: .6; }
 @keyframes cg-flow { to { stroke-dashoffset: -9; } }
 .cg-node { position: absolute; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-xs); background: var(--surface); color: var(--text); text-align: left; }
 .cg-node:hover { border-color: var(--border-strong); box-shadow: var(--shadow-card); }
@@ -138,3 +138,18 @@
 .cg-token-table th, .cg-token-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
 .cg-token-table th:first-child { text-align: left; font-weight: 500; }
 .cg-token-table thead { color: var(--muted); }
+
+/* 已跳过：沿用设计稿的虚线、浅灰斜纹与不划线的淡化名字。 */
+.cg-skip-fill, .cg-node.skipped, .cs-block.skipped { background: repeating-linear-gradient(135deg, var(--surface-soft) 0 4px, var(--surface) 4px 8px); }
+.cg-skip-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px dashed var(--border-strong); border-radius: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.cg-aggregate { display: inline-flex; flex-shrink: 0; align-items: center; height: 16px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.cg-node.skipped { border-style: dashed; box-shadow: none; color: var(--muted); }
+.cg-node.skipped .cg-node-name { opacity: .75; }
+.cg-node.skipped .cg-node-meta { opacity: .75; }
+.cg-node-state .cg-skip-chip { height: 18px; padding: 0 6px; background: var(--clear); }
+.cg-node-state .cg-skip-chip { display: block; min-width: 0; }
+.cg-node.withdrawn { border-color: var(--border); background: var(--clear); color: var(--faint); }
+.cg-node.withdrawn .cg-node-name > span:last-child { text-decoration: line-through; }
+
+.cg-legend .cg-skip-chip { height: 16px; font-size: 10px; }
+.cg-inspector-head .cg-skip-chip { max-width: 100%; height: auto; min-height: 18px; white-space: normal; overflow-wrap: anywhere; }

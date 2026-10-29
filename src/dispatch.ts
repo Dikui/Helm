@@ -166,7 +166,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const work = store.work(params.workId);
   if (!['executing', 'awaiting-review'].includes(work.status)) throw new RuleError('WORK_NOT_EXECUTING', '对齐中、暂停或终态工作不能派单。');
   const card = cardDetails(store, work.id, params.cardId);
-  if (['waiting', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、暂停或终态卡片不能派单。');
+  if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended' && (purpose === 'execution' || item.purpose === 'execution'))) {

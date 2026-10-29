@@ -240,4 +240,7 @@ export const migrations: readonly string[] = [
   UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL
     WHERE status IN ('merged', 'pushing');
   `,
+  `
+  ALTER TABLE cards ADD COLUMN aggregate INTEGER NOT NULL DEFAULT 0 CHECK(aggregate IN (0, 1));
+  `,
 ];

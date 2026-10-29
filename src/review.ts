@@ -13,7 +13,7 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
   if (fields.kind !== 'review') return gate;
   const work = store.work(String(fields.workId));
   const project = projectPath(store, work.id);
-  const cards = cardGraph(store, work.id).filter(node => node.type === 'card').filter(card => card.status !== 'cancelled');
+  const cards = cardGraph(store, work.id).filter(node => node.type === 'card').filter(card => !['cancelled', 'skipped'].includes(card.status));
   const dispatches = listDispatches(store, work.id);
   const verificationOnlyCards = cards.filter(card => card.needsVerification
     && !dispatches.some(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'execution'));
@@ -52,9 +52,9 @@ export function requestReview(store: TaskStore, actor: Actor, params: { workId: 
   if (gates.some(gate => gate.kind === 'review' && gate.status === 'pending')) throw new RuleError('REVIEW_PENDING', '工作已有未关闭的审核关卡。');
   if (store.work(params.workId).status !== 'executing') throw new RuleError('WORK_NOT_EXECUTING', '只能为执行中的工作发起审核。');
   const nonTerminalCards = cardGraph(store, params.workId)
-    .filter(node => node.type === 'card').filter(card => card.status !== 'completed' && card.status !== 'cancelled')
+    .filter(node => node.type === 'card').filter(card => card.status !== 'completed' && !['cancelled', 'skipped'].includes(card.status))
     .map(card => ({ id: card.id, content: card.content, status: card.status }));
-  if (nonTerminalCards.length) throw new RuleError('NON_TERMINAL_CARDS', '所有卡片必须完成或取消后才能发起审核。', 409, { nonTerminalCards });
+  if (nonTerminalCards.length) throw new RuleError('NON_TERMINAL_CARDS', '所有卡片必须完成、取消或跳过后才能发起审核。', 409, { nonTerminalCards });
   const id = randomUUID();
   const options = ['accept', 'return'];
   const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'review', question: '审核', body: params.report.summary, report: params.report, options }, { workId: params.workId });

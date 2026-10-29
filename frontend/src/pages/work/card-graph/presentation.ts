@@ -22,6 +22,7 @@ export function graphSummary(nodes: GraphNode[], dispatches: Dispatch[]) {
   const sendBacks = new Map<string, number>();
   for (const dispatch of dispatches) if (loops.has(dispatch.id)) sendBacks.set(dispatch.cardId, (sendBacks.get(dispatch.cardId) ?? 0) + 1);
   return { cards: cards.length, parallel: cards.filter(card => card.status === 'executing' || card.status === 'verifying').length,
+    skipped: cards.filter(card => card.status === 'skipped').length,
     cancelled: cards.filter(card => card.status === 'cancelled').length, retries: loops.size, sendBacks };
 }
 

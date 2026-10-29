@@ -25,12 +25,12 @@ test('显示拓扑将确认和审核置于首尾，保留一般关卡及真实�
 });
 
 test('汇总按卡片数并行、取消，只有验收失败后再执行才算打回', () => {
-  const nodes = [card('a', 'executing'), card('b', 'verifying'), card('c', 'cancelled'), gate('decision', 'general')];
+  const nodes = [card('a', 'executing'), card('b', 'verifying'), card('c', 'cancelled'), card('skip', 'skipped'), gate('decision', 'general')];
   const dispatches = [dispatch('one', 'a'), dispatch('fail', 'a', 'verification', 'failed'), dispatch('repair', 'a'), dispatch('retry', 'a'), dispatch('only-verify', 'b', 'verification', 'failed')];
   const summary = graphSummary(nodes, dispatches);
-  expect(summary).toMatchObject({ cards: 3, parallel: 2, cancelled: 1, retries: 1 });
+  expect(summary).toMatchObject({ cards: 4, parallel: 2, cancelled: 1, skipped: 1, retries: 1 });
   expect([...summary.sendBacks]).toEqual([['a', 1]]);
-  expect(graphSummary([], [])).toMatchObject({ cards: 0, parallel: 0, cancelled: 0, retries: 0 });
+  expect(graphSummary([], [])).toMatchObject({ cards: 0, parallel: 0, cancelled: 0, skipped: 0, retries: 0 });
 });
 
 test('用时跳过排队，完成后的时间线重开不随当前时间拉长，轮次参与范围', () => {

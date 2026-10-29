@@ -628,14 +628,14 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, gateId }) => gateHistory(store, workId, gateId),
   }),
   operation({
-    name: 'create-card', description: '建卡片；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
+    name: 'create-card', description: '建卡片；aggregate 标记汇总卡片，上游取消、撤回或跳过时只等其余上游完成；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
       writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => createCard(store, actor, params),
   }),
   operation({
-    name: 'update-card', description: '修改卡片内容、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
-    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(),
+    name: 'update-card', description: '修改卡片内容、汇总标记（aggregate）、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(),
       writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => updateCard(store, actor, params),
   }),

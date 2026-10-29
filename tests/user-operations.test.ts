@@ -103,7 +103,7 @@ test('用户暂停卡片会中止派单并拒绝新派单，恢复推导状态�
   assert.equal(events.filter(event => event.action === 'card-paused' && event.cardId === card.id).length, 1);
 });
 
-test('用户取消卡片会中止派单、删除副本，后继阻塞且取消为终态', async t => {
+test('用户取消卡片会中止派单、删除副本，后继跳过且取消为终态', async t => {
   const daemon = await fixture(t, [create('upstream'), dispatch('upstream'), create('downstream'),
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx),
       upstream: { type: 'card', id: saved(ctx, 'upstream').id }, downstream: { type: 'card', id: saved(ctx, 'downstream').id } }), check: ok },
@@ -117,7 +117,7 @@ test('用户取消卡片会中止派单、删除副本，后继阻塞且取消�
   assert.equal(result.abortReason, '卡片取消');
   assert.equal(existsSync(card.workPath), false);
   assert.equal(daemon.git('for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`), '');
-  assert.equal((await daemon.card('downstream')).status, 'waiting');
+  assert.equal((await daemon.card('downstream')).status, 'skipped');
   assert.equal((await daemon.call('pause-card', params)).error.code, 'TERMINAL_CARD');
   assert.equal((await daemon.call('resume-card', params)).error.code, 'TERMINAL_CARD');
   ok(await daemon.call('cancel-card', { ...params, reason: '重试取消' }));

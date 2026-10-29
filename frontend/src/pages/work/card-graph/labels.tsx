@@ -10,10 +10,15 @@ export function gateDecision(node: Pick<GateNode, 'kind' | 'decision'>, t: (key:
 }
 const statuses: Record<string, MessageKey> = {
   ready: 'graphReady', waiting: 'graphWaiting', executing: 'executing', verifying: 'graphVerifying',
-  paused: 'paused', completed: 'completed', cancelled: 'cancelled', pending: 'graphPending', decided: 'graphDecided', withdrawn: 'graphWithdrawn',
+  paused: 'paused', completed: 'completed', cancelled: 'cancelled', skipped: 'skipped', pending: 'graphPending', decided: 'graphDecided', withdrawn: 'graphWithdrawn',
 };
 export function NodeStatus({ node }: { node: GraphNode }) {
   const { t } = useI18n();
+  if (node.type === 'card' && node.status === 'skipped') {
+    const label = node.skippedBy?.map(cause => t('graphSkippedCause').replace('{name}', cause.title)
+      .replace('{reason}', t(cause.status === 'withdrawn' ? 'graphCauseWithdrawn' : 'graphCauseCancelled'))).join('；') || t('skipped');
+    return <span className="pill cg-skip-chip" title={label}>{label}</span>;
+  }
   const tone = node.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(node.status) ? 'run' : ['completed', 'decided'].includes(node.status) ? 'ok' : 'idle';
   return <span className={`pill ${tone}`}>{node.type === 'gate' && node.kind === 'work-confirmation' && node.status === 'decided' ? t('graphConfirmed') : t(statuses[node.status]!)}</span>;
 }
@@ -31,4 +36,9 @@ export function DispatchStatus({ dispatch }: { dispatch: Dispatch }) {
   </span>;
 }
 
-export const nodeRingTone: Record<string, string> = { executing: 'run busy', verifying: 'run busy', completed: 'ok', decided: 'ok', pending: 'att', cancelled: 'cut', withdrawn: 'cut' };
+export const nodeRingTone: Record<string, string> = { executing: 'run busy', verifying: 'run busy', completed: 'ok', decided: 'ok', pending: 'att', cancelled: 'cut', skipped: 'cut', withdrawn: 'cut' };
+
+export function AggregateBadge() {
+  const { t } = useI18n();
+  return <span className="cg-aggregate" title={t('graphAggregateHint')}>{t('graphAggregate')}</span>;
+}

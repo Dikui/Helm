@@ -3,7 +3,8 @@ import type { Gate, Usage } from '../../../shared/types.js';
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 export interface CardNode {
   type: 'card'; id: string; workId: string; content: string;
-  status: 'ready' | 'waiting' | 'executing' | 'verifying' | 'paused' | 'completed' | 'cancelled';
+  status: 'ready' | 'waiting' | 'executing' | 'verifying' | 'paused' | 'completed' | 'cancelled' | 'skipped';
+  aggregate?: boolean; skippedBy?: { type: 'card' | 'gate'; id: string; status: 'cancelled' | 'withdrawn'; title: string }[];
   agentId: string | null; latestDispatchId: string | null; currentStep: number; latestStepSummary: string | null;
   cardBranch: string | null; workPath: string | null; usage: Usage; dependencies: NodeRef[];
 }

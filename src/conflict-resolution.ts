@@ -81,7 +81,7 @@ export function finishConflictResolution(store: TaskStore, actor: Actor, workId:
   const cards = cardGraph(store, workId).filter(node => node.type === 'card');
   const completed = cards.filter(card => newCardIds.has(card.id) && card.status === 'completed');
   const dispatches = listDispatches(store, workId);
-  if (!completed.length || cards.some(card => !['completed', 'cancelled'].includes(card.status))
+  if (!completed.length || cards.some(card => !['completed', 'cancelled', 'skipped'].includes(card.status))
     || dispatches.some(dispatch => dispatch.status !== 'ended') || completed.some(card => !card.needsVerification)) {
     throw new RuleError('RESOLUTION_UNVERIFIED', '冲突处理卡片必须通过验收并完成，其他卡片和派单也须结束。');
   }

@@ -15,6 +15,7 @@ const eventLabels: Record<string, string> = {
   'round-step': '调度者正在处理',
   'round-agent-loaded': '调度者已就绪', 'coordinator-notes-written': '调度笔记已更新',
   'gate-created': '有待决定的关卡', 'gate-updated': '关卡已更新', 'gate-decided': '关卡已决定', 'gate-withdrawn': '关卡已撤回',
+  'card-skipped': '卡片已跳过', 'card-waiting': '卡片等待前置', 'card-unblocked': '卡片已解除阻塞',
   'card-created': '卡片已创建', 'card-updated': '卡片已更新', 'card-ready': '卡片等待派单',
   'card-completed': '卡片已完成', 'card-cancelled': '卡片已取消', 'card-paused': '卡片已暂停', 'card-resumed': '卡片已恢复',
   'dispatch-created': '派单正在排队', 'dispatch-started': '执行者开始处理', 'dispatch-ended': '派单已结束',

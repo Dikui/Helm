@@ -193,7 +193,7 @@ test('依赖阻塞卡片、拒绝成环，删边后解除阻塞；关卡的决�
   assert.ok(after.some(event => event.action === 'card-ready' && event.cardId === downstreamId && event.id > events.at(-1).id));
 });
 
-test('取消上游和撤回关卡使下游持续阻塞、保留依赖并唤醒调度者，终态卡片不可修改或添加依赖', async t => {
+test('取消上游和撤回关卡使下游级联跳过、保留依赖并在同轮简报列出致因，终态卡片不可修改或添加依赖', async t => {
   let nextBrief: StartupBrief | undefined;
   let cancelledId = '';
   let withdrawnId = '';
@@ -214,6 +214,7 @@ test('取消上游和撤回关卡使下游持续阻塞、保留依赖并唤醒�
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'upstream', content: '终态重试仍是原卡片' }), check: value => assert.equal((value as any).result.status, 'cancelled') },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: node(ctx, 'leaf'), downstream: node(ctx, 'upstream') }), check: value => assert.equal((value as any).error.code, 'TERMINAL_CARD') },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: node(ctx, 'upstream'), downstream: node(ctx, 'leaf') }), check: value => assert.equal((value as any).error.code, 'INACTIVE_UPSTREAM') },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'leaf').id, key: 'skip-rejected', agentId: 'claude-executor' }), check: value => assert.equal((value as any).error.code, 'CARD_NOT_DISPATCHABLE') },
     { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'gate').id, reason: '问题改了，稍后重新提出' }), check: ok },
     { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'gate').id, reason: '问题改了，稍后重新提出' }), check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: node(ctx, 'gate', 'gate'), downstream: node(ctx, 'downstream') }), check: value => assert.equal((value as any).error.code, 'INACTIVE_UPSTREAM') },
@@ -221,9 +222,9 @@ test('取消上游和撤回关卡使下游持续阻塞、保留依赖并唤醒�
   ], ctx => { nextBrief = JSON.parse(ctx.input); return []; });
   const events = await daemon.finished();
   const graph = (await daemon.call('get-card-graph', { workId: daemon.work.id })).result;
-  assert.equal(graph.find((node: any) => node.key === 'downstream').status, 'waiting');
-  assert.equal(graph.find((node: any) => node.key === 'leaf').status, 'waiting');
-  assert.equal(graph.find((node: any) => node.key === 'gate-child').status, 'waiting');
+  assert.equal(graph.find((node: any) => node.key === 'downstream').status, 'skipped');
+  assert.equal(graph.find((node: any) => node.key === 'leaf').status, 'skipped');
+  assert.equal(graph.find((node: any) => node.key === 'gate-child').status, 'skipped');
   assert.equal(graph.find((node: any) => node.key === 'upstream').status, 'cancelled');
   assert.equal(graph.find((node: any) => node.key === 'decision').status, 'withdrawn');
   assert.deepEqual(graph.find((node: any) => node.key === 'downstream').dependencies, [{ type: 'card', id: cancelledId }]);
@@ -233,6 +234,11 @@ test('取消上游和撤回关卡使下游持续阻塞、保留依赖并唤醒�
   await until(async () => nextBrief, brief => brief !== undefined);
   assert.ok(nextBrief!.wakeEvents.some(event => event.action === 'card-cancelled'));
   assert.ok(nextBrief!.wakeEvents.some(event => event.action === 'gate-withdrawn'));
+  assert.equal(nextBrief!.newEvents.filter(event => event.action === 'card-skipped').length, 3);
+  const skipped = events.find(event => event.action === 'card-skipped' && event.cardId === graph.find((node: any) => node.key === 'downstream').id);
+  assert.deepEqual(skipped.details.upstream, [{ type: 'card', id: cancelledId, status: 'cancelled' }]);
+  assert.deepEqual(skipped.details.skippedBy, [{ type: 'card', id: cancelledId, status: 'cancelled', title: '上游' }]);
+  assert.ok(!events.some(event => event.action === 'work-stalled'));
   assert.equal((await daemon.call('decide-gate', { workId: daemon.work.id, gateId: withdrawnId, decision: '继续' })).error.code, 'GATE_WITHDRAWN');
 });
 

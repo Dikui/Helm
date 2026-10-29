@@ -38,7 +38,7 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (work.status !== 'executing' && !runtimePaused) throw new RuleError('WORK_NOT_EXECUTING', '只能在执行中或由运行层暂停的工作里标记卡片完成。');
   const dispatches = listDispatches(store, work.id, card.id);
   if (dispatches.some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '派单结束后才能标记卡片完成。');
-  if (['waiting', 'paused'].includes(card.status)) throw new RuleError('CARD_NOT_COMPLETABLE', '等待前置或暂停的卡片不能标记完成。');
+  if (['waiting', 'skipped', 'paused'].includes(card.status)) throw new RuleError('CARD_NOT_COMPLETABLE', '等待前置、已跳过或暂停的卡片不能标记完成。');
   if (!dispatches.some(item => item.endReason === 'completed')) throw new RuleError('NO_COMPLETED_DISPATCH', '从没正常完成过派单的卡片不能标完成，只能取消。');
   const verification = dispatches.filter(item => item.purpose === 'verification').at(-1);
   if (card.needsVerification && (verification?.endReason !== 'completed' || verification.conclusion !== 'passed')) {

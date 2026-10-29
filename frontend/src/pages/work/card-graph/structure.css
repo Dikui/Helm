@@ -90,3 +90,7 @@
 .cs-events .cs-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .cs-events .cs-filters label { display: block; }
 .cs-events .cs-filters select { width: auto; max-width: 260px; min-height: 28px; padding: 0 var(--space-2); font-size: var(--text-sm); }
+
+.cs-lane.skipped .cs-lane-label { color: var(--faint); }
+.cs-block.skipped { border-style: dashed; color: var(--muted); text-align: center; }
+.cs-gate-marker.withdrawn { position: absolute; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 20px; padding: 0 4px; border: 1px dashed var(--border-strong); border-radius: 4px; background: var(--clear); color: var(--faint); font-size: 10px; text-decoration: line-through; }

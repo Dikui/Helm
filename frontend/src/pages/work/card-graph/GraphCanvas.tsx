@@ -3,7 +3,7 @@ import type { Usage } from '../../../shared/types.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { graphlib, layout, type Point } from '@dagrejs/dagre';
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
-import { gateDecision, nodeTitle, NodeStatus, nodeRingTone } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge } from './labels.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
@@ -97,7 +97,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
             <defs><marker id={marker} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="context-stroke" /></marker></defs>
             {positions.edges.map(edge => {
               const from = byId.get(edge.from)!; const to = byId.get(edge.to)!;
-              const tone = [from.status, to.status].includes('cancelled') || from.status === 'withdrawn' ? 'cut'
+              const tone = [from.status, to.status].some(status => ['cancelled', 'withdrawn', 'skipped'].includes(status)) ? 'cut'
                 : from.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(to.status) ? 'flow' : ['completed', 'decided'].includes(from.status) ? '' : 'todo';
               return <path key={`${edge.from}:${edge.to}`} role="img" aria-label={`${t((from.type === 'gate' && from.kind === 'work-confirmation') || (to.type === 'gate' && to.kind === 'review') ? 'graphFlowLink' : 'graphDependency')}：${nodeTitle(from)} → ${nodeTitle(to)}`}
                 className={`cg-edge ${tone} ${related && !(related.has(edge.from) && related.has(edge.to)) ? 'dim' : ''}`}
@@ -113,9 +113,9 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
               aria-describedby={`${marker}-${node.id}-state`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
               <span className="cg-node-name"><span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span><span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
-              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />
+              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{node.type === 'card' && node.aggregate && <AggregateBadge />}
                 {node.type === 'gate' && node.status === 'pending' && <time dateTime={node.createdAt}>{elapsed(node.createdAt, now)}</time>}
-                {node.type === 'card' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
+                {node.type === 'card' && node.status !== 'skipped' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}
               </span>
               {node.type === 'card' && <span className="cg-node-meta">Token {formatUsage(node.usage, language)}</span>}
@@ -132,7 +132,9 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
     </div>
     </div>
     <div className="cg-legend">
-      {(['met', 'flow', 'todo', 'att', 'cut'] as const).map(tone => <span key={tone}><svg viewBox="0 0 22 6" aria-hidden="true"><path className={`cg-edge ${tone}`} d="M0 3 H22" /></svg>{t(({ met: 'graphLegendMet', flow: 'graphLegendFlow', todo: 'graphLegendWaiting', att: 'graphLegendAttention', cut: 'cancelled' } as const)[tone])}</span>)}
+      {(['met', 'flow', 'todo', 'att', 'cut'] as const).map(tone => <span key={tone}><svg viewBox="0 0 22 6" aria-hidden="true"><path className={`cg-edge ${tone}`} d="M0 3 H22" /></svg>{t(({ met: 'graphLegendMet', flow: 'graphLegendFlow', todo: 'graphLegendWaiting', att: 'graphLegendAttention', cut: 'graphLegendCut' } as const)[tone])}</span>)}
+      <span><span className="cg-skip-chip cg-skip-fill">{t('skipped')}</span>{t('graphLegendSkipped')}</span>
+      <span><AggregateBadge />{t('graphLegendAggregate')}</span>
       <span><span className="cg-rework">↺</span>{t('graphSendBacks')}</span><span>{t('graphParallel')}</span>
     </div>
   </section>;

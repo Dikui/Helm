@@ -34,7 +34,8 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
         </div></div>
         {cards.map((card, index) => {
           const history = dispatches.filter(dispatch => dispatch.cardId === card.id);
-          return <div key={card.id} className={`cs-lane ${selectedId === card.id ? 'selected' : ''} ${card.status === 'cancelled' ? 'cancelled' : ''}`} role="group" aria-label={`${t('graphCard')} ${index + 1}：${nodeTitle(card)}`}>
+          const withdrawn = card.status === 'skipped' ? card.skippedBy?.filter(cause => cause.status === 'withdrawn') ?? [] : [];
+          return <div key={card.id} className={`cs-lane ${selectedId === card.id ? 'selected' : ''} ${card.status}`} style={withdrawn.length > 1 ? { minHeight: 12 + withdrawn.length * 22 } : undefined} role="group" aria-label={`${t('graphCard')} ${index + 1}：${nodeTitle(card)}`}>
             <div className="cs-lane-label"><span className={`spark ${nodeRingTone[card.status] ?? ''}`} aria-hidden="true" /><button className="cs-card-label" onClick={() => select(card.id)}>{index + 1} · {nodeTitle(card)}</button><NodeStatus node={card} /></div>
             <div className="cs-track">
               {history.filter(dispatch => dispatch.startedAt).map(dispatch => {
@@ -46,14 +47,20 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
                   aria-label={name} title={`${name} · ${dispatch.agentId}\n${date(dispatch.startedAt!)} → ${dispatch.endedAt ? date(dispatch.endedAt) : t('structureNow')} · ${elapsed(dispatch.startedAt!, end)}`}
                   onClick={() => select(card.id, dispatch.id)}>{label}</button>;
               })}
-              {!history.length && <span className="cs-lane-empty">{t('graphNoDispatches')}</span>}
+              {card.status === 'skipped' && <>
+                {withdrawn.map((cause, index) => <button key={cause.id}
+                  className="cs-gate-marker withdrawn" style={{ right: '14%', top: 7 + index * 22 }}
+                  title={cause.title} aria-label={`${t('graphGateWithdrawn')}：${cause.title}`} onClick={() => select(cause.id)}>▲ {t('graphGateWithdrawn')} · {cause.title}</button>)}
+                <span className="cs-block skipped cg-skip-fill" style={{ left: '87.5%', width: '12.5%' }}>{t('graphSkip')}</span>
+              </>}
+              {card.status !== 'skipped' && !history.length && <span className="cs-lane-empty">{t('graphNoDispatches')}</span>}
               {history.some(dispatch => dispatch.status === 'queued') && <span className="cs-lane-queued">{t('graphQueued')}</span>}
             </div>
           </div>;
         })}
         {now <= start + span && <div className="cs-now" style={{ '--cs-now': position(now) } as CSSProperties}><span /><div><time aria-label={t('structureNow')} dateTime={new Date(now).toISOString()}>{t('structureNow')} · {time(now)}</time></div></div>}
       </div>
-      <div className="cg-legend cs-timeline-legend"><span><i className="cs-block execution" />{t('graphExecution')}</span><span><i className="cs-block verification passed">✓</i>{t('graphReportedPassed')}</span><span><i className="cs-block verification failed">✗</i>{t('structureSendBack')}</span><span>{t('structureTimelineLegend')}</span></div>
+      <div className="cg-legend cs-timeline-legend"><span><i className="cs-block execution" />{t('graphExecution')}</span><span><i className="cs-block verification passed">✓</i>{t('graphReportedPassed')}</span><span><i className="cs-block verification failed">✗</i>{t('structureSendBack')}</span><span><i className="cs-block skipped cg-skip-fill" />{t('structureSkippedLegend')}</span><span>{t('structureTimelineLegend')}</span></div>
     </>}
   </section>;
 }

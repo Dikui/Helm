@@ -3,7 +3,7 @@ import { RuleError, TaskStore, type Actor } from './store.js';
 import type { TokenUsage } from './driver.js';
 
 export interface Card {
-  id: string; workId: string; key: string; content: string; needsVerification: boolean;
+  id: string; workId: string; key: string; content: string; needsVerification: boolean; aggregate: boolean;
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
   agentId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
@@ -13,7 +13,7 @@ export interface Card {
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
-const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, status, created_at AS createdAt,
+const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, aggregate, status, created_at AS createdAt,
   work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, write_scopes AS writeScopes, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
@@ -26,7 +26,7 @@ const cardColumns = `id, work_id AS workId, key, content, needs_verification AS 
 function readCard(row: Record<string, unknown>): Card {
   const { incomplete, cacheReadTokens, ...usage } = JSON.parse(String(row.usage));
   if (cacheReadTokens !== null) usage.cacheReadTokens = cacheReadTokens;
-  return { ...row, needsVerification: Boolean(row.needsVerification), writeScopes: JSON.parse(String(row.writeScopes)),
+  return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), writeScopes: JSON.parse(String(row.writeScopes)),
     usage: incomplete && (usage.inputTokens !== null || usage.outputTokens !== null) ? { ...usage, incomplete: true } : usage } as unknown as Card;
 }
 
@@ -66,17 +66,17 @@ function wake(store: TaskStore, eventId: number, workId: string) {
 }
 
 export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...params }: {
-  workId: string; key: string; content: string; needsVerification?: boolean; repairOfCardId?: string; writeScopes?: string[];
+  workId: string; key: string; content: string; needsVerification?: boolean; aggregate?: boolean; repairOfCardId?: string; writeScopes?: string[];
 }) {
   store.work(params.workId);
   const existing = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND key = ?`).get(params.workId, params.key);
   if (existing) return readCard(existing);
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
-  const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false,
+  const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false, aggregate: params.aggregate ?? false,
     writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: null, outputTokens: null } };
-  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, repair_of_card_id, write_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), card.status, card.createdAt, card.repairOfCardId ?? null,
+  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, aggregate, status, created_at, repair_of_card_id, write_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), Number(card.aggregate), card.status, card.createdAt, card.repairOfCardId ?? null,
       JSON.stringify(card.writeScopes));
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
   store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
@@ -84,19 +84,21 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
 }
 
 export function updateCard(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; content?: string; needsVerification?: boolean; writeScopes?: string[];
+  workId: string; cardId: string; content?: string; needsVerification?: boolean; aggregate?: boolean; writeScopes?: string[];
 }) {
   const card = cardDetails(store, params.workId, params.cardId);
   requireMutable(card);
   const content = params.content ?? card.content;
   const needsVerification = params.needsVerification ?? card.needsVerification;
+  const aggregate = params.aggregate ?? card.aggregate;
   const writeScopes = params.writeScopes ? normalizeWriteScopes(params.writeScopes) : card.writeScopes;
-  if (content === card.content && needsVerification === card.needsVerification && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
-  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, write_scopes = ? WHERE id = ?')
-    .run(content, Number(needsVerification), JSON.stringify(writeScopes), card.id);
+  if (content === card.content && needsVerification === card.needsVerification && aggregate === card.aggregate && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
+  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, write_scopes = ? WHERE id = ?')
+    .run(content, Number(needsVerification), Number(aggregate), JSON.stringify(writeScopes), card.id);
   const updated = cardDetails(store, card.workId, card.id);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-updated', { before: card, after: updated }, { workId: card.workId, cardId: card.id });
-  return updated;
+  refreshCardReadiness(store, card.workId);
+  return cardDetails(store, card.workId, card.id);
 }
 
 export function cancelCard(store: TaskStore, actor: Actor, params: { workId: string; cardId: string; reason: string }) {
@@ -115,7 +117,7 @@ export function cardGraph(store: TaskStore, workId: string) {
   const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? ORDER BY created_at, id`).all(workId).map(readCard);
   const gates = store.gates(workId);
   const edges = dependencies(store, workId);
-  const active = cards.filter(card => card.status !== 'completed' && card.status !== 'cancelled' && card.writeScopes.length);
+  const active = cards.filter(card => !['completed', 'cancelled', 'skipped'].includes(card.status) && card.writeScopes.length);
   const upstream = new Map(active.map(card => [card.id, new Set(ancestors(edges, { type: 'card', id: card.id }).map(node => `${node.type}:${node.id}`))]));
   // Overlap only matters between cards that no dependency orders; it warns and never blocks.
   const warnings = (card: Card) => active.flatMap(other => {
@@ -124,7 +126,7 @@ export function cardGraph(store: TaskStore, workId: string) {
     return overlap.length ? [`与卡片 ${other.key}（${other.id}）没有依赖、写入范围重叠：${overlap.join('，')}`] : [];
   });
   return [
-    ...cards.map(card => ({ type: 'card' as const, ...card, writeScopeWarnings: upstream.has(card.id) ? warnings(card) : [] })),
+    ...cards.map(card => ({ type: 'card' as const, ...card, skippedBy: card.status === 'skipped' ? skippedCauses(store, workId, edges, { type: 'card', id: card.id }) : [], writeScopeWarnings: upstream.has(card.id) ? warnings(card) : [] })),
     ...gates.map(gate => ({ type: 'gate' as const, ...gate })),
   ].map(node => ({ ...node, dependencies: edges.filter(edge => sameNode(edge.downstream, node)).map(edge => edge.upstream) }));
 }
@@ -162,24 +164,72 @@ function ancestors(edges: Dependency[], node: NodeRef): NodeRef[] {
   return [...result.values()];
 }
 
-// Re-evaluate idle cards; active dispatches and user-set paused/terminal states stay intact.
+// An aggregate absorbs inactive branches. Other cards and gates still require
+// their upstream chain, as before; inactive nodes end a branch.
+function readinessUpstreams(store: TaskStore, workId: string, edges: Dependency[], node: NodeRef): NodeRef[] {
+  const result = new Map<string, NodeRef>();
+  const visit = (current: NodeRef) => {
+    for (const { upstream, downstream } of edges) {
+      if (!sameNode(downstream, current) || result.has(`${upstream.type}:${upstream.id}`)) continue;
+      result.set(`${upstream.type}:${upstream.id}`, upstream);
+      const node = graphNode(store, workId, upstream);
+      if (!['cancelled', 'withdrawn', 'skipped'].includes(node.status) && !('aggregate' in node && node.aggregate)) visit(upstream);
+    }
+  };
+  visit(node);
+  return [...result.values()];
+}
+
+export interface SkippedUpstream extends NodeRef { status: 'cancelled' | 'withdrawn'; title: string }
+function skippedCauses(store: TaskStore, workId: string, edges: Dependency[], node: NodeRef): SkippedUpstream[] {
+  const causes = new Map<string, SkippedUpstream>();
+  const visited = new Set<string>();
+  const visit = (current: NodeRef) => {
+    if (visited.has(`${current.type}:${current.id}`)) return;
+    visited.add(`${current.type}:${current.id}`);
+    for (const ref of readinessUpstreams(store, workId, edges, current)) {
+      const upstream = graphNode(store, workId, ref);
+      if (upstream.status === 'cancelled' || upstream.status === 'withdrawn') {
+        const title = 'content' in upstream ? (upstream.content.split(/\r?\n/).find(line => line.trim()) ?? upstream.content).replace(/^\s*#+\s*/, '') : upstream.question;
+        causes.set(`${ref.type}:${ref.id}`, { ...ref, status: upstream.status, title });
+      } else if (upstream.status === 'skipped') visit(ref);
+    }
+  };
+  visit(node);
+  return [...causes.values()];
+}
+
+// Re-evaluate upstream first, irrespective of creation order. Active dispatches and
+// user-set paused/terminal states stay intact; skipped is always recoverable.
 export function refreshCardReadiness(store: TaskStore, workId: string) {
   const edges = dependencies(store, workId);
   const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND status NOT IN ('paused', 'completed', 'cancelled')
     AND NOT EXISTS (SELECT 1 FROM dispatches WHERE card_id = cards.id AND status IN ('queued', 'running'))`).all(workId).map(readCard);
-  for (const card of cards) {
-    const blocked = ancestors(edges, { type: 'card', id: card.id }).some(node => {
-      const upstream = graphNode(store, workId, node);
-      return upstream.status !== (node.type === 'card' ? 'completed' : 'decided');
-    });
+  const eligible = new Map(cards.map(card => [card.id, card]));
+  const visited = new Set<string>();
+  const refresh = (node: NodeRef) => {
+    const key = `${node.type}:${node.id}`;
+    if (visited.has(key)) return;
+    visited.add(key);
+    for (const edge of edges) if (sameNode(edge.downstream, node)) refresh(edge.upstream);
+    const card = node.type === 'card' ? eligible.get(node.id) : undefined;
+    if (!card) return;
+    const upstream = readinessUpstreams(store, workId, edges, node).map(ref => ({ ref, node: graphNode(store, workId, ref) }));
+    const inactive = upstream.filter(({ node }) => ['cancelled', 'withdrawn', 'skipped'].includes(node.status));
+    const skipped = inactive.length > 0 && (!card.aggregate || inactive.length === upstream.length);
+    const blocked = upstream.some(({ ref, node }) => !(card.aggregate && ['cancelled', 'withdrawn', 'skipped'].includes(node.status))
+      && node.status !== (ref.type === 'card' ? 'completed' : 'decided'));
     const latest = card.latestDispatchId ? store.db.prepare('SELECT purpose FROM dispatches WHERE id = ?').get(card.latestDispatchId) : undefined;
-    const status = blocked ? 'waiting' : latest ? latest.purpose === 'verification' ? 'verifying' : 'executing' : 'ready';
-    if (status === card.status) continue;
+    const status = skipped ? 'skipped' : blocked ? 'waiting' : latest ? latest.purpose === 'verification' ? 'verifying' : 'executing' : 'ready';
+    if (status === card.status) return;
     store.db.prepare('UPDATE cards SET status = ? WHERE id = ?').run(status, card.id);
-    // card-ready never wakes: the coordinator caused it in its own round, or the triggering event (dispatch-ended, gate-decided…) already wakes.
+    // The triggering event already wakes the coordinator; the same brief includes these transitions.
     store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id },
-      status === 'waiting' ? 'card-waiting' : status === 'ready' ? 'card-ready' : 'card-unblocked', { previousStatus: card.status, status }, { workId, cardId: card.id });
-  }
+      status === 'skipped' ? 'card-skipped' : status === 'waiting' ? 'card-waiting' : status === 'ready' ? 'card-ready' : 'card-unblocked',
+      { previousStatus: card.status, status, ...(skipped ? { upstream: inactive.map(({ ref, node }) => ({ ...ref, status: node.status })), skippedBy: skippedCauses(store, workId, edges, node) } : {}) },
+      { workId, cardId: card.id });
+  };
+  for (const card of cards) refresh({ type: 'card', id: card.id });
 }
 
 export function addDependency(store: TaskStore, actor: Actor, params: { workId: string } & Dependency) {

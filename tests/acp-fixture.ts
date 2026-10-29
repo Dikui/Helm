@@ -25,7 +25,8 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   await writeFile(record, '');
   await writeFile(path, JSON.stringify({ record, ...script }));
   const command = { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/acp-agent.js', import.meta.url)), path] };
-  const driver = new AcpDriver(kind, { command, timeoutMs: 2000 });
+  // Leave startup/configuration headroom under parallel suite load; timeout scenarios set their own shorter budget.
+  const driver = new AcpDriver(kind, { command, timeoutMs: 5000 });
   const agent: AgentConfig = { id: `${kind}-executor`, role: 'executor', driver: kind, model: kind === 'grok' ? 'grok-4.7' : 'deepseek-flash',
     reasoningEffort: 'low', fast: false, home: 'shared', description: '测试执行者', prompt: '测试策略', rules: roleRules('executor'), directory, skillsPath: null };
   const options: SessionOptions = { agent, cwd, env: { ...agentEnvironment(agent), HOME: home, XAI_API_KEY: 'must-not-inherit' },
