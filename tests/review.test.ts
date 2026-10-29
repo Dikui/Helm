@@ -145,6 +145,7 @@ for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡�
     { type: 'hang', until: executed.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id }), check: code('VERIFICATION_REQUIRED') },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id, key: 'verify-failed', purpose: 'verification', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: verified.promise },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'resolve').id }), check: ok },
     review('no-new-review', code('CONFLICT_RESOLUTION_ACTIVE')),
@@ -157,7 +158,8 @@ for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡�
     assert.match(git(path, 'status', '--porcelain'), /UU shared.txt/);
     writeFileSync(join(path, 'shared.txt'), 'work and base resolved\n');
     return [];
-  }, [ { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '新副本确认同时保留两边结果，检查通过' }, check: ok } ]]);
+  }, [ { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '新副本确认同时保留两边结果，检查通过' }, check: ok } ],
+    [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '另一票不通过，计票交给调度者' }, check: ok }]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
   const work = await daemon.getWork();
@@ -173,7 +175,7 @@ for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡�
   code('REVIEW_NOT_ACCEPTED')(await daemon.call('merge-work', { workId: work.id }));
   code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: work.id }));
   executed.release();
-  await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 2);
+  await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 3);
   verified.release();
   await until(daemon.getWork, value => value.status === 'accepted');
   const resolution = (await daemon.getWork()).delivery.resolution;
@@ -181,7 +183,8 @@ for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡�
   const changes = await daemon.call('get-conflict-resolution', { workId: work.id });
   ok(changes); assert.match(changes.result.diff, /\+work and base resolved/);
   assert.equal(resolution.cards.length, 1);
-  assert.ok(resolution.cards[0].verificationId);
+  const votes = (await daemon.call('list-dispatches', { workId: work.id })).result;
+  assert.equal(resolution.cards[0].verificationId, votes.find((vote: any) => vote.key === 'verify').id);
   assert.equal((await daemon.conversation()).filter(item => item.kind === 'review').length, 1);
   if (baseMoved) {
     await writeFile(join(daemon.repo, 'shared.txt'), 'base changed again\n');
@@ -664,7 +667,7 @@ test('审核附上真实 diff、整体验收结论与未声明派单数，接受
   assert.equal((await daemon.conversation()).find(item => item.id === gate.id).review.overallVerification[0].conclusion, 'passed');
 });
 
-for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验收卡片 ${oldStatus} 后新卡不依赖旧卡，审核列出有效卡片的最近一次验收结论`, async t => {
+for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验收卡片 ${oldStatus} 后新卡不依赖旧卡，审核列出有效卡片的全部验收票`, async t => {
   const ended = [hold(), hold(), hold(), hold(), hold()];
   t.after(() => ended.forEach(signal => signal.release()));
   const daemon = await fixture(t, [[
@@ -707,7 +710,9 @@ for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验�
   const dispatches = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result;
   const old = dispatches.find((dispatch: any) => dispatch.key === 'old-verify');
   const latest = dispatches.find((dispatch: any) => dispatch.key === 'new-verify-passed');
-  const expected = [{ cardId: latest.cardId, dispatchId: latest.id,
+  const failed = dispatches.find((dispatch: any) => dispatch.key === 'new-verify-failed');
+  const expected = [{ cardId: failed.cardId, dispatchId: failed.id,
+    status: 'ended', endReason: 'completed', conclusion: 'failed', reason: '需要再次检查' }, { cardId: latest.cardId, dispatchId: latest.id,
     status: 'ended', endReason: 'completed', conclusion: 'passed', reason: '新卡最近一次验收通过' }];
   if (oldStatus === 'completed') expected.push({ cardId: old.cardId, dispatchId: old.id,
     status: 'ended', endReason: 'completed', conclusion: 'passed', reason: '旧卡验收通过' });

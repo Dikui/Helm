@@ -40,9 +40,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (dispatches.some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '派单结束后才能标记卡片完成。');
   if (['waiting', 'skipped', 'paused'].includes(card.status)) throw new RuleError('CARD_NOT_COMPLETABLE', '等待前置、已跳过或暂停的卡片不能标记完成。');
   if (!dispatches.some(item => item.endReason === 'completed')) throw new RuleError('NO_COMPLETED_DISPATCH', '从没正常完成过派单的卡片不能标完成，只能取消。');
-  const verification = dispatches.filter(item => item.purpose === 'verification').at(-1);
-  if (card.needsVerification && (verification?.endReason !== 'completed' || verification.conclusion !== 'passed')) {
-    throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须最近一次验收派单通过才能标完成。');
+  const passed = dispatches.filter(item => item.purpose === 'verification' && item.endReason === 'completed' && item.conclusion === 'passed');
+  if (card.needsVerification && !passed.length) {
+    throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须至少有一票正常结束且通过的验收才能标完成；计票由调度者负责。');
   }
   if (!work.workPath || !work.workBranch || !card.cardBranch) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
   if (dispatchGit(work.workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(work.workPath, 'status', '--porcelain')) {
@@ -50,11 +50,13 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   }
   // A retry after cleanup can still merge the saved commit; the branch may already be gone.
   const branchExists = dispatchGit(work.workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
-  if (card.needsVerification && branchExists && verification!.startCommit !== verificationCommit(store, card)) {
-    throw new RuleError('VERIFICATION_OUTDATED', '最近一次验收之后卡片已有新提交，须重新验收。');
-  }
   const target = branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit;
   if (!target) throw new RuleError('GIT_ERROR', '找不到卡片的提交。');
+  // Keep the checked commit readable after completion removes the card branch.
+  const checkedCommit = card.needsVerification ? branchExists ? verificationCommit(store, card) : target : null;
+  if (card.needsVerification && !passed.some(item => item.startCommit === checkedCommit)) {
+    throw new RuleError('VERIFICATION_OUTDATED', '当前提交没有有效的通过验收票，须重新验收。');
+  }
   try {
     dispatchGit(work.workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
       'merge', '--no-ff', '--no-edit', target);
@@ -70,7 +72,7 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     store.db.prepare(`UPDATE cards SET status = 'completed' WHERE id = ?`).run(card.id);
     store.db.prepare(`UPDATE artifacts SET ref = ?, commit_sha = ? WHERE kind = 'branch'
       AND dispatch_id IN (SELECT id FROM dispatches WHERE card_id = ?)`).run(work.workBranch, mergeCommit, card.id);
-    store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit }, { workId: work.id, cardId: card.id });
+    store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit, checkedCommit }, { workId: work.id, cardId: card.id });
     refreshCardReadiness(store, work.id);
     return cardDetails(store, work.id, card.id);
   });

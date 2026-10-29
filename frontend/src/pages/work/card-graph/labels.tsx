@@ -29,7 +29,7 @@ export const endLabels: Record<NonNullable<Dispatch['endReason']>, MessageKey> =
 export const conclusionLabels: Record<Dispatch['conclusion'], MessageKey> = {
   completed: 'graphReportedCompleted', blocked: 'graphReportedBlocked', passed: 'graphReportedPassed', failed: 'graphReportedFailed', undeclared: 'graphUndeclared',
 };
-export function DispatchStatus({ dispatch }: { dispatch: Dispatch }) {
+export function DispatchStatus({ dispatch }: { dispatch: Pick<Dispatch, 'status' | 'endReason'> }) {
   const { t } = useI18n();
   return <span className={`pill ${dispatch.status !== 'ended' ? 'run' : dispatch.endReason === 'completed' ? 'ok' : 'bad'}`}>
     {t(dispatch.status === 'queued' ? 'graphQueued' : dispatch.status === 'running' ? 'graphDispatchRunning' : endLabels[dispatch.endReason!]!)}

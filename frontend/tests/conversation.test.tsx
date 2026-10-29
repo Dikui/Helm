@@ -220,7 +220,7 @@ test('针对卡片的发送响应丢失后保留正文和范围，重试同一�
   expect((await daemon!.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.body === '保留原文 English')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(chat).getByLabelText('About')).toBeTruthy();
-  expect(within(chat).getByText('保留原文 English', { selector: 'article p' })).toBeTruthy();
+  expect(await within(chat).findByText('保留原文 English', { selector: 'article p' })).toBeTruthy();
 });
 
 test('本轮步骤提取真实驱动输出中的文字与工具名称，详情仍可读取原始输出', async () => {

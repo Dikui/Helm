@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
 import { deliveryDetails } from './delivery.js';
 import { cardGraph } from './graph.js';
-import { listDispatches, type Dispatch } from './dispatch.js';
+import { listDispatches, markOutdated, type Dispatch } from './dispatch.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 
 export interface ConflictResolution {
@@ -80,7 +80,7 @@ export function finishConflictResolution(store: TaskStore, actor: Actor, workId:
   const newCardIds = new Set(store.events({ workId, after: request.id }).filter(event => event.action === 'card-created').map(event => event.object.id));
   const cards = cardGraph(store, workId).filter(node => node.type === 'card');
   const completed = cards.filter(card => newCardIds.has(card.id) && card.status === 'completed');
-  const dispatches = listDispatches(store, workId);
+  const dispatches = markOutdated(store, listDispatches(store, workId));
   if (!completed.length || cards.some(card => !['completed', 'cancelled', 'skipped'].includes(card.status))
     || dispatches.some(dispatch => dispatch.status !== 'ended') || completed.some(card => !card.needsVerification)) {
     throw new RuleError('RESOLUTION_UNVERIFIED', '冲突处理卡片必须通过验收并完成，其他卡片和派单也须结束。');
@@ -91,8 +91,9 @@ export function finishConflictResolution(store: TaskStore, actor: Actor, workId:
   try { git(project, 'merge-base', '--is-ancestor', resolution.baseCommit, toCommit); }
   catch { throw new RuleError('BASE_NOT_IN_WORK', '冲突处理尚未把基准提交合进工作分支。'); }
   const evidence = completed.map(card => {
-    const verification = dispatches.filter(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'verification').at(-1);
-    if (verification?.endReason !== 'completed' || verification.conclusion !== 'passed') throw new RuleError('RESOLUTION_UNVERIFIED', '冲突处理卡片须验收通过。');
+    const verification = dispatches.find(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'verification'
+      && !dispatch.outdated && dispatch.endReason === 'completed' && dispatch.conclusion === 'passed');
+    if (!verification) throw new RuleError('RESOLUTION_UNVERIFIED', '冲突处理卡片的当前提交须至少有一票有效的通过验收。');
     return { cardId: card.id, verificationId: verification.id };
   });
   store.appendEvent(actor, { type: 'work', id: workId }, 'conflict-resolution-finished',

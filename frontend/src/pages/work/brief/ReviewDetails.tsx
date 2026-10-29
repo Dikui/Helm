@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useI18n } from '../../../shared/i18n.js';
 import type { ReviewData } from './types.js';
+import { DispatchStatus } from '../card-graph/labels.js';
 import './brief.css';
 
 // Bound the rendered text even when the diff contains a single very long line.
@@ -34,7 +35,8 @@ export function ReviewDetails({ review, detailed = false }: { review: ReviewData
     {detailed && <>
       <section><h3>{t('reviewVerification')}</h3>
         {review.overallVerification.length === 0 ? <p className="muted">{t('reviewNoVerification')}</p> : <ul className="review-verifications">
-          {review.overallVerification.map(item => <li key={item.cardId}>
+          {review.overallVerification.map(item => <li key={item.dispatchId ?? item.cardId}>
+            {item.status && <DispatchStatus dispatch={{ status: item.status, endReason: item.endReason }} />}
             <span className={`pill ${item.conclusion === 'passed' ? 'ok' : item.conclusion === 'failed' ? 'bad' : ''}`}>{t(item.conclusion === 'passed' ? 'reviewPassed' : item.conclusion === 'failed' ? 'reviewFailed' : 'reviewNotDeclared')}</span>
             <span className="mono">{t('reviewCard')} {item.cardId}</span>
             {item.dispatchId && <span className="mono">{t('reviewDispatch')} {item.dispatchId}</span>}

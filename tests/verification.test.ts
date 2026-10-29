@@ -8,6 +8,7 @@ import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { reviewReport } from './fixtures/review-report.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -67,6 +68,30 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   const cards = async () => (await call('get-card-graph', { workId: work.id })).result.filter((node: any) => node.type === 'card') as any[];
   const dispatches = async () => (await call('list-dispatches', { workId: work.id })).result as any[];
   return { ...daemon, call, work, repo, events, finished, cards, dispatches, description: gate.description };
+}
+
+for (const conclusions of [['failed', 'passed'], ['passed', 'failed'], ['failed', 'undeclared'], ['passed-error', 'failed']]) {
+  test(`完成卡片检查当前提交任一正常通过票：${conclusions.join(' → ')}`, async t => {
+    const created = hold();
+    const ended = hold();
+    t.after(() => { created.release(); ended.release(); });
+    const accepted = conclusions.includes('passed');
+    const daemon = await fixture(t, [card(), dispatch('one'), dispatch('two'),
+      { type: 'hang', until: ended.promise }, complete(accepted ? ok : code('VERIFICATION_REQUIRED')),
+    ], conclusions.map(conclusion => [
+      { type: 'hang', until: created.promise },
+      ...(conclusion === 'undeclared' ? [] : [{ type: 'tool' as const, name: 'submit-conclusion',
+        arguments: { conclusion: conclusion === 'passed-error' ? 'passed' : conclusion, reason: conclusion }, check: ok }]),
+      ...(conclusion === 'passed-error' ? [{ type: 'crash' as const }] : []),
+    ]));
+    await until(daemon.dispatches, values => values.length === 2);
+    created.release();
+    const votes = await until(daemon.dispatches, values => values.every(value => value.status === 'ended'));
+    assert.equal(votes[0].startCommit, votes[1].startCommit);
+    ended.release();
+    await daemon.finished();
+    assert.equal((await daemon.cards())[0].status, accepted ? 'completed' : 'verifying');
+  });
 }
 
 test('执行派单附上并保存派单时卡片说明快照，之后改卡不影响快照', async t => {
@@ -222,7 +247,7 @@ test('验收先结束副本子目录的残留进程，再删除副本', async t 
   assert.equal(existsSync(workPath), false);
 });
 
-test('最近一次验收未声明、不通过或异常结束都不能沿用上次通过，取消需要验收后可完成并记事件', async t => {
+test('后续验收未声明、不通过或异常结束不影响当前提交已有的正常通过票', async t => {
   for (const outcome of ['undeclared', 'failed', 'error', 'quota-exhausted', 'timed-out', 'aborted'] as const) {
     await t.test(outcome, async t => {
       const first = hold();
@@ -231,8 +256,7 @@ test('最近一次验收未声明、不通过或异常结束都不能沿用上�
       let verificationSession = '';
       const daemon = await fixture(t, [card(), dispatch('first'), { type: 'hang', until: first.promise },
         { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-check-as-execution', agentId: 'claude-executor', resumeSessionId: verificationSession }), check: code('INVALID_RESUME') },
-        dispatch('last'), { type: 'hang', until: last.promise }, complete(code('VERIFICATION_REQUIRED')),
-        { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, needsVerification: false }), check: ok }, complete(),
+        dispatch('last'), { type: 'hang', until: last.promise }, complete(), complete(),
       ], [[{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '第一次通过' }, check: ok }], [
         { type: 'write', path: 'result.txt', content: 'temporary verification edit\n' },
         ...(outcome === 'undeclared' ? [] : [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: outcome === 'failed' ? 'failed' : 'passed', reason: '本次自报结论' }, check: ok } as FakeStep]),
@@ -250,9 +274,9 @@ test('最近一次验收未声明、不通过或异常结束都不能沿用上�
       last.release();
       await daemon.finished();
       assert.equal((await daemon.cards())[0].status, 'completed');
-      const update = (await daemon.events()).find(event => event.action === 'card-updated' && event.details.before.needsVerification && !event.details.after.needsVerification);
-      assert.ok(update, '取消需要验收必须有事件');
-      assert.ok((await daemon.events()).some(event => event.action === 'operation-rejected' && event.details.code === 'VERIFICATION_REQUIRED'));
+      assert.equal((await daemon.cards())[0].needsVerification, true);
+      assert.equal((await daemon.events()).filter(event => event.action === 'card-completed').length, 1);
+      assert.ok(!(await daemon.events()).some(event => event.action === 'operation-rejected' && event.details.code === 'VERIFICATION_REQUIRED'));
     });
   }
 });
@@ -303,8 +327,9 @@ test('整体验收用普通卡片依赖所有成果，只派验收单且完成�
 test('只派验收单的卡片新增上游成果后旧验收过期，复验检查新的工作分支，完成时跳过合并', async t => {
   const firstVerified = hold();
   const upstreamEnded = hold();
+  const currentFailed = hold();
   const reverified = hold();
-  t.after(() => { firstVerified.release(); upstreamEnded.release(); reverified.release(); });
+  t.after(() => { firstVerified.release(); upstreamEnded.release(); currentFailed.release(); reverified.release(); });
   let overallPath = '';
   const passed: FakeStep = { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '成果符合标准' }, check: ok };
   const daemon = await fixture(t, [
@@ -312,12 +337,17 @@ test('只派验收单的卡片新增上游成果后旧验收过期，复验检�
     card('upstream', false),
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: saved(ctx, 'upstream').id }, downstream: { type: 'card', id: saved(ctx, 'overall').id } }), check: ok },
     dispatch('upstream', 'execution', 'upstream'), { type: 'hang', until: upstreamEnded.promise }, complete(ok, 'upstream'),
+    complete(code('VERIFICATION_OUTDATED'), 'overall'),
+    dispatch('current-failed', 'verification', 'overall'), { type: 'hang', until: currentFailed.promise },
+    complete(code('VERIFICATION_OUTDATED'), 'overall'),
     dispatch('again', 'verification', 'overall'), { type: 'hang', until: reverified.promise }, complete(ok, 'overall'),
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport() }), check: ok },
   ], [ctx => {
     overallPath = ctx.options.cwd;
     assert.equal(git(overallPath, 'rev-parse', 'HEAD'), git(overallPath, 'rev-parse', 'main'));
     return [passed];
-  }, [{ type: 'write', path: 'upstream.txt', content: 'new upstream result\n' }], ctx => {
+  }, [{ type: 'write', path: 'upstream.txt', content: 'new upstream result\n' }],
+  [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '当前提交未通过' }, check: ok }], ctx => {
     assert.notEqual(ctx.options.cwd, overallPath);
     assert.equal(git(ctx.options.cwd, 'show', 'HEAD:upstream.txt'), 'new upstream result');
     return [passed];
@@ -326,8 +356,10 @@ test('只派验收单的卡片新增上游成果后旧验收过期，复验检�
   firstVerified.release();
   await until(daemon.dispatches, values => values[1]?.status === 'ended');
   upstreamEnded.release();
-  const records = await until(daemon.dispatches, values => values[2]?.status === 'ended');
-  const verification = records[2];
+  await until(daemon.dispatches, values => values[2]?.status === 'ended');
+  currentFailed.release();
+  const records = await until(daemon.dispatches, values => values[3]?.status === 'ended');
+  const verification = records[3];
   assert.equal(verification.endReason, 'completed', JSON.stringify(verification));
   assert.equal(verification.conclusion, 'passed');
   assert.notEqual(verification.startCommit, records[0].startCommit);
@@ -340,6 +372,13 @@ test('只派验收单的卡片新增上游成果后旧验收过期，复验检�
   await daemon.finished();
   assert.equal((await daemon.cards()).find(value => value.key === 'overall').status, 'completed');
   assert.equal(git(daemon.repo, 'rev-parse', `helm/${daemon.work.id}`), workTip);
+  const afterCompletion = await daemon.dispatches();
+  assert.equal(afterCompletion[0].outdated, true);
+  const gate = (await daemon.call('get-conversation', { workId: daemon.work.id })).result.find((item: any) => item.kind === 'review');
+  assert.deepEqual(gate.review.overallVerification, [records[2], records[3]].map(vote => ({
+    cardId: vote.cardId, dispatchId: vote.id, status: vote.status, endReason: vote.endReason,
+    conclusion: vote.conclusion, reason: vote.conclusionReason,
+  })));
 });
 
 test('派过执行单的卡片多次验收始终检查自己的成果，不随工作分支刷新', async t => {

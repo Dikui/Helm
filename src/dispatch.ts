@@ -66,7 +66,10 @@ export function markOutdated(store: TaskStore, dispatches: Dispatch[]) {
     if (!commits.has(item.cardId)) {
       const card = cardDetails(store, item.workId, item.cardId);
       const settled = ['completed', 'cancelled'].includes(card.status) || ['completed', 'cancelled'].includes(store.work(item.workId).status);
-      commits.set(item.cardId, settled ? null : verificationCommit(store, card));
+      // Completed cards no longer have a branch; retain the validity at completion.
+      const completed = settled ? store.events({ workId: item.workId, cardId: item.cardId }).findLast(event => event.action === 'card-completed') : undefined;
+      const checkedCommit = (completed?.details as { checkedCommit?: string } | undefined)?.checkedCommit;
+      commits.set(item.cardId, settled ? checkedCommit ?? null : verificationCommit(store, card));
     }
     const commit = commits.get(item.cardId);
     return commit ? { ...item, outdated: item.startCommit !== commit } : item;

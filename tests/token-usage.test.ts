@@ -62,7 +62,8 @@ test('卡片合计包含执行和失败验收，工作合计另加所有调度�
   }
   releases[2]!();
   await until(() => daemon.call('list-rounds', params), value => value.result.rounds[1]?.status === 'ended' && value.result.rounds.every((round: any) => round.status === 'ended'));
-  assert.deepEqual((await daemon.call('get-work', params)).result.usage, { inputTokens: 190, outputTokens: 37 });
+  const completeUsage = await until(() => daemon.call('get-work', params), value => value.result.usage.inputTokens === 190 && !value.result.usage.incomplete);
+  assert.deepEqual(completeUsage.result.usage, { inputTokens: 190, outputTokens: 37 });
   ok(await daemon.call('send-message', { ...params, body: 'missing', key: 'missing' }));
   await until(() => daemon.call('list-dispatches', params), value => value.result.length === 3 && value.result[2].status === 'ended');
   await until(() => daemon.call('list-rounds', params), value => value.result.rounds.every((round: any) => round.status === 'ended'));

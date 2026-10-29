@@ -46,7 +46,7 @@ const draft = (version: number): FakeStep => ({
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
 const workIdOf = (ctx: { input: string }) => JSON.parse(ctx.input).work.id;
 
-async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => ReviewReport)) {
+async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => ReviewReport), multipleVotes = false) {
   let releaseExecution!: () => void;
   let releaseVerification!: () => void;
   const executionEnded = new Promise<void>(resolve => { releaseExecution = resolve; });
@@ -60,6 +60,7 @@ async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => Revi
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'card', id: (ctx.results.get('code') as any).result.id }, downstream: { type: 'card', id: (ctx.results.get('overall') as any).result.id } }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id, key: 'verify', purpose: 'verification', agentId: 'claude-executor' }), saveAs: 'verify', check: ok },
+    ...(multipleVotes ? [{ type: 'tool', name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id, key: 'verify-failed', purpose: 'verification', agentId: 'claude-executor' }), check: ok } as FakeStep] : []),
     { type: 'hang', until: verificationEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id }), check: ok },
     { type: 'tool', name: 'get-dispatch-artifacts', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: (ctx.results.get('execute') as any).result.id }), saveAs: 'artifacts', check: ok },
@@ -67,6 +68,7 @@ async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => Revi
   ]], undefined, { executorScripts: [
     [{ type: 'write', path: 'result.txt', content: '审核成果\n' + '内容'.repeat(25_000) + '\n末尾成果\n' }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '全部标准通过，原文保留' }, check: ok }],
+    ...(multipleVotes ? [[{ type: 'tool' as const, name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '第二票不通过的理由' }, check: ok }]] : []),
   ] });
   const work = await createWork();
   try {
@@ -74,7 +76,7 @@ async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => Revi
     const ended = (count: number) => until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result.filter((item: any) => item.status === 'ended').length === count);
     await ended(1);
     releaseExecution();
-    await ended(2);
+    await ended(multipleVotes ? 3 : 2);
     releaseVerification();
     await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
   } finally { releaseExecution(); releaseVerification(); }
@@ -282,7 +284,7 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
 });
 
 test('审核显示真实汇总、计数和整体验收；长 diff 按需分段，退回须附意见并恢复进行中', async () => {
-  const work = await prepareReview();
+  const work = await prepareReview(undefined, true);
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
@@ -290,6 +292,15 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   fireEvent.click(within(review).getByText('审核记录与全部改动'));
   expect(within(review).getByText('全部标准通过，原文保留')).toBeTruthy();
   expect(within(within(review).getByRole('heading', { name: '整体验收' }).parentElement!).getByText('通过')).toBeTruthy();
+  const votes = within(within(review).getByRole('heading', { name: '整体验收' }).parentElement!);
+  expect(votes.getAllByRole('listitem')).toHaveLength(2);
+  expect(votes.getByText('不通过')).toBeTruthy();
+  expect(votes.getByText('第二票不通过的理由')).toBeTruthy();
+  expect(votes.getAllByText('正常完成')).toHaveLength(2);
+  const dispatches = (await daemon!.call('list-dispatches', { workId: work.id })).result;
+  for (const dispatch of dispatches.filter((item: any) => item.purpose === 'verification')) {
+    expect(votes.getByText(`派单 ${dispatch.id}`)).toBeTruthy();
+  }
   expect(within(review).getByLabelText('被拒绝的操作').textContent).toBe('1');
   expect(within(review).getByLabelText('未声明结论的派单').textContent).toBe('1');
   expect(within(review).queryByLabelText('Diff 内容')).toBeNull();
