@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { projectPath } from './alignment.js';
-import { listDispatches, markOutdated } from './dispatch.js';
+import { listDispatches, markOutdated, type Dispatch } from './dispatch.js';
 import { cardGraph } from './graph.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import type { ReviewReport } from './review-report.js';
@@ -21,10 +21,15 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
   const requiredCards = cards.filter(card => !verificationOnlyCards.includes(card));
   const overallVerification = verificationOnlyCards.filter(card => requiredCards.every(other =>
     card.dependencies.some(node => node.type === 'card' && node.id === other.id)))
-    .flatMap(card => dispatches.filter(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'verification' && !dispatch.outdated)
-      .map(dispatch => ({ cardId: card.id, dispatchId: dispatch.id, status: dispatch.status,
+    .flatMap((card): { cardId: string; dispatchId: string | null; status: Dispatch['status'] | null; endReason: Dispatch['endReason'];
+      conclusion: Dispatch['conclusion']; reason: string | null }[] => {
+      const votes = dispatches.filter(dispatch => dispatch.cardId === card.id && dispatch.purpose === 'verification' && !dispatch.outdated);
+      // A card with no valid vote still appears, so the review shows it as unverified.
+      if (!votes.length) return [{ cardId: card.id, dispatchId: null, status: null, endReason: null, conclusion: 'undeclared' as const, reason: null }];
+      return votes.map(dispatch => ({ cardId: card.id, dispatchId: dispatch.id, status: dispatch.status,
         endReason: dispatch.endReason, conclusion: dispatch.status === 'ended' ? dispatch.conclusion : 'undeclared',
-        reason: dispatch.status === 'ended' ? dispatch.conclusionReason : null })));
+        reason: dispatch.status === 'ended' ? dispatch.conclusionReason : null }));
+    });
   // A finished work's branch or project may since have been removed; the rest of the conversation must stay readable.
   let workCommit: string | null = null, diff: string | null = null, diffUnavailableReason: string | null = null;
   try {
