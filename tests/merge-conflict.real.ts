@@ -102,7 +102,7 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
         await writeFile(join(repo, 'shared.txt'), 'manual resolution\n');
         git('add', 'shared.txt'); git('commit', '-m', 'manual resolution');
         await panel.getByRole('button', { name: '重新检测', exact: true }).click();
-        await panel.getByRole('heading', { name: '已包含，待推送', exact: true }).waitFor();
+        await panel.getByRole('heading', { name: '已包含 · 工作完成', exact: true }).waitFor();
         await page.screenshot({ path: join(evidence, 'already-merged.png') });
       } else {
         await panel.getByRole('button', { name: '交给调度者解决', exact: true }).click();
@@ -117,10 +117,10 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
         assert.equal(changes.cards.length, 1);
         assert.ok(changes.cards[0].verificationId);
         await panel.getByRole('button', { name: '再次合入', exact: true }).click();
-        await panel.getByRole('heading', { name: '已合入，待推送', exact: true }).waitFor();
+        await panel.getByRole('heading', { name: '已完成', exact: true }).waitFor();
         assert.equal(await readFile(join(repo, 'shared.txt'), 'utf8'), 'RESOLVED-BOTH\n');
       }
-      assert.equal((await call('get-work', { workId: work.id })).status, 'merged');
+      assert.equal((await call('get-work', { workId: work.id })).status, 'completed');
       const finalGates = (await call('get-conversation', { workId: work.id })).filter((item: any) => item.kind === 'review');
       assert.equal(finalGates.length, 1); assert.equal(finalGates[0].decision, 'accept');
       assert.equal(git('status', '--porcelain'), '');

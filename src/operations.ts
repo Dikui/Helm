@@ -21,6 +21,7 @@ import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
 import { listWorkFiles, readWorkFile } from './work-files.js';
+import { previewWorkPush } from './delivery.js';
 import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
 import { changeProjectEnvironment, projectEnvironmentName, projectEnvironmentNames } from './project-environment.js';
 
@@ -551,7 +552,7 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1) }).strict(), execute: ({ store }, { workId }) => store.descriptions(workId),
   }),
   operation({
-    name: 'recheck-work-merge', description: '重新检测本地合并；仅在基准已包含工作分支时记录已合入', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    name: 'recheck-work-merge', description: '重新检测本地合并；基准已包含工作分支时完成工作', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ actor, userOperations }, { workId }) => userOperations.deliverWork(actor, workId, 'detect'),
   }),
@@ -570,8 +571,18 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ store }, { workId }) => conflictResolutionChanges(store, workId),
   }),
+  operation({
+    name: 'get-work-push-preview', description: '预览基准分支相对本地远端跟踪分支将推出的全部提交，不访问网络', callers: ['user'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ store }, { workId }) => previewWorkPush(store, workId),
+  }),
+  operation({
+    name: 'finish-work-without-merge', description: '结束已接受但未合入的工作，删除工作副本并保留工作分支', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1) }).strict(),
+    execute: ({ actor, userOperations }, { workId }) => userOperations.deliverWork(actor, workId, 'finish'),
+  }),
   ...(['merge', 'push'] as const).map(phase => operation({
-    name: `${phase}-work`, description: phase === 'merge' ? '把工作分支合入基准分支，不推送' : '推送已合入的基准分支', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    name: `${phase}-work`, description: phase === 'merge' ? '把工作分支合入基准分支，不推送' : '可选推送已完成工作的基准分支，不改变工作状态', callers: ['user'], keyed: false, mutates: true, transactional: false,
     schema: z.object({ workId: z.string().min(1) }).strict(),
     execute: ({ actor, userOperations }, { workId }) => userOperations.deliverWork(actor, workId, phase),
   })),
@@ -697,7 +708,7 @@ export async function invoke(store: TaskStore, actor: Actor, name: string, input
       if (resolving && ((name === 'create-card' && parsed.data.needsVerification !== true) || (name === 'update-card' && parsed.data.needsVerification === false))) {
         throw new RuleError('VERIFICATION_REQUIRED', '冲突处理卡片必须安排验收。');
       }
-      if ((['completed', 'cancelled'].includes(work.status) || (acceptedReview && !resolving)) && !repeatReview && !['withdraw-acceptance', 'merge-work', 'push-work', 'resolve-merge-conflict', 'recheck-work-merge', 'finish-conflict-resolution'].includes(name) && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
+      if ((['completed', 'cancelled'].includes(work.status) || (acceptedReview && !resolving)) && !repeatReview && !['withdraw-acceptance', 'finish-work-without-merge', 'merge-work', 'push-work', 'resolve-merge-conflict', 'recheck-work-merge', 'finish-conflict-resolution'].includes(name) && !managesOutputs && !(name === 'cancel-work' && work.status === 'cancelled')) {
         throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       }
     }

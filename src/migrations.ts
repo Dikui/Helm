@@ -222,4 +222,22 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (project_id, name)
   ) STRICT;
   `,
+  `
+  -- Merge is terminal; an interrupted legacy push is optional and retryable.
+  INSERT INTO events (time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+    SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'runtime', 'helmd', 'work', w.id, 'base-push-result',
+      json_object('status', 'failed', 'reason', '运行层重启，推送已中断，可重试。',
+        'baseBranch', COALESCE((SELECT json_extract(e.details, '$.baseBranch') FROM events e
+          WHERE e.work_id = w.id AND e.action = 'base-merge-result' ORDER BY e.id DESC LIMIT 1), w.base_ref)), w.id
+    FROM works w WHERE w.status = 'pushing';
+  INSERT INTO events (time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+    SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'runtime', 'helmd', 'work', w.id, 'work-completed',
+      json_object('migratedFrom', w.status,
+        'gateId', (SELECT g.id FROM gates g WHERE g.work_id = w.id AND g.kind = 'review' AND g.decision = 'accept' ORDER BY g.sequence DESC LIMIT 1),
+        'merge', json((SELECT e.details FROM events e WHERE e.work_id = w.id AND e.action = 'base-merge-result' ORDER BY e.id DESC LIMIT 1))), w.id
+    FROM works w WHERE w.status IN ('merged', 'pushing')
+      AND NOT EXISTS (SELECT 1 FROM events e WHERE e.work_id = w.id AND e.action = 'work-completed');
+  UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL
+    WHERE status IN ('merged', 'pushing');
+  `,
 ];

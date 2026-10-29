@@ -75,7 +75,8 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   await until(events, values => values.some(event => event.action === 'round-ended' && event.details.finalAnswer === 'created'));
   const dispatch = (await call('list-dispatches', { workId: work.id })).result[0];
   assert.ok(dispatch, JSON.stringify(await events()));
-  const ended = () => until(async () => (await call('get-dispatch', { workId: work.id, dispatchId: dispatch.id })).result, (value: any) => value.status === 'ended', config.executorDriver ? 180_000 : config.realBrowser ? 120_000 : 10_000);
+  const ended = (timeout = config.executorDriver ? 180_000 : config.realBrowser ? 120_000 : 10_000) =>
+    until(async () => (await call('get-dispatch', { workId: work.id, dispatchId: dispatch.id })).result, (value: any) => value.status === 'ended', timeout);
   return { ...daemon, call, work, dispatch, ended, events, directory };
 }
 

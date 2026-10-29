@@ -234,7 +234,8 @@ for (const reason of ['error', 'quota-exhausted', 'timed-out', 'aborted', 'conte
 
 test('执行者崩溃仍关闭浏览器，TERM 后强制清理同组顽固子进程', async t => {
   const daemon = await fixture(t, [[{ type: 'crash' }]], { needsBrowser: true, browserArgs: ['--stubborn'] });
-  const result = await daemon.ended();
+  // Forced cleanup waits five seconds before SIGKILL; allow for busy-host scheduling.
+  const result = await daemon.ended(30_000);
   assert.equal(result.endReason, 'error');
   assert.match(result.failure, /Fake agent crashed/);
   const descendant = Number(await readFile(join(result.outputPath, '..', 'browser', 'descendant.pid'), 'utf8'));

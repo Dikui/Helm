@@ -186,3 +186,49 @@ test('全新安装不生成任何 Agent', async t => {
   const body = await (await fetch(`${daemon.url}/api/list-agents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any;
   assert.deepEqual(body.result, []);
 });
+
+test('合入即完成迁移转换 merged / pushing、清空暂停字段并把中断推送记为可重试失败', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-delivery-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    const migration = migrations.findIndex(sql => sql.includes('Merge is terminal'));
+    assert.ok(migration > 0);
+    for (const [index, sql] of migrations.slice(0, migration).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧交付', '/missing/project', '2026-01-01');`);
+    for (const status of ['merged', 'pushing']) {
+      db.prepare(`INSERT INTO works (id, project_id, status, creation_key, created_at, base_ref, paused_from_status, runtime_pause_reason)
+        VALUES (?, 'project', ?, ?, '2026-01-01', 'main', 'executing', 'old pause')`).run(status, status, status);
+      db.prepare(`INSERT INTO events (time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+        VALUES ('2026-01-01', 'runtime', 'helmd', 'work', ?, 'base-merge-result', ?, ?)`)
+        .run(status, JSON.stringify({ status: 'merged', baseBranch: 'refs/heads/main', workBranch: `helm/${status}` }), status);
+    }
+    db.exec(`INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('finished', 'project', 'completed', 'finished', '2026-01-01');`);
+  } finally { db.close(); }
+  const agents = new AgentCatalog(join(directory, 'agents'));
+  let store = new TaskStore(directory, agents);
+  for (const id of ['merged', 'pushing']) {
+    assert.equal(store.work(id).status, 'completed');
+    assert.equal(store.work(id).runtimePauseReason, null);
+    assert.equal(store.db.prepare('SELECT paused_from_status FROM works WHERE id = ?').get(id)!.paused_from_status, null);
+    const events = store.events({ workId: id });
+    const completion = events.filter(event => event.action === 'work-completed');
+    assert.equal(completion.length, 1);
+    assert.equal((completion[0]!.details as any).merge.status, 'merged');
+    const pushes = events.filter(event => event.action === 'base-push-result');
+    assert.equal(pushes.length, id === 'pushing' ? 1 : 0);
+    if (id === 'pushing') {
+      assert.equal((pushes[0]!.details as any).status, 'failed');
+      assert.equal((pushes[0]!.details as any).baseBranch, 'refs/heads/main');
+      assert.match((pushes[0]!.details as any).reason, /中断.*可重试/);
+    }
+  }
+  const count = store.events({}).length;
+  store.close();
+  store = new TaskStore(directory, agents);
+  try {
+    assert.equal(store.events({}).length, count);
+    assert.equal(store.work('finished').status, 'completed');
+  } finally { store.close(); }
+});

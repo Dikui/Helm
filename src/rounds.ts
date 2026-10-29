@@ -286,7 +286,7 @@ export class RoundScheduler {
     }
   }
 
-  async cancel(workId: string, reason: '用户打断' | '工作取消' | '审核接受') {
+  async cancel(workId: string, reason: '用户打断' | '工作取消' | '审核接受' | '结束（不合入）') {
     const running = this.running.get(workId);
     if (running) {
       this.cancellations.get(workId)?.(reason);

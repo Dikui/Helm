@@ -247,7 +247,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     assert.equal(git('rev-parse', 'main'), baseline);
     await click(gate.getByRole('button', { name: '接受', exact: true }));
     await click(delivery.getByRole('button', { name: '合入', exact: true }));
-    await visible(delivery.getByRole('heading', { name: '已合入，待推送', exact: true }));
+    await visible(delivery.getByRole('heading', { name: '已完成', exact: true }));
     assert.notEqual(git('rev-parse', 'main'), baseline);
     assert.equal(execFileSync('git', ['--git-dir', remote, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), baseline);
     await screenshot('07c-merged', delivery);
@@ -264,6 +264,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     console.log(`UI 截图 07d-push-failed：${failedPushShot}`);
     await rm(rejectPush);
     await click(delivery.getByRole('button', { name: '重试推送', exact: true }));
+    await visible(delivery.getByRole('heading', { name: '已推送 · 工作完成', exact: true }));
     await visible(workHeader(page).getByText(/^已完成(?:\s*·|$)/));
     assert.equal(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches), true);
     const lightBackground = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg'));

@@ -49,7 +49,7 @@ export function ConversationView({ work }: { work: Work }) {
     ...pendingGates.map(gate => ({ value: `gate:${gate.id}`, label: `${t('conversationGate')} · ${gate.question}` })),
   ];
   const validScope = scopes.some(item => item.value === scope);
-  const readOnly = ['accepted', 'merge-queued', 'merging', 'merged', 'pushing', 'completed', 'cancelled'].includes(work.status);
+  const readOnly = ['accepted', 'merge-queued', 'merging', 'completed', 'cancelled'].includes(work.status);
   const locked = readOnly || submission.pending || submission.uncertain || interrupting;
   const reference = (message: Message) => message.cardId
     ? `${t('conversationCard')} · ${cards.find(card => card.id === message.cardId)?.content?.split(/\r?\n/, 1)[0] || message.cardId}`

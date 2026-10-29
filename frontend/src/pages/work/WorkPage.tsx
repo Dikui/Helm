@@ -18,7 +18,7 @@ import { ConversationView } from './conversation/ConversationView.js';
 export function WorkPage({ route }: { route: RouteParams }) {
   return route.workId ? <SelectedWork key={route.workId} route={route} /> : <EmptyWork />;
 }
-const headerRing: Record<WorkStatus, string> = { aligning: 'att', executing: 'run busy', paused: '', 'awaiting-review': 'att', completed: 'ok', cancelled: 'cut', accepted: 'att', 'merge-queued': 'att', merging: 'run busy', merged: 'ok', pushing: 'run busy' };
+const headerRing: Record<WorkStatus, string> = { aligning: 'att', executing: 'run busy', paused: '', 'awaiting-review': 'att', completed: 'ok', cancelled: 'cut', accepted: 'att', 'merge-queued': 'att', merging: 'run busy' };
 function SelectedWork({ route }: { route: RouteParams }) {
   const { t, language } = useI18n();
   const now = useClock();

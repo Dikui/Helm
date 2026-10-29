@@ -56,8 +56,7 @@ function statusSince(store: TaskStore, work: Work) {
     if (row.action === 'gate-decided' && row.kind === 'review' && details.decision === 'accept') next = 'accepted';
     if (row.action === 'acceptance-withdrawn') next = 'awaiting-review';
     if (row.action === 'delivery-status-changed') next = details.status;
-    if (row.action === 'base-merge-result') next = ['merged', 'already-contained'].includes(details.status) ? 'merged' : 'accepted';
-    if (row.action === 'base-push-result') next = details.status === 'pushed' ? 'completed' : 'merged';
+    if (row.action === 'base-merge-result') next = ['merged', 'already-contained'].includes(details.status) ? 'completed' : 'accepted';
     if (row.action === 'work-paused') next = 'paused';
     if (row.action === 'work-resumed') next = confirmed ? review ? 'awaiting-review' : 'executing' : 'aligning';
     if (row.action === 'work-completed') next = 'completed';

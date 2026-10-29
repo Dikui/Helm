@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { migrations } from '../src/migrations.js';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -228,7 +230,7 @@ test('标记完成在 _work 合并中崩溃，重启 abort 后可重试标记完
   assert.equal(existsSync(join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId)), false);
 });
 
-test('合入中崩溃，重启只恢复合入并停在待推送', async t => {
+test('合入中崩溃，重启恢复合入并完成，不自动推送', async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
@@ -245,7 +247,7 @@ test('合入中崩溃，重启只恢复合入并停在待推送', async t => {
   // Disable this hook for the retry while leaving the running hook blocked.
   await rm(join(daemon.directory, 'hooks', 'pre-merge-commit'));
   await daemon.start();
-  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'merged');
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   await daemon.call('push-work', daemon.scope);
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   assert.equal(git(daemon.repo, 'status', '--porcelain'), 'M baseline.txt');
@@ -278,11 +280,10 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`独立合入或推
   await accepting;
   await rm(join(daemon.directory, 'hooks', interruptedAt));
   await daemon.start();
-  assert.equal((await daemon.call('get-work', daemon.scope)).status, interruptedAt === 'post-merge' ? 'merged' : 'completed');
-  if (interruptedAt === 'post-merge') {
-    assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
-    await daemon.call('push-work', daemon.scope);
-  }
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  assert.equal((await daemon.events()).filter(event => event.action === 'base-push-result').length, 0);
+  await daemon.call('push-work', daemon.scope);
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), merged);
   const events = await daemon.events();
@@ -318,14 +319,14 @@ test('重启先恢复正在合入的工作，再按请求顺序恢复队列，�
   await daemon.start();
   const firstAfter = await daemon.call('get-work', daemon.scope);
   const secondAfter = await daemon.call('get-work', { workId: second.id });
-  assert.equal(firstAfter.status, 'merged');
-  assert.equal(secondAfter.status, 'merged');
+  assert.equal(firstAfter.status, 'completed');
+  assert.equal(secondAfter.status, 'completed');
   assert.equal(git(daemon.repo, 'rev-parse', 'main^1'), secondAfter.delivery.merge.commit);
   assert.equal(git(daemon.repo, 'show', 'main:result-0.txt'), 'work 0');
   assert.equal(git(daemon.repo, 'show', 'main:result-1.txt'), 'work 1');
 });
 
-test('重启保留已接受、已合入和推送失败的阶段，只有显式操作才继续', async t => {
+test('重启保留接受决定和完成状态，不自动合入或重试推送', async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
@@ -341,7 +342,7 @@ test('重启保留已接受、已合入和推送失败的阶段，只有显式�
   await daemon.call('merge-work', daemon.scope);
   const merged = git(daemon.repo, 'rev-parse', 'main');
   await daemon.restart();
-  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'merged');
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
   const hook = join(daemon.remote, 'hooks', 'pre-receive');
@@ -350,7 +351,7 @@ test('重启保留已接受、已合入和推送失败的阶段，只有显式�
   await rm(hook);
   await daemon.restart();
   const failed = await daemon.call('get-work', daemon.scope);
-  assert.equal(failed.status, 'merged');
+  assert.equal(failed.status, 'completed');
   assert.match(failed.delivery.push.reason, /retry-me/);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
   await daemon.call('push-work', daemon.scope);
@@ -527,4 +528,42 @@ test('_work 已写下 MERGE_HEAD 的半截合并在重启时 abort', async t => 
   assert.equal(existsSync(marker), false);
   assert.equal(git(daemon.work.workPath, 'status', '--porcelain'), '');
   assert.equal(git(daemon.work.workPath, 'rev-parse', 'HEAD'), daemon.work.baseCommit);
+});
+
+for (const status of ['merged', 'pushing']) test(`旧 ${status} 工作升级后已完成，helmd 重启不自动推送`, async t => {
+  const daemon = await fixture(t, 'settled');
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  await writeFile(join(daemon.work.workPath, 'result.txt'), 'migrated result\n');
+  git(daemon.work.workPath, 'add', 'result.txt');
+  git(daemon.work.workPath, ...identity, 'commit', '-m', 'result');
+  const baseline = git(daemon.remote, 'rev-parse', 'main');
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  await daemon.call('merge-work', daemon.scope);
+  await daemon.stop(true);
+  const db = new DatabaseSync(join(daemon.dataDir, 'helm.db'));
+  try {
+    db.prepare('UPDATE works SET status = ? WHERE id = ?').run(status, daemon.work.id);
+    db.prepare("DELETE FROM events WHERE work_id = ? AND action = 'work-completed'").run(daemon.work.id);
+    db.exec(`PRAGMA user_version = ${migrations.length - 1}`);
+  } finally { db.close(); }
+  const marker = join(daemon.directory, 'unexpected-push');
+  const hook = join(daemon.repo, '.git', 'hooks', 'pre-push');
+  await writeFile(hook, `#!/bin/sh\necho unexpected > '${marker}'\nexit 1\n`, { mode: 0o755 });
+  await daemon.start();
+  const work = await daemon.call('get-work', daemon.scope);
+  assert.equal(work.status, 'completed');
+  assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(daemon.work.workPath), false);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  if (status === 'pushing') {
+    assert.equal(work.delivery.push.status, 'failed');
+    assert.match(work.delivery.push.reason, /中断.*可重试/);
+  } else assert.equal(work.delivery.push, undefined);
+  await daemon.restart();
+  assert.equal(existsSync(marker), false);
+  assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
+  await rm(hook);
+  await daemon.call('push-work', daemon.scope);
+  assert.equal(git(daemon.remote, 'show', 'main:result.txt'), 'migrated result');
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
 });

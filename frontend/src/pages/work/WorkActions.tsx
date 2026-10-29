@@ -34,7 +34,7 @@ export function WorkActions({ work, reload, inline = false }: { work: ActionWork
   }, [open]);
   const ended = work.status === 'completed' || work.status === 'cancelled';
   const allowed = restriction?.status === work.status ? restriction.operations : work.allowedOperations;
-  const mutable = !ended && !['accepted', 'merge-queued', 'merging', 'merged', 'pushing'].includes(work.status);
+  const mutable = !ended && !['accepted', 'merge-queued', 'merging'].includes(work.status);
   const enabled = (operation: string, state = mutable) => !busy && state && (!allowed || allowed.includes(operation));
   const close = () => { setPanel(undefined); trigger.current?.focus(); };
   async function run(operation: string, params: object = {}) {

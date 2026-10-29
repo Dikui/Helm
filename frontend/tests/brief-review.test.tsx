@@ -25,7 +25,7 @@ let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 const decisionRequests: Promise<Response>[] = [];
 const trackDecisions: typeof fetch = (input, init) => {
   const response = fetch(input, init);
-  if (['decide-gate', 'merge-work', 'push-work', 'withdraw-acceptance'].some(name => String(input).endsWith(`/api/${name}`))) decisionRequests.push(response);
+  if (['decide-gate', 'merge-work', 'push-work', 'withdraw-acceptance', 'finish-work-without-merge'].some(name => String(input).endsWith(`/api/${name}`))) decisionRequests.push(response);
   return response;
 };
 afterEach(async () => {
@@ -319,7 +319,7 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   await checkGraphDecision(gate.question, '已退回', 'Sent back');
 });
 
-test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤回，合入后再推送才移到已结束', async source => {
+test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤回，合入即移到已结束，推送可选', async source => {
   const work = await prepareReview();
   const remote = join(daemon!.directory, 'remote.git');
   execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
@@ -343,10 +343,9 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   await within(delivery).findByRole('heading', { name: '已接受，待合入' });
   await waitFor(() => expect((within(delivery).getByRole('button', { name: '合入' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(within(delivery).getByRole('button', { name: '合入' }));
-  expect(await within(delivery).findByRole('heading', { name: '已合入，待推送' })).toBeTruthy();
-  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('merged');
+  expect(await within(delivery).findByRole('heading', { name: '已完成' })).toBeTruthy();
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
   await waitFor(() => expect((within(delivery).getByRole('button', { name: '推送' }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
   await waitFor(() => expect(within(top).getByText('已完成')).toBeTruthy());
   await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('工作说明与审核')).toBeTruthy());
   expect(within(screen.getByRole('region', { name: '等你处理' })).queryByText('工作说明与审核')).toBeNull();
@@ -358,6 +357,10 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('accept');
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
+  expect(await within(delivery).findByRole('region', { name: '将推出的提交' })).toBeTruthy();
+  expect(within(delivery).getByText(/将新建远端分支/)).toBeTruthy();
+  fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
+  await within(delivery).findByRole('heading', { name: '已推送 · 工作完成' });
   expect(execFileSync('git', ['-C', remote, 'show', 'main:result.txt'], { encoding: 'utf8' })).toContain('末尾成果');
   await checkGraphDecision(gate.question, '已接受', 'Accepted');
 });
@@ -402,7 +405,7 @@ test.each(['conflict', 'push-failed'])('界面显示 %s 原因并保留继续操
     expect(within(delivery).queryByRole('button', { name: '推送' })).toBeNull();
     expect(within(delivery).getByRole('button', { name: '撤回接受' })).toBeTruthy();
   } else {
-    await within(delivery).findByRole('heading', { name: '已合入，待推送' });
+    await within(delivery).findByRole('heading', { name: '已完成' });
     const hook = join(remote, 'hooks', 'pre-receive');
     await writeFile(hook, '#!/bin/sh\necho ui-push-rejected >&2\nexit 1\n', { mode: 0o755 });
     await waitFor(() => expect((within(delivery).getByRole('button', { name: '推送' }) as HTMLButtonElement).disabled).toBe(false));
@@ -525,4 +528,21 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
     expect(result.error.code).toBe('TERMINAL_WORK');
   }
   expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('cancelled');
+});
+
+test('审核接受后确认结束（不合入）即移到已结束，完成后没有推送入口', async () => {
+  const work = await prepareReview();
+  const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
+  ok(await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
+  const delivery = await screen.findByRole('region', { name: '合入与推送' });
+  fireEvent.click(within(delivery).getByRole('button', { name: '结束（不合入）' }));
+  const dialog = await screen.findByRole('dialog', { name: '结束（不合入）' });
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认结束（不合入）' }));
+  await within(delivery).findByText(/工作已完成，未合入/);
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('工作说明与审核')).toBeTruthy());
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
+  expect(within(delivery).queryByRole('button', { name: '推送' })).toBeNull();
 });

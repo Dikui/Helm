@@ -1,9 +1,10 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import { compressWorkOutputs } from './outputs.js';
 import type { ConflictResolution } from './conflict-resolution.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
@@ -89,6 +90,7 @@ export function deliveryDetails(store: TaskStore, workId: string) {
     push: current.findLast(event => event.action === 'base-push-result')?.details as PushResult | undefined,
     cleanup: current.findLast(event => event.action === 'work-copy-cleanup')?.details as { reason?: string } | undefined,
     resolution,
+    completedWithoutMerge: current.some(event => event.action === 'work-completed' && (event.details as { withoutMerge?: boolean }).withoutMerge),
   };
 }
 
@@ -114,23 +116,36 @@ export async function cleanupReviewedCopy(store: TaskStore, workId: string) {
   store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'work-copy-cleanup', { reason }, { workId }));
 }
 
+// Record completion in the same transaction as the merge result, before cleanup.
+export function completeReviewedWork(store: TaskStore, actor: Actor, workId: string, details: Record<string, unknown>) {
+  store.db.prepare("UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(workId);
+  if (!store.events({ workId }).some(event => event.action === 'work-completed')) {
+    store.appendEvent(actor, { type: 'work', id: workId }, 'work-completed', details, { workId });
+  }
+}
+
+export async function finishDelivery(store: TaskStore, workId: string) {
+  await cleanupReviewedCopy(store, workId);
+  await compressWorkOutputs(store, workId);
+  return store.work(workId);
+}
+
 export async function mergeReviewedWork(store: TaskStore, workId: string) {
   const gate = acceptedGate(store, workId);
+  if (store.work(workId).status === 'completed') return store.work(workId);
   const saved = deliveryDetails(store, workId).merge;
   if (saved?.status === 'merged' || saved?.status === 'already-contained') {
-    await cleanupReviewedCopy(store, workId);
-    return store.work(workId);
+    store.transaction(() => completeReviewedWork(store, runtime, workId, { gateId: gate.id, merge: saved }));
+    return finishDelivery(store, workId);
   }
   setDeliveryStatus(store, runtime, workId, 'merging');
   const merge = await mergeIntoBase(store, workId);
-  // Persist the result and next phase together before removing the work copy.
   store.transaction(() => {
     store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId: gate.id, ...merge }, { workId });
-    store.db.prepare('UPDATE works SET status = ? WHERE id = ?')
-      .run(merge.status === 'merged' || merge.status === 'already-contained' ? 'merged' : 'accepted', workId);
+    if (merge.status === 'merged' || merge.status === 'already-contained') completeReviewedWork(store, runtime, workId, { gateId: gate.id, merge });
+    else store.db.prepare("UPDATE works SET status = 'accepted' WHERE id = ?").run(workId);
   });
-  if (store.work(workId).status === 'merged') await cleanupReviewedCopy(store, workId);
-  return store.work(workId);
+  return store.work(workId).status === 'completed' ? finishDelivery(store, workId) : store.work(workId);
 }
 
 // Detection never creates a merge: a user may still be resolving it in their project directory.
@@ -138,7 +153,7 @@ export async function recheckReviewedWork(store: TaskStore, workId: string) {
   const gate = acceptedGate(store, workId);
   const work = store.work(workId);
   const { merge, resolution } = deliveryDetails(store, workId);
-  if (work.status === 'merged') return work;
+  if (work.status === 'completed') return work;
   if (work.status !== 'accepted' || merge?.status !== 'conflict' || resolution?.status !== 'manual' || !merge.baseBranch) {
     throw new RuleError('NO_MANUAL_RESOLUTION', '请先选择自己处理合入冲突。');
   }
@@ -151,40 +166,103 @@ export async function recheckReviewedWork(store: TaskStore, workId: string) {
     if ((error as { status?: number }).status === 1) return work;
     throw error;
   }
+  const contained = { status: 'already-contained', baseBranch: merge.baseBranch, workBranch: work.workBranch, commit: baseCommit };
   store.transaction(() => {
-    store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result',
-      { gateId: gate.id, status: 'already-contained', baseBranch: merge.baseBranch, workBranch: work.workBranch, commit: baseCommit }, { workId });
-    store.db.prepare("UPDATE works SET status = 'merged' WHERE id = ?").run(workId);
+    store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-result', { gateId: gate.id, ...contained }, { workId });
+    completeReviewedWork(store, runtime, workId, { gateId: gate.id, merge: contained });
   });
-  await cleanupReviewedCopy(store, workId);
+  return finishDelivery(store, workId);
+}
+
+export function completeWithoutMerge(store: TaskStore, actor: Actor, workId: string) {
+  const gate = acceptedGate(store, workId);
+  const work = store.work(workId);
+  if (work.status === 'completed' && deliveryDetails(store, workId).completedWithoutMerge) return work;
+  const resolving = deliveryDetails(store, workId).resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status);
+  if (work.status !== 'accepted' && !resolving) throw new RuleError('WORK_NOT_ACCEPTED', '只能结束已接受、尚未合入的工作。');
+  store.transaction(() => completeReviewedWork(store, actor, workId, { gateId: gate.id, withoutMerge: true, workBranch: work.workBranch }));
   return store.work(workId);
 }
 
-export async function pushReviewedWork(store: TaskStore, workId: string) {
-  const gate = acceptedGate(store, workId);
-  const { merge, push: saved } = deliveryDetails(store, workId);
-  if (!merge?.baseBranch || !['merged', 'already-contained'].includes(merge.status)) throw new RuleError('WORK_NOT_MERGED', '合入完成后才能推送。');
-  let push = saved;
-  if (push?.status !== 'pushed') {
-    setDeliveryStatus(store, runtime, workId, 'pushing');
-    const project = projectPath(store, workId);
-    try {
-      let remote = 'origin';
-      try { remote = (await git(project, 'config', '--get', `branch.${merge.baseBranch.slice('refs/heads/'.length)}.remote`)).trim() || remote; }
-      catch (error) { if ((error as { code?: number }).code !== 1) throw error; }
-      await git(project, 'push', '--', remote, `${merge.baseBranch}:${merge.baseBranch}`);
-      push = { status: 'pushed', baseBranch: merge.baseBranch };
-    } catch (error) { push = { status: 'failed', baseBranch: merge.baseBranch, reason: failureReason(error) }; }
-    store.transaction(() => {
-      store.appendEvent(runtime, { type: 'work', id: workId }, 'base-push-result', { gateId: gate.id, ...push }, { workId });
-      store.db.prepare("UPDATE works SET status = 'merged' WHERE id = ?").run(workId);
-    });
+function mergedWork(store: TaskStore, workId: string) {
+  const { merge, completedWithoutMerge } = deliveryDetails(store, workId);
+  if (store.work(workId).status !== 'completed' || completedWithoutMerge || !merge?.baseBranch || !['merged', 'already-contained'].includes(merge.status)) {
+    throw new RuleError('WORK_NOT_MERGED', '工作完成且已合入后才能推送。');
   }
-  if (push.status === 'pushed') store.transaction(() => {
-    store.db.prepare("UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(workId);
-    if (!store.events({ workId }).some(event => event.action === 'work-completed')) {
-      store.appendEvent(runtime, { type: 'work', id: workId }, 'work-completed', { gateId: gate.id, merge, push }, { workId });
-    }
+  return merge as MergeResult & { baseBranch: string };
+}
+
+export interface PushPreview {
+  baseBranch: string; remote?: string; remoteBranch?: string; trackingBranch?: string; newBranch?: boolean;
+  commits: { hash: string; subject: string }[]; reason?: string;
+}
+
+// Uses local remote-tracking refs; no network access or fetch during a read.
+export async function previewWorkPush(store: TaskStore, workId: string): Promise<PushPreview> {
+  const merge = mergedWork(store, workId);
+  const project = projectPath(store, workId);
+  const preview: PushPreview = { baseBranch: merge.baseBranch, commits: [] };
+  try {
+    const config = async (key: string) => {
+      try { return (await git(project, 'config', '--get', key)).trim(); }
+      catch (error) { if ((error as { code?: number }).code === 1) return ''; throw error; }
+    };
+    const branch = merge.baseBranch.slice('refs/heads/'.length);
+    const remotes = (await git(project, 'remote')).trim().split('\n').filter(Boolean);
+    const remote = await config(`branch.${branch}.remote`) || (remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : undefined);
+    if (!remote || !remotes.includes(remote)) return { ...preview, reason: '没有可用的远端仓库，请先为基准分支配置远端。' };
+    const remoteBranch = await config(`branch.${branch}.merge`) || merge.baseBranch;
+    if (!remoteBranch.startsWith('refs/heads/')) throw new Error('远端跟踪目标不是分支，无法推送。');
+    // for-each-ref respects custom fetch refspecs as well as upstream branch names.
+    const upstream = (await git(project, 'for-each-ref', '--format=%(upstream)', merge.baseBranch)).trim();
+    const trackingBranch = upstream || `refs/remotes/${remote}/${remoteBranch.slice('refs/heads/'.length)}`;
+    let newBranch = false;
+    try { await git(project, 'show-ref', '--verify', '--quiet', trackingBranch); }
+    catch (error) { if ((error as { code?: number }).code !== 1) throw error; newBranch = true; }
+    const log = await git(project, 'log', '--format=%h%x00%s', newBranch ? merge.baseBranch : `${trackingBranch}..${merge.baseBranch}`, '--');
+    const commits = log.trimEnd().split('\n').filter(Boolean).map(line => {
+      const [hash, subject] = line.split('\0');
+      return { hash: hash!, subject: subject! };
+    });
+    return { ...preview, remote, remoteBranch, trackingBranch, newBranch, commits };
+  } catch (error) { return { ...preview, reason: failureReason(error) }; }
+}
+
+// Kill the entire push process group so hooks/credential helpers cannot keep it waiting.
+async function pushGit(project: string, remote: string, refspec: string, timeoutMs: number) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('git', ['-C', project, 'push', '--', remote, refspec], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    let timedOut = false;
+    child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-1024 * 1024); });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (child.pid) {
+        try { process.kill(-child.pid, 'SIGKILL'); }
+        catch { child.kill('SIGKILL'); }
+      }
+    }, timeoutMs);
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) reject(new Error(`推送超时（${timeoutMs} ms），可重试。`));
+      else if (code !== 0) reject(new Error(stderr.trim() || `git push exited: ${code ?? signal}`));
+      else resolve();
+    });
   });
+}
+
+export async function pushReviewedWork(store: TaskStore, workId: string, timeoutMs = 120_000) {
+  const merge = mergedWork(store, workId);
+  if (deliveryDetails(store, workId).push?.status === 'pushed') return store.work(workId);
+  const gate = acceptedGate(store, workId);
+  let push: PushResult;
+  try {
+    const preview = await previewWorkPush(store, workId);
+    if (preview.reason) throw new Error(preview.reason);
+    await pushGit(projectPath(store, workId), preview.remote!, `${merge.baseBranch}:${preview.remoteBranch}`, timeoutMs);
+    push = { status: 'pushed', baseBranch: merge.baseBranch };
+  } catch (error) { push = { status: 'failed', baseBranch: merge.baseBranch, reason: failureReason(error) }; }
+  store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-push-result', { gateId: gate.id, ...push }, { workId }));
   return store.work(workId);
 }

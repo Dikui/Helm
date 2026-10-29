@@ -13,7 +13,7 @@
     "prepare": "git config core.hooksPath .githooks",
     "build": "tsc && vite build --config frontend/vite.config.ts",
     "check": "tsc --noEmit && tsc -p frontend/tsconfig.json",
-    "test": "npm run build && node --test dist/tests/*.test.js && npm run test:ui",
+    "test": "npm run build && node --test --test-concurrency=4 dist/tests/*.test.js && npm run test:ui",
     "test:real": "npm run build && node dist/tests/real-smoke-runner.js",
     "test:attachments": "npm run build && HELM_ATTACHMENTS_REAL=1 node --test dist/tests/attachments.real.js",
     "browser:install": "node node_modules/@playwright/mcp/cli.js install-browser chromium --no-shell",
@@ -23,7 +23,7 @@
     "test:codex-executor": "npm run build && HELM_CODEX_EXECUTOR_REAL=1 node --test dist/tests/codex-executor.real.js",
     "test:codex-coordinator": "npm run build && HELM_CODEX_COORDINATOR_REAL=1 node --test dist/tests/codex-coordinator.real.js",
     "start": "node dist/src/cli.js",
-    "test:ui": "tsc && vitest run --config frontend/vitest.config.ts",
+    "test:ui": "tsc && vitest run --config frontend/vitest.config.ts --maxWorkers=2",
     "dev:ui": "vite --config frontend/vite.config.ts"
   },
   "dependencies": {

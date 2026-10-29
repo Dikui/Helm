@@ -356,9 +356,11 @@ test('DeepSeek 模型查询在草稿专用主目录中运行，并在失败、�
   for (const script of [{ hangOn: 'session/new' }, { rejectOn: 'session/new' }, { hangOn: 'session/set_config_option' }, { hangOn: 'session/close' }]) {
     await t.test(JSON.stringify(script), async t => {
       const ctx = await acpFixture(t, { configOptions, ...script }, true, 'deepseek');
-      const driver = new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 500 });
+      // Allow the fake CLI to start under the full suite's parallel process load.
+      const driver = new AcpDriver('deepseek', { command: ctx.command, timeoutMs: 2_000 });
       await assert.rejects(driver.listModels());
       const spawn = (await ctx.requests())[0];
+      assert.ok(spawn, '假 CLI 应先记录启动，再验证超时或失败后的进程回收');
       assert.throws(() => process.kill(spawn.pid, 0), { code: 'ESRCH' });
     });
   }

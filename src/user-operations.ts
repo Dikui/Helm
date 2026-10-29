@@ -10,11 +10,11 @@ import { decideReview, withdrawAcceptance } from './review.js';
 import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry, ModelContext } from './driver.js';
-import { mergeReviewedWork, pushReviewedWork, recheckReviewedWork, setDeliveryStatus } from './delivery.js';
+import { completeWithoutMerge, deliveryDetails, finishDelivery, mergeReviewedWork, pushReviewedWork, recheckReviewedWork, setDeliveryStatus } from './delivery.js';
 
 export class UserOperations {
   private projectDeliveries = new Map<string, Promise<unknown>>();
-  private workDeliveries = new Map<string, { phase: 'merge' | 'push' | 'detect'; promise: Promise<unknown> }>();
+  private workDeliveries = new Map<string, { phase: 'merge' | 'push' | 'detect' | 'finish'; promise: Promise<unknown> }>();
   constructor(private store: TaskStore, private executions: ExecutionRunner, private rounds: RoundScheduler, private drivers: DriverRegistry) {}
 
   async settleDeliveries() { await Promise.allSettled([...this.workDeliveries.values()].map(item => item.promise)); }
@@ -55,23 +55,30 @@ export class UserOperations {
 
   withdrawAcceptance(actor: Actor, workId: string) { return withdrawAcceptance(this.store, actor, workId); }
 
-  deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push' | 'detect') {
+  deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push' | 'detect' | 'finish') {
     const work = this.store.work(workId);
     const active = this.workDeliveries.get(workId);
     if (active) {
       if (active.phase !== phase) throw new RuleError('DELIVERY_BUSY', '请等待当前合入或推送操作结束。');
       return active.promise;
     }
-    if (phase === 'merge' && !['accepted', 'merged', 'completed'].includes(work.status)) throw new RuleError('REVIEW_NOT_ACCEPTED', '须先接受审核。');
-    if (phase === 'push' && !['merged', 'completed'].includes(work.status)) throw new RuleError('WORK_NOT_MERGED', '合入完成后才能推送。');
-    if (phase === 'detect' && !['accepted', 'merged'].includes(work.status)) throw new RuleError('NO_MANUAL_RESOLUTION', '请先选择自己处理合入冲突。');
+    if (phase === 'merge' && !['accepted', 'completed'].includes(work.status)) throw new RuleError('REVIEW_NOT_ACCEPTED', '须先接受审核。');
+    if (phase === 'push' && work.status !== 'completed') throw new RuleError('WORK_NOT_MERGED', '合入完成后才能推送。');
+    if (phase === 'detect' && !['accepted', 'completed'].includes(work.status)) throw new RuleError('NO_MANUAL_RESOLUTION', '请先选择自己处理合入冲突。');
+    const resolving = deliveryDetails(this.store, workId).resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status);
+    if (phase === 'finish' && !resolving && !['accepted', 'completed'].includes(work.status)) throw new RuleError('WORK_NOT_ACCEPTED', '只能结束已接受、尚未合入的工作。');
     const previous = this.projectDeliveries.get(work.projectId) ?? Promise.resolve();
     if (phase === 'merge' && work.status === 'accepted') setDeliveryStatus(this.store, actor, workId, 'merge-queued');
     const next = previous.catch(() => {}).then(async () => {
-      const result = phase === 'merge' ? await mergeReviewedWork(this.store, workId)
-        : phase === 'detect' ? await recheckReviewedWork(this.store, workId) : await pushReviewedWork(this.store, workId);
-      if (result.status === 'completed') await compressWorkOutputs(this.store, workId);
-      return result;
+      if (phase === 'finish') {
+        completeWithoutMerge(this.store, actor, workId);
+        this.store.transaction(() => this.abortDispatches(actor, workId, '结束（不合入）'));
+        await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '结束（不合入）')]);
+        for (const node of cardGraph(this.store, workId)) if (node.type === 'card') removeCardCopy(this.store, node);
+        return finishDelivery(this.store, workId);
+      }
+      return phase === 'merge' ? mergeReviewedWork(this.store, workId)
+        : phase === 'detect' ? recheckReviewedWork(this.store, workId) : pushReviewedWork(this.store, workId);
     }).finally(() => {
       this.workDeliveries.delete(workId);
       if (this.projectDeliveries.get(work.projectId) === next) this.projectDeliveries.delete(work.projectId);
