@@ -191,7 +191,7 @@ test('无卡片和笔记时显示空态，事件读取错误可重试，轮次�
   expect(await within(coordinator).findByText('还没有调度笔记。')).toBeTruthy();
   ok(await daemon.call('cancel-work', { workId: work.id }));
   ok(await daemon.call('delete-outputs', { workId: work.id, confirm: true }));
-  expect(await within(coordinator).findByText('已删除')).toBeTruthy();
+  expect(await within(coordinator).findByText('输出已删除')).toBeTruthy();
 });
 
 test('调度者连续失败后从工作和轮次读取连败暂停与原始原因', async () => {

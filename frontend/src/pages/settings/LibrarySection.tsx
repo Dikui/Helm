@@ -21,7 +21,7 @@ export function LibrarySection() {
     {library.error && <ErrorNotice error={library.error} retry={library.reload} />}
     {!library.data && !library.error && <p role="status">{t('loading')}</p>}
     {library.data?.length === 0 && <p>{t('emptyLibrary')}</p>}
-    <span role="status">{deleted ? t('outputsDeleted') : ''}</span>
+    <span role="status">{deleted ? t('libraryEntryDeleted') : ''}</span>
     {library.data?.map(entry => <LibraryRow key={`${entry.type}:${entry.name}`} entry={entry} onDeleted={() => { setDeleted(true); heading.current?.focus(); library.reload(); }} />)}
     <InstallSkillForm onInstalled={library.reload} onStateChange={setSkillForm} />
     <RegisterMcpForm onRegistered={library.reload} onStateChange={setMcpForm} />
