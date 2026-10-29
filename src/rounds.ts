@@ -31,7 +31,9 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   const description = versions.at(-1);
   const lastStart = store.db.prepare(`SELECT MAX(id) AS id FROM events WHERE work_id = ? AND action = 'round-started'`).get(workId)!.id;
   const previous = store.db.prepare('SELECT reason FROM coordinator_rounds WHERE work_id = ? ORDER BY rowid DESC LIMIT 1').get(workId);
-  // Stable fields lead so consecutive rounds can share a cached prompt prefix; work carries per-round usage.
+  // Agent snapshots carry whole prompts; the coordinator has its own and dispatches keep agentId.
+  const brief = (event: HelmEvent) => event.action.startsWith('dispatch-') && event.details && typeof event.details === 'object' && 'agent' in event.details
+    ? { ...event, details: { ...event.details, agent: undefined } } : event;
   return {
     activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
     workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
@@ -42,11 +44,14 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     coordinatorNotes: String(store.notes(workId).body),
     // Executor steps and artifacts can number thousands per round; outcomes arrive as dispatch-ended,
     // details stay readable via get-dispatch-output and get-dispatch-artifacts.
+    // Wake events appear only in wakeEvents; a failed round's wakes may predate lastStart.
     newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
       .filter(event => event.action !== 'message-sent' || !withdrawn.has(event.object.id))
-      .filter(event => !['dispatch-step', 'round-step', 'artifact-saved'].includes(event.action))
-      .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user')),
-    wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)),
+      .filter(event => !['dispatch-step', 'round-step', 'artifact-saved', 'round-agent-loaded'].includes(event.action))
+      .filter(event => !wakeIds.includes(event.id))
+      .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user'))
+      .map(brief),
+    wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)).map(brief),
     recentConversation: store.conversation(workId).slice(-20),
     ...(previous && ['error', 'timed-out', 'context-overflow', 'aborted'].includes(String(previous.reason))
       ? { interruptionNotice: '上一轮中断，期间已做的操作见任务库' } : {}),

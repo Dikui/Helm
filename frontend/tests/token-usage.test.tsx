@@ -18,7 +18,7 @@ afterEach(async () => {
 test('卡片节点与明细显示全部派单用量，独立调度者节点按轮次展示并可切回卡片', async () => {
   const ok = (value: any) => expect(value.ok).toBe(true);
   const next: FakeScript = ctx => {
-    const ended = JSON.parse(ctx.input).newEvents.find((event: any) => event.action === 'dispatch-ended' && event.details.key === 'first');
+    const ended = JSON.parse(ctx.input).wakeEvents.find((event: any) => event.action === 'dispatch-ended' && event.details.key === 'first');
     return ended ? [{ type: 'tool', name: 'create-dispatch', arguments: { workId: ended.workId, cardId: ended.details.cardId,
       key: 'verify', purpose: 'verification', agentId: 'claude-executor' }, check: ok }] : [];
   };

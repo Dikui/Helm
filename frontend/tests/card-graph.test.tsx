@@ -17,7 +17,7 @@ test('派单打回回路、步骤分页及成果可查，派单结束经 SSE 同
   let finish!: () => void;
   const hold = new Promise<void>(resolve => { finish = resolve; });
   const nextDispatch: FakeScript = ctx => {
-    const ended = JSON.parse(ctx.input).newEvents.filter((event: any) => event.action === 'dispatch-ended').at(-1)?.details;
+    const ended = JSON.parse(ctx.input).wakeEvents.filter((event: any) => event.action === 'dispatch-ended').at(-1)?.details;
     if (!ended || ended.key === 'repair') return [];
     return [{ type: 'tool', name: 'create-dispatch', arguments: { workId: workId(ctx), cardId: ended.cardId,
       key: ended.key === 'first' ? 'verify' : 'repair', purpose: ended.key === 'first' ? 'verification' : 'execution', agentId: 'claude-executor',

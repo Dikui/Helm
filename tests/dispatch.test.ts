@@ -407,9 +407,15 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   assert.equal(briefs.some(value => value.wakeEvents.some(wake => wake.action === 'card-ready')), false);
   assert.ok(brief.cardGraph.some((node: any) => node.id === card.id));
   assert.ok(ended.some(event => event.action === 'dispatch-step'));
-  assert.ok(brief.newEvents.some(value => value.id === event.id && value.action === 'dispatch-ended'));
+  assert.equal(brief.newEvents.some(value => value.id === event.id), false, '唤醒事件只出现在 wakeEvents');
+  assert.ok(brief.newEvents.some(value => value.action === 'dispatch-created'));
   assert.equal(brief.newEvents.some(event => event.action === 'dispatch-step'), false);
   assert.equal(brief.newEvents.some(event => event.action === 'artifact-saved'), false);
+  for (const value of [...brief.newEvents, ...brief.wakeEvents]) {
+    assert.equal(value.action === 'round-agent-loaded', false);
+    if (value.action.startsWith('dispatch-')) assert.equal((value.details as any).agent, undefined, `${value.action} 不带 Agent 快照`);
+  }
+  assert.ok((brief.wakeEvents.find(value => value.id === event.id)!.details as any).agentId);
 });
 
 test('同一卡片续跑复用副本和原 Agent 会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {

@@ -16,7 +16,7 @@ afterEach(async () => {
 test('泳道显示并行及打回，事件经接口筛选后跳到历史派单步骤，检查器保留选择', async () => {
   let finish!: () => void;
   const hold = new Promise<void>(resolve => { finish = resolve; });
-  const advance: FakeScript = ctx => JSON.parse(ctx.input).newEvents
+  const advance: FakeScript = ctx => JSON.parse(ctx.input).wakeEvents
     .filter((event: any) => event.action === 'dispatch-ended' && ['first', 'verify'].includes(event.details.key))
     .map((event: any): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: { workId: workId(ctx), cardId: event.details.cardId,
       key: event.details.key === 'first' ? 'verify' : 'repair', purpose: event.details.key === 'first' ? 'verification' : 'execution', agentId: 'claude-executor' }, check: ok }));

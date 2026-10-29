@@ -24,7 +24,7 @@ test('卡片合计包含执行和失败验收，工作合计另加所有调度�
   const holds = Array.from({ length: 3 }, () => new Promise<void>(resolve => releases.push(resolve)));
   const missing: FakeScript = ctx => {
     const brief = JSON.parse(ctx.input);
-    return brief.newEvents.some((event: any) => event.action === 'message-sent' && event.details.body === 'missing') ? [
+    return brief.wakeEvents.some((event: any) => event.action === 'message-sent' && event.details.body === 'missing') ? [
       { type: 'tool', name: 'create-dispatch', arguments: { workId: brief.work.id, cardId: brief.cardGraph.find((node: any) => node.type === 'card').id, key: 'partial', agentId: 'claude-executor', purpose: 'verification' }, check: ok },
     ] : [];
   };
