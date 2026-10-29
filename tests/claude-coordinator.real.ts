@@ -272,7 +272,8 @@ test('冒烟④：创建后首个真实对齐轮次只读工作副本，项目�
     const round = observed.rounds[0]!;
     connected(round);
     const calls = toolCalls(round.messages);
-    const pwd = calls.find(call => call.name === 'Bash' && (call.input as any).command === 'pwd');
+    // The model may chain pwd with the next command; the output check below still pins the cwd.
+    const pwd = calls.find(call => call.name === 'Bash' && /\bpwd\b/.test(String((call.input as any).command)));
     assert.ok(pwd, '真实 CLI 必须报告 cwd');
     assert.ok(JSON.stringify(toolResult(round.messages, pwd.id)?.content).includes(round.brief.work.workPath!));
     const read = calls.find(call => call.name === 'Read' && String((call.input as any).file_path).endsWith('README.md'));
