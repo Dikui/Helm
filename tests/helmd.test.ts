@@ -233,13 +233,13 @@ test('约束失败返回结构化错误并记录拒绝事件，事务回滚且�
 
 test('HTTP 输入错误同样返回结构化拒绝，服务继续处理请求', async t => {
   const daemon = await fixture(t);
-  const malformed = await fetch(`${daemon.url}/api/set-concurrency`, { method: 'POST', body: '{' });
+  const malformed = await fetch(`${daemon.url}/api/set-concurrency`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
   assert.equal(malformed.status, 400);
   assert.equal((await malformed.json() as any).error.code, 'INVALID_JSON');
-  const large = await fetch(`${daemon.url}/api/set-concurrency`, { method: 'POST', body: ' '.repeat(1024 * 1024 + 1) });
+  const large = await fetch(`${daemon.url}/api/set-concurrency`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: ' '.repeat(1024 * 1024 + 1) });
   assert.equal(large.status, 413);
   assert.equal((await large.json() as any).error.code, 'BODY_TOO_LARGE');
-  const invalidCursor = await fetch(`${daemon.url}/events`, { method: 'POST', headers: { 'last-event-id': '5' }, body: '{"after":-1}' });
+  const invalidCursor = await fetch(`${daemon.url}/events`, { method: 'POST', headers: { 'content-type': 'application/json', 'last-event-id': '5' }, body: '{"after":-1}' });
   assert.equal(invalidCursor.status, 400);
   assert.equal((await invalidCursor.json() as any).error.code, 'INVALID_PARAMS');
   assert.equal((await daemon.call('get-events')).body.result.filter((event: any) => event.action === 'operation-rejected').length, 3);

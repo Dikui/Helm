@@ -29,7 +29,7 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
       ] } }).start(options);
     },
   });
-  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', body: '{}', signal: AbortSignal.timeout(10_000) });
+  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(10_000) });
   const reader = stream.body!.getReader();
   t.after(() => reader.cancel());
   const notification = (async () => {

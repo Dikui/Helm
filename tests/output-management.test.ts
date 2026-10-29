@@ -324,7 +324,7 @@ test('调小输出提示阈值会列出全局待处理事项并推送一次 SSE�
   assert.equal((await daemon.call('get-settings')).outputThresholdBytes, 10_000_000_000);
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', body: JSON.stringify({ after: (await daemon.events()).at(-1).id }),
+  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ after: (await daemon.events()).at(-1).id }),
     signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) });
   const notification = (async () => {
     let data = '';

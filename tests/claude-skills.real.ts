@@ -156,7 +156,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
       start: options => (options.agent.role === 'coordinator' ? coordinator : claude).start(options),
     } } });
     const call = async (name: string, params = {}): Promise<any> => {
-      const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+      const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
       const value = await response.json() as any;
       ok(value);
       return value.result;
@@ -196,7 +196,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
     assert.ok(!JSON.stringify(library).includes(authorization));
     assert.ok(!JSON.stringify(library).includes(stdioSecret));
     for (const [type, name] of [['skill', 'helm-library-probe'], ['mcp', 'library-probe'], ['mcp', 'stdio-probe']]) {
-      const response: Response = await fetch(`${daemon.url}/api/delete-library-entry`, { method: 'POST', body: JSON.stringify({ type, name }) });
+      const response: Response = await fetch(`${daemon.url}/api/delete-library-entry`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type, name }) });
       const failure = await response.json() as any;
       assert.equal(response.status, 409);
       assert.equal(failure.error.code, 'LIBRARY_ENTRY_IN_USE');

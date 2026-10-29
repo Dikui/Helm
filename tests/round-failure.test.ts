@@ -66,7 +66,7 @@ test('连续失败三次暂停，推送待处理通知，消息和确认关卡�
     [draft, { type: 'crash' }], [{ type: 'end', reason: 'error' }], [{ type: 'end', reason: 'context-overflow' }],
     ctx => { pausedBrief = JSON.parse(ctx.input); return []; },
   ]);
-  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', body: '{}', signal: AbortSignal.timeout(8_000) });
+  const stream = await fetch(`${daemon.url}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(8_000) });
   const reader = stream.body!.getReader();
   t.after(() => reader.cancel());
   const notification = (async () => {
@@ -199,7 +199,7 @@ test('看门狗能结束驱动启动、发送或事件流挂住的轮次，过�
     const work = await daemon.begin();
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
     assert.equal(events.find(event => event.action === 'round-ended').details.reason, 'timed-out');
-    const expired = await fetch(`${daemon.url}/api/get-work`, { method: 'POST', headers, body: JSON.stringify({ workId: work.id }) });
+    const expired = await fetch(`${daemon.url}/api/get-work`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ workId: work.id }) });
     assert.equal(expired.status, 401);
     lateStart?.();
     await until(async () => cancellations, value => value > 0);

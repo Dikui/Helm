@@ -87,7 +87,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   const dataDir = join(directory, 'data');
   daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: { 'claude-sdk': claude, codex: executor } });
   const call = async (name: string, params: object = {}): Promise<any> => {
-    const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+    const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
     return response.json();
   };
   const project = (await call('register-project', { path: repo })).result;

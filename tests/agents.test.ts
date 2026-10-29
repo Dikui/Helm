@@ -31,7 +31,7 @@ async function fixture(t: TestContext, drivers: Record<string, Driver> = { 'clau
     await rm(directory, { recursive: true, force: true });
   });
   const call = async (name: string, params: object = {}) => {
-    const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+    const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
     return { status: response.status, ...await response.json() as any };
   };
   const writeAgent = async (id: string, config: object = {}, prompt = '文件中的策略') => {
@@ -705,7 +705,7 @@ test('项目默认调度者 Agent 可修改，新工作继承默认且现有工�
   await daemon.close();
   const restarted = await startHelmd({ port: 0, dataDir: join(daemon.directory, 'data'), agentDir: daemon.agentDir, drivers });
   t.after(() => restarted.close());
-  const read = async (name: string, params: object = {}) => (await (await fetch(`${restarted.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json() as any).result;
+  const read = async (name: string, params: object = {}) => (await (await fetch(`${restarted.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any).result;
   assert.equal((await read('list-projects'))[0].defaultCoordinatorAgentId, 'codex-coordinator');
   assert.equal((await read('get-work', { workId: inherited.result.work.id })).coordinatorAgentId, 'codex-coordinator');
   assert.equal((await read('list-works')).find((item: any) => item.id === work.id).coordinatorAgentId, 'claude-coordinator');
@@ -786,7 +786,7 @@ test('换调度者 Agent 只影响下一轮，当前运行或启动中的轮次�
       assert.equal((await daemon.call('change-coordinator-agent', { ...params, agentId })).error.code, 'AGENT_UNAVAILABLE');
     }
     const forbidden = await fetch(`${daemon.url}/api/change-coordinator-agent`, { method: 'POST',
-      headers: { Authorization: firstOptions!.mcpServers.helm!.headers.Authorization! },
+      headers: { 'content-type': 'application/json', Authorization: firstOptions!.mcpServers.helm!.headers.Authorization! },
       body: JSON.stringify({ ...params, agentId: 'codex-coordinator' }) });
     assert.equal(forbidden.status, 403);
     const changed = await daemon.call('change-coordinator-agent', { ...params, agentId: 'codex-coordinator' });

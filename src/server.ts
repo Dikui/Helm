@@ -50,11 +50,26 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
   let executions: ExecutionRunner;
   let userOperations: UserOperations;
   let ready = false;
-  const server = createServer(async (request, response) => {
+  const server = createServer({ requireHostHeader: false }, async (request, response) => {
     if (!ready) return json(response, 503, { error: { code: 'STARTING', reason: '运行层正在启动对账。', allowedOperations: [] } });
     let name = request.url ?? '/';
     let actor: Actor = { type: 'user', id: 'user' };
     try {
+      // Block cross-site web requests and DNS rebinding before any route is handled.
+      if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(request.headers.host ?? '')) {
+        throw new RuleError('INVALID_HOST', 'Host 必须是 127.0.0.1 或 localhost。', 403);
+      }
+      if (request.headers.origin !== undefined) {
+        let hostname: string;
+        try { hostname = new URL(request.headers.origin).hostname; }
+        catch { throw new RuleError('INVALID_ORIGIN', 'Origin 必须是本机地址。', 403); }
+        if (hostname !== '127.0.0.1' && hostname !== 'localhost') {
+          throw new RuleError('INVALID_ORIGIN', 'Origin 必须是本机地址。', 403);
+        }
+      }
+      if (request.method === 'POST' && request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
+        throw new RuleError('INVALID_CONTENT_TYPE', 'POST 请求必须使用 application/json。', 403);
+      }
       let path: string;
       try { path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname; }
       catch { throw new RuleError('INVALID_PATH', '请求路径无效。', 400); }

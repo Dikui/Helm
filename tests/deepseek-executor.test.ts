@@ -618,7 +618,7 @@ test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显�
   await writeFile(path, JSON.stringify({ ...JSON.parse(await readFile(path, 'utf8')), role: 'coordinator' }));
   const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), agentDir });
   try {
-    const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: '{}' })).json() as any).result;
+    const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any).result;
     const agents = await call('list-agents');
     assert.equal(agents.find((t: any) => t.id === 'deepseek-executor').available, true);
     assert.equal(agents.find((t: any) => t.id === 'deepseek-coordinator').available, false);

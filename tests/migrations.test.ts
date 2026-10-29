@@ -75,7 +75,7 @@ test('版本 1–10 的任务库保留已有记录并升级，重启后仍能读
     let daemon = await startHelmd({ dataDir, port: 0, driver: new FakeDriver(), executorDriver: new FakeDriver() });
     t.after(() => daemon.close());
     const call = async (name: string, params: object = {}) => {
-      const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+      const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
       const body = await response.json() as any;
       assert.equal(response.status, 200, JSON.stringify(body));
       assert.equal(body.ok, true, JSON.stringify(body));
@@ -136,7 +136,7 @@ test('去掉 Agent 表的迁移保留已有派单快照、卡片 Agent id 和成
   const daemon = await startHelmd({ port: 0, dataDir });
   t.after(() => daemon.close());
   const call = async (name: string, params: object) => {
-    const body = await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json() as any;
+    const body = await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any;
     assert.equal(body.ok, true, JSON.stringify(body));
     return body.result;
   };
@@ -166,7 +166,7 @@ test('模板改名为 Agent 的迁移改写列名和事件，已有工作时一�
   const daemon = await startRealHelmd({ port: 0, dataDir, drivers: { 'claude-sdk': new FakeDriver(), codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() } });
   t.after(() => daemon.close());
   const call = async (name: string, params: object = {}) => {
-    const body = await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json() as any;
+    const body = await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any;
     assert.equal(body.ok, true, JSON.stringify(body));
     return body.result;
   };
@@ -183,6 +183,6 @@ test('全新安装不生成任何 Agent', async t => {
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const daemon = await startRealHelmd({ port: 0, dataDir, drivers: { 'claude-sdk': new FakeDriver(), codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() } });
   t.after(() => daemon.close());
-  const body = await (await fetch(`${daemon.url}/api/list-agents`, { method: 'POST', body: '{}' })).json() as any;
+  const body = await (await fetch(`${daemon.url}/api/list-agents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any;
   assert.deepEqual(body.result, []);
 });

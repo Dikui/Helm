@@ -76,7 +76,7 @@ test('startHelmd 默认登记 Grok 驱动和内置 Agent；调度者 Agent 不�
   try {
     assert.throws(() => new AgentCatalog(agentDir, ['grok']).get('grok-coordinator', 'coordinator'), /本阶段只支持执行者/,
       '设置调度者 Agent 的同步入口同样拒绝 Grok');
-    const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: '{}' })).json() as any).result;
+    const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any).result;
     const agents = await call('list-agents');
     assert.equal(agents.find((t: any) => t.id === 'grok-executor').available, true);
     const coordinator = agents.find((t: any) => t.id === 'grok-coordinator');

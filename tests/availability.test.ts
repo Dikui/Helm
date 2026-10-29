@@ -33,7 +33,7 @@ async function fixture(t: TestContext, initial: Record<string, AgentAvailability
   let daemon = await startHelmd(options);
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> => {
-    const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) });
+    const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
     return response.json();
   };
   const events = async (): Promise<any[]> => (await call('get-events')).result;
@@ -138,7 +138,7 @@ test('异步可用性检查期间的重复派单仍按 key 去重，关闭时等
   t.after(() => release());
   let checked = 0;
   daemon.probes.set('claude-executor', async () => { checked++; await hold; return { available: true }; });
-  const dispatch = () => fetch(`${daemon.url}/api/create-dispatch`, { method: 'POST', headers: { Authorization: authorization },
+  const dispatch = () => fetch(`${daemon.url}/api/create-dispatch`, { method: 'POST', headers: { 'content-type': 'application/json', Authorization: authorization },
     body: JSON.stringify({ workId: work.id, cardId: card.id, key: 'dispatch', agentId: 'claude-executor' }) }).then(response => response.json() as Promise<any>);
   const first = dispatch();
   const duplicate = dispatch();
@@ -218,7 +218,7 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
     drivers: { 'claude-sdk': new FakeDriver(), codex } });
   t.after(async () => { process.env.PATH = path; await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> =>
-    (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', body: JSON.stringify(params) })).json();
+    (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json();
   assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: false, install: command });
   assert.deepEqual((await call('check-agent', { driver: 'claude-sdk' })).result, { installed: true, install: null });
   const environment = (await call('check-environment')).result;
@@ -243,7 +243,7 @@ test('list-agent-models 将草稿 Agent 的主目录上下文交给驱动，不�
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory),
     drivers: { 'claude-sdk': new FakeDriver(), deepseek } });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
-  const response = await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', body: JSON.stringify({
+  const response = await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
     driver: 'deepseek', agent: { id: 'draft-forwarder', home: 'dedicated' },
   }) });
   assert.equal(response.status, 200);
@@ -259,7 +259,7 @@ test('list-agent-models 向驱动询问模型，驱动失败时返回结构化�
     drivers: { 'claude-sdk': new FakeDriver(), codex, grok } });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (params: object): Promise<any> =>
-    (await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', body: JSON.stringify(params) })).json();
+    (await fetch(`${daemon.url}/api/list-agent-models`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json();
   assert.deepEqual((await call({ driver: 'codex' })).result, models);
   const failed = await call({ driver: 'grok' });
   assert.equal(failed.error.code, 'MODELS_UNAVAILABLE');

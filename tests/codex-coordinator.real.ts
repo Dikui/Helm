@@ -136,7 +136,7 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
       assert.ok(round.sqlitePath!.startsWith(join(daemon.dataDir, 'rounds')));
       for (const [name, count] of [['create-card', 2], ['add-dependency', 2], ['remove-dependency', 1], ['create-dispatch', 1]] as const) successfulTool(round, name, count);
       const response = await fetch(`${daemon.url}/api/get-work`, { method: 'POST',
-        headers: { Authorization: round.options.mcpServers.helm!.headers.Authorization! }, body: JSON.stringify(daemon.params) });
+        headers: { 'content-type': 'application/json', Authorization: round.options.mcpServers.helm!.headers.Authorization! }, body: JSON.stringify(daemon.params) });
       assert.equal(response.status, 401, '结束或打断后的轮次令牌失效');
     }
     const graph = (await daemon.call('get-card-graph', daemon.params)).filter((node: any) => node.type === 'card');
