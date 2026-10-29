@@ -409,6 +409,7 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   assert.ok(ended.some(event => event.action === 'dispatch-step'));
   assert.ok(brief.newEvents.some(value => value.id === event.id && value.action === 'dispatch-ended'));
   assert.equal(brief.newEvents.some(event => event.action === 'dispatch-step'), false);
+  assert.equal(brief.newEvents.some(event => event.action === 'artifact-saved'), false);
 });
 
 test('同一卡片续跑复用副本和原 Agent 会话，拒绝跨卡片续跑；撤销立即失效并提交进度', async t => {
