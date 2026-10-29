@@ -11,7 +11,7 @@ function git(path: string, ...args: string[]) {
 }
 
 function resolveBaseCommit(project: string, baseRef: string) {
-  const ref = baseRef === 'HEAD' ? 'HEAD' : `refs/heads/${baseRef}`;
+  const ref = `refs/heads/${baseRef}`;
   return git(project, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`);
 }
 
@@ -28,13 +28,13 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
   let baseRef = work.baseRef ?? selectedBase ?? draft?.baseRef;
   if (!baseRef) {
     try { baseRef = git(project, 'symbolic-ref', 'HEAD').replace(/^refs\/heads\//, ''); }
-    catch { baseRef = 'HEAD'; }
+    catch { throw new RuleError('INVALID_BASE_BRANCH', '项目未检出本地分支，请指定基准分支。', 400); }
   }
-  if (selectedBase !== undefined) {
+  if (!work.baseRef) {
     try {
-      git(project, 'check-ref-format', `refs/heads/${selectedBase}`);
-      git(project, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${selectedBase}^{commit}`);
-    } catch { throw new RuleError('INVALID_BASE_BRANCH', '所选基准分支不存在，请刷新分支后重试。', 400); }
+      git(project, 'check-ref-format', `refs/heads/${baseRef}`);
+      git(project, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${baseRef}^{commit}`);
+    } catch { throw new RuleError('INVALID_BASE_BRANCH', '基准必须是已存在的本地分支，请指定基准分支。', 400); }
   }
   const baseCommit = work.baseCommit ?? draft?.baseCommit ?? resolveBaseCommit(project, baseRef);
   const workBranch = work.workBranch ?? `helm/${work.id}`;

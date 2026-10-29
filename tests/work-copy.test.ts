@@ -55,13 +55,39 @@ test('创建工作可选择其他本地基准分支，拒绝无效基准且不�
   assert.equal(work.baseCommit, release);
   assert.equal(await readFile(join(work.workPath, 'README.md'), 'utf8'), 'release baseline\n');
   assert.equal(git('branch', '--show-current'), 'main');
+  git('tag', 'release-tag');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   const refs = git('for-each-ref', '--format=%(refname)');
-  for (const baseRef of ['missing', '--help', 'HEAD', 'main~1']) {
+  for (const baseRef of ['missing', '--help', 'HEAD', 'main~1', 'release-tag', 'refs/tags/release-tag', 'origin/main', git('rev-parse', 'HEAD')]) {
     const invalid = await daemon.call('send-message', { projectId: daemon.project.id, baseRef, key: baseRef, body: '无效基准' });
+    assert.equal(invalid.status, 400);
     assert.equal(invalid.error.code, 'INVALID_BASE_BRANCH');
   }
   assert.equal((await daemon.call('list-works')).result.length, 1);
   assert.equal(git('for-each-ref', '--format=%(refname)'), refs);
+});
+
+test('detached HEAD 新建工作必须指定本地基准分支，拒绝后可用原请求重试', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('checkout', '--detach');
+  const refs = git('for-each-ref', '--format=%(refname)');
+  const copies = git('worktree', 'list', '--porcelain');
+  const params = { projectId: daemon.project.id, key: 'detached', body: '选择基准后创建' };
+  const rejected = await daemon.call('send-message', params);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.error.code, 'INVALID_BASE_BRANCH');
+  assert.match(rejected.error.reason, /请指定基准分支/);
+  assert.deepEqual((await daemon.call('list-works')).result, []);
+  assert.equal(git('for-each-ref', '--format=%(refname)'), refs);
+  assert.equal(git('worktree', 'list', '--porcelain'), copies);
+
+  const response = await daemon.call('send-message', { ...params, baseRef: 'main' });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.work.baseRef, 'main');
+  assert.equal(response.result.work.baseCommit, git('rev-parse', 'refs/heads/main'));
+  assert.equal((await daemon.call('list-works')).result.length, 1);
 });
 
 test('取消对齐中的工作清理副本和分支，重复取消及删除均可完成', async t => {
