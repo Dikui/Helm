@@ -29,11 +29,11 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
   assert.equal(dispatch.endReason, 'completed', dispatch.failure);
   assert.equal(dispatch.finalAnswer, '已完成');
   assert.equal(dispatch.conclusion, purpose === 'execution' ? 'completed' : 'passed');
-  assert.deepEqual(dispatch.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80 });
+  assert.deepEqual(dispatch.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
-  assert.deepEqual(card.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80 });
+  assert.deepEqual(card.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
   await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
-  assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80 });
+  assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
   if (purpose === 'execution') {
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');
     assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), 'inside');

@@ -124,7 +124,7 @@ async function handle(line: string) {
       params: { sessionId, ...notification.params } });
     if (script.holdPrompt) return;
     result = Object.hasOwn(script, 'response') ? script.response : { stopReason: 'end_turn', _meta: { inputTokens: 999, outputTokens: 999,
-      usage: { inputTokens: 120, outputTokens: 9, cachedReadTokens: 80 } } };
+      usage: { inputTokens: 120, outputTokens: 9, cachedReadTokens: 80, cacheCreationTokens: 6 } } };
   }
   emit({ id: message.id, result });
   await writeChunks(script.stdoutAfter?.[message.method] ?? []);

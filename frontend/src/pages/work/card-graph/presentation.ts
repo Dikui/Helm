@@ -30,10 +30,27 @@ export function dispatchDuration(dispatches: Dispatch[], now: number) {
     ? Math.max(0, (dispatch.endedAt ? Date.parse(dispatch.endedAt) : now) - Date.parse(dispatch.startedAt)) : 0), 0);
 }
 
-export function timelineRange(dispatches: Dispatch[], rounds: { startedAt: string; endedAt: string | null }[], now: number) {
-  const runs = [...dispatches.filter(dispatch => dispatch.startedAt).map(dispatch => ({ startedAt: dispatch.startedAt!, endedAt: dispatch.endedAt })), ...rounds];
-  const start = Math.min(now, ...runs.map(run => Date.parse(run.startedAt)));
+// Idle stretches longer than this (waiting for the user, paused) are drawn at this length with a break mark, so runs keep the width.
+export const idleCap = 2 * 60_000;
+
+export function timelineScale(dispatches: Dispatch[], rounds: { startedAt: string; endedAt: string | null }[], now: number) {
+  const runs = [...dispatches.filter(dispatch => dispatch.startedAt).map(dispatch => ({ startedAt: dispatch.startedAt!, endedAt: dispatch.endedAt })), ...rounds]
+    .map(run => [Date.parse(run.startedAt), run.endedAt ? Date.parse(run.endedAt) : now] as const).sort((a, b) => a[0] - b[0]);
+  const start = Math.min(now, ...runs.map(run => run[0]));
   // Finished work keeps a readable time scale even when reopened much later.
-  const end = runs.length ? Math.max(...runs.map(run => run.endedAt ? Date.parse(run.endedAt) : now)) : now;
-  return { start, span: Math.max(60_000, Math.ceil((end - start) / 60_000) * 60_000) * 1.08 };
+  const end = runs.length ? Math.max(...runs.map(run => run[1])) : now;
+  const gaps: { from: number; to: number }[] = [];
+  let busy = start;
+  for (const [from, to] of runs) {
+    if (from - busy > idleCap) gaps.push({ from: busy, to: from });
+    busy = Math.max(busy, to);
+  }
+  // Each long gap loses its middle; later times shift left by what was dropped.
+  const shown = (time: number) => gaps.reduce((value, gap) =>
+    value - Math.max(0, Math.min(time, gap.to - idleCap / 2) - (gap.from + idleCap / 2)), time) - start;
+  const span = Math.max(60_000, Math.ceil(shown(end) / 60_000) * 60_000) * 1.08;
+  const position = (time: number) => shown(time) / span;
+  // Real time at a fraction of the axis; a tick on a break reads as the break's start.
+  const timeAt = (fraction: number) => gaps.reduce((time, gap) => time > gap.from + idleCap / 2 ? time + gap.to - gap.from - idleCap : time, start + fraction * span);
+  return { position, timeAt, breaks: gaps.map(gap => ({ ...gap, at: position(gap.from + idleCap / 2) })) };
 }

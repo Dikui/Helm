@@ -63,7 +63,7 @@ helm service install
 | `description` | 职责说明，调度者派单时参考 |
 | `skills`、`mcp` | 引用的库条目名字 |
 
-订阅 Agent 会加载用户自己的全局配置、规则、hooks、插件、skills 和 MCP，Helm 只按会话覆盖模型、强度、fast 和角色权限（[ADR 0005](docs/adr/0005-subscription-templates-use-default-cli-homes.md)）。API Agent 的接口和 key 由用户按 CLI 格式写在专用主目录里，Helm 不读（[ADR 0004](docs/adr/0004-agent-homes-and-cli-owned-credentials.md)）。
+订阅 Agent 会加载用户自己的全局配置、规则、hooks、插件、skills 和 MCP，Helm 只按会话覆盖模型、强度、fast 和角色权限（[ADR 0005](docs/adr/0005-subscription-templates-use-default-cli-homes.md)）；Claude 调度者例外，不加载这些全局配置（[ADR 0014](docs/adr/0014-coordinator-without-global-config.md)）。API Agent 的接口和 key 由用户按 CLI 格式写在专用主目录里，Helm 不读（[ADR 0004](docs/adr/0004-agent-homes-and-cli-owned-credentials.md)）。
 
 **提示词**：调度者和执行者的规则及运行约束存在 `~/.helm/prompts/`，可在设置页修改。仓库的 [prompts/](prompts/) 只是初始默认，`helm serve` 启动时只补缺失的文件，从不覆盖；想要新默认请自己合并，或删掉文件后重启（[ADR 0008](docs/adr/0008-editable-role-prompts.md)）。
 

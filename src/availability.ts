@@ -25,8 +25,8 @@ export function monitorAgentAvailability(store: TaskStore, drivers: DriverRegist
   });
 }
 
-export async function pendingAgents(store: TaskStore) {
-  return (await store.agents.refresh()).filter(agent => !agent.available)
+export function pendingAgents(store: TaskStore) {
+  return store.agents.cached().filter(agent => !agent.available)
     .map(agent => ({ type: 'agent', kind: 'agent-unavailable', agentId: agent.id,
       reason: agent.reason, command: 'command' in agent ? agent.command : undefined }));
 }

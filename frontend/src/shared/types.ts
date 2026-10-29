@@ -1,5 +1,5 @@
-// cacheReadTokens is the part of inputTokens served from the prompt cache.
-export interface Usage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; incomplete?: boolean }
+// cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
+export interface Usage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
 export type WorkStatus = 'aligning' | 'executing' | 'paused' | 'awaiting-review' | 'accepted' | 'merge-queued' | 'merging' | 'merged' | 'pushing' | 'completed' | 'cancelled';
 export interface Delivery {
   merge?: { status: 'merged' | 'already-contained' | 'conflict' | 'failed'; baseBranch: string | null; workBranch: string; commit?: string; reason?: string; conflictFiles?: string[] };

@@ -47,6 +47,7 @@ export async function deepseekUsage(env: Record<string, string>, sessionId: stri
       total.inputTokens += usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
       total.outputTokens += usage.outputTokens;
       if (usage.cacheReadTokens !== undefined) total.cacheReadTokens = (total.cacheReadTokens ?? 0) + usage.cacheReadTokens;
+      if (usage.cacheWriteTokens !== undefined) total.cacheWriteTokens = (total.cacheWriteTokens ?? 0) + usage.cacheWriteTokens;
     }
     return reported || allowMissing ? total : { inputTokens: null, outputTokens: null };
   }

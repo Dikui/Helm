@@ -76,7 +76,7 @@ test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参�
           minimal: { type: 'stdio', command: 'local-mcp' },
           empty: { type: 'stdio', command: 'empty-mcp', args: [], env: {} },
         });
-        assert.equal(Object.hasOwn(args.options!, 'strictMcpConfig'), false);
+        assert.equal(args.options!.strictMcpConfig, role === 'coordinator' ? true : undefined);
       }) }), { ...options, agent: { ...options.agent, home }, mcpServers });
       assert.equal(inspected, true);
     }
@@ -300,14 +300,15 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
       assert.equal(sdk.cwd, cwd);
-      assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
+      assert.deepEqual(sdk.settingSources, [], '调度者不加载用户的全局插件、hooks、CLAUDE.md');
+      assert.equal((sdk.settings as Exclude<NonNullable<Options['settings']>, string>).disableClaudeAiConnectors, true);
       assert.equal(sdk.permissionMode, 'default');
       assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
       assert.deepEqual(sdk.sandbox, {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
         filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
       });
-      assert.equal(Object.hasOwn(sdk, 'strictMcpConfig'), false);
+      assert.equal(sdk.strictMcpConfig, true);
       assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
       assert.equal(sdk.env?.NO_PROXY, 'example.test,127.0.0.1,localhost');
       assert.equal(sdk.model, 'haiku');
@@ -390,7 +391,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
     assert.equal(events.filter(event => event.type === 'compaction').length, 1);
     assert.deepEqual(events.map(event => event.step), [1, 2, 3, 4, 5]);
     assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
-    assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 } });
+    assert.deepEqual(end, { type: 'end', step: 5, reason: 'completed', finalAnswer: '最终回答', usage: { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 } });
   });
 }
 
@@ -469,7 +470,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
     for (const { messages, reason } of cases) {
       const { end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
       assert.equal(end?.reason, reason, JSON.stringify(messages));
-      assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
+      assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
       assert.equal(end?.finalAnswer, reason === 'completed' ? '最终回答' : undefined);
     }
   });
@@ -512,7 +513,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
         const { events, end } = await collect(new DriverType({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery(messages) }), options);
         assert.equal(end?.reason, reason, `${name}: ${sample.source}`);
         assert.equal(end?.finalAnswer, answer);
-        assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
+        assert.deepEqual(end?.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
         assert.deepEqual(events.filter(event => event.type === 'output').map(event => JSON.parse(event.text)), messages);
       }
     });
@@ -676,7 +677,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
     assert.equal(closed, true);
     if (mode === 'quota-exhausted') {
       assert.equal((await daemon.call('get-work', { workId: daemon.work.id })).result.status, 'executing');
-      assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
+      assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
     }
   });
 });
@@ -717,7 +718,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     assert.equal(dispatch.endReason, 'completed', dispatch.failure);
     assert.equal(dispatch.conclusion, purpose === 'verification' ? 'passed' : 'completed');
     assert.equal(dispatch.conclusionReason, 'SDK MCP round trip');
-    assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20 });
+    assert.deepEqual(dispatch.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
     assert.ok((await daemon.events()).some(event => event.action === 'context-compacted' && event.dispatchId === dispatch.id));
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');

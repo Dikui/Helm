@@ -30,7 +30,8 @@ function tokenUsage(message: SDKResultMessage): TokenUsage {
     inputTokens: total.inputTokens + model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens,
     outputTokens: total.outputTokens + model.outputTokens,
     cacheReadTokens: total.cacheReadTokens + model.cacheReadInputTokens,
-  }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
+    cacheWriteTokens: total.cacheWriteTokens + model.cacheCreationInputTokens,
+  }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 }
 
 function quotaExhausted(text: string) {
@@ -175,8 +176,12 @@ export class ClaudeDriver implements Driver {
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
-      cwd, env, pathToClaudeCodeExecutable: executable, settingSources: agent.home === 'dedicated' ? ['user'] : ['user', 'project', 'local'],
-      settings: { autoMemoryEnabled: false, fastMode: false,
+      // The coordinator only uses helm MCP and read tools; the user's global plugins, hooks, CLAUDE.md and connectors would
+      // only grow every round's context (ADR 0014). A dedicated home holds just the API settings, so it still loads.
+      cwd, env, pathToClaudeCodeExecutable: executable,
+      settingSources: agent.home === 'dedicated' ? ['user'] : coordinator ? [] : ['user', 'project', 'local'],
+      ...(coordinator ? { strictMcpConfig: true } : {}),
+      settings: { autoMemoryEnabled: false, fastMode: false, ...(coordinator ? { disableClaudeAiConnectors: true } : {}),
         // Ask rules precede settings allow rules; otherwise they can skip our
         // path and sandbox checks in canUseTool, even in default mode.
         // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated

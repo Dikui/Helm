@@ -10,8 +10,8 @@ import type { ManagedProcess } from './processes.js';
 export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' | 'aborted' | 'context-overflow';
 // null means the driver has not reported that count; a reported zero stays zero.
 // incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
-// cacheReadTokens is the part of inputTokens served from the prompt cache.
-export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; incomplete?: boolean }
+// cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
+export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
 interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
 export type McpServerConfig = HttpMcpServer | Extract<McpConfig, { type: 'stdio' }>;
 export interface SessionOptions {
