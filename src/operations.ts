@@ -23,6 +23,7 @@ import { listWorkFiles, readWorkFile } from './work-files.js';
 import { previewWorkPush } from './delivery.js';
 import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
 import { changeProjectEnvironment, projectEnvironmentName, projectEnvironmentNames } from './project-environment.js';
+import { decideGitInitialization } from './git-initialization.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -463,10 +464,7 @@ export const operations: readonly Operation[] = [
       if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       if (params.attachments?.length && actor.type !== 'user') throw new RuleError('FORBIDDEN', '只有用户可以发送附件。', 403);
       if (params.cardId) cardDetails(store, workId, params.cardId);
-      if (params.gateId) {
-        const gate = store.db.prepare('SELECT id FROM gates WHERE id = ? AND work_id = ?').get(params.gateId, workId);
-        if (!gate) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
-      }
+      if (params.gateId) store.gate(workId, params.gateId);
       const id = randomUUID();
       const attachments = saveAttachments(store, workId, id, params.attachments ?? []);
       const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null, cardId: params.cardId ?? null, attachments }, { workId, cardId: params.cardId });
@@ -578,10 +576,11 @@ export const operations: readonly Operation[] = [
     execute: ({ actor, userOperations }, { workId }) => userOperations.withdrawAcceptance(actor, workId),
   }),
   operation({
-    name: 'decide-gate', description: '用户确认工作说明、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional() }).strict(),
+    name: 'decide-gate', description: '用户确认工作说明、初始化 git、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional(), ignoreRules: z.string().max(100_000).optional() }).strict(),
     execute({ store, actor, userOperations }, params) {
       const kind = store.gate(params.workId, params.gateId).kind;
+      if (kind === 'git-initialization') return decideGitInitialization(store, actor, params);
       if (kind === 'review') return userOperations.decideReview(actor, params);
       if (kind !== 'work-confirmation') return decideGate(store, actor, params);
       if (params.decision !== 'confirm' || !params.descriptionId) throw new RuleError('INVALID_PARAMS', '确认工作说明须指定所查看的版本并选择 confirm。', 400);

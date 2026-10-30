@@ -14,15 +14,14 @@ const draft: FakeStep = { type: 'tool', name: 'draft-work-description', argument
 const saved = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result;
 const ok = (value: unknown) => assert.equal((value as any).ok, true, JSON.stringify(value));
 
-test('非 git 项目从登记、对齐、只读派单到审核可用；写代码和验收的拒绝对调度者可见', async t => {
+test('非 git 项目从登记、对齐、只读派单到审核可用；写代码和验收的初始化阻塞对调度者可见', async t => {
   let projectPath = '', executorStarted = false, rejected = 0;
   let release!: () => void;
   const ready = new Promise<void>(resolve => { release = resolve; });
   const requiresGit = (value: unknown) => {
     const result = value as any;
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, 'GIT_REQUIRED');
-    assert.match(result.error.reason, /需要 git 仓库/);
+    assert.ok(['GIT_INITIALIZATION_PENDING', 'CARD_NOT_DISPATCHABLE'].includes(result.error.code));
     rejected++;
   };
   const dispatch = (card: string, purpose: 'execution' | 'verification', check = ok): FakeStep => ({
@@ -41,7 +40,9 @@ test('非 git 项目从登记、对齐、只读派单到审核可用；写代码
       { type: 'tool', name: 'create-card', saveAs: 'read', arguments: { key: 'read', content: '分析文件' }, check: ok },
       dispatch('read', 'execution', requiresGit), dispatch('read', 'verification', requiresGit),
       { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, readOnly: true }), check: ok },
-      dispatch('read', 'verification', requiresGit), dispatch('read', 'execution'),
+      dispatch('read', 'verification', requiresGit),
+      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, readOnly: true }), check: ok },
+      dispatch('read', 'execution'),
     ],
     ctx => {
       const brief = JSON.parse(ctx.input);

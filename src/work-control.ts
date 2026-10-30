@@ -23,7 +23,7 @@ export function noticeStall(store: TaskStore, workId: string, roundId: string) {
     OR EXISTS (SELECT 1 FROM wake_queue WHERE work_id = ? AND processed_by IS NULL)
     OR EXISTS (SELECT 1 FROM gates WHERE work_id = ? AND status = 'pending')
     OR EXISTS (SELECT 1 FROM cards WHERE work_id = ? AND status = 'paused') AS busy`).get(workId, workId, workId, workId)!.busy;
-  if (busy) return;
+  if (busy || store.gates(workId).some(gate => gate.status === 'pending')) return;
   const cards = store.db.prepare('SELECT status FROM cards WHERE work_id = ?').all(workId);
   if (cards.length && cards.every(card => ['completed', 'cancelled', 'skipped'].includes(String(card.status)))) return;
   const reason = '调度者结束了这一轮，但没有运行中的派单、待你决定的关卡或待处理事件，工作不会自己推进';

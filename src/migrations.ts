@@ -258,4 +258,9 @@ export const migrations: readonly string[] = [
   ALTER TABLE work_descriptions DROP COLUMN legacy_base_ref;
   ALTER TABLE work_descriptions DROP COLUMN legacy_base_commit;
   `,
+  `
+  ALTER TABLE gates ADD COLUMN git_initialization TEXT;
+  CREATE UNIQUE INDEX one_pending_git_initialization ON gates(json_extract(git_initialization, '$.projectId'))
+    WHERE kind = 'git-initialization' AND status = 'pending';
+  `,
 ];

@@ -100,7 +100,10 @@ export function updateCard(store: TaskStore, actor: Actor, params: {
     }
   }
   const writeScopes = params.writeScopes ? normalizeWriteScopes(params.writeScopes) : card.writeScopes;
-  if (content === card.content && needsVerification === card.needsVerification && aggregate === card.aggregate && readOnly === card.readOnly && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
+  // Explicitly choosing read-only also releases a gate added by a verification attempt.
+  const released = params.readOnly === true ? store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND downstream_type = 'card' AND downstream_id = ?
+    AND upstream_type = 'gate' AND upstream_id IN (SELECT id FROM gates WHERE kind = 'git-initialization')`).run(card.workId, card.id).changes : 0;
+  if (!released && content === card.content && needsVerification === card.needsVerification && aggregate === card.aggregate && readOnly === card.readOnly && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
   store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, read_only = ?, write_scopes = ? WHERE id = ?')
     .run(content, Number(needsVerification), Number(aggregate), Number(readOnly), JSON.stringify(writeScopes), card.id);
   const updated = cardDetails(store, card.workId, card.id);
@@ -152,7 +155,13 @@ function sameNode(left: NodeRef, right: NodeRef) { return left.type === right.ty
 function graphNode(store: TaskStore, workId: string, node: NodeRef) {
   const row = store.db.prepare(`SELECT work_id FROM ${node.type === 'card' ? 'cards' : 'gates'} WHERE id = ?`).get(node.id);
   if (!row) throw new RuleError('INVALID_NODE', '找不到依赖中的卡片或关卡。', 400);
-  if (row.work_id !== workId) throw new RuleError('CROSS_WORK_DEPENDENCY', '依赖两端必须属于同一项工作。');
+  if (row.work_id !== workId) {
+    // The runtime may link a project's initialization gate from another work.
+    const shared = node.type === 'gate' && store.db.prepare(`SELECT 1 FROM gates g JOIN works w ON w.id = g.work_id
+      WHERE g.id = ? AND g.kind = 'git-initialization' AND w.project_id = (SELECT project_id FROM works WHERE id = ?)
+      AND EXISTS (SELECT 1 FROM dependencies WHERE work_id = ? AND upstream_type = 'gate' AND upstream_id = g.id)`).get(node.id, workId, workId);
+    if (!shared) throw new RuleError('CROSS_WORK_DEPENDENCY', '依赖两端必须属于同一项工作。');
+  }
   return node.type === 'card' ? cardDetails(store, workId, node.id) : store.gate(workId, node.id);
 }
 
@@ -226,7 +235,8 @@ export function refreshCardReadiness(store: TaskStore, workId: string) {
     const inactive = upstream.filter(({ node }) => ['cancelled', 'withdrawn', 'skipped'].includes(node.status));
     const skipped = inactive.length > 0 && (!card.aggregate || inactive.length === upstream.length);
     const blocked = upstream.some(({ ref, node }) => !(card.aggregate && ['cancelled', 'withdrawn', 'skipped'].includes(node.status))
-      && node.status !== (ref.type === 'card' ? 'completed' : 'decided'));
+      && (node.status !== (ref.type === 'card' ? 'completed' : 'decided')
+        || ('kind' in node && node.kind === 'git-initialization' && !node.gitInitialization?.initialized)));
     const latest = card.latestDispatchId ? store.db.prepare('SELECT purpose FROM dispatches WHERE id = ?').get(card.latestDispatchId) : undefined;
     const status = skipped ? 'skipped' : blocked ? 'waiting' : latest ? latest.purpose === 'verification' ? 'verifying' : 'executing' : 'ready';
     if (status === card.status) return;
@@ -263,6 +273,9 @@ export function removeDependency(store: TaskStore, actor: Actor, params: { workI
   requireExecuting(store, params.workId);
   graphNode(store, params.workId, params.upstream);
   graphNode(store, params.workId, params.downstream);
+  if (params.upstream.type === 'gate' && store.gate(params.workId, params.upstream.id).kind === 'git-initialization') {
+    throw new RuleError('FIXED_DEPENDENCY', '初始化 git 的依赖由运行层维护。可把卡片改为只读或取消。');
+  }
   const removed = store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND upstream_type = ? AND upstream_id = ? AND downstream_type = ? AND downstream_id = ?`)
     .run(params.workId, params.upstream.type, params.upstream.id, params.downstream.type, params.downstream.id);
   if (removed.changes) {
@@ -345,7 +358,7 @@ export function decideGate(store: TaskStore, actor: Actor, params: {
 }
 
 export function gateHistory(store: TaskStore, workId: string, gateId: string) {
-  store.gate(workId, gateId);
-  return store.events({ workId }).filter(event => event.object.type === 'gate' && event.object.id === gateId
+  const gate = store.gate(workId, gateId);
+  return store.events({ workId: gate.workId }).filter(event => event.object.type === 'gate' && event.object.id === gateId
     && ['gate-created', 'gate-updated', 'gate-decided', 'gate-withdrawn'].includes(event.action));
 }

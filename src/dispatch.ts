@@ -10,6 +10,7 @@ import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 import { redactDispatchContent, redactDispatchText } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
+import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -171,11 +172,12 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   }
   const work = store.work(params.workId);
   if (!['executing', 'awaiting-review'].includes(work.status)) throw new RuleError('WORK_NOT_EXECUTING', '对齐中、暂停或终态工作不能派单。');
+  reconcileGitInitialization(store, work.id);
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
   if ((purpose === 'verification' || !card.readOnly) && !projectGitRoot(projectPath(store, work.id))) {
-    throw new RuleError('GIT_REQUIRED', '写代码的执行派单和验收派单需要 git 仓库，请先在项目目录初始化 git 并创建提交。');
+    requireGitInitialization(store, work.id, card.id);
   }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended' && (purpose === 'execution' || item.purpose === 'execution'))) {

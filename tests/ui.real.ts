@@ -17,6 +17,7 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 import { configureTestAgent } from './helmd-fixture.js';
 import { uiFixture, until } from './ui-fixture.js';
 import { reviewReport } from './fixtures/review-report.js';
+import { gitInitializationFixture } from './fixtures/git-initialization.js';
 
 const enabled = process.env.HELM_UI_REAL === '1';
 const title = 'UI 冒烟：添加 smoke.txt';
@@ -25,6 +26,58 @@ const reviewMessage = '请发起审核';
 const changeTitle = '添加 smoke.txt';
 const verificationTitle = '整体验收 smoke.txt';
 const contents = 'helm-ui-smoke\n';
+
+test('初始化 git 关卡：收件箱与工作对话、中英文、编辑规则、失败重试和拒绝截图', { skip: !enabled, timeout: 90_000 }, async t => {
+  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
+  const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-git-initialization-ui-')));
+  const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
+  const { chromium } = require('playwright') as typeof import('playwright');
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', colorScheme: 'light' });
+  page.setDefaultTimeout(15_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  for (const existingIgnore of [false, true]) {
+    const fixture = await gitInitializationFixture(existingIgnore, resolve('dist/ui'));
+    try {
+      await page.goto(`${fixture.daemon.url}/works/${fixture.work.id}`);
+      const chat = page.getByRole('region', { name: '对话', exact: true });
+      const gate = chat.getByRole('group', { name: '初始化 git', exact: true });
+      await gate.getByText('预计提交文件数', { exact: true }).waitFor();
+      await page.screenshot({ path: join(evidence, existingIgnore ? 'existing-ignore-zh.png' : 'suggested-ignore-zh.png'), animations: 'disabled' });
+      if (!existingIgnore) {
+        const rules = gate.getByLabel('忽略规则', { exact: true });
+        await rules.fill('*\n');
+        await gate.getByRole('button', { name: '同意并初始化', exact: true }).click();
+        await gate.getByRole('alert').waitFor();
+        assert.equal(await rules.inputValue(), '*\n');
+        await page.screenshot({ path: join(evidence, 'failed-retry.png'), animations: 'disabled' });
+        await rules.fill('.env\nnode_modules/\n');
+        await gate.getByRole('button', { name: '同意并初始化', exact: true }).click();
+        await chat.getByText('git 已初始化，卡片已解除这项阻塞，可重新派单。', { exact: true }).waitFor();
+        assert.equal(await readFile(join(fixture.projectPath, '.gitignore'), 'utf8'), '.env\nnode_modules/\n');
+        await page.screenshot({ path: join(evidence, 'initialized.png'), animations: 'disabled' });
+      } else {
+        assert.equal(await gate.getByLabel('忽略规则', { exact: true }).count(), 0);
+        const sidebar = page.getByRole('complementary', { name: 'Helm', exact: true });
+        await sidebar.getByRole('button', { name: '展开详情', exact: true }).click();
+        await sidebar.getByRole('button', { name: 'EN', exact: true }).click();
+        const inboxGate = sidebar.getByRole('group', { name: 'Initialize git', exact: true });
+        await inboxGate.getByText('The existing .gitignore will be used. Helm will leave it unchanged.', { exact: true }).waitFor();
+        await page.screenshot({ path: join(evidence, 'inbox-existing-ignore-en.png'), animations: 'disabled' });
+        await inboxGate.getByLabel('Comment (required to refuse)', { exact: true }).fill('Keep this directory outside git');
+        await inboxGate.getByRole('button', { name: 'Refuse initialization', exact: true }).click();
+        await page.getByText('Initialization was refused. The card stays blocked; the coordinator can make it read-only or cancel it.', { exact: true }).waitFor();
+        await page.setViewportSize({ width: 720, height: 900 });
+        await page.screenshot({ path: join(evidence, 'refused-narrow-en.png'), animations: 'disabled' });
+      }
+      assert.equal(await page.getByRole('alert').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally { await fixture.daemon.close(); }
+  }
+  console.log(`初始化 git 关卡截图：${evidence}`);
+});
 
 test('只读工作审核显示无代码改动，接受即完成且没有交付按钮', { skip: !enabled, timeout: 90_000 }, async t => {
   if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');

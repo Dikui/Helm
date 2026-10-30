@@ -48,7 +48,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     work,
     delivery: deliveryDetails(store, workId),
     cardGraph: cardGraph(store, workId),
-    pendingGates: store.pending().filter(gate => gate.workId === workId),
+    pendingGates: store.gates(workId).filter(gate => gate.status === 'pending'),
     // Executor steps and artifacts can number thousands per round; outcomes arrive as dispatch-ended,
     // details stay readable via get-dispatch-output and get-dispatch-artifacts.
     // Wake events appear only in wakeEvents; a failed round's wakes may predate lastStart.
