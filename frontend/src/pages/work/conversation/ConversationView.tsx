@@ -26,6 +26,7 @@ export function ConversationView({ work }: { work: Work }) {
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [references, setReferences] = useState<string[]>([]);
   const workFiles = useWorkFiles(work.id);
   const preview = useFilePreview(work.id);
   const [scope, setScope] = useState('work');
@@ -74,9 +75,9 @@ export function ConversationView({ work }: { work: Work }) {
     if (body.trim()) {
       if (!validScope && !submission.uncertain) return;
       const target = scope.startsWith('card:') ? { cardId: scope.slice(5) } : scope.startsWith('gate:') ? { gateId: scope.slice(5) } : {};
-      const result = await submission.send({ workId: work.id, body: body.trim(), attachments: await encodeFiles(files), ...target });
+      const result = await submission.send({ workId: work.id, body: body.trim(), attachments: await encodeFiles(files), references, ...target });
       if (!result) return;
-      setBody(''); setFiles([]);
+      setBody(''); setFiles([]); setReferences([]);
     } else if (!immediate) return;
     if (immediate) await interrupt();
   };
@@ -115,7 +116,7 @@ export function ConversationView({ work }: { work: Work }) {
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
       }} /></label>
       <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
-      <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
+      <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
       <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
         <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>
         <label>{t('conversationAbout')}<select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>

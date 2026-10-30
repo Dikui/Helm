@@ -85,6 +85,27 @@ test('基准分支默认当前检出分支，可选择其他分支并用它创�
   expect(await screen.findByText(/工作副本已创建；对齐阶段只读此副本/)).toBeTruthy();
 });
 
+test('引用其他工作：下拉选中后显示标签，可移除，发送时生成快照附件', async () => {
+  daemon = await uiFixture();
+  const source = (await daemon.call('send-message', { projectId: daemon.project.id, body: '调研缓存方案', key: 'research' })).result.work;
+  window.history.replaceState(null, '', '/new');
+  render(<App baseUrl={daemon.url} />);
+  const picker = await screen.findByLabelText('引用工作');
+  await within(picker).findByRole('option', { name: '调研缓存方案' });
+  fireEvent.change(picker, { target: { value: source.id } });
+  expect(screen.getByText('引用：调研缓存方案')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '移除 调研缓存方案' }));
+  expect(screen.queryByText('引用：调研缓存方案')).toBeNull();
+  fireEvent.change(picker, { target: { value: source.id } });
+  fireEvent.change(screen.getByLabelText('需求'), { target: { value: '按调研实现缓存' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: '开始' }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '开始' }));
+  await screen.findByRole('heading', { name: '按调研实现缓存' });
+  const work = (await daemon.call('list-works')).result.find((item: any) => item.id !== source.id);
+  const message = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.type === 'message');
+  expect(message.attachments.map((item: any) => item.name)).toEqual([`引用工作-${source.id.slice(0, 8)}.md`]);
+});
+
 test('基准加载、失败和空分支时不能开始，重试和刷新后可创建工作', async () => {
   daemon = await uiFixture();
   const realFetch = fetch;

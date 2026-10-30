@@ -69,7 +69,7 @@ async function main() {
     const isObject = type === 'object' || variants?.every(variant => typeof variant === 'object' && variant.type === 'object');
     if (type === 'boolean' && value !== 'true' && value !== 'false') throw new Error(`${key} must be true or false`);
     params[key] = type === 'boolean' ? value === 'true' : type === 'integer' || type === 'number' ? Number(value)
-      : isObject ? JSON.parse(value) : value;
+      : isObject || type === 'array' ? JSON.parse(value) : value;
   }
   const url = values.url ?? process.env.HELM_URL ?? 'http://127.0.0.1:4242';
   const response = await fetch(`${url}/api/${command}`, {

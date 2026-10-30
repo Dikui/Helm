@@ -29,6 +29,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
   const [confirmError, setConfirmError] = useState<Error>();
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [references, setReferences] = useState<string[]>([]);
   const preview = useFilePreview(workId);
   const input = useRef<HTMLTextAreaElement>(null);
   const submission = useSendMessage();
@@ -49,7 +50,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
   };
   const send = async () => {
     if (!body.trim()) return;
-    if (await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files) })) { setBody(''); setFiles([]); }
+    if (await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files), references })) { setBody(''); setFiles([]); setReferences([]); }
   };
   const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
   const chat = useRef<HTMLElement>(null);
@@ -88,7 +89,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
         <button className="btn primary send" disabled={submission.pending || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
-        <AttachmentPicker files={files} onChange={setFiles} disabled={submission.pending || submission.uncertain} />
+        <AttachmentPicker files={files} onChange={setFiles} disabled={submission.pending || submission.uncertain} references={references} onReferencesChange={setReferences} workId={workId} />
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>

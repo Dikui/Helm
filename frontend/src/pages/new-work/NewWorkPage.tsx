@@ -21,6 +21,7 @@ export function NewWorkPage() {
   const [base, setBase] = useState<BaseSelection>();
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [references, setReferences] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
   const submission = useSendMessage();
   const project = projects.data?.find(item => item.id === projectId) ?? projects.data?.[0];
@@ -35,7 +36,7 @@ export function NewWorkPage() {
   const locked = submission.pending || submission.uncertain;
   const send = async () => {
     if (!project || (!submission.uncertain && (!available || !branchReady)) || !body.trim()) return;
-    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, baseRef: base?.baseRef, body: body.trim(), attachments: await encodeFiles(files) });
+    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, baseRef: base?.baseRef, body: body.trim(), attachments: await encodeFiles(files), references });
     if (result) navigate(`/works/${encodeURIComponent(result.work.id)}`);
   };
   const registered = (id: string) => {
@@ -53,7 +54,7 @@ export function NewWorkPage() {
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
-        <AttachmentPicker files={files} onChange={setFiles} disabled={locked} />
+        <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} />
         <div className="new-tools">
           <label className="new-project" title={project.path}><span className="sr">{t('projects')}</span><select value={project.id} disabled={locked} onChange={event => { setProjectId(event.target.value); setAgentId(undefined); }}>
             {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.currentBranch ?? (item.headCommit ? 'HEAD' : '—')}</option>)}

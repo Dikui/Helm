@@ -79,3 +79,28 @@ test('CLI --attach 读取本地文件作为附件发送', async t => {
   assert.deepEqual(attachments.map((item: any) => item.name), ['spec.md', 'notes.txt']);
   assert.equal(await readFile(attachments[0].path, 'utf8'), '规格');
 });
+
+test('references 把其他工作的说明和成果提交写成快照附件，拒绝引用自身和不存在的工作', async t => {
+  const daemon = await uiFixture();
+  t.after(() => daemon.close());
+  const source = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'research', body: '调研缓存方案' })).result.work;
+  const sourcePath = (await daemon.call('get-work', { workId: source.id })).result.workPath;
+  await writeFile(join(sourcePath, 'research.md'), '# 结论\n');
+  execFileSync('git', ['-C', sourcePath, 'add', 'research.md']);
+  execFileSync('git', ['-C', sourcePath, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'research']);
+  const commit = execFileSync('git', ['-C', sourcePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  const sent = await daemon.call('send-message', { projectId: daemon.project.id, key: 'use', body: '按调研实现', references: [source.id] });
+  assert.equal(sent.ok, true);
+  const [snapshot] = sent.result.message.attachments;
+  assert.equal(snapshot.name, `引用工作-${source.id.slice(0, 8)}.md`);
+  const text = await readFile(snapshot.path, 'utf8');
+  assert.match(text, /^# 引用的工作：调研缓存方案/);
+  assert.match(text, new RegExp(`成果提交：${commit}`));
+  assert.match(text, /- A research\.md/);
+  assert.ok(text.includes(`git -C ${daemon.repo} show ${commit}:<路径>`));
+
+  const workId = sent.result.work.id;
+  assert.equal((await daemon.call('send-message', { workId, key: 'self', body: 'x', references: [workId] })).error.code, 'INVALID_REFERENCE');
+  assert.equal((await daemon.call('send-message', { workId, key: 'missing', body: 'x', references: ['nope'] })).error.code, 'NOT_FOUND');
+});
