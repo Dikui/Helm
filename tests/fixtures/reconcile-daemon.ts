@@ -1,9 +1,11 @@
 import { reviewReport } from './review-report.js';
 // A separate helmd process lets recovery tests stop it without running close().
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { existsSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { FakeDriver, type FakeScript } from '../../src/driver.js';
+import { managedProcess } from '../../src/processes.js';
 import { startTestHelmd as startHelmd } from '../helmd-fixture.js';
 
 const [dataDir, purpose] = process.argv.slice(2);
@@ -25,9 +27,17 @@ const executor: FakeScript = [
   { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: purpose === 'verification' ? 'passed' : 'completed', reason: '检查结果' } },
   ...(purpose === 'settled' ? [] : [{ type: 'hang' as const }]),
 ];
+// An executor whose process left the worktree: after a crash only its recorded group finds it.
+const escaped: FakeScript = ctx => {
+  const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'],
+    { cwd: dirname(dataDir!), detached: true, stdio: 'ignore' });
+  ctx.options.onProcess?.(managedProcess(child.pid!));
+  writeFileSync(join(dirname(dataDir!), 'escaped.pid'), String(child.pid));
+  return [{ type: 'hang' }];
+};
 const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(Array(100).fill(round)),
   roundRetryDelaysMs: [20, 40],
-  executorDriver: new FakeDriver(Array(100).fill(executor)),
+  executorDriver: new FakeDriver(Array(100).fill(purpose === 'escaped' ? escaped : executor)),
   browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./browser-mcp.js', import.meta.url)), '--stubborn'] },
 });
 process.send?.({ type: 'ready', url: daemon.url });

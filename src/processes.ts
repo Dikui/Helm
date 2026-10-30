@@ -9,6 +9,15 @@ export interface ManagedProcess { pid: number; pgid: number; startedAt: string }
 interface ProcessDirectory { pid: number; pgid: number; cwd: string }
 const exec = promisify(execFile);
 
+// Drivers call this right after spawning a detached group leader. The OS start
+// time lets restart cleanup tell the recorded group from a reused PID.
+export function managedProcess(pid: number): ManagedProcess {
+  let startedAt: string | null = null;
+  // shortcut: an unreadable start time falls back to now, so restart cleanup skips that group; fine while helmd may run ps.
+  try { startedAt = processStartTime(pid); } catch { /* keep the fallback */ }
+  return { pid, pgid: pid, startedAt: startedAt ?? new Date().toISOString() };
+}
+
 // Use the OS timestamp rather than the time helmd happened to observe a PID.
 export function processStartTime(pid: number): string | null {
   try {

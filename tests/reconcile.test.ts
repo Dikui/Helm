@@ -194,6 +194,19 @@ test('崩溃后先清进程，再补交执行派单；轮次重投且不自动�
   assert.equal((await until(next.read, value => value.status === 'running')).portStart, 20000);
 });
 
+test('崩溃前离开工作副本的执行者进程，重启时按记录的进程组结束', async t => {
+  const daemon = await fixture(t, 'escaped');
+  const { dispatch, read } = await daemon.create();
+  const running = await until(read, value => value.pgid !== null);
+  const pid = Number(await readFile(join(daemon.directory, 'escaped.pid'), 'utf8'));
+  t.after(() => { try { process.kill(-pid, 'SIGKILL'); } catch {} });
+  assert.equal(running.pgid, pid);
+  await daemon.restart();
+  const cleaned = (await daemon.events()).find(event => event.action === 'dispatch-processes-cleaned' && event.object.id === dispatch.id);
+  assert.deepEqual(cleaned?.details, { pgid: pid, startedAt: running.processStartedAt });
+  assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' });
+});
+
 async function blockingHook(daemon: Awaited<ReturnType<typeof fixture>>, name: string) {
   const hooks = join(daemon.directory, 'hooks');
   const block = join(daemon.directory, 'block');

@@ -9,6 +9,7 @@ import { query, type CanUseTool, type ModelInfo, type Options, type SDKMessage, 
 import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
+import { managedProcess } from './processes.js';
 import type { AgentConfig } from './agents.js';
 
 function claudeHome(agent: AgentConfig, home = homedir()) {
@@ -204,7 +205,7 @@ export class ClaudeDriver implements Driver {
           detached: true, stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.stderr.on('data', chunk => sdkOptions.stderr?.(String(chunk)));
-        if (child.pid) options.onProcess?.({ pid: child.pid, pgid: child.pid, startedAt: new Date().toISOString() });
+        if (child.pid) options.onProcess?.(managedProcess(child.pid));
         return child;
       },
       sandbox: {

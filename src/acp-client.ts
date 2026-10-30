@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import { client, ndJsonStream, type ClientConnection, type RequestPermissionRequest, type RequestPermissionResponse, type SessionNotification } from '@agentclientprotocol/sdk';
 import type { SessionOptions } from './driver.js';
+import { managedProcess } from './processes.js';
 
 export interface AcpCommand { file: string; args: string[] }
 
@@ -93,7 +94,7 @@ export class AcpClient {
     this.child.on('close', (code, signal) => this.connection.close(new Error(`ACP agent exited (${signal ?? code})`)));
     this.child.stderr.on('data', chunk => handlers.output({ method: 'agent/stderr', params: { text: String(chunk) } }));
     if (this.child.pid) {
-      try { options.onProcess?.({ pid: this.child.pid, pgid: this.child.pid, startedAt: new Date().toISOString() }); }
+      try { options.onProcess?.(managedProcess(this.child.pid)); }
       catch (error) { void this.close(); throw error; }
     }
   }

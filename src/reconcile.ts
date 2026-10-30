@@ -36,6 +36,18 @@ export async function reconcileStartup(store: TaskStore) {
         { pgid: row.browser_pgid, startedAt: row.browser_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
     }
   }
+  // Agents may leave the worktree; their recorded groups are still ours.
+  const agents = store.db.prepare(`SELECT 'dispatch' AS type, id, work_id, card_id, pgid, process_started_at FROM dispatches
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL
+    UNION ALL SELECT 'coordinator-round', id, work_id, NULL, pgid, process_started_at FROM coordinator_rounds
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL`).all();
+  for (const row of agents) {
+    if (!await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) continue;
+    const dispatch = row.type === 'dispatch';
+    store.transaction(() => store.appendEvent(runtime, { type: String(row.type), id: String(row.id) },
+      dispatch ? 'dispatch-processes-cleaned' : 'round-processes-cleaned', { pgid: row.pgid, startedAt: row.process_started_at },
+      { workId: String(row.work_id), ...dispatch ? { cardId: String(row.card_id), dispatchId: String(row.id) } : {} }));
+  }
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
 
