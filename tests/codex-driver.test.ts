@@ -174,6 +174,28 @@ test('Codex 成功优先于重试中的额度错误；普通回答中的额度�
   assert.equal(end.type === 'end' && end.reason, 'completed');
 });
 
+test('Codex 关闭插件后，用户启用的本地插件技能经 extraRoots 传入，未启用的不传', async t => {
+  const ctx = await fixture(t, [completed()]);
+  const codexDir = join(ctx.directory, '.codex');
+  const cache = join(codexDir, 'plugins', 'cache');
+  const write = async (path: string, content: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, content); };
+  // Like gungnir: the manifest lists single skills grouped in folders; the highest version wins.
+  await write(join(cache, 'market', 'listed', '4.10.0', '.claude-plugin', 'plugin.json'), JSON.stringify({ skills: ['./engineering/tdd', './engineering/implement', './productivity/grill-me'] }));
+  for (const skill of ['engineering/tdd', 'engineering/implement', 'productivity/grill-me']) await write(join(cache, 'market', 'listed', '4.10.0', skill, 'SKILL.md'), '');
+  await mkdir(join(cache, 'market', 'listed', '4.9.0'), { recursive: true });
+  await write(join(cache, 'local', 'plain', '1.0.0', 'skills', 'review', 'SKILL.md'), '');
+  await write(join(cache, 'market', 'off', '1.0.0', 'skills', 'x', 'SKILL.md'), '');
+  await write(join(codexDir, 'config.toml'), [
+    'model = "m"', '[plugins."listed@market"]', 'enabled = true', '', '[plugins."off@market"]', 'enabled = false',
+    '[plugins."plain@local"]', 'enabled = true', '[plugins."missing@market"]', 'enabled = true', ''].join('\n'));
+  const session = await ctx.driver.start(ctx.options);
+  t.after(() => session.cancel());
+  const requests = await ctx.requests();
+  assert.deepEqual(requests[2].params.extraRoots, [ctx.options.agent!.skillsPath,
+    join(cache, 'market', 'listed', '4.10.0', 'engineering'), join(cache, 'market', 'listed', '4.10.0', 'productivity'),
+    join(cache, 'local', 'plain', '1.0.0', 'skills')]);
+});
+
 test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skills 均取当前 Agent', async t => {
   const ctx = await fixture(t, [completed()]);
   ctx.options.agent = { ...ctx.options.agent!, id: 'api-codex', home: 'dedicated', fast: false, skillsPath: null, reasoningEffort: 'ultra' };

@@ -20,4 +20,4 @@ Claude 调度者后来不再加载全局配置，见 [ADR 0014](0014-coordinator
 
 ## 2026-10-29：Helm 启动的 Codex 关闭插件
 
-Codex 0.165 开着插件时，每次启动 app-server 都会重新下载并安装账号下的远程连接器插件（约 18 MB），缓存再全也一样；Helm 每次派单、调度轮次和列模型都会启动一次，10-22 起每天多耗 2–6 GB 流量。实测只有 `features.plugins=false` 能阻止（`features.apps=false` 无效，也没有只关远程插件的配置项），所以 Helm 启动 app-server 时一律加这个开关。代价是用户在 `~/.codex/config.toml` 里启用的本地插件（如 gungnir）不进入 Helm 的 Codex 会话；Helm 库技能经 `skills/extraRoots` 传入，`~/.agents/skills` 等全局技能照常加载，不受影响。
+Codex 0.165 开着插件时，每次启动 app-server 都会重新下载并安装账号下的远程连接器插件（约 18 MB），缓存再全也一样；Helm 每次派单、调度轮次和列模型都会启动一次，10-22 起每天多耗 2–6 GB 流量。实测只有 `features.plugins=false` 能阻止（`features.apps=false` 无效，也没有只关远程插件的配置项），所以 Helm 启动 app-server 时一律加这个开关。上游缺陷见 [openai/codex#47483](https://github.com/openai/codex/issues/47483)，修好后去掉。开关同时关掉了用户在 `config.toml` 里启用的本地插件（如 gungnir），所以 Codex 驱动读取其中 `enabled = true` 的插件，从插件缓存的最高版本按清单找到技能目录，和 Helm 库技能一起经 `skills/extraRoots` 传入。实测这样 gungnir 的 31 个技能都在，远程插件也不再重装。补回的只有技能：本地插件里的 MCP、hooks 不进入会话，账号下的远程插件也不进入。`~/.agents/skills` 等全局技能照常加载。
