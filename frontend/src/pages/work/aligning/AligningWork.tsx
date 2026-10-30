@@ -55,7 +55,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
   const chat = useRef<HTMLElement>(null);
   const composer = useRef<HTMLFormElement>(null);
   const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
-  const copyNotice = workBranch && <p className="warn"><span>!</span><span>{t('alignmentCopyReady')}</span></p>;
+  const copyNotice = <p className="warn"><span>!</span><span>{t(workBranch ? 'alignmentCopyReady' : 'alignmentCopyPending')}</span></p>;
   return <div className="aligning-work">
     <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
       <ConversationScroll key={workId} className="aligning-thread">
@@ -72,7 +72,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
             }}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
               <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
-              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t('alignmentCopyRefresh')}</p>}
+              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}
             </div>
             : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}

@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
+import { DataProvider } from '../src/shared/data.js';
+import { I18nProvider } from '../src/shared/i18n.js';
+import { AligningWork } from '../src/pages/work/aligning/AligningWork.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 const { copyAgents, configureTestAgent }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
@@ -85,7 +88,8 @@ test('基准分支默认当前检出分支，可选择其他分支，创建工�
   expect(work.workBranch).toBeNull();
   expect(work.workPath).toBeNull();
   expect(existsSync(join(daemon.directory, 'data', 'worktrees', work.id, '_work'))).toBe(false);
-  expect(screen.queryByText(/工作副本已创建；对齐阶段只读此副本/)).toBeNull();
+  expect(await screen.findByText('对齐阶段只读项目目录；确认工作说明不会建立工作副本。第一张写代码卡片的执行派单前，才从基准分支的最新提交建立工作分支和工作副本。')).toBeTruthy();
+  expect(screen.queryByText(/工作副本已创建/)).toBeNull();
 });
 
 test('基准加载、失败和空分支时不能开始，重试和刷新后可创建工作', async () => {
@@ -132,6 +136,34 @@ const draft = (key: string, requirements: string): import('../../src/driver.js')
   }), check: value => expect((value as any).ok).toBe(true),
 });
 
+for (const language of ['zh', 'en'] as const) for (const hasCopy of [false, true]) {
+  test(`对齐提示按工作分支区分按需副本与已有副本（${language}，${hasCopy ? '已有副本' : '无副本'}）`, async () => {
+    daemon = await uiFixture([[draft('copy-notice', '核对副本提示')]]);
+    const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '核对提示', key: 'start' })).result.work;
+    await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 1);
+    localStorage.setItem('helm.language', language);
+    // Render the branch prop directly to cover old aligning works that already have a copy.
+    render(<I18nProvider><DataProvider baseUrl={daemon.url}><AligningWork workId={work.id} projectId={work.projectId}
+      workBranch={hasCopy ? `helm/${work.id}` : null} /></DataProvider></I18nProvider>);
+    const brief = await screen.findByRole('complementary', { name: language === 'zh' ? '工作说明' : 'Brief' });
+    expect(await within(brief).findByText('核对副本提示')).toBeTruthy();
+    const pending = language === 'zh'
+      ? '对齐阶段只读项目目录；确认工作说明不会建立工作副本。第一张写代码卡片的执行派单前，才从基准分支的最新提交建立工作分支和工作副本。'
+      : 'Alignment reads the project directory without writing to it. Confirming the work brief does not create a work copy. The work branch and copy are created from the latest base branch commit just before the first code-writing execution dispatch.';
+    const ready = language === 'zh'
+      ? '工作副本已创建；对齐阶段只读此副本，项目目录的切分支和未提交改动不会影响它。'
+      : 'The work copy is ready; alignment reads only this copy, independently of branch switches and uncommitted changes in the project directory.';
+    expect(within(brief).getByText(hasCopy ? ready : pending)).toBeTruthy();
+    expect(within(brief).queryByText(hasCopy ? pending : ready)).toBeNull();
+    const branchPending = language === 'zh' ? '第一张写代码卡片执行派单前创建' : 'Created before the first code-writing execution dispatch';
+    expect(Boolean(within(brief).queryByText(`· ${branchPending}`))).toBe(!hasCopy);
+    const chat = screen.getByRole('region', { name: language === 'zh' ? '对话' : 'Chat' });
+    expect(within(chat).getByText(language === 'zh'
+      ? hasCopy ? '确认时，工作分支没有提交则跟上基准分支的最新提交；已有提交则保持。' : '首次派出写代码的执行派单前取基准分支的最新提交，确认时不建副本。'
+      : hasCopy ? 'On confirmation, a work branch with no commits follows the latest base; existing commits are kept.' : 'The latest base branch commit is used before the first code-writing execution dispatch; confirmation does not create a copy.', { exact: false })).toBeTruthy();
+  });
+}
+
 test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口确认后进入执行', async () => {
   daemon = await uiFixture([[draft('first', '邮箱验证码登录')], [
     { type: 'tool', name: 'send-message', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'reply', body: '已补充过期时间，请确认。' }) },
@@ -143,6 +175,7 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('complementary', { name: '工作说明' });
   expect(await within(brief).findByText('邮箱验证码登录')).toBeTruthy();
+  expect(within(brief).getByText('· 第一张写代码卡片执行派单前创建')).toBeTruthy();
   const chat = screen.getByRole('region', { name: '对话' });
   fireEvent.change(within(chat).getByLabelText('消息'), { target: { value: '验证码十分钟过期' } });
   fireEvent.click(within(chat).getByRole('button', { name: '发送' }));
@@ -161,6 +194,10 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   await waitFor(() => expect(within(screen.getByRole('main')).getByText('执行中')).toBeTruthy());
   const descriptions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   expect(descriptions[1].status).toBe('active');
+  const confirmed = (await daemon.call('get-work', { workId: work.id })).result;
+  expect(confirmed.workBranch).toBeNull();
+  expect(confirmed.workPath).toBeNull();
+  expect(existsSync(join(daemon.directory, 'data', 'worktrees', work.id, '_work'))).toBe(false);
   expect((await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(2);
 });
 

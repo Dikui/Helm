@@ -3,6 +3,7 @@
 // HELM_UI_REAL=1 node --test dist/tests/ui.real.js
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -158,11 +159,12 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     const confirm = brief.getByRole('button', { name: '确认这一版', exact: true });
     await eventually(page, () => confirm.isEnabled().catch(() => false), '等待真实调度者起草工作说明超时');
     assert.match(await brief.innerText(), /smoke\.txt/);
-    await visible(main.getByText('工作副本已创建；对齐阶段只读此副本，项目目录的切分支和未提交改动不会影响它。', { exact: true }));
+    await visible(main.getByText('对齐阶段只读项目目录；确认工作说明不会建立工作副本。第一张写代码卡片的执行派单前，才从基准分支的最新提交建立工作分支和工作副本。', { exact: true }));
+    await visible(brief.getByText('· 第一张写代码卡片执行派单前创建', { exact: true }));
     const workId = decodeURIComponent(new URL(page.url()).pathname.split('/').at(-1)!);
     const workPath = join(evidence, 'data', 'worktrees', workId, '_work');
-    assert.equal(execFileSync('git', ['-C', workPath, 'branch', '--show-current'], { encoding: 'utf8' }).trim(), `helm/${workId}`);
-    assert.equal(await readFile(join(workPath, 'README.md'), 'utf8'), 'UI smoke baseline\n');
+    assert.equal(existsSync(workPath), false, '对齐阶段不建立工作副本');
+    assert.equal(git('branch', '--list', `helm/${workId}`), '', '对齐阶段不建立工作分支');
     // v2 puts the status and its elapsed time in the same pill.
     await screenshot('03-aligning', workHeader(page).getByText(/^对齐中(?:\s*·|$)/), brief.getByRole('heading', { name: '标准', exact: true }), confirm);
     await click(confirm);
@@ -176,6 +178,9 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await click(card);
     const inspector = main.getByRole('complementary', { name: '卡片检查器', exact: true });
     await eventually(page, () => inspector.getByRole('button', { name: '派单 #1 · 执行', exact: true }).isVisible(), '等待真实执行派单超时');
+    assert.equal(existsSync(workPath), true, '写代码执行派单前必须建立工作副本');
+    assert.equal(execFileSync('git', ['-C', workPath, 'branch', '--show-current'], { encoding: 'utf8' }).trim(), `helm/${workId}`);
+    assert.equal(await readFile(join(workPath, 'README.md'), 'utf8'), 'UI smoke baseline\n');
     await screenshot('05-card-graph-inspector', graph, inspector.getByRole('heading', { name: changeTitle, exact: true }), inspector.getByRole('heading', { name: /^派单历史\s+1$/ }));
 
     await click(workHeader(page).getByRole('link', { name: '对话', exact: true }));
