@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
@@ -21,6 +21,8 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
   const preview = useFilePreview(gate.workId);
   const [answer, setAnswer] = useState('');
   const [comment, setComment] = useState('');
+  // An explicit label keeps the rules text out of the textarea's accessible name.
+  const rulesId = useId();
   const [ignoreRules, setIgnoreRules] = useState(gate.gitInitialization?.ignoreRules ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error>();
@@ -68,7 +70,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
     {ended && <p className="pill">{t(workStatus)}</p>}
     {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t(gate.review?.noCodeChanges ? 'reviewNoCodeChangesHint' : 'reviewReturnHint')}</p></>}
     {!readOnly && gate.kind === 'git-initialization' && <>
-      {!gate.gitInitialization?.hasGitignore && <label>{t('gitInitIgnoreRules')}<textarea className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></label>}
+      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
       <label>{t('gitInitReason')}<textarea className="resize-none" disabled={pending} value={comment} onChange={event => setComment(event.target.value)} /></label>
       <div className="acts"><button className="btn sm primary" disabled={pending} onClick={() => void decide('initialize')}>{t('gitInitApprove')}</button>
         <button className="btn sm" disabled={pending || !comment.trim()} onClick={() => void decide('refuse')}>{t('gitInitReject')}</button></div>
