@@ -1,11 +1,11 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
+import type { ContextSize, DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { ensureWorkCopy } from './alignment.js';
 import { deliveryDetails } from './delivery.js';
 import { cardGraph } from './graph.js';
-import { agentEnvironment } from './agents.js';
+import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
@@ -15,18 +15,20 @@ export interface StartupBrief {
   projectEnvironmentNames: string[];
   work: Work;
   delivery: ReturnType<typeof deliveryDetails>;
-  workDescription: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
-  activeWorkDescription: WorkDescription | null;
+  // A resumed session already holds the description and notes; it gets only what changed (ADR 0017).
+  resumed?: true;
+  workDescription?: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
+  activeWorkDescription?: WorkDescription | null;
   cardGraph: ReturnType<typeof cardGraph>;
   pendingGates: ReturnType<TaskStore['pending']>;
-  coordinatorNotes: string;
+  coordinatorNotes?: string;
   newEvents: HelmEvent[];
   wakeEvents: HelmEvent[];
   recentConversation: ReturnType<TaskStore['conversation']>;
   interruptionNotice?: string;
 }
 
-export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]): StartupBrief {
+export function startupBrief(store: TaskStore, workId: string, wakeIds: number[], resumedRoundId?: string): StartupBrief {
   const withdrawn = new Set(store.db.prepare('SELECT id FROM messages WHERE work_id = ? AND withdrawn_at IS NOT NULL').all(workId).map(row => String(row.id)));
   const work = store.work(workId);
   const versions = store.descriptions(workId);
@@ -38,13 +40,15 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     ? { ...event, details: { ...event.details, agent: undefined } } : event;
   return {
     projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),
-    activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
-    workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
+    ...(resumedRoundId ? { resumed: true } : {
+      activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
+      workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
+      coordinatorNotes: String(store.notes(workId).body),
+    }),
     work,
     delivery: deliveryDetails(store, workId),
     cardGraph: cardGraph(store, workId),
     pendingGates: store.pending().filter(gate => gate.workId === workId),
-    coordinatorNotes: String(store.notes(workId).body),
     // Executor steps and artifacts can number thousands per round; outcomes arrive as dispatch-ended,
     // details stay readable via get-dispatch-output and get-dispatch-artifacts.
     // Wake events appear only in wakeEvents; a failed round's wakes may predate lastStart.
@@ -52,6 +56,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
       .filter(event => event.action !== 'message-sent' || !withdrawn.has(event.object.id))
       .filter(event => !['dispatch-step', 'round-step', 'artifact-saved', 'round-agent-loaded'].includes(event.action))
       .filter(event => !wakeIds.includes(event.id))
+      .filter(event => !resumedRoundId || event.actor.type !== 'coordinator-round' || event.actor.id !== resumedRoundId)
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user'))
       .map(brief),
     wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)).map(brief),
@@ -62,6 +67,8 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
 }
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
+// ADR 0017: past this size rereading the session each request costs more than a fresh brief.
+const resumeContextLimit = 150_000;
 
 export class RoundScheduler {
   private tokens = new Map<string, Actor>();
@@ -127,21 +134,31 @@ export class RoundScheduler {
     const outputPath = join(this.store.dataDir, 'rounds', `${id}.jsonl`);
     mkdirSync(join(this.store.dataDir, 'rounds'), { recursive: true });
     writeFileSync(outputPath, '');
-    const { ids, brief } = this.store.transaction(() => {
+    const started = this.store.transaction(() => {
       const ids = this.store.db.prepare(`SELECT q.event_id FROM wake_queue q JOIN events e ON e.id = q.event_id JOIN works w ON w.id = q.work_id
         WHERE q.work_id = ? AND q.processed_by IS NULL
         AND (w.status <> 'paused' OR (e.action = 'message-sent' AND e.actor_type = 'user'
           AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
         ORDER BY q.event_id`).all(workId).map(row => Number(row.event_id));
-      const brief = startupBrief(this.store, workId, ids);
+      // Failed, interrupted, compacted or large sessions start fresh; the agent is compared once loaded.
+      const previous = this.store.db.prepare(`SELECT id, session_id AS sessionId, agent_snapshot AS agent, context FROM coordinator_rounds
+        WHERE work_id = ? ORDER BY rowid DESC LIMIT 1`).get(workId);
+      const context = previous?.context ? JSON.parse(String(previous.context)) as ContextSize : undefined;
+      const resume = previous?.sessionId && previous.agent && context && context.tokens < Math.min(resumeContextLimit, (context.window ?? Infinity) / 2)
+        ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig } : undefined;
+      const brief = startupBrief(this.store, workId, ids, resume?.roundId);
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
       this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started', { eventIds: ids, outputPath }, { workId });
-      return { ids, brief };
+      return { ids, brief, resume };
     });
+    const ids = started.ids;
+    let { brief, resume } = started;
     this.tokens.set(token, { type: 'coordinator-round', id, workId });
     let reason: EndReason = 'error';
     let usage: TokenUsage = { inputTokens: null, outputTokens: null };
+    let context: ContextSize | undefined;
+    let compacted = false;
     let finalAnswer: string | undefined;
     let failure: string | undefined;
     let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
@@ -202,8 +219,9 @@ export class RoundScheduler {
       if (reason === 'timed-out') failure = [failure, '调度轮次超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       let failures = 0;
       this.store.transaction(() => {
-        this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ? WHERE id = ?`)
-          .run(new Date().toISOString(), reason, JSON.stringify(usage), id);
+        // Only a completed, uncompacted round leaves a session the next round may resume.
+        this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ?, context = ? WHERE id = ?`)
+          .run(new Date().toISOString(), reason, JSON.stringify(usage), reason === 'completed' && context && !compacted ? JSON.stringify(context) : null, id);
         if (reason === 'completed') {
           const mark = this.store.db.prepare('UPDATE wake_queue SET processed_by = ? WHERE event_id = ?');
           for (const eventId of ids) mark.run(id, eventId);
@@ -236,9 +254,16 @@ export class RoundScheduler {
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
       const mcpServers = this.store.agents.mcpServers(agent);
+      // Model, prompt, rules, skill names or MCP changes need a fresh session.
+      // shortcut: edited skill files under unchanged names still resume; compare their contents if that bites.
+      const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null });
+      if (resume && comparable(resume.agent) !== comparable(agent)) {
+        resume = undefined;
+        brief = this.store.transaction(() => startupBrief(this.store, workId, ids));
+      }
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
-        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent }, { workId });
+        this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent, resumed: Boolean(resume) }, { workId });
       });
       const session = await this.drivers[agent.driver]!.start({
         agent,
@@ -247,6 +272,7 @@ export class RoundScheduler {
         dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
         mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
+        ...(resume ? { resumeSessionId: resume.sessionId } : {}),
         signal: controller.signal,
         onProcess: process => {
           processes.push(process);
@@ -275,12 +301,16 @@ export class RoundScheduler {
         if (event.type !== 'end') this.store.transaction(() => {
           this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-step', { step: event.step }, { workId });
         });
-        if (event.type === 'compaction') this.store.transaction(() => {
-          this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'context-compacted', { step: event.step }, { workId });
-        });
+        if (event.type === 'compaction') {
+          compacted = true;
+          this.store.transaction(() => {
+            this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'context-compacted', { step: event.step }, { workId });
+          });
+        }
         if (event.type === 'end') {
           // Keep reported usage even if closing the iterator stalls or fails.
           usage = event.usage;
+          context = event.context;
           return { reason: event.reason, usage: event.usage, finalAnswer: event.reason === 'completed' ? event.finalAnswer : undefined };
         }
       }

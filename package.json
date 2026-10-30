@@ -22,6 +22,7 @@
     "test:claude-coordinator": "npm run build && HELM_CLAUDE_COORDINATOR_REAL=1 node --test dist/tests/claude-coordinator.real.js",
     "test:codex-executor": "npm run build && HELM_CODEX_EXECUTOR_REAL=1 node --test dist/tests/codex-executor.real.js",
     "test:codex-coordinator": "npm run build && HELM_CODEX_COORDINATOR_REAL=1 node --test dist/tests/codex-coordinator.real.js",
+    "test:coordinator-resume": "npm run build && HELM_COORDINATOR_RESUME_REAL=1 node --test dist/tests/coordinator-resume.real.js",
     "start": "node dist/src/cli.js",
     "test:ui": "tsc && vitest run --config frontend/vitest.config.ts --maxWorkers=2",
     "dev:ui": "vite --config frontend/vite.config.ts"

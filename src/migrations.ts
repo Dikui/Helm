@@ -243,4 +243,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE cards ADD COLUMN aggregate INTEGER NOT NULL DEFAULT 0 CHECK(aggregate IN (0, 1));
   `,
+  `
+  ALTER TABLE coordinator_rounds ADD COLUMN context TEXT;
+  `,
 ];

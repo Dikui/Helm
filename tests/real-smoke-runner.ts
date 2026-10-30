@@ -25,6 +25,7 @@ export function runRealSmoke(run: SmokeProcess = (args, options) => spawnSync(pr
     ['claude-skills', 'HELM_CLAUDE_SKILLS_REAL'],
     ['codex-executor', 'HELM_CODEX_EXECUTOR_REAL'],
     ['codex-coordinator', 'HELM_CODEX_COORDINATOR_REAL'],
+    ['coordinator-resume', 'HELM_COORDINATOR_RESUME_REAL'],
     ['grok-executor', 'HELM_GROK_EXECUTOR_REAL'],
     ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
     ['attachments', 'HELM_ATTACHMENTS_REAL'],

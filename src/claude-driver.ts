@@ -142,8 +142,8 @@ export class ClaudeDriver implements Driver {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
     if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
-      || options.agent?.role === 'executor' || options.resumeSessionId !== undefined)) {
-      throw new Error('ClaudeCoordinatorDriver requires a fresh read-only coordinator round');
+      || options.agent?.role === 'executor')) {
+      throw new Error('ClaudeCoordinatorDriver requires a read-only coordinator round');
     }
     if (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.agent?.role === 'coordinator')) {
       throw new Error('ClaudeExecutorDriver requires an executor card copy');
@@ -237,12 +237,17 @@ export class ClaudeDriver implements Driver {
         if (controller.signal.aborted) return;
         let step = 0;
         let quotaRejected = false;
+        let lastRequest: { model: string; tokens: number } | undefined;
         try {
           stream = runQuery({ prompt, options: sdkOptions });
           for await (const message of stream) {
             if (controller.signal.aborted) return;
             yield { type: 'output', step: ++step, text: JSON.stringify(message) };
             if (message.type === 'assistant' && !message.parent_tool_use_id) {
+              // The last main-session request's prompt plus its reply is what a resume carries forward.
+              const used = message.message.usage;
+              if (used) lastRequest = { model: message.message.model, tokens: used.input_tokens + (used.cache_read_input_tokens ?? 0)
+                + (used.cache_creation_input_tokens ?? 0) + used.output_tokens };
               for (const block of message.message.content) {
                 if (block.type !== 'tool_use' || block.name !== 'TodoWrite') continue;
                 const entries = normalizePlan((block.input as { todos?: unknown })?.todos);
@@ -261,8 +266,10 @@ export class ClaudeDriver implements Driver {
               const completed = message.subtype === 'success' && !message.is_error;
               // Older CLIs can put the diagnostic only in the error result.
               const diagnostics = message.subtype === 'success' ? [message.result] : message.errors;
+              const window = lastRequest && message.modelUsage?.[lastRequest.model]?.contextWindow;
               yield { type: 'end', step: ++step, reason: completed ? 'completed' : quotaRejected || diagnostics.some(quotaExhausted) ? 'quota-exhausted' : 'error',
-                ...(completed ? { finalAnswer: message.result } : {}), usage: tokenUsage(message) };
+                ...(completed ? { finalAnswer: message.result } : {}), usage: tokenUsage(message),
+                ...(lastRequest ? { context: { tokens: lastRequest.tokens, ...(window ? { window } : {}) } } : {}) };
               return;
             }
           }

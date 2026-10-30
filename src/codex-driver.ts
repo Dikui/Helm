@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage } from './driver.js';
+import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage, ContextSize } from './driver.js';
 
 interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
   supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
@@ -106,8 +106,8 @@ export class CodexDriver implements Driver {
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
     const agent = options.agent;
     if (coordinator && (agent.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
-      || options.sandbox.writableRoots.length || options.resumeSessionId !== undefined)) {
-      throw new Error('CodexCoordinatorDriver requires a fresh read-only coordinator round');
+      || options.sandbox.writableRoots.length)) {
+      throw new Error('CodexCoordinatorDriver requires a read-only coordinator round');
     }
     if (!coordinator && (agent.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
       throw new Error('CodexExecutorDriver requires an executor card copy');
@@ -177,6 +177,7 @@ export class CodexDriver implements Driver {
         events: (async function* (): AsyncGenerator<DriverEvent> {
           let step = 0;
           let usage: TokenUsage = { inputTokens: null, outputTokens: null };
+          let context: ContextSize | undefined;
           let finalAnswer = '';
           let terminalError: unknown;
           try {
@@ -194,6 +195,10 @@ export class CodexDriver implements Driver {
                 const total = params.tokenUsage.total;
                 usage = { inputTokens: total.inputTokens ?? null, outputTokens: total.outputTokens ?? null, ...(total.cachedInputTokens != null ? { cacheReadTokens: total.cachedInputTokens } : {}),
                   ...(total.cacheWriteInputTokens != null ? { cacheWriteTokens: total.cacheWriteInputTokens } : {}) };
+                // The latest request's input grows with the thread; Codex documents no other occupancy figure.
+                const last = params.tokenUsage.last;
+                if (typeof last?.inputTokens === 'number') context = { tokens: last.inputTokens + (last.outputTokens ?? 0),
+                  ...(typeof params.tokenUsage.modelContextWindow === 'number' ? { window: params.tokenUsage.modelContextWindow } : {}) };
               }
               if (message.method === 'error' && !params.willRetry) terminalError = params.error;
               if (message.method === 'item/completed' && params.item?.type === 'agentMessage' && params.item.phase !== 'commentary') finalAnswer = params.item.text;
@@ -204,7 +209,7 @@ export class CodexDriver implements Driver {
                 const answer = turn.items?.filter((item: any) => item.type === 'agentMessage' && item.phase !== 'commentary').at(-1)?.text ?? finalAnswer;
                 yield { type: 'end', step: ++step, reason: completed ? 'completed' : turn.status === 'interrupted' ? 'aborted'
                   : quotaExhausted(turn.error ?? terminalError) ? 'quota-exhausted' : 'error',
-                  ...(completed ? { finalAnswer: answer } : {}), usage };
+                  ...(completed ? { finalAnswer: answer } : {}), usage, ...(context ? { context } : {}) };
                 return;
               }
             }

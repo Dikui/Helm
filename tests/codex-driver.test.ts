@@ -101,7 +101,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   for await (const event of session.events) events.push(event);
   assert.equal(session.id, 'thread-scripted');
   assert.equal(session.sqlitePath, join(ctx.directory, 'dispatch', 'codex-sqlite'));
-  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 } });
+  assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 }, context: { tokens: 9 } });
   const requests = await ctx.requests();
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'initialized', 'skills/extraRoots/set', 'thread/start', 'turn/start']);
   assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.agent!.skillsPath] });
@@ -343,13 +343,12 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
   }
 });
 
-test('Codex 调度者拒绝续跑、可写沙箱和错配角色，角色专用驱动不越界', async t => {
+test('Codex 调度者拒绝可写沙箱和错配角色，角色专用驱动不越界', async t => {
   const ctx = await fixture(t, [], {}, 'coordinator');
   for (const options of [
-    { ...ctx.options, resumeSessionId: 'old-thread' },
     { ...ctx.options, sandbox: { mode: 'workspace-write' as const, writableRoots: [ctx.directory] } },
     { ...ctx.options, sandbox: { mode: 'read-only' as const, writableRoots: [ctx.directory] } },
-  ]) await assert.rejects(ctx.driver.start(options), /fresh read-only coordinator round/);
+  ]) await assert.rejects(ctx.driver.start(options), /read-only coordinator round/);
   await assert.rejects(new CodexCoordinatorDriver().start({ ...ctx.options, agent: { ...ctx.options.agent!, role: 'executor' } }), /coordinator/);
   await assert.rejects(new CodexExecutorDriver().start(ctx.options), /executor card copy/);
   assert.deepEqual(await ctx.requests(), []);
@@ -397,4 +396,19 @@ test('Codex 没有用量通知时保留未知，明确零用量时保留零', as
     const end = (await collect(session.events)).at(-1);
     assert.deepEqual(end?.type === 'end' && end.usage, usage);
   }
+});
+
+test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近一次请求的占用和窗口', async t => {
+  const usage = (input: number, output: number) => notification('thread/tokenUsage/updated', { tokenUsage: {
+    total: { inputTokens: input * 3, outputTokens: output * 3 }, last: { inputTokens: input, outputTokens: output }, modelContextWindow: 258400 } });
+  const ctx = await fixture(t, [usage(20, 1), usage(30, 4), completed()], {}, 'coordinator');
+  const session = await ctx.driver.start({ ...ctx.options, resumeSessionId: 'thread-scripted',
+    mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-2' } } } });
+  await session.send('续跑简报');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.deepEqual(end.type === 'end' && end.context, { tokens: 34, window: 258400 });
+  const thread = (await ctx.requests()).find(request => request.method === 'thread/resume');
+  assert.equal(thread.params.threadId, 'thread-scripted');
+  assert.equal(thread.params.sandbox, 'read-only');
+  assert.equal(thread.params.config.mcp_servers.helm.http_headers.Authorization, 'Bearer round-2');
 });

@@ -337,8 +337,7 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
     { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd] } },
     { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [cwd] } },
     { ...options, agent: base.agent },
-    { ...options, resumeSessionId: 'previous-round' },
-  ]) await assert.rejects(driver.start(invalid), /fresh read-only coordinator round/);
+  ]) await assert.rejects(driver.start(invalid), /read-only coordinator round/);
 });
 
 test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和新开/续跑选项', async t => {
@@ -766,4 +765,16 @@ test('Claude TodoWrite 归一完整计划、更新和清空，调度者可使用
 test('Claude 未报告模型用量时保留未知，不把空 modelUsage 当成零', async t => {
   const { end } = await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result({ modelUsage: {} })]) }), await fixture(t));
   assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: null, outputTokens: null });
+});
+
+test('Claude 调度者可续跑，结束时报告最后一次主会话请求的占用和该模型窗口', async t => {
+  const usage = (cached: number) => ({ input_tokens: 1, cache_read_input_tokens: cached, cache_creation_input_tokens: 2, output_tokens: 3 });
+  const assistant = (model: string, used: object, parent_tool_use_id: string | null = null) => ({ type: 'assistant', parent_tool_use_id,
+    message: { model, usage: used, content: [] } }) as unknown as SDKMessage;
+  const options = { ...await fixture(t, 'coordinator'), resumeSessionId: 'previous-round' };
+  const { session, end } = await collect(new ClaudeCoordinatorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([
+    assistant('main', usage(100)), assistant('main', usage(500)), assistant('helper', usage(9000), 'child-tool'), result(),
+  ], args => assert.equal(args.options!.resume, 'previous-round')) }), options);
+  assert.equal(session.id, 'previous-round');
+  assert.deepEqual(end?.type === 'end' && end.context, { tokens: 506, window: 200000 });
 });

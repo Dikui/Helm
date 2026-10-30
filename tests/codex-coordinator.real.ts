@@ -108,7 +108,12 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
     const observed = observedDriver();
     const daemon = await coordinatorFixture(t, observed.driver, { rounds: 2, stagedAuth });
     await daemon.confirm();
-    await until(async () => observed.rounds[0]?.holding ?? false, Boolean, 240_000);
+    await until(async () => observed.rounds[0]?.holding ?? false, Boolean, 240_000).catch(async error => {
+      // Keep what the rounds did; the evidence below is otherwise written only after this wait.
+      await writeFile(join(evidence, 'events.json'), JSON.stringify(await daemon.events(), null, 2));
+      for (const [index, round] of observed.rounds.entries()) await writeFile(join(evidence, `round-${index + 1}.json`), JSON.stringify(round.messages, null, 2));
+      throw error;
+    });
     await daemon.call('send-message', { ...daemon.params, key: 'interrupt-message', body: '重投本轮事件并复用原 key' });
     await daemon.call('interrupt-round', daemon.params);
     const events = await until(daemon.events, values => values.filter(e => e.action === 'round-ended').length >= 3, 240_000);

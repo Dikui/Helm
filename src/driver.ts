@@ -12,6 +12,8 @@ export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' 
 // incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
 // cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
 export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
+// Session size after the turn; a coordinator round resumes only when its driver reports it (ADR 0017).
+export interface ContextSize { tokens: number; window?: number }
 interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
 export type McpServerConfig = HttpMcpServer | Extract<McpConfig, { type: 'stdio' }>;
 export interface SessionOptions {
@@ -37,7 +39,7 @@ export type DriverEvent =
   | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }
   | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage; failure?: string;
-      unavailable?: { reason: string; command?: string } };
+      unavailable?: { reason: string; command?: string }; context?: ContextSize };
 export interface DriverSession {
   id: string;
   sqlitePath?: string;
@@ -71,7 +73,7 @@ export type FakeStep =
   | { type: 'plan'; entries: PlanEntry[] }
   | { type: 'artifact'; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction' }
-  | { type: 'end'; reason: EndReason; finalAnswer?: string; usage?: TokenUsage }
+  | { type: 'end'; reason: EndReason; finalAnswer?: string; usage?: TokenUsage; context?: ContextSize }
   | { type: 'hang'; until?: Promise<void> }
   | { type: 'crash'; message?: string };
 export type FakeScript = FakeStep[] | ((context: FakeContext) => FakeStep[]);
@@ -154,7 +156,7 @@ export class FakeDriver implements Driver {
             } else if (instruction.type === 'end') {
               yield { type: 'end', step: ++step, reason: instruction.reason,
                 ...(instruction.reason === 'completed' ? { finalAnswer: instruction.finalAnswer ?? '' } : {}),
-                usage: instruction.usage ?? { inputTokens: null, outputTokens: null } };
+                usage: instruction.usage ?? { inputTokens: null, outputTokens: null }, ...(instruction.context ? { context: instruction.context } : {}) };
               return;
             } else yield { ...instruction, step: ++step };
           }
