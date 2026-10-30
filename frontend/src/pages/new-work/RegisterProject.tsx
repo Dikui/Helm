@@ -19,6 +19,7 @@ export function RegisterProjectForm({ onRegistered, onCancel, onPendingChange }:
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (error && !pending) input.current?.focus(); }, [error, pending]);
   const invalidPath = error instanceof OperationError && error.failure.code === 'INVALID_PROJECT';
+  const missing = error instanceof OperationError && Boolean(error.failure.details?.missing);
   // The dropdown lists subdirectories of the typed path's parent, filtered by the last segment.
   const parent = path.slice(0, path.lastIndexOf('/') + 1);
   const listing = useResource<{ path: string; directories: { name: string; git: boolean }[] }>('list-directories', parent ? { path: parent } : {}, unaffected);
@@ -33,12 +34,12 @@ export function RegisterProjectForm({ onRegistered, onCancel, onPendingChange }:
     // Keep the newly appended segment in view; a long path otherwise stays scrolled at the old end.
     requestAnimationFrame(() => { const field = input.current; if (field) { field.setSelectionRange(value.length, value.length); field.scrollLeft = field.scrollWidth; } });
   };
-  const register = async () => {
+  const register = async (createDirectory = false) => {
     if (busy.current) return;
     if (!path.trim()) { input.current?.focus(); return; }
     busy.current = true; setPending(true); onPendingChange?.(true); setError(undefined);
     try {
-      const project = await api.call<{ id: string }>('register-project', { path: path.trim() });
+      const project = await api.call<{ id: string }>('register-project', { path: path.trim(), ...(createDirectory ? { createDirectory } : {}) });
       onRegistered(project.id);
     } catch (error) { setError(error as Error); }
     finally { busy.current = false; setPending(false); onPendingChange?.(false); }
@@ -67,6 +68,7 @@ export function RegisterProjectForm({ onRegistered, onCancel, onPendingChange }:
         <span>{option.name}/</span>{option.git && <span className="muted">git</span>}</li>)}
     </ul>}
     {error && <div id="project-register-error"><ErrorNotice error={error} /></div>}
+    {missing && <p className="muted">{t('newWorkCreateDirectoryHint')} <button type="button" className="btn" disabled={pending} onClick={() => void register(true)}>{t('newWorkCreateDirectory')}</button></p>}
     <div className="acts">{onCancel && <button type="button" className="btn" disabled={pending} onClick={onCancel}>{t('newWorkCancel')}</button>}
       <button className="btn primary" disabled={pending || !path.trim()}>{t('newWorkRegister')}</button></div>
   </form>;

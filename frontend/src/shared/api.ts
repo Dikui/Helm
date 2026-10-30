@@ -1,4 +1,4 @@
-export interface OperationFailure { code: string; reason: string; allowedOperations: string[]; details?: { agents?: string[] } }
+export interface OperationFailure { code: string; reason: string; allowedOperations: string[]; details?: { agents?: string[]; missing?: boolean } }
 export class OperationError extends Error {
   constructor(readonly failure: OperationFailure) { super(failure.reason); }
 }

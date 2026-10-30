@@ -264,6 +264,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await click(main.getByRole('button', { name: '登记项目', exact: true }));
     const registration = page.getByRole('dialog', { name: '登记项目', exact: true });
     await registration.getByLabel('项目路径', { exact: true }).fill(plain);
+    await visible(registration.getByText('选择或输入一个已有的本机目录，也可以新建目录，无需 git。git 项目的路径会归一到工作树根目录；已登记的路径直接返回原项目。', { exact: true }));
     assert.equal(await registration.getByRole('button', { name: /初始化|新建目录/ }).count(), 0);
     await screenshot('02c-register-directory', registration);
     await click(registration.getByRole('button', { name: '登记', exact: true }));

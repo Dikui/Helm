@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
@@ -248,9 +248,13 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'register-project', description: '登记本机目录为项目', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional() }).strict(),
+    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), createDirectory: z.boolean().optional() }).strict(),
     execute({ store, actor }, params) {
       const requested = resolve(params.path);
+      if (!existsSync(requested)) {
+        if (!params.createDirectory) throw new RuleError('INVALID_PROJECT', '项目路径不存在。', 400, { missing: true });
+        try { mkdirSync(requested, { recursive: true }); } catch (error) { throw new RuleError('INVALID_PROJECT', `创建目录失败：${(error as Error).message}`, 400); }
+      }
       let candidate: string;
       try {
         candidate = realpathSync(requested);

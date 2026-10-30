@@ -296,12 +296,14 @@ test('无项目时直接登记非 git 目录；弹窗登记归一并选中新项
   // Invalid paths stay in the modal so the user can correct them.
   fireEvent.change(within(reopened).getByLabelText('项目路径'), { target: { value: join(daemon.directory, 'missing') } });
   fireEvent.click(within(reopened).getByRole('button', { name: '登记' }));
-  expect((await within(reopened).findByRole('alert')).textContent).toContain('项目路径不存在或不是目录。');
+  expect((await within(reopened).findByRole('alert')).textContent).toContain('项目路径不存在。');
+  expect(within(reopened).getByRole('button', { name: '新建目录并登记' })).toBeTruthy();
   expect(within(reopened).queryByRole('button', { name: '初始化为 git 仓库并登记' })).toBeNull();
   const second = join(daemon.directory, 'second');
   execFileSync('git', ['clone', daemon.repo, second], { stdio: 'ignore' });
   await mkdir(join(second, 'nested'));
   fireEvent.change(within(reopened).getByLabelText('项目路径'), { target: { value: join(second, 'nested') } });
+  expect(within(reopened).queryByRole('button', { name: '新建目录并登记' })).toBeNull();
   fireEvent.click(within(reopened).getByRole('button', { name: '登记' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   const projects = (await daemon.call('list-projects')).result;
@@ -310,7 +312,7 @@ test('无项目时直接登记非 git 目录；弹窗登记归一并选中新项
   await waitFor(() => expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe(registered.id));
 });
 
-test('项目路径下拉列出子目录，选择后进入下一级；不存在的路径显示错误且不提供创建选项', async () => {
+test('项目路径下拉列出子目录，选择后进入下一级；不存在的路径提示确认创建', async () => {
   daemon = await uiFixture([], undefined, { registerProject: false });
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} />);
@@ -326,11 +328,54 @@ test('项目路径下拉列出子目录，选择后进入下一级；不存在�
   const created = join(daemon.directory, 'apps', 'fresh');
   fireEvent.change(path, { target: { value: created } });
   fireEvent.click(screen.getByRole('button', { name: '登记' }));
-  expect((await screen.findByRole('alert')).textContent).toContain('项目路径不存在或不是目录。');
+  expect((await screen.findByRole('alert')).textContent).toContain('项目路径不存在。');
   expect(path.value).toBe(created);
   expect(path.getAttribute('aria-invalid')).toBe('true');
   expect(existsSync(created)).toBe(false);
-  expect(screen.queryByRole('button', { name: /新建目录|初始化/ })).toBeNull();
+  expect(screen.getByText('这个目录还不存在，可以新建后登记，无需 git。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '新建目录并登记' }));
+  expect(await screen.findByLabelText('需求')).toBeTruthy();
+  expect(existsSync(created)).toBe(true);
+  expect(existsSync(join(created, '.git'))).toBe(false);
+  expect(screen.queryByLabelText('基准分支')).toBeNull();
+});
+
+test.each(['zh', 'en'])('登记弹窗缺失目录经确认创建并选中非 git 项目（%s）', async language => {
+  localStorage.setItem('helm.language', language);
+  const labels = language === 'zh'
+    ? { registerProject: '登记项目', path: '项目路径', register: '登记', create: '新建目录并登记',
+      hint: '这个目录还不存在，可以新建后登记，无需 git。', description: '选择或输入一个已有的本机目录，也可以新建目录，无需 git。', project: '项目' }
+    : { registerProject: 'Register project', path: 'Project path', register: 'Register', create: 'Create directory and register',
+      hint: 'This directory does not exist yet. You can create it and register it. Git is optional.', description: 'Choose or enter an existing local directory, or create a new one. Git is optional.', project: 'Projects' };
+  daemon = await uiFixture();
+  const realFetch = fetch;
+  const submissions: object[] = [];
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/api/register-project')) submissions.push(JSON.parse(String(init?.body)));
+    return realFetch(input, init);
+  };
+  window.history.replaceState(null, '', '/new');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  fireEvent.click(await screen.findByRole('button', { name: labels.registerProject }));
+  const dialog = screen.getByRole('dialog', { name: labels.registerProject });
+  expect(within(dialog).getByText(labels.description, { exact: false })).toBeTruthy();
+  expect(within(dialog).queryByRole('button', { name: labels.create })).toBeNull();
+  const created = join(daemon.directory, 'new', 'app');
+  const path = within(dialog).getByLabelText(labels.path) as HTMLInputElement;
+  fireEvent.change(path, { target: { value: created } });
+  fireEvent.click(within(dialog).getByRole('button', { name: labels.register }));
+  expect(await within(dialog).findByText(labels.hint)).toBeTruthy();
+  expect(path.value).toBe(created);
+  expect(document.activeElement).toBe(path);
+  expect(existsSync(created)).toBe(false);
+  fireEvent.click(within(dialog).getByRole('button', { name: labels.create }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(submissions).toEqual([{ path: created }, { path: created, createDirectory: true }]);
+  const projects = (await daemon.call('list-projects')).result;
+  const registered = projects.find((project: any) => project.path === created);
+  expect(registered.isGit).toBe(false);
+  expect(existsSync(join(created, '.git'))).toBe(false);
+  await waitFor(() => expect((screen.getByLabelText(labels.project) as HTMLSelectElement).value).toBe(registered.id));
 });
 
 test('草稿更新但网络未送达页面时，确认被运行层拒绝，显示原因且保持对齐', async () => {
