@@ -146,7 +146,7 @@ test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话
   await daemon.confirm();
   const [first] = await daemon.ended();
   await idle();
-  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true,
+  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), testProcessPid: process.pid, uniqueSession: true,
     mcpTools: [{ name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: '需要修改' } }] }));
   daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
     workId: daemon.work.id, cardId: first.cardId, agentId: 'grok-executor', key: 'verification', purpose: 'verification',
@@ -157,7 +157,7 @@ test('Grok 执行后验收始终新开；不通过后打回续跑原执行会话
   assert.notEqual(verification.sessionId, first.sessionId);
   assert.equal(verification.resumeSessionId, null);
   await idle();
-  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), uniqueSession: true }));
+  await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), testProcessPid: process.pid, uniqueSession: true }));
   daemon.actions.push([
     { type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
       agentId: 'grok-executor', key: 'invalid-verification', purpose: 'verification', resumeSessionId: first.sessionId },

@@ -9,6 +9,7 @@ import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '..
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 import { reviewReport } from './fixtures/review-report.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -241,7 +242,7 @@ test('验收先结束副本子目录的残留进程，再删除副本', async t 
         process.exit(0);
       });
       fs.writeFileSync('ready', 'ready');
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `], { cwd: join(workPath, '.cache'), detached: true, stdio: 'ignore' });
     return [{ type: 'hang', until: end.promise }];
   }]);
@@ -571,12 +572,12 @@ test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之
     const childCode = `
       process.on('SIGTERM', () => {});
       require('fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `;
     const parent = spawn(process.execPath, ['-e', `
       require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(childCode)}], { cwd: '..', stdio: 'ignore' });
       process.on('SIGTERM', () => process.exit(0));
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `], { cwd: workPath, detached: true, stdio: 'ignore' });
     group = parent.pid!;
     return [{ type: 'write', path: 'result.txt', content: 'must be reset\n' },
@@ -653,7 +654,7 @@ test('验收看门狗限制无输出和总时长，超时先清进程再删除�
         const fs = require('fs');
         process.on('SIGTERM', () => { fs.writeFileSync('../result.txt', 'termination write'); process.exit(0); });
         fs.writeFileSync('ready', 'ready');
-        setInterval(() => {}, 1000);
+        ${testProcessWatchdog()}
       `], { cwd: join(workPath, '.cache'), detached: true, stdio: 'ignore' });
       return [
         { type: 'hang', until: until(async () => readFile(join(workPath, '.cache/ready'), 'utf8').catch(() => ''), Boolean).then(() => {}) },

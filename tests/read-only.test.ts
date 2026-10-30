@@ -17,6 +17,7 @@ import { processStartTime } from '../src/processes.js';
 import { RuleError, TaskStore } from '../src/store.js';
 import type { Driver, SessionOptions } from '../src/driver.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const actor = { type: 'runtime', id: 'test' } as const;
 const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -149,7 +150,7 @@ test('只读卡片执行后仍可验收工作分支末端，验收过期时拒�
 
 test('只读派单收尾保留共享目录中不属于本次派单的进程', async t => {
   const ctx = await fixture(t, false);
-  const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: ctx.project, detached: true, stdio: 'ignore' });
+  const other = spawn(process.execPath, ['-e', testProcessWatchdog()], { cwd: ctx.project, detached: true, stdio: 'ignore' });
   await once(other, 'spawn');
   t.after(async () => {
     if (other.exitCode === null && other.signalCode === null) {
@@ -168,7 +169,7 @@ test('重启对账只清理记录的只读执行者进程组，保留项目目�
   const ctx = await fixture(t, false);
   const card = createCard(ctx.store, actor, { workId: 'work', key: 'research', content: '调研', readOnly: true });
   const dispatch = await ctx.run(card.id);
-  const children = [0, 1].map(() => spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: ctx.project, detached: true, stdio: 'ignore' }));
+  const children = [0, 1].map(() => spawn(process.execPath, ['-e', testProcessWatchdog()], { cwd: ctx.project, detached: true, stdio: 'ignore' }));
   await Promise.all(children.map(child => once(child, 'spawn')));
   t.after(async () => {
     for (const child of children) if (child.exitCode === null && child.signalCode === null) {

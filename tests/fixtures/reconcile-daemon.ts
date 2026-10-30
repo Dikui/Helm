@@ -5,8 +5,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeDriver, type FakeScript } from '../../src/driver.js';
 import { startTestHelmd as startHelmd } from '../helmd-fixture.js';
+import { watchTestProcess } from './test-process.js';
 
-const [dataDir, purpose] = process.argv.slice(2);
+const [dataDir, purpose, testPid] = process.argv.slice(2);
+watchTestProcess(Number(testPid)).unref();
 let executingRounds = 0;
 const round: FakeScript = ctx => {
   const brief = JSON.parse(ctx.input);
@@ -28,7 +30,7 @@ const executor: FakeScript = [
 const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(Array(100).fill(round)),
   roundRetryDelaysMs: [20, 40],
   executorDriver: new FakeDriver(Array(100).fill(executor)),
-  browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./browser-mcp.js', import.meta.url)), '--stubborn'] },
+  browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./browser-mcp.js', import.meta.url)), '--test-process-pid', testPid!, '--stubborn'] },
 });
 process.send?.({ type: 'ready', url: daemon.url });
 process.on('message', message => {

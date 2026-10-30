@@ -14,6 +14,7 @@ import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 import { claudeErrors } from './fixtures/claude-errors.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'executor'): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
@@ -615,7 +616,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
         // processes leave the copy, so only the registered group can find them.
         const child = sdk.spawnClaudeCodeProcess!({ command: process.execPath, args: ['-e', `
           const fs = require('fs');
-          const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: '/', stdio: 'ignore' });
+          const child = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(testProcessWatchdog())}], { cwd: '/', stdio: 'ignore' });
           fs.writeFileSync(${JSON.stringify(file)}, 'temporary SDK edit');
           process.on('SIGTERM', () => {
             fs.writeFileSync(${JSON.stringify(join(evidence, 'terminated.txt'))}, fs.readFileSync(${JSON.stringify(file)}, 'utf8'));
@@ -623,7 +624,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
           });
           process.chdir('/');
           console.log(process.pid + ':' + child.pid);
-          setInterval(() => {}, 1000);
+          ${testProcessWatchdog()}
         `], cwd: sdk.cwd, env: sdk.env!, signal: new AbortController().signal });
         await new Promise<void>((resolve, reject) => {
           child.once('error', reject);

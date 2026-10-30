@@ -13,6 +13,7 @@ import { RoundScheduler } from '../src/rounds.js';
 import { TaskStore } from '../src/store.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { until } from './ui-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 function fixture(t: TestContext) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'helm-round-processes-')));
@@ -41,7 +42,7 @@ function fixture(t: TestContext) {
     rmSync(directory, { recursive: true, force: true });
   });
   const child = async () => {
-    const value = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: project, detached: true, stdio: 'ignore' });
+    const value = spawn(process.execPath, ['-e', testProcessWatchdog()], { cwd: project, detached: true, stdio: 'ignore' });
     children.push(value);
     await once(value, 'spawn');
     return value;

@@ -11,6 +11,7 @@ import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const identity = ['-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid'];
@@ -55,7 +56,7 @@ console.log(readFileSync(path, 'utf8'));
   let output = '';
   const start = async () => {
     url = ''; token = ''; output = '';
-    child = fork(new URL('./fixtures/reconcile-daemon.js', import.meta.url), [dataDir, purpose], {
+    child = fork(new URL('./fixtures/reconcile-daemon.js', import.meta.url), [dataDir, purpose, String(process.pid)], {
       detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: { ...process.env, PATH: `${processTools}:${process.env.PATH}` },
     });
     daemonGroups.push(child.pid!);
@@ -180,7 +181,7 @@ test('崩溃后先清进程，再补交执行派单；轮次重投且不自动�
   const writer = spawn(process.execPath, ['-e', `
     const fs = require('node:fs');
     process.on('SIGTERM', () => { fs.writeFileSync('terminated.txt', 'saved before commit'); process.exit(0); });
-    console.log('ready'); setInterval(() => {}, 1000);
+    console.log('ready'); ${testProcessWatchdog()}
   `], { cwd: path, detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
   t.after(() => { try { process.kill(-writer.pid!, 'SIGKILL'); } catch {} });
   await new Promise<void>(resolve => writer.stdout!.once('data', () => resolve()));

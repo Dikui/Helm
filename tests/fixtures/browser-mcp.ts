@@ -6,9 +6,12 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { testProcessWatchdog, watchTestProcess } from './test-process.js';
 
 const args = process.argv.slice(2);
 const option = (name: string) => args[args.indexOf(name) + 1];
+const testPid = Number(option('--test-process-pid'));
+const watchdog = watchTestProcess(testPid).unref();
 const config = JSON.parse(readFileSync(option('--config')!, 'utf8'));
 // Locked Playwright MCP resolves explicit filenames against its workspace (cwd
 // when the client advertises no roots), and generated names against outputDir.
@@ -37,10 +40,10 @@ if (args.includes('--headless') || !args.includes('--isolated') || option('--bro
   throw new Error('Expected isolated, headed, bundled Chromium on loopback');
 }
 if (args.includes('--crash')) process.exit(2);
-if (args.includes('--hang-start')) setInterval(() => {}, 1000);
+if (args.includes('--hang-start')) watchdog.ref();
 else {
   // A group member ignores TERM, proving cleanup reaches descendants after MCP exits.
-  const descendant = spawn(process.execPath, ['-e', `${args.includes('--stubborn') ? 'process.on("SIGTERM", () => {});' : ''} console.log('ready'); setInterval(() => {}, 1000)`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const descendant = spawn(process.execPath, ['-e', `${testProcessWatchdog(testPid)} ${args.includes('--stubborn') ? 'process.on("SIGTERM", () => {});' : ''} console.log('ready');`], { stdio: ['ignore', 'pipe', 'ignore'] });
   await new Promise<void>(resolve => descendant.stdout!.once('data', () => resolve()));
   writeFileSync(join(config.outputDir, 'descendant.pid'), String(descendant.pid));
   let page = '';
