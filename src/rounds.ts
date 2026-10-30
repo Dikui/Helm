@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContextSize, DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
-import { ensureWorkCopy } from './alignment.js';
+import { projectPath } from './alignment.js';
 import { deliveryDetails } from './delivery.js';
 import { cardGraph } from './graph.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
@@ -144,12 +144,16 @@ export class RoundScheduler {
       const previous = this.store.db.prepare(`SELECT id, session_id AS sessionId, agent_snapshot AS agent, context FROM coordinator_rounds
         WHERE work_id = ? ORDER BY rowid DESC LIMIT 1`).get(workId);
       const context = previous?.context ? JSON.parse(String(previous.context)) as ContextSize : undefined;
+      const previousCwd = previous ? this.store.db.prepare(`SELECT json_extract(details, '$.cwd') AS cwd FROM events
+        WHERE object_type = 'coordinator-round' AND object_id = ? AND action IN ('round-started', 'process-started')
+          AND json_extract(details, '$.cwd') IS NOT NULL ORDER BY id DESC LIMIT 1`).get(String(previous.id))?.cwd : undefined;
       const resume = previous?.sessionId && previous.agent && context && context.tokens < Math.min(resumeContextLimit, (context.window ?? Infinity) / 2)
-        ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig } : undefined;
+        ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig, cwd: previousCwd } : undefined;
       const brief = startupBrief(this.store, workId, ids, resume?.roundId);
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
-      this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started', { eventIds: ids, outputPath }, { workId });
+      this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started',
+        { eventIds: ids, outputPath, cwd: brief.work.workPath ?? projectPath(this.store, workId) }, { workId });
       return { ids, brief, resume };
     });
     const ids = started.ids;
@@ -249,7 +253,7 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      brief.work = this.store.transaction(() => ensureWorkCopy(this.store, workId));
+      const cwd = brief.work.workPath ?? projectPath(this.store, workId);
       const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
@@ -257,7 +261,7 @@ export class RoundScheduler {
       // Model, prompt, rules, skill names or MCP changes need a fresh session.
       // shortcut: edited skill files under unchanged names still resume; compare their contents if that bites.
       const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null });
-      if (resume && comparable(resume.agent) !== comparable(agent)) {
+      if (resume && (resume.cwd !== cwd || comparable(resume.agent) !== comparable(agent))) {
         resume = undefined;
         brief = this.store.transaction(() => startupBrief(this.store, workId, ids));
       }
@@ -267,7 +271,7 @@ export class RoundScheduler {
       });
       const session = await this.drivers[agent.driver]!.start({
         agent,
-        cwd: brief.work.workPath!,
+        cwd,
         env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
         sandbox: { mode: 'read-only', writableRoots: [] },
@@ -280,7 +284,7 @@ export class RoundScheduler {
           this.store.transaction(() => {
             this.store.db.prepare('UPDATE coordinator_rounds SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, process.startedAt, id);
             this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'process-started',
-              { ...process, cwd: brief.work.workPath!, role: 'coordinator' }, { workId });
+              { ...process, cwd, role: 'coordinator' }, { workId });
           });
         },
       });

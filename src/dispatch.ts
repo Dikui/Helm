@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
-import { projectPath } from './alignment.js';
+import { ensureWorkCopy, projectPath } from './alignment.js';
 import { cardDetails } from './graph.js';
 import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
@@ -52,10 +52,12 @@ export function listDispatches(store: TaskStore, workId: string, cardId?: string
     .all(workId, cardId ?? null, cardId ?? null).map(row => readDispatch(row, Boolean(work.outputsDeletedAt)));
 }
 
-// A verification checks the card branch, or the work branch for read-only and verification-only cards.
+// A verification checks the card branch, or for read-only and verification-only cards the work branch or latest base.
 export function verificationCommit(store: TaskStore, card: { id: string; workId: string; cardBranch?: string | null }) {
   const executed = card.cardBranch && store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ? AND purpose = 'execution'`).get(card.id);
-  return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${executed ? card.cardBranch : store.work(card.workId).workBranch}`);
+  const work = store.work(card.workId);
+  const branch = executed ? card.cardBranch : work.workBranch ?? work.baseRef;
+  return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${branch}`);
 }
 
 // Read tools flag verification conclusions whose commit the card has since moved past.
@@ -195,7 +197,9 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
   const cardContentSnapshot = card.content;
   content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
-  const copy = purpose === 'execution' && !card.readOnly ? cardCopy(store, work.id, card.id) : card;
+  const needsWorkCopy = purpose === 'execution' && !card.readOnly;
+  if (needsWorkCopy) store.transaction(() => ensureWorkCopy(store, work.id));
+  const copy = needsWorkCopy ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.
   const startCommit = purpose === 'verification' ? verificationCommit(store, card) : null;
   const id = randomUUID();

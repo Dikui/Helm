@@ -62,37 +62,38 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     });
   }
   const executed = dispatches.some(item => item.purpose === 'execution');
-  if (!work.workPath || !work.workBranch || (executed && !card.cardBranch)) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
-  if (dispatchGit(work.workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(work.workPath, 'status', '--porcelain')) {
+  if ((work.workBranch && !work.workPath) || (executed && (!work.workBranch || !card.cardBranch))) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
+  const workPath = work.workPath ?? projectPath(store, work.id);
+  if (work.workBranch && (dispatchGit(workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(workPath, 'status', '--porcelain'))) {
     throw new RuleError('WORK_COPY_DIRTY', '工作分支的 _work 必须干净且检出工作分支。');
   }
   // A retry after cleanup can still merge the saved commit; the branch may already be gone.
-  const branchExists = executed && dispatchGit(work.workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
-  const target = executed ? (branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit) : work.workBranch;
+  const branchExists = executed && dispatchGit(workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);
+  const target = executed ? (branchExists ? card.cardBranch : dispatches.at(-1)?.endCommit) : work.workBranch ?? work.baseRef;
   if (!target) throw new RuleError('GIT_ERROR', '找不到卡片的提交。');
   // Keep the checked commit readable after completion removes the card branch.
   const checkedCommit = card.needsVerification ? (!executed || branchExists ? verificationCommit(store, card) : target) : null;
   if (card.needsVerification && !passed.some(item => item.startCommit === checkedCommit)) {
     throw new RuleError('VERIFICATION_OUTDATED', '当前提交没有有效的通过验收票，须重新验收。');
   }
-  // Verification-only cards already checked the work branch; there is nothing to merge.
+  // Verification-only cards checked the work branch or base; there is nothing to merge.
   if (executed) {
     try {
-      dispatchGit(work.workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
+      dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
         'merge', '--no-ff', '--no-edit', target);
     } catch (error) {
-      const conflicts = dispatchGit(work.workPath, 'diff', '--name-only', '--diff-filter=U');
-      if (existsSync(dispatchGit(work.workPath, 'rev-parse', '--git-path', 'MERGE_HEAD'))) dispatchGit(work.workPath, 'merge', '--abort');
+      const conflicts = dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=U');
+      if (existsSync(dispatchGit(workPath, 'rev-parse', '--git-path', 'MERGE_HEAD'))) dispatchGit(workPath, 'merge', '--abort');
       if (conflicts) throw new RuleError('WORK_BRANCH_CONFLICT', '与工作分支冲突');
       throw error;
     }
   }
-  const mergeCommit = dispatchGit(work.workPath, 'rev-parse', 'HEAD');
+  const mergeCommit = dispatchGit(workPath, 'rev-parse', `refs/heads/${work.workBranch ?? work.baseRef}`);
   removeCardCopy(store, card);
   return store.transaction(() => {
     store.db.prepare(`UPDATE cards SET status = 'completed' WHERE id = ?`).run(card.id);
     store.db.prepare(`UPDATE artifacts SET ref = ?, commit_sha = ? WHERE kind = 'branch'
-      AND dispatch_id IN (SELECT id FROM dispatches WHERE card_id = ?)`).run(work.workBranch, mergeCommit, card.id);
+      AND dispatch_id IN (SELECT id FROM dispatches WHERE card_id = ?)`).run(work.workBranch ?? work.baseRef, mergeCommit, card.id);
     store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit, checkedCommit }, { workId: work.id, cardId: card.id });
     refreshCardReadiness(store, work.id);
     return cardDetails(store, work.id, card.id);

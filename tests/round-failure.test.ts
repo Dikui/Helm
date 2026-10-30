@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { RuleError } from '../src/store.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -509,6 +509,7 @@ test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项�
     });
     const work = await daemon.begin();
     await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+    existingWorkCopy(daemon.dataDir, work.id);
     if (reason === 'timed-out') ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 2000, idleTimeoutMs: 30_000 }));
     await daemon.confirm(work.id);
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length >= 2);

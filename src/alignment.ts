@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.js';
 import { refreshCardReadiness } from './graph.js';
 import { deleteBranch } from './branch-cleanup.js';
+import { runtimeMessage } from './work-control.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -21,8 +22,7 @@ export function projectPath(store: TaskStore, workId: string) {
   return String(store.db.prepare('SELECT path FROM projects WHERE id = ?').get(work.projectId)!.path);
 }
 
-// Also used before the first round of an older work that has no copy yet.
-export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: string) {
+export function recordBaseBranch(store: TaskStore, workId: string, selectedBase?: string) {
   const work = store.work(workId);
   const project = projectPath(store, workId);
   const draft = store.descriptions(workId).at(-1);
@@ -37,9 +37,19 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
       git(project, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${baseRef}^{commit}`);
     } catch { throw new RuleError('INVALID_BASE_BRANCH', '基准必须是已存在的本地分支，请指定基准分支。', 400); }
   }
-  const baseCommit = work.baseCommit ?? draft?.baseCommit ?? resolveBaseCommit(project, baseRef);
+  store.db.prepare('UPDATE works SET base_ref = ? WHERE id = ?').run(baseRef, workId);
+  return baseRef;
+}
+
+export function ensureWorkCopy(store: TaskStore, workId: string) {
+  const work = store.work(workId);
+  const project = projectPath(store, workId);
+  const baseRef = recordBaseBranch(store, workId);
+  const baseCommit = work.workBranch ? work.baseCommit ?? resolveBaseCommit(project, baseRef) : resolveBaseCommit(project, baseRef);
   const workBranch = work.workBranch ?? `helm/${work.id}`;
   const workPath = work.workPath ?? resolve(join(store.dataDir, 'worktrees', work.id, '_work'));
+  const projectDiffers = !work.workPath && (git(project, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${baseRef}`
+    || Boolean(git(project, 'status', '--porcelain')));
   let createdBranch = false;
   let addingCopy = false;
   try {
@@ -67,6 +77,8 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
   }
   store.db.prepare('UPDATE works SET base_ref = ?, base_commit = ?, work_branch = ?, work_path = ? WHERE id = ?')
     .run(baseRef, baseCommit, workBranch, workPath, work.id);
+  if (projectDiffers) runtimeMessage(store, workId, 'runtime-work-copy',
+    `已从基准分支 ${baseRef} 的最新提交建立工作副本。项目目录当前检出的不是基准分支，或有未提交改动；工作副本不包含这些差异和未提交改动。`);
   return store.work(workId);
 }
 
@@ -77,8 +89,9 @@ export function confirmationDetails<T extends object>(store: TaskStore, gate: T)
   const work = store.work(String(fields.workId));
   let uncommittedChanges = '';
   // Keep history and the confirmation gate readable after cleanup or a failed copy repair.
-  if (work.workPath && existsSync(work.workPath)) {
-    try { uncommittedChanges = git(work.workPath, 'status', '--porcelain'); } catch { /* Confirmation reports the git error when retried. */ }
+  const path = work.workPath ?? projectPath(store, work.id);
+  if (existsSync(path)) {
+    try { uncommittedChanges = git(path, 'status', '--porcelain'); } catch { /* Confirmation reports the git error when retried. */ }
   }
   return { ...gate, description, baseRef: description?.baseRef ?? null, baseCommit: description?.baseCommit ?? null,
     uncommittedChanges };
@@ -98,7 +111,7 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
     catch { baseRef = 'HEAD'; }
   }
   if (work.baseRef && params.baseRef && params.baseRef !== work.baseRef) throw new RuleError('BASE_REF_FIXED', '创建后不能改变工作的基准分支。');
-  const baseCommit = work.baseCommit ?? git(path, 'rev-parse', '--verify', '--end-of-options', `${baseRef}^{commit}`);
+  const baseCommit = work.baseCommit ?? resolveBaseCommit(path, baseRef);
   let gate = store.db.prepare(`SELECT id FROM gates WHERE work_id = ? AND kind = 'work-confirmation' AND status = 'pending'`).get(work.id);
   if (!gate) {
     const id = randomUUID();
@@ -135,15 +148,21 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
   if (gate.status === 'decided') return store.work(work.id);
   const description = store.descriptions(work.id).find(item => item.id === params.descriptionId);
   if (!description) throw new RuleError('NO_DESCRIPTION', '调度者尚未起草工作说明。');
-  const prepared = store.transaction(() => ensureWorkCopy(store, work.id));
-  const workPath = prepared.workPath!;
-  const workBranch = prepared.workBranch!;
-  const baseRef = prepared.baseRef!;
-  let baseCommit = prepared.baseCommit!;
+  const { workPath, workBranch } = work;
+  const project = projectPath(store, work.id);
+  const baseRef = work.baseRef ?? description.baseRef;
+  let baseCommit = work.baseCommit ?? description.baseCommit;
+  if (workPath && workBranch && (git(workPath, 'rev-parse', '--show-toplevel') !== workPath
+    || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch)) {
+    throw new RuleError('WORK_PATH_CONFLICT', '工作分支的 _work 路径已被占用。');
+  }
   // Equality with the recorded starting point means there are no work commits to preserve.
-  if (git(workPath, 'rev-parse', 'HEAD') === baseCommit) {
-    const latest = resolveBaseCommit(projectPath(store, work.id), baseRef);
-    if (latest !== baseCommit) git(workPath, 'reset', '--keep', latest);
+  if (!workBranch || git(project, 'rev-parse', `refs/heads/${workBranch}`) === baseCommit) {
+    const latest = resolveBaseCommit(project, baseRef);
+    if (workBranch && latest !== baseCommit) {
+      if (workPath) git(workPath, 'reset', '--keep', latest);
+      else git(project, 'branch', '-f', workBranch, latest);
+    }
     baseCommit = latest;
   }
   return store.transaction(() => {

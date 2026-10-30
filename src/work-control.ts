@@ -32,7 +32,7 @@ export function noticeStall(store: TaskStore, workId: string, roundId: string) {
   store.appendEvent(runtime, { type: 'work', id: workId }, 'needs-user-attention', { kind: 'work-stalled', reason, roundId }, { workId });
 }
 
-function runtimeMessage(store: TaskStore, workId: string, key: string, body: string) {
+export function runtimeMessage(store: TaskStore, workId: string, key: string, body: string) {
   const id = randomUUID();
   const event = store.appendEvent(runtime, { type: 'message', id }, 'message-sent', { body }, { workId });
   store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')

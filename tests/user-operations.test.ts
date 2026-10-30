@@ -68,6 +68,7 @@ async function fixture(t: TestContext, script: FakeStep[] = [], executors: FakeS
     // New cards do not wake the coordinator, so a user message starts the follow-up rounds.
     if (after.length) ok(await call('send-message', { ...params, key: 'next-round', body: '继续' }));
   }
+  Object.assign(work, (await call('get-work', params)).result);
   const card = async (key: string) => (await call('get-card-graph', params)).result.find((node: any) => node.type === 'card' && node.key === key);
   return { ...daemon, call, work, params, events, git, card, briefs, directory, gate };
 }
@@ -254,7 +255,8 @@ test('暂停的对齐工作可确认说明且保持暂停，恢复后进入执�
   const confirmed = await daemon.call('decide-gate', { ...daemon.params, gateId: daemon.gate.id, descriptionId: daemon.gate.description.id, decision: 'confirm' });
   ok(confirmed);
   assert.equal(confirmed.result.status, 'paused');
-  assert.ok(existsSync(confirmed.result.workPath));
+  assert.equal(confirmed.result.workPath, null);
+  assert.equal(confirmed.result.workBranch, null);
   assert.equal((await daemon.call('resume-work', daemon.params)).result.status, 'executing');
   ok(await daemon.call('resume-work', daemon.params));
   const events = await daemon.events();

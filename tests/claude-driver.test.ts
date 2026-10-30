@@ -668,7 +668,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
     assert.equal(card.workPath, null);
     assert.equal(card.cardBranch, null);
     const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
-    assert.equal(await readFile(join(work.workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
+    assert.equal(await readFile(join(work.workPath ?? join(daemon.directory, 'project'), 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
     assert.equal(await readFile(join(evidence, 'terminated.txt'), 'utf8'), 'temporary SDK edit', '进程必须在删除副本前退出');
     assert.throws(() => process.kill(group, 0), { code: 'ESRCH' });
     assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
@@ -725,7 +725,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');
     if (purpose === 'verification') assert.equal(card.workPath, null);
-    const copyPath = card.workPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath;
+    const copyPath = card.workPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath ?? join(daemon.directory, 'project');
     assert.equal(await readFile(join(copyPath, 'index.html'), 'utf8'), purpose === 'verification' ? '<h1>Helm browser dispatch</h1>' : 'temporary SDK edit');
     if (purpose === 'verification') assert.equal(dispatch.endCommit, dispatch.startCommit);
     else assert.notEqual(dispatch.endCommit, dispatch.startCommit);

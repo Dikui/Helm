@@ -85,7 +85,7 @@ for (const purpose of ['execution', 'verification'] as const) {
     const cardPath = (await daemon.call('get-card', { workId: daemon.work.id, cardId: result.cardId })).result.workPath;
     assert.equal(purpose === 'execution', cardPath === workPath);
     if (purpose === 'verification') assert.equal(cardPath, null);
-    const copyPath = cardPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath;
+    const copyPath = cardPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath ?? join(daemon.directory, 'project');
     assert.equal(execFileSync('git', ['-C', copyPath, 'ls-tree', '-r', '--name-only', result.endCommit], { encoding: 'utf8' }), 'index.html\n');
     assert.equal(execFileSync('git', ['-C', copyPath, 'status', '--porcelain'], { encoding: 'utf8' }), '');
     const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
@@ -215,7 +215,7 @@ test('验收派单可在同一端点检查页面并提交通过，关闭浏览�
   await assert.rejects(readFile(join(workPath, 'index.html')), { code: 'ENOENT' });
   const cardPath = (await daemon.call('get-card', { workId: daemon.work.id, cardId: result.cardId })).result.workPath;
   assert.equal(cardPath, null);
-  const copyPath = (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath;
+  const copyPath = (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath ?? join(daemon.directory, 'project');
   assert.equal(await readFile(join(copyPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
   assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
   const events = await daemon.events();
