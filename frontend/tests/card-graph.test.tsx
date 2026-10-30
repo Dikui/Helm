@@ -190,6 +190,21 @@ test('卡片图显示并行依赖汇合、关卡与取消卡片，选择节点�
   expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText('Confirmed', { selector: 'p' })).toBeTruthy();
 });
 
+test('工作取消后未决定的关卡显示已取消，不再计时', async () => {
+  daemon = await uiFixture([[draft], [
+    { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workId(ctx), key: 'choice', question: '选择发布时机', body: '等待用户决定', options: ['confirm', '稍后'] }), check: ok },
+  ]]);
+  const work = await executeWork();
+  await until(() => daemon!.call('get-card-graph', { workId: work.id }), value => value.result.some((node: any) => node.kind === 'general'));
+  ok(await daemon.call('cancel-work', { workId: work.id }));
+  window.history.replaceState(null, '', `/works/${work.id}/structure`);
+  render(<App baseUrl={daemon.url} />);
+  const gate = await within(await screen.findByRole('region', { name: '卡片图' })).findByRole('button', { name: '关卡：选择发布时机' });
+  expect(gate.textContent).toContain('已取消');
+  expect(gate.textContent).not.toContain('待你决定');
+  expect(gate.querySelector('time')).toBeNull();
+});
+
 test('排队和运行中的派单结论显示占位符，结束后才显示未声明，支持中英文', async () => {
   let finish!: () => void;
   const hold = new Promise<void>(resolve => { finish = resolve; });

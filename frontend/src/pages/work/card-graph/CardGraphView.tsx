@@ -33,21 +33,24 @@ export function CardGraphView({ work }: { work: Work }) {
   const rounds = useResource<Rounds>('list-rounds', { workId });
   const [coordinatorSelected, setCoordinatorSelected] = useState(false);
   const graph = useResource<GraphNode[]>('get-card-graph', { workId });
+  // An ended work keeps its review gate pending on purpose; show the work's end state instead of a ticking "pending".
+  const nodes = ['completed', 'cancelled'].includes(work.status)
+    ? graph.data?.map(node => node.type === 'gate' && node.status === 'pending' ? { ...node, status: work.status } : node) : graph.data;
   const dispatches = useResource<Dispatch[]>('list-dispatches', { workId });
   const [selection, setSelection] = useState<{ id: string; dispatchId?: string; step?: number; request: number } | null>(null);
-  const selectedId = selection?.id ?? graph.data?.find(node => node.type === 'card' && ['executing', 'verifying'].includes(node.status))?.id ?? graph.data?.find(node => node.type === 'card')?.id ?? graph.data?.[0]?.id ?? null;
+  const selectedId = selection?.id ?? nodes?.find(node => node.type === 'card' && ['executing', 'verifying'].includes(node.status))?.id ?? nodes?.find(node => node.type === 'card')?.id ?? nodes?.[0]?.id ?? null;
   const select = (id: string, dispatchId?: string, step?: number) => { setCoordinatorSelected(false); setSelection(previous => ({ id, dispatchId, step, request: (previous?.request ?? 0) + 1 })); };
-  const selected = graph.data?.find(node => node.id === selectedId);
-  const summary = graphSummary(graph.data ?? [], dispatches.data ?? []);
-  const ordinal = (id: string) => (graph.data ?? []).filter(node => node.type === 'card').findIndex(node => node.id === id) + 1;
+  const selected = nodes?.find(node => node.id === selectedId);
+  const summary = graphSummary(nodes ?? [], dispatches.data ?? []);
+  const ordinal = (id: string) => (nodes ?? []).filter(node => node.type === 'card').findIndex(node => node.id === id) + 1;
   const selectedDispatches = dispatches.data?.filter(dispatch => dispatch.cardId === selected?.id);
   const refButton = (id: string) => {
-    const node = graph.data?.find(node => node.id === id);
+    const node = nodes?.find(node => node.id === id);
     return node ? <button className="ref" key={id} title={nodeTitle(node)} aria-label={`${t(node.type === 'card' ? 'graphCard' : 'graphGate')} ${node.type === 'card' ? ordinal(id) : ''}：${nodeTitle(node)}`} onClick={() => select(id)}>{node.type === 'card' ? ordinal(id) : nodeTitle(node)}</button> : null;
   };
   return <section className="cg-view" aria-label={t('structure')}>
     <div className="cg-errors">{rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}{dispatches.error && <ErrorNotice error={dispatches.error} retry={dispatches.reload} />}</div>
-    {!graph.data ? <p className="hint" role="status">{graph.error ? '' : t('loading')}</p> : <>
+    {!nodes ? <p className="hint" role="status">{graph.error ? '' : t('loading')}</p> : <>
       <div className="cg-main">
         <div className="cg-bar"><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
           {tabs.map((key, index) => <button key={key} ref={element => { tabButtons.current[index] = element; }} type="button" role="tab"
@@ -62,10 +65,10 @@ export function CardGraphView({ work }: { work: Work }) {
           {summary.skipped > 0 && <span><b>{summary.skipped}</b> {t('graphSummarySkipped')}</span>}
         </div></div>
         <div className={`cs-panel ${tab === 'graphTab' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${tab}`}>
-          {tab === 'graphTab' && <GraphCanvas nodes={graph.data} dispatches={dispatches.data ?? []} selectedId={coordinatorSelected ? null : selectedId} sendBacks={summary.sendBacks} select={select} coordinator={{ count: rounds.data?.rounds.length, usage: sumUsage(rounds.data?.rounds ?? []), selected: coordinatorSelected, select: () => setCoordinatorSelected(true) }} />}
+          {tab === 'graphTab' && <GraphCanvas nodes={nodes} dispatches={dispatches.data ?? []} selectedId={coordinatorSelected ? null : selectedId} sendBacks={summary.sendBacks} select={select} coordinator={{ count: rounds.data?.rounds.length, usage: sumUsage(rounds.data?.rounds ?? []), selected: coordinatorSelected, select: () => setCoordinatorSelected(true) }} />}
           {tab === 'structureCoordinator' && <CoordinatorView work={work} initialRoundId={roundId} />}
-          {tab === 'structureTimeline' && <TimelineView inspectRound={id => { setRoundId(id); setTab('structureCoordinator'); tabButtons.current[2]?.focus(); }} workId={workId} nodes={graph.data} dispatches={dispatches.data} selectedId={selectedId} select={select} />}
-          {tab === 'structureEvents' && <EventsView workId={workId} nodes={graph.data} dispatches={dispatches.data} select={select} />}
+          {tab === 'structureTimeline' && <TimelineView inspectRound={id => { setRoundId(id); setTab('structureCoordinator'); tabButtons.current[2]?.focus(); }} workId={workId} nodes={nodes} dispatches={dispatches.data} selectedId={selectedId} select={select} />}
+          {tab === 'structureEvents' && <EventsView workId={workId} nodes={nodes} dispatches={dispatches.data} select={select} />}
         </div>
       </div>
       <aside className="cg-inspector" aria-label={t(coordinatorSelected ? 'tokenCoordinator' : selected?.type === 'gate' ? 'graphGateInspector' : 'graphInspector')}>
@@ -77,7 +80,7 @@ export function CardGraphView({ work }: { work: Work }) {
           </header>
           <div className="cg-inspector-body">
             <dl className="cg-kv"><dt>{t('graphDependency')}</dt><dd>{selected.dependencies.length ? selected.dependencies.map(ref => refButton(ref.id)) : '—'}</dd>
-              <dt>{t('graphDownstream')}</dt><dd>{graph.data.some(node => node.dependencies.some(ref => ref.id === selected.id)) ? graph.data.filter(node => node.dependencies.some(ref => ref.id === selected.id)).map(node => refButton(node.id)) : '—'}</dd>
+              <dt>{t('graphDownstream')}</dt><dd>{nodes.some(node => node.dependencies.some(ref => ref.id === selected.id)) ? nodes.filter(node => node.dependencies.some(ref => ref.id === selected.id)).map(node => refButton(node.id)) : '—'}</dd>
             </dl>
             <Markdown text={selected.type === 'card' ? selected.content : selected.body} workId={workId} files={files} onOpen={preview.open} />
             {selected.type === 'gate' ? <><p className="cg-prose">{gateDecision(selected, t) || selected.withdrawalReason}</p><ul>{selected.options.map(option => <li key={option}>{option}</li>)}</ul></> : <CardInspector key={`${selected.id}:${selection?.request}`} card={selected} dispatches={selectedDispatches} initialDispatchId={selection?.dispatchId} initialStep={selection?.step} />}
