@@ -7,7 +7,7 @@
 .cg-graph { flex: 1; }
 .cg-tools { font-size: var(--text-sm); }
 .cg-tools output { min-width: 4ch; text-align: center; }
-.cg-viewport { flex: 1; min-height: 280px; overflow: auto; scrollbar-gutter: stable; background: radial-gradient(var(--border) 1px, var(--clear) 1px) 0 0 / 16px 16px; cursor: grab; touch-action: pan-x pan-y; }
+.cg-viewport { flex: 1; overflow: auto; scrollbar-gutter: stable; background: radial-gradient(var(--border) 1px, var(--clear) 1px) 0 0 / 16px 16px; cursor: grab; touch-action: pan-x pan-y; }
 .cg-viewport:active { cursor: grabbing; }
 .cg-extent { position: relative; margin: 0 auto; overflow: hidden; }
 .cg-surface { position: relative; transform-origin: top left; }

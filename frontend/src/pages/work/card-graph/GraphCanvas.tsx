@@ -61,8 +61,9 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   const related = relatedNodes(nodes.map(node => ({ ...node, dependencies: positions.edges.filter(edge => edge.to === node.id).map(edge => ({ type: byId.get(edge.from)!.type, id: edge.from })) })), hovered ?? focused);
   const fit = useCallback(() => {
     const element = viewport.current;
-    if (!element?.clientWidth || !element.clientHeight) return;
-    setZoom(Math.max(.25, Math.min(1, Math.max(1, element.clientWidth - 48) / positions.width, Math.max(1, element.clientHeight - 48) / positions.height)));
+    if (!element?.clientWidth) return;
+    // Fit width only: long chains scroll vertically instead of shrinking to unreadable nodes.
+    setZoom(Math.max(.25, Math.min(1, Math.max(1, element.clientWidth - 48) / positions.width)));
     element.scrollLeft = 0; element.scrollTop = 0;
   }, [positions]);
   useEffect(() => {
