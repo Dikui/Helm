@@ -184,6 +184,8 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .gate-actions .opts .btn::before { content: ""; flex-shrink: 0; width: 16px; height: 16px; border: 1.5px solid var(--border-strong); border-radius: 50%; }
 .gate-actions .opts .btn:hover { background: var(--hover); }
 .gate-actions .opts .btn:hover::before { border-color: var(--attention); }
+.gate-actions .opts.multi .btn::before { border-radius: 4px; }
+.gate-actions .opts .btn[aria-pressed="true"]::before { border-color: var(--attention); background: var(--attention); box-shadow: inset 0 0 0 2.5px var(--surface); }
 .gate-actions .opts kbd { margin-left: auto; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-soft); color: var(--muted); font: 500 11px/18px var(--mono); }
 
 /* 可拖动分界：侧栏宽度、对话与输入区高度；悬停或键盘聚焦时显示分界线 */

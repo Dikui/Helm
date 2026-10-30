@@ -6,6 +6,6 @@ export interface WorkDescription {
   requirements: string; boundary: string; criteria: string;
   gateId: string; baseRef: string; baseCommit: string;
 }
-export type ConversationItem = (Gate & { type: 'gate'; createdAt: string }) | {
+export type ConversationItem = (Gate & { type: 'gate'; createdAt: string; decision: string | null; withdrawalReason: string | null }) | {
   id: string; type: 'message'; sender: string; body: string; createdAt: string; attachments?: Attachment[]; withdrawnAt?: string | null;
 };

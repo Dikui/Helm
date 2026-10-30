@@ -19,6 +19,7 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
   const { t } = useI18n();
   const preview = useFilePreview(gate.workId);
   const [answer, setAnswer] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
   const [comment, setComment] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error>();
@@ -26,6 +27,10 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
   const busy = useRef(false);
   const ended = workStatus === 'completed' || workStatus === 'cancelled';
   const readOnly = ended || gate.status !== 'pending';
+  const multi = gate.kind === 'general' && gate.multiSelect;
+  const toggle = (option: string) => setSelected(current => current.includes(option) ? current.filter(item => item !== option) : [...current, option]);
+  // 多选时选中项按选项顺序一行一个，自由回答接在最后
+  const multiAnswer = () => [...gate.options.filter(option => selected.includes(option)), answer.trim()].filter(Boolean).join('\n');
   const decide = async (decision: string) => {
     if (readOnly || busy.current || decided || (gate.kind === 'review' && decision === 'return' && !comment.trim())) return;
     busy.current = true;
@@ -43,7 +48,8 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     const index = Number(event.key) - 1;
     if (event.nativeEvent.isComposing || readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-    event.preventDefault(); void decide(gate.options[index]);
+    event.preventDefault();
+    if (multi) toggle(gate.options[index]); else void decide(gate.options[index]);
   };
   if (decided) return null;
   return <section role="group" aria-busy={pending} className="gate-actions" aria-label={gate.kind === 'review' ? t('reviewTitle') : gate.question} onKeyDown={shortcut}>
@@ -62,9 +68,9 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
     {ended && <p className="pill">{t(workStatus)}</p>}
     {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t('reviewReturnHint')}</p></>}
-    {!readOnly && gate.kind === 'general' && <div className="opts">
+    {!readOnly && gate.kind === 'general' && <div className={multi ? 'opts multi' : 'opts'}>
       {gate.options.map((option, index) => <button className="btn" key={option} disabled={pending} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-        onClick={() => void decide(option)}>{option}{index < 9 && <kbd aria-hidden="true">{index + 1}</kbd>}</button>)}
+        aria-pressed={multi ? selected.includes(option) : undefined} onClick={() => multi ? toggle(option) : void decide(option)}>{option}{index < 9 && <kbd aria-hidden="true">{index + 1}</kbd>}</button>)}
     </div>}
     {!readOnly && gate.kind !== 'general' && <div className="acts">
       {gate.kind === 'work-confirmation'
@@ -72,9 +78,9 @@ export function GateDecision({ gate, workStatus, detailedReview = false }: { gat
         : gate.options.map(option => <button className="btn sm" key={option} disabled={pending || (gate.kind === 'review' && option === 'return' && !comment.trim())}
           onClick={() => void decide(option)}>{gate.kind === 'review' ? t(option as 'accept' | 'return') : option}</button>)}
     </div>}
-    {!readOnly && gate.kind === 'general' && <form noValidate onSubmit={event => { event.preventDefault(); void decide(answer.trim()); }}>
-      <label>{t('answer')}<input value={answer} onChange={e => setAnswer(e.target.value)} /></label>
-      <button className="btn sm" disabled={pending || !answer.trim()}>{t('decide')}</button>
+    {!readOnly && gate.kind === 'general' && <form noValidate onSubmit={event => { event.preventDefault(); const decision = multi ? multiAnswer() : answer.trim(); if (decision) void decide(decision); }}>
+      <label>{t(multi ? 'answerMore' : 'answer')}<input value={answer} onChange={e => setAnswer(e.target.value)} /></label>
+      <button className="btn sm" disabled={pending || !(multi ? multiAnswer() : answer.trim())}>{t('decide')}</button>
     </form>}
     {error && <ErrorNotice error={error} />}
   </section>;

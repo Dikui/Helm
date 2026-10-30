@@ -267,19 +267,21 @@ export function removeDependency(store: TaskStore, actor: Actor, params: { workI
 }
 
 export function proposeGate(store: TaskStore, actor: Actor, params: {
-  workId: string; key: string; question: string; body?: string; options?: string[];
+  workId: string; key: string; question: string; body?: string; options?: string[]; multiSelect?: boolean;
 }) {
   const existing = store.gates(params.workId).find(gate => gate.key === params.key);
   if (existing) return existing;
-  requireExecuting(store, params.workId);
+  // Questions to the user also clarify the work description, so aligning may ask them too.
+  if (!['aligning', 'executing'].includes(store.work(params.workId).status)) throw new RuleError('WORK_NOT_EXECUTING', '只能在对齐中或执行中的工作里提关卡。');
   const id = randomUUID();
   const body = params.body ?? '';
   const options = params.options ?? [];
-  const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'general', question: params.question, body, options }, { workId: params.workId });
+  const multiSelect = params.multiSelect ?? false;
+  const event = store.appendEvent(actor, { type: 'gate', id }, 'gate-created', { kind: 'general', question: params.question, body, options, multiSelect }, { workId: params.workId });
   store.db.prepare(`INSERT INTO gates
-    (id, work_id, kind, status, key, question, body, options, creator_type, creator_id, created_at, sequence)
-    VALUES (?, ?, 'general', 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, params.workId, params.key, params.question, body, JSON.stringify(options), actor.type, actor.id, event.time, event.id);
+    (id, work_id, kind, status, key, question, body, options, multi_select, creator_type, creator_id, created_at, sequence)
+    VALUES (?, ?, 'general', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, params.workId, params.key, params.question, body, JSON.stringify(options), multiSelect ? 1 : 0, actor.type, actor.id, event.time, event.id);
   store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'gate', id }, 'needs-user-attention', { kind: 'general' }, { workId: params.workId });
   return store.gate(params.workId, id);
 }
@@ -293,15 +295,16 @@ function ownGeneralGate(store: TaskStore, workId: string, gateId: string) {
 }
 
 export function updateGate(store: TaskStore, actor: Actor, params: {
-  workId: string; gateId: string; question?: string; body?: string; options?: string[];
+  workId: string; gateId: string; question?: string; body?: string; options?: string[]; multiSelect?: boolean;
 }) {
   const gate = ownGeneralGate(store, params.workId, params.gateId);
   if (gate.status !== 'pending') throw new RuleError('GATE_CLOSED', '只能修改等待决定的关卡。');
   const question = params.question ?? gate.question;
   const body = params.body ?? gate.body;
   const options = params.options ?? gate.options;
-  if (question === gate.question && body === gate.body && JSON.stringify(options) === JSON.stringify(gate.options)) return gate;
-  store.db.prepare('UPDATE gates SET question = ?, body = ?, options = ? WHERE id = ?').run(question, body, JSON.stringify(options), gate.id);
+  const multiSelect = params.multiSelect ?? gate.multiSelect;
+  if (question === gate.question && body === gate.body && JSON.stringify(options) === JSON.stringify(gate.options) && multiSelect === gate.multiSelect) return gate;
+  store.db.prepare('UPDATE gates SET question = ?, body = ?, options = ?, multi_select = ? WHERE id = ?').run(question, body, JSON.stringify(options), multiSelect ? 1 : 0, gate.id);
   const updated = store.gate(gate.workId, gate.id);
   store.appendEvent(actor, { type: 'gate', id: gate.id }, 'gate-updated', { before: gate, after: updated }, { workId: gate.workId });
   return updated;

@@ -3,6 +3,7 @@ import { useData, useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { GateDecision } from '../../inbox/GateActions.js';
+import { GateHistory } from '../conversation/GateHistory.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview } from '../../../shared/files.js';
@@ -75,7 +76,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
               <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
               {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t('alignmentCopyRefresh')}</p>}
             </div>
-            : item.status === 'pending' && <GateDecision key={item.id} gate={item} />)}
+            : item.status === 'pending' ? <GateDecision key={item.id} gate={item} /> : <GateHistory key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
         {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
         <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />

@@ -150,6 +150,28 @@ test('消息和关卡按时间穿插，选项和自由回答保存决定；已�
   expect(decided.find((item: any) => item.question === '验证码发送频率？').decision).toBe('每分钟最多一次');
 });
 
+test('对齐中的多选关卡可勾选多项并补充回答，决定后留在对齐对话里', async () => {
+  daemon = await uiFixture([[
+    { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'platforms',
+      question: '要支持哪些平台？', options: ['macOS', 'Linux', 'Windows'], multiSelect: true }) }, { type: 'hang' },
+  ]]);
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '多选提问', key: 'start' })).result.work;
+  window.history.replaceState(null, '', `/works/${work.id}`);
+  render(<App baseUrl={daemon.url} />);
+  const question = await screen.findByRole('group', { name: '要支持哪些平台？' });
+  fireEvent.click(within(question).getByRole('button', { name: 'Windows' }));
+  fireEvent.click(within(question).getByRole('button', { name: 'macOS' }));
+  fireEvent.keyDown(question, { key: '3' });
+  expect(within(question).getByRole('button', { name: 'macOS' }).getAttribute('aria-pressed')).toBe('true');
+  expect(within(question).getByRole('button', { name: 'Windows' }).getAttribute('aria-pressed')).toBe('false');
+  fireEvent.change(within(question).getByLabelText('补充（可选）'), { target: { value: '先做 Apple Silicon' } });
+  fireEvent.click(within(question).getByRole('button', { name: '决定' }));
+  await waitFor(() => expect(screen.queryByRole('group', { name: '要支持哪些平台？' })).toBeNull());
+  expect(await screen.findByText('已决定')).toBeTruthy();
+  const decided = (await daemon.call('get-conversation', { workId: work.id })).result;
+  expect(decided.find((item: any) => item.question === '要支持哪些平台？').decision).toBe('macOS\n先做 Apple Silicon');
+});
+
 test('步骤与用时实时更新，Enter 排队，⌘Enter 发送并打断，下一轮接收后清空队列，空闲不可打断', async () => {
   let advance!: () => void;
   let finishNext!: () => void;

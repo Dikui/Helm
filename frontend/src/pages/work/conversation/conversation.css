@@ -19,6 +19,7 @@
 .conversation-item .gate-actions > strong { font-size: 16px; }
 .conversation-gate-history { display: grid; gap: var(--space-2); color: var(--muted); }
 .conversation-gate-history .pill { justify-self: start; }
+.conversation-gate-decision { white-space: pre-line; }
 /* 底部浮起的引导卡：本轮步骤 + 下一轮处理 + 输入框，高度可拖动 */
 .conversation-dock { display: flex; flex-direction: column; flex-shrink: 0; width: min(720px, calc(100% - 2 * var(--space-5))); min-height: 0; max-height: 75%; margin: 0 auto var(--space-4); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); overflow: hidden; }
 .conversation-dock > .error { margin: var(--space-2) var(--space-3) 0; }

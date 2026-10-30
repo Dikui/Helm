@@ -23,19 +23,19 @@ export interface WorkDescription {
 }
 export interface Gate {
   id: string; workId: string; kind: string; status: string; key: string | null;
-  question: string; body: string; options: string[]; creator: Actor;
+  question: string; body: string; options: string[]; multiSelect: boolean; creator: Actor;
   createdAt: string; sequence: number; descriptionId: string | null;
   decision: string | null; withdrawalReason: string | null; comment: string | null;
   report: ReviewReport | null;
 }
 
-const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options,
+const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options, multi_select AS multiSelect,
   creator_type AS creatorType, creator_id AS creatorId, created_at AS createdAt, sequence,
   description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment, report`;
 
 function readGate(row: Record<string, unknown>): Gate {
-  const { creatorType, creatorId, options, report, ...fields } = row;
-  return { ...fields, options: JSON.parse(String(options)), report: report ? JSON.parse(String(report)) : null,
+  const { creatorType, creatorId, options, multiSelect, report, ...fields } = row;
+  return { ...fields, options: JSON.parse(String(options)), multiSelect: multiSelect === 1, report: report ? JSON.parse(String(report)) : null,
     creator: { type: creatorType, id: creatorId } } as Gate;
 }
 export interface EventFilter {

@@ -8,6 +8,7 @@ import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
 import { Thinking } from './RoundProgress.js';
 import { ConversationScroll } from './ConversationScroll.js';
+import { GateHistory } from './GateHistory.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
@@ -94,8 +95,7 @@ export function ConversationView({ work }: { work: Work }) {
         </div>
         {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
           ? <GateDecision gate={item} />
-          : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
-            {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
+          : <GateHistory gate={item} />}
       </article>)}
       <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
     </ConversationScroll>

@@ -621,13 +621,13 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => requestReview(store, actor, params),
   }),
   operation({
-    name: 'propose-gate', description: '提出一般决策关卡', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), question: z.string().trim().min(1), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional() }).strict(),
+    name: 'propose-gate', description: '向用户提问或提出决策关卡，对齐中和执行中可用；options 给出可选答案，multiSelect=true 时可多选，用户也可自由回答', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), question: z.string().trim().min(1), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional(), multiSelect: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => proposeGate(store, actor, params),
   }),
   operation({
     name: 'update-gate', description: '修改一般决策关卡并保存历史', callers: ['coordinator-round'], keyed: false, mutates: true,
-    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), question: z.string().trim().min(1).optional(), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional() }).strict(),
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), question: z.string().trim().min(1).optional(), body: z.string().optional(), options: z.array(z.string().trim().min(1)).optional(), multiSelect: z.boolean().optional() }).strict(),
     execute: ({ store, actor }, params) => updateGate(store, actor, params),
   }),
   operation({

@@ -22,7 +22,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
   }
 }
 
-async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript) {
+async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript, aligning: FakeStep[] = []) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-graph-')));
   const repo = join(directory, 'project');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
@@ -32,6 +32,7 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript) {
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const dataDir = join(directory, 'data');
   const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver([[
+    ...aligning,
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '卡片图', boundary: '本机', criteria: '依赖约束成立' }), check: ok },
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'graph-script-finished' }], ...(after ? [after] : [])]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
@@ -45,7 +46,7 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript) {
   const work = (await call('send-message', { projectId: project.id, key: 'start', body: '创建卡片图' })).result.work;
   const events = async () => (await call('get-events', { workId: work.id })).result as any[];
   await until(events, values => values.some(event => event.action === 'round-ended'));
-  const gate = (await call('list-pending')).result[0];
+  const gate = (await call('list-pending')).result.find((item: any) => item.kind === 'work-confirmation');
   ok(await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const finished = async () => {
     const values = await until(events, values => values.filter(event => event.action === 'round-ended').length >= 2);
@@ -155,6 +156,22 @@ test('一般关卡支持 key 去重、修改历史和用户选项或自由回答
   const node = conversation.find((item: any) => item.id === chosenGateId);
   assert.equal(node.body, '只支持一种');
   assert.equal(node.decision, '本地');
+});
+
+test('对齐中也能提一般关卡，多选标记可读可改，用户多选的回答原样保存', async t => {
+  let gateId = '';
+  const daemon = await fixture(t, [], undefined, [
+    { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'platforms', question: '要支持哪些平台？', options: ['macOS', 'Linux', 'Windows'], multiSelect: true }), check: value => { ok(value); gateId = (value as any).result.id; assert.equal((value as any).result.multiSelect, true); } },
+    { type: 'tool', name: 'update-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId, multiSelect: false }), check: value => { ok(value); assert.equal((value as any).result.multiSelect, false); } },
+    { type: 'tool', name: 'update-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId, multiSelect: true }), check: ok },
+  ]);
+  const gate = (await daemon.call('get-conversation', { workId: daemon.work.id })).result.find((item: any) => item.id === gateId);
+  assert.equal(gate.multiSelect, true);
+  assert.equal(gate.status, 'pending');
+  const decided = await daemon.call('decide-gate', { workId: daemon.work.id, gateId, decision: 'macOS\nLinux' });
+  ok(decided);
+  assert.equal(decided.result.decision, 'macOS\nLinux');
+  await daemon.finished();
 });
 
 test('依赖阻塞卡片、拒绝成环，删边后解除阻塞；关卡的决定解除后续卡片阻塞', async t => {

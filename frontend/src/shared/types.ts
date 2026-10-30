@@ -27,7 +27,7 @@ export interface HelmEvent {
   object: { type: string; id: string }; details: unknown;
 }
 export interface Gate {
-  id: string; workId: string; kind: string; status: string; question: string; body: string; options: string[];
+  id: string; workId: string; kind: string; status: string; question: string; body: string; options: string[]; multiSelect?: boolean;
   descriptionId: string | null; description?: { id: string; requirements: string; boundary: string; criteria: string };
   report?: import('../../../src/review-report.js').ReviewReport | null;
 }
