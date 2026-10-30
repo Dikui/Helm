@@ -63,7 +63,8 @@ for (const outcome of ['completed', 'quota-exhausted', 'error', 'timed-out', 'ab
       async start(options) {
         assert.equal(options.cwd, ctx.project);
         managed = await ctx.child();
-        options.onProcess?.({ pid: managed.pid!, pgid: managed.pid!, startedAt: 'driver-ISO-timestamp' });
+        // Drivers report the OS start time themselves; the round layer records it unchanged.
+        options.onProcess?.({ pid: managed.pid!, pgid: managed.pid!, startedAt: processStartTime(managed.pid!)! });
         return { id: 'test-session', async send() {}, cancel() {}, events: (async function* () {
           if (outcome === 'timed-out' || outcome === 'aborted') await new Promise<void>(resolve => options.signal!.addEventListener('abort', () => resolve(), { once: true }));
           else yield { type: 'end' as const, step: 1, reason: outcome as EndReason, usage: { inputTokens: 1, outputTokens: 1 } };

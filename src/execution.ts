@@ -6,7 +6,7 @@ import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, 
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
-import { cleanupWorktreeProcesses, processStartTime, type ManagedProcess } from './processes.js';
+import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
@@ -239,10 +239,9 @@ export class ExecutionRunner {
           signal: stop.signal,
           onProcess: process => {
             processes.push(process);
-            const startedAt = readOnly ? processStartTime(process.pid) ?? process.startedAt : process.startedAt;
             this.store.transaction(() => {
-              this.store.db.prepare('UPDATE dispatches SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, startedAt, dispatch.id);
-              this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'process-started', { ...process, startedAt, cwd: workPath, role: 'executor' }, scope);
+              this.store.db.prepare('UPDATE dispatches SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, process.startedAt, dispatch.id);
+              this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'process-started', { ...process, cwd: workPath, role: 'executor' }, scope);
             });
           },
         });

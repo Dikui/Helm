@@ -36,21 +36,17 @@ export async function reconcileStartup(store: TaskStore) {
         { pgid: row.browser_pgid, startedAt: row.browser_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
     }
   }
-  // Read-only executors can run in the project directory, outside the copy tree.
-  const readOnlyProcesses = store.db.prepare(`SELECT d.id, d.work_id, d.card_id, d.pgid, d.process_started_at FROM dispatches d
-    JOIN cards c ON c.id = d.card_id WHERE c.read_only = 1 AND d.purpose = 'execution' AND d.pgid IS NOT NULL`).all();
-  for (const row of readOnlyProcesses) {
-    if (row.process_started_at && await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) {
-      store.transaction(() => store.appendEvent(runtime, { type: 'dispatch', id: String(row.id) }, 'dispatch-processes-cleaned',
-        { pgid: row.pgid, startedAt: row.process_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
-    }
-  }
-  const rounds = store.db.prepare(`SELECT id, work_id, event_ids, pgid, process_started_at FROM coordinator_rounds WHERE status = 'running'`).all();
-  for (const row of rounds) {
-    if (row.pgid && row.process_started_at && await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) {
-      store.transaction(() => store.appendEvent(runtime, { type: 'coordinator-round', id: String(row.id) }, 'round-processes-cleaned',
-        { pgid: row.pgid, startedAt: row.process_started_at }, { workId: String(row.work_id) }));
-    }
+  // Agents may leave the worktree; their recorded groups are still ours.
+  const agents = store.db.prepare(`SELECT 'dispatch' AS type, id, work_id, card_id, pgid, process_started_at FROM dispatches
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL
+    UNION ALL SELECT 'coordinator-round', id, work_id, NULL, pgid, process_started_at FROM coordinator_rounds
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL`).all();
+  for (const row of agents) {
+    if (!await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) continue;
+    const dispatch = row.type === 'dispatch';
+    store.transaction(() => store.appendEvent(runtime, { type: String(row.type), id: String(row.id) },
+      dispatch ? 'dispatch-processes-cleaned' : 'round-processes-cleaned', { pgid: row.pgid, startedAt: row.process_started_at },
+      { workId: String(row.work_id), ...dispatch ? { cardId: String(row.card_id), dispatchId: String(row.id) } : {} }));
   }
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
@@ -75,7 +71,7 @@ export async function reconcileStartup(store: TaskStore) {
       });
     }
   }
-  for (const row of rounds) {
+  for (const row of store.db.prepare(`SELECT id, work_id, event_ids FROM coordinator_rounds WHERE status = 'running'`).all()) {
     store.transaction(() => {
       store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = 'aborted' WHERE id = ?`).run(new Date().toISOString(), String(row.id));
       store.appendEvent(runtime, { type: 'coordinator-round', id: String(row.id) }, 'round-ended',

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { uiFixture } from './ui-fixture.js';
+import { uiFixture, until } from './ui-fixture.js';
 
 const base64 = (text: string | Buffer) => Buffer.from(text).toString('base64');
 
@@ -78,4 +78,47 @@ test('CLI --attach 读取本地文件作为附件发送', async t => {
   const attachments = JSON.parse(stdout).result.message.attachments;
   assert.deepEqual(attachments.map((item: any) => item.name), ['spec.md', 'notes.txt']);
   assert.equal(await readFile(attachments[0].path, 'utf8'), '规格');
+});
+
+test('references 把其他工作的说明和成果提交写成快照附件，拒绝引用自身和不存在的工作', async t => {
+  const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
+  const daemon = await uiFixture([[
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      key: 'brief', requirements: '调研', boundary: '本机', criteria: '有结论' }), check: ok },
+  ], [], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '写结论' }), saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      key: 'dispatch', cardId: (ctx.results.get('card') as any).result.id, agentId: 'claude-executor' }), check: ok },
+  ]], undefined, { executorScripts: [[{ type: 'hang' }]] });
+  t.after(() => daemon.close());
+  const source = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'research', body: '调研缓存方案' })).result.work;
+  const params = { workId: source.id };
+  // Before any code-writing dispatch the referenced work has no work branch (ADR 0018).
+  await until(() => daemon.call('get-work-descriptions', params), value => value.result.length > 0);
+  const earlySent = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'early', body: '先看调研', references: [source.id] })).result;
+  const early = earlySent.message.attachments[0];
+  // The referencing work's own round takes the empty script before the source work is confirmed.
+  await until(() => daemon.call('list-rounds', { workId: earlySent.work.id }), value => value.result.rounds[0]?.status === 'ended');
+  assert.match(await readFile(early.path, 'utf8'), /成果提交：无（这项工作没有代码改动）/);
+  const description = (await daemon.call('get-work-descriptions', params)).result[0];
+  ok(await daemon.call('decide-gate', { ...params, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' }));
+  const sourcePath = (await until(() => daemon.call('get-work', params), value => Boolean(value.result.workPath))).result.workPath;
+  await writeFile(join(sourcePath, 'research.md'), '# 结论\n');
+  execFileSync('git', ['-C', sourcePath, 'add', 'research.md']);
+  execFileSync('git', ['-C', sourcePath, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'research']);
+  const commit = execFileSync('git', ['-C', sourcePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  const sent = await daemon.call('send-message', { projectId: daemon.project.id, key: 'use', body: '按调研实现', references: [source.id] });
+  assert.equal(sent.ok, true);
+  const [snapshot] = sent.result.message.attachments;
+  assert.equal(snapshot.name, `引用工作-${source.id.slice(0, 8)}.md`);
+  const text = await readFile(snapshot.path, 'utf8');
+  assert.match(text, /^# 引用的工作：调研缓存方案/);
+  assert.match(text, new RegExp(`成果提交：${commit}`));
+  assert.match(text, /- A research\.md/);
+  assert.ok(text.includes(`git -C ${daemon.repo} show ${commit}:<路径>`));
+
+  const workId = sent.result.work.id;
+  assert.equal((await daemon.call('send-message', { workId, key: 'self', body: 'x', references: [workId] })).error.code, 'INVALID_REFERENCE');
+  assert.equal((await daemon.call('send-message', { workId, key: 'missing', body: 'x', references: ['nope'] })).error.code, 'NOT_FOUND');
 });

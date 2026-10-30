@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { SessionOptions } from './driver.js';
+import { managedProcess } from './processes.js';
 
 export interface CodexCommand { file: string; args: string[] }
 export interface RpcNotification { method: string; params?: any }
@@ -40,7 +41,7 @@ export class CodexRpc {
       } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); }
     });
     if (this.child.pid) {
-      try { options.onProcess?.({ pid: this.child.pid, pgid: this.child.pid, startedAt: new Date().toISOString() }); }
+      try { options.onProcess?.(managedProcess(this.child.pid)); }
       catch (error) { this.close(); throw error; }
     }
   }

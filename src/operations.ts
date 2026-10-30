@@ -19,6 +19,7 @@ import { listDirectories, projectBranches, projectGitReady, projectGitRoot, proj
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
+import { referencesSchema, referenceSnapshot } from './work-references.js';
 import { listWorkFiles, readWorkFile } from './work-files.js';
 import { previewWorkPush } from './delivery.js';
 import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
@@ -429,9 +430,10 @@ export const operations: readonly Operation[] = [
     },
   }),
   operation({
-    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作。用户可带附件 attachments: [{ name, content(base64) }]，存到 Helm 数据目录，消息里返回绝对路径', callers: ['user', 'coordinator-round'], keyed: true, mutates: true,
+    name: 'send-message', description: '发消息；选项目发第一条消息即新建工作。用户可带附件 attachments: [{ name, content(base64) }]，存到 Helm 数据目录，消息里返回绝对路径；references: [工作 id] 引用其他工作，各生成一份成果快照附件', callers: ['user', 'coordinator-round'], keyed: true, mutates: true,
     schema: z.object({
       attachments: attachmentsSchema.optional(),
+      references: referencesSchema.optional(),
       projectId: z.string().min(1).optional(), workId: z.string().min(1).optional(),
       body: z.string().trim().min(1), key: z.string().min(1), gateId: z.string().min(1).optional(),
       cardId: z.string().min(1).optional(),
@@ -466,11 +468,13 @@ export const operations: readonly Operation[] = [
       const existing = store.message(workId, params.key);
       if (existing) return { work, message: existing };
       if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
-      if (params.attachments?.length && actor.type !== 'user') throw new RuleError('FORBIDDEN', '只有用户可以发送附件。', 403);
+      if ((params.attachments?.length || params.references?.length) && actor.type !== 'user') throw new RuleError('FORBIDDEN', '只有用户可以发送附件或引用工作。', 403);
       if (params.cardId) cardDetails(store, workId, params.cardId);
       if (params.gateId) store.gate(workId, params.gateId);
       const id = randomUUID();
-      const attachments = saveAttachments(store, workId, id, params.attachments ?? []);
+      const uploads = [...params.attachments ?? [], ...(params.references ?? []).map(reference => referenceSnapshot(store, workId!, reference))];
+      if (new Set(uploads.map(item => item.name)).size !== uploads.length) throw new RuleError('INVALID_PARAMS', '附件名与引用快照重名。', 400);
+      const attachments = saveAttachments(store, workId, id, uploads);
       const event = store.appendEvent(actor, { type: 'message', id }, 'message-sent', { body: params.body, gateId: params.gateId ?? null, cardId: params.cardId ?? null, attachments }, { workId, cardId: params.cardId });
       store.db.prepare('INSERT INTO messages (id, work_id, sender, body, key, gate_id, created_at, sequence, card_id, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         id, workId, actor.type, params.body, params.key, params.gateId ?? null, event.time, event.id, params.cardId ?? null, JSON.stringify(attachments),

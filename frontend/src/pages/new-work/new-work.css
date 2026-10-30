@@ -41,6 +41,8 @@
 .new-tools .new-register { min-width: 0; border: 0; background: none; padding: 0 5px; font-size: 11px; }
 .new-tools .new-send { margin-left: auto; width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; border-radius: 50%; }
 .new-compose > .attachments { padding: 0 14px 4px; }
+/* Undo the page-wide select pill so the reference picker matches the attach button beside it. */
+.new-compose > .attachments select { width: auto; height: 28px; min-height: 28px; border-radius: var(--radius-sm); font-size: var(--text-sm); }
 .new-compose > .hint, .new-compose > .error, .new-compose > .cli-status { margin: 6px 14px 12px; font-size: 12px; }
 .new-context { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 12px; }
 .new-base { padding: 12px 14px; gap: 6px; }
