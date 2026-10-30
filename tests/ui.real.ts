@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import type { Browser, Locator, Page } from 'playwright';
 import { ClaudeDriver } from '../src/claude-driver.js';
@@ -15,6 +15,8 @@ import { startHelmd } from '../src/server.js';
 import { AgentCatalog } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { configureTestAgent } from './helmd-fixture.js';
+import { uiFixture, until } from './ui-fixture.js';
+import { reviewReport } from './fixtures/review-report.js';
 
 const enabled = process.env.HELM_UI_REAL === '1';
 const title = 'UI 冒烟：添加 smoke.txt';
@@ -23,6 +25,56 @@ const reviewMessage = '请发起审核';
 const changeTitle = '添加 smoke.txt';
 const verificationTitle = '整体验收 smoke.txt';
 const contents = 'helm-ui-smoke\n';
+
+test('只读工作审核显示无代码改动，接受即完成且没有交付按钮', { skip: !enabled, timeout: 90_000 }, async t => {
+  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
+  const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-read-only-ui-')));
+  let release!: () => void;
+  const executionEnded = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const daemon = await uiFixture([[
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '分析项目', boundary: '只读', criteria: '给出分析结论' }) },
+  ], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'research', content: '分析项目', readOnly: true }), saveAs: 'card' },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },
+    { type: 'hang', until: executionEnded },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', report: reviewReport('只读分析已完成') }) },
+  ]], resolve('dist/ui'), { executorScripts: [[{ type: 'output', text: '分析完成，没有代码改动。' }]] });
+  t.after(() => daemon.close());
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '分析项目' })).result.work;
+  const description = (await until(() => daemon.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 1)).result[0];
+  await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds[0]?.status === 'ended');
+  assert.equal((await daemon.call('decide-gate', { workId: work.id, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' })).ok, true);
+  await until(() => daemon.call('list-dispatches', { workId: work.id }), value => value.result[0]?.status === 'ended');
+  release();
+  await until(() => daemon.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
+  const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
+  const { chromium } = require('playwright') as typeof import('playwright');
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', colorScheme: 'light' });
+  page.setDefaultTimeout(15_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${daemon.url}/works/${work.id}/brief`);
+  const review = page.getByRole('region', { name: '审核', exact: true });
+  await review.getByText('退回必须附意见。这项工作没有代码改动，接受后将直接完成。', { exact: true }).waitFor();
+  await review.getByText('审核记录与全部改动', { exact: true }).click();
+  await review.getByText('这项工作没有代码改动。', { exact: true }).waitFor();
+  assert.equal(await review.getByRole('button', { name: '查看 diff', exact: true }).count(), 0);
+  assert.equal(await review.getByText(/无法读取.*diff/).count(), 0);
+  await page.screenshot({ path: join(evidence, 'readonly-review.png'), animations: 'disabled' });
+  await review.getByRole('button', { name: '接受', exact: true }).click();
+  const delivery = page.getByRole('region', { name: '合入与推送', exact: true });
+  await delivery.getByRole('heading', { name: '已完成', exact: true }).waitFor();
+  await delivery.getByText('这项工作没有代码改动，已完成。', { exact: true }).waitFor();
+  assert.equal(await delivery.getByRole('button').count(), 0);
+  assert.equal(await page.getByRole('alert').count(), 0);
+  assert.deepEqual(errors, []);
+  await page.screenshot({ path: join(evidence, 'readonly-completed.png'), animations: 'disabled' });
+  console.log(`只读工作审核与完成截图：${evidence}`);
+});
 
 // Keep the real model's job small, and hold the review until the UI has visited execution views.
 const coordinatorPrompt = `这是界面真实冒烟，使用真实 Helm 工具，所有 key 稳定复用，不重复建对象。

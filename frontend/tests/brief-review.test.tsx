@@ -496,6 +496,43 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
   expect(within(review).queryByLabelText('Diff 内容')).toBeNull();
 });
 
+test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接受后直接完成并隐藏交付按钮（%s）', async language => {
+  let release!: () => void;
+  const executionEnded = new Promise<void>(resolve => { release = resolve; });
+  daemon = await uiFixture([[draft(1)], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '只读分析', readOnly: true }), saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: executionEnded },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('只读分析结论') }), check: ok },
+  ]], undefined, { executorScripts: [[{ type: 'output', text: '只读分析结果' }]] });
+  const work = await createWork();
+  try {
+    await confirmVersion(work.id, 1);
+    await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result[0]?.status === 'ended');
+    release();
+    await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
+    localStorage.setItem('helm.language', language);
+    window.history.replaceState(null, '', `/works/${work.id}/brief`);
+    render(<App baseUrl={daemon.url} transport={trackDecisions} />);
+    const review = await screen.findByRole('region', { name: language === 'zh' ? '审核' : 'Review' });
+    expect(await within(review).findByText(language === 'zh' ? '退回必须附意见。这项工作没有代码改动，接受后将直接完成。'
+      : 'A comment is required to send back. This work has no code changes and will complete when accepted.')).toBeTruthy();
+    fireEvent.click(within(review).getByText(language === 'zh' ? '审核记录与全部改动' : 'Review records and all changes'));
+    expect(within(review).getByText(language === 'zh' ? '这项工作没有代码改动。' : 'This work has no code changes.')).toBeTruthy();
+    expect(within(review).queryByRole('button', { name: /查看 diff|View diff/ })).toBeNull();
+    expect(within(review).queryByText(/无法读取.*diff/)).toBeNull();
+    fireEvent.click(within(review).getByRole('button', { name: language === 'zh' ? '接受' : 'Accept' }));
+    const delivery = await screen.findByRole('region', { name: language === 'zh' ? '合入与推送' : 'Merge and push' });
+    expect(await within(delivery).findByRole('heading', { name: language === 'zh' ? '已完成' : 'Completed' })).toBeTruthy();
+    expect(within(delivery).queryAllByRole('button')).toEqual([]);
+    const completed = (await daemon.call('get-work', { workId: work.id })).result;
+    expect(completed.status).toBe('completed');
+    expect(completed.workBranch).toBeNull();
+    expect(completed.delivery.merge).toBeUndefined();
+  } finally { release(); }
+});
+
 
 test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只读，保留报告并显示终态', async timing => {
   daemon = await uiFixture([[draft(1)], [

@@ -125,7 +125,7 @@ export async function cleanupReviewedCopy(store: TaskStore, workId: string) {
   store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'work-copy-cleanup', { reason }, { workId }));
 }
 
-// Record completion in the same transaction as the merge result, before cleanup.
+// Record completion in the same transaction as acceptance or the merge result, before cleanup.
 export function completeReviewedWork(store: TaskStore, actor: Actor, workId: string, details: Record<string, unknown>) {
   store.db.prepare("UPDATE works SET status = 'completed', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(workId);
   if (!store.events({ workId }).some(event => event.action === 'work-completed')) {

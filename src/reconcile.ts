@@ -84,13 +84,16 @@ export async function reconcileStartup(store: TaskStore) {
   const recoveryWorks = [...works].sort((a, b) => recoveryRank(a.status) - recoveryRank(b.status)
     || (queuedAt.get(a.id) ?? 0) - (queuedAt.get(b.id) ?? 0));
   for (const work of recoveryWorks) {
+    const accepted = store.gates(work.id).findLast(gate => gate.kind === 'review' && gate.decision === 'accept');
+    if (accepted && !work.workBranch && work.status === 'accepted') {
+      store.transaction(() => completeReviewedWork(store, runtime, work.id, { gateId: accepted.id, noCodeChanges: true }));
+    }
     // A deleted project has no repository to repair; keep the work as recorded instead of failing startup.
     if (!existsSync(projectPath(store, work.id))) { await compressWorkOutputs(store, work.id); continue; }
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
-    const accepted = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
-    if (accepted) {
+    if (accepted && work.workBranch) {
       const project = projectPath(store, work.id);
       const events = store.events({ workId: work.id });
       const intent = events.filter(event => event.action === 'base-merge-started').at(-1);

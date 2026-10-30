@@ -11,7 +11,7 @@ beforeAll(() => {
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 afterEach(() => { cleanup(); localStorage.clear(); });
-const conflict: Pick<Work, 'id' | 'status' | 'delivery'> = { id: 'work', status: 'accepted', delivery: {
+const conflict: Pick<Work, 'id' | 'status' | 'delivery' | 'workBranch'> = { id: 'work', status: 'accepted', workBranch: 'helm/work', delivery: {
   merge: { status: 'conflict', baseBranch: 'refs/heads/main', workBranch: 'helm/work', conflictFiles: ['src/中文 file.ts'] },
 } };
 const resolution = { fromCommit: 'before', baseCommit: 'base', baseBranch: 'refs/heads/main' };
@@ -66,7 +66,7 @@ test('解决后展示改动与再次合入入口，diff 文本不执行 HTML', a
   await waitFor(() => expect(requests.map(request => request.name)).toEqual(['get-conflict-resolution', 'merge-work']));
 });
 
-const completed: typeof conflict = { id: 'work', status: 'completed', delivery: {
+const completed: typeof conflict = { id: 'work', status: 'completed', workBranch: 'helm/work', delivery: {
   merge: { status: 'merged', baseBranch: 'refs/heads/main', workBranch: 'helm/work' },
 } };
 const pushPreview = { baseBranch: 'refs/heads/main', remote: 'origin', remoteBranch: 'refs/heads/main', newBranch: false,
@@ -138,4 +138,15 @@ test.each(['accepted', 'conflict', 'manual'] as const)('%s 时结束（不合入
 test('调度者正在处理合入冲突时也可结束（不合入）', () => {
   show({ ...conflict, status: 'executing', delivery: { ...conflict.delivery, resolution: { ...resolution, status: 'solving' } } }, []);
   expect(screen.getByRole('button', { name: '结束（不合入）' })).toBeTruthy();
+});
+
+test.each(['accepted', 'completed'] as const)('无工作分支的 %s 工作隐藏全部交付操作且不请求推送预览', status => {
+  const requests: { name: string; params: any }[] = [];
+  show({ id: 'work', status, workBranch: null, delivery: {} }, requests);
+  expect(screen.queryAllByRole('button')).toEqual([]);
+  expect(requests).toEqual([]);
+  if (status === 'completed') {
+    expect(screen.getByRole('heading', { name: '已完成' })).toBeTruthy();
+    expect(screen.getByText('这项工作没有代码改动，已完成。')).toBeTruthy();
+  } else expect(screen.queryByRole('region', { name: '合入与推送' })).toBeNull();
 });
