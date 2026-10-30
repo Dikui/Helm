@@ -1,10 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
-import { confirmationDetails, confirmDescription, draftDescription, recordBaseBranch } from './alignment.js';
+import { confirmationDetails, confirmDescription, draftDescription, projectPath, recordBaseBranch } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, markOutdated, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
@@ -16,7 +15,7 @@ import { reviewReportSchema } from './review-report.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
-import { listDirectories, projectBranches, projectGitStatus } from './project-reads.js';
+import { listDirectories, projectBranches, projectGitRoot, projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
@@ -247,38 +246,16 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, path, encoding }) => readWorkFile(store, workId, path, encoding),
   }),
   operation({
-    name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), initGit: z.boolean().optional() }).strict(),
+    name: 'register-project', description: '登记本机目录为项目', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional() }).strict(),
     execute({ store, actor }, params) {
       const requested = resolve(params.path);
-      const created = !existsSync(requested);
-      if (created) {
-        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '项目路径不存在。', 400, { initializable: true, missing: true });
-        try { mkdirSync(requested, { recursive: true }); } catch (error) { throw new RuleError('INVALID_PROJECT', `创建目录失败：${(error as Error).message}`, 400); }
-      }
       let candidate: string;
       try {
         candidate = realpathSync(requested);
         if (!statSync(candidate).isDirectory()) throw new Error();
       } catch { throw new RuleError('INVALID_PROJECT', '项目路径不存在或不是目录。', 400); }
-      const git = (...args: string[]) => execFileSync('git', ['-C', candidate, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      let path: string;
-      try {
-        // A directory created for a new project gets its own repository, even inside another work tree.
-        if (created) throw new Error('new directory');
-        path = realpathSync(git('rev-parse', '--show-toplevel'));
-      } catch {
-        let insideGit = !created;
-        if (insideGit) try { git('rev-parse', '--git-dir'); } catch { insideGit = false; }
-        if (insideGit) throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400);
-        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '这个目录还不是 git 仓库。Helm 需要用 git 记录开工起点并开工作分支。', 400, { initializable: true });
-        // Helm needs a commit to fix the base on; an empty one leaves the user's files untouched.
-        try {
-          git('init');
-          git('-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Initial commit');
-        } catch (error) { throw new RuleError('INVALID_PROJECT', `git 初始化失败：${(error as Error).message}`, 400); }
-        path = candidate;
-      }
+      const path = projectGitRoot(candidate) ?? candidate;
       const existing = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE path = ?`).get(path);
       if (existing) return projectSettings(store, existing);
       const id = randomUUID();
@@ -505,7 +482,7 @@ export const operations: readonly Operation[] = [
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
-        recordBaseBranch(store, workId, params.baseRef);
+        if (projectGitRoot(projectPath(store, workId))) recordBaseBranch(store, workId, params.baseRef);
       }
       return { work: store.work(workId), message: store.message(workId, params.key) };
     },

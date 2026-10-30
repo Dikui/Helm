@@ -6,6 +6,7 @@ import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.
 import { refreshCardReadiness } from './graph.js';
 import { deleteBranch } from './branch-cleanup.js';
 import { runtimeMessage } from './work-control.js';
+import { projectGitRoot } from './project-reads.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -105,13 +106,9 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   const existing = versions.find(item => item.key === params.key);
   if (existing) return existing;
   const path = projectPath(store, work.id);
-  let baseRef = work.baseRef ?? params.baseRef;
-  if (!baseRef) {
-    try { baseRef = execFileSync('git', ['-C', path, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
-    catch { baseRef = 'HEAD'; }
-  }
   if (work.baseRef && params.baseRef && params.baseRef !== work.baseRef) throw new RuleError('BASE_REF_FIXED', '创建后不能改变工作的基准分支。');
-  const baseCommit = work.baseCommit ?? resolveBaseCommit(path, baseRef);
+  const baseRef = projectGitRoot(path) ? recordBaseBranch(store, work.id, params.baseRef) : null;
+  const baseCommit = baseRef ? work.baseCommit ?? resolveBaseCommit(path, baseRef) : null;
   let gate = store.db.prepare(`SELECT id FROM gates WHERE work_id = ? AND kind = 'work-confirmation' AND status = 'pending'`).get(work.id);
   if (!gate) {
     const id = randomUUID();
@@ -150,14 +147,14 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
   if (!description) throw new RuleError('NO_DESCRIPTION', '调度者尚未起草工作说明。');
   const { workPath, workBranch } = work;
   const project = projectPath(store, work.id);
-  const baseRef = work.baseRef ?? description.baseRef;
-  let baseCommit = work.baseCommit ?? description.baseCommit;
+  const baseRef = projectGitRoot(project) ? recordBaseBranch(store, work.id) : null;
+  let baseCommit = baseRef ? work.baseCommit ?? description.baseCommit : null;
   if (workPath && workBranch && (git(workPath, 'rev-parse', '--show-toplevel') !== workPath
     || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch)) {
     throw new RuleError('WORK_PATH_CONFLICT', '工作分支的 _work 路径已被占用。');
   }
   // Equality with the recorded starting point means there are no work commits to preserve.
-  if (!workBranch || git(project, 'rev-parse', `refs/heads/${workBranch}`) === baseCommit) {
+  if (baseRef && (!workBranch || git(project, 'rev-parse', `refs/heads/${workBranch}`) === baseCommit)) {
     const latest = resolveBaseCommit(project, baseRef);
     if (workBranch && latest !== baseCommit) {
       if (workPath) git(workPath, 'reset', '--keep', latest);
@@ -167,7 +164,7 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
   }
   return store.transaction(() => {
     store.db.prepare(`UPDATE work_descriptions SET status = 'superseded' WHERE work_id = ? AND status = 'active'`).run(work.id);
-    store.db.prepare(`UPDATE work_descriptions SET status = 'active', base_commit = ? WHERE id = ?`).run(baseCommit, description.id);
+    store.db.prepare(`UPDATE work_descriptions SET status = 'active', base_ref = ?, base_commit = ? WHERE id = ?`).run(baseRef, baseCommit, description.id);
     store.db.prepare(`UPDATE gates SET status = 'decided', decision = ? WHERE id = ?`).run(params.decision, params.gateId);
     const status = store.gates(work.id).some(item => item.kind === 'review' && item.status === 'pending') ? 'awaiting-review' : 'executing';
     store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE ? END,
