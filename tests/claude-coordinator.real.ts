@@ -132,7 +132,7 @@ test('冒烟①⑤：三轮真实调度者从项目目录经带令牌 HTTP MCP �
     for (const index of [1, 2, 3]) await t.test(`新会话 ${index}`, async subtest => {
       const observed = observedDriver(() => `这是调度者驱动冒烟，工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 按顺序调用：
-1. create-card，key=smoke-upstream，content=上游卡片。
+1. create-card，key=smoke-upstream，content=上游卡片，readOnly=false（写代码卡片）。
 2. create-card，key=smoke-downstream，content=下游卡片。
 3. add-dependency，上游为第一张卡片，下游为第二张卡片（节点 type 均为 card）。
 4. remove-dependency，删除同一条依赖。
@@ -156,6 +156,8 @@ test('冒烟①⑤：三轮真实调度者从项目目录经带令牌 HTTP MCP �
       assert.equal(cards.length, 2);
       const upstream = cards.find((card: any) => card.key === 'smoke-upstream');
       const downstream = cards.find((card: any) => card.key === 'smoke-downstream');
+      // A read-only upstream would legitimately skip the work copy asserted below.
+      assert.equal(upstream.readOnly, false);
       assert.equal(downstream.status, 'waiting');
       assert.deepEqual(downstream.dependencies, [{ type: 'card', id: upstream.id }]);
       const dispatches = await daemon.call('list-dispatches', daemon.params);
