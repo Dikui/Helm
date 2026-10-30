@@ -47,7 +47,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
   if (config.model) await configureTestAgent(agentDir, 'claude-executor', { model: config.model, reasoningEffort: 'low' });
   const options = { agentDir,
     port: 0, dataDir: join(directory, 'data'), executorDriver: config.executorDriver ?? new FakeDriver(executors),
-    browserCommand: config.realBrowser ? undefined : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), ...(config.browserArgs ?? [])] },
+    browserCommand: config.realBrowser ? undefined : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), '--test-process-pid', String(process.pid), ...(config.browserArgs ?? [])] },
     driver: new FakeDriver([[
       { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '浏览器派单', boundary: '本机', criteria: '截图匹配页面' }), check: ok },
     ], [

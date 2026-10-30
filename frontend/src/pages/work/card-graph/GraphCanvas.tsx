@@ -3,7 +3,7 @@ import type { Usage } from '../../../shared/types.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { graphlib, layout, type Point } from '@dagrejs/dagre';
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
-import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge, ReadOnlyBadge } from './labels.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
@@ -114,7 +114,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
               aria-describedby={`${marker}-${node.id}-state`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
               <span className="cg-node-name"><span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span><span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
-              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{node.type === 'card' && node.aggregate && <AggregateBadge />}
+              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{node.type === 'card' && node.readOnly && <ReadOnlyBadge />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
                 {node.type === 'gate' && node.status === 'pending' && <time dateTime={node.createdAt}>{elapsed(node.createdAt, now)}</time>}
                 {node.type === 'card' && node.status !== 'skipped' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}

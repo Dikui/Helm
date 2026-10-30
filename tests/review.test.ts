@@ -8,11 +8,13 @@ import { test, type TestContext } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 import { TaskStore } from '../src/store.js';
 import { AgentCatalog } from '../src/agents.js';
 import { pushReviewedWork } from '../src/delivery.js';
 import { reviewReport } from './fixtures/review-report.js';
+import { decideReview } from '../src/review.js';
+import { reconcileStartup } from '../src/reconcile.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -98,7 +100,7 @@ test('发起审核拒绝新提交的纯文本、缺失字段和无效枚举，�
   }
 });
 
-async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScript[] = []) {
+async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScript[] = [], options: { workCopy?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm review-')));
   const repo = join(directory, 'project');
   const remote = join(directory, 'remote.git');
@@ -123,6 +125,7 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   const work = (await call('send-message', { projectId: project.id, key: 'start', body: '请实现并交给我审核' })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
+  if (options.workCopy !== false) Object.assign(work, existingWorkCopy(join(directory, 'data'), work.id));
   const confirmation = (await call('list-pending')).result[0];
   ok(await call('decide-gate', { workId: work.id, gateId: confirmation.id, descriptionId: confirmation.description.id, decision: 'confirm' }));
   const getWork = async () => (await call('get-work', { workId: work.id })).result;
@@ -132,6 +135,98 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   const roundsEnded = (count: number) => until(events, values => values.filter(event => event.action === 'round-ended').length >= count);
   return { ...daemon, directory, repo, remote, baseline, work, call, events, getWork, conversation, pendingReview, roundsEnded };
 }
+
+for (const paused of [false, true]) test(`没有工作分支的审核${paused ? '暂停后' : ''}接受即完成，停止轮次、清空暂停原因并压缩输出`, async t => {
+  const daemon = await fixture(t, [[review(), { type: 'hang' }]], [], { workCopy: false });
+  const gate = await daemon.pendingReview();
+  assert.equal(gate.review.noCodeChanges, true);
+  assert.equal(gate.review.diff, '');
+  assert.equal(gate.review.diffUnavailableReason, null);
+  assert.equal(gate.review.workCommit, null);
+  const pending = (await daemon.call('list-pending')).result.find((item: any) => item.id === gate.id);
+  assert.equal(pending.review.noCodeChanges, true);
+  if (paused) ok(await daemon.call('pause-work', { workId: daemon.work.id }));
+  const store = new TaskStore(join(daemon.directory, 'data'), new AgentCatalog(join(daemon.directory, 'agents')));
+  t.after(() => store.close());
+  store.db.prepare("UPDATE works SET runtime_pause_reason = 'old pause' WHERE id = ?").run(daemon.work.id);
+  ok(await daemon.call('decide-gate', { workId: daemon.work.id, gateId: gate.id, decision: 'accept' }));
+  const work = await daemon.getWork();
+  assert.equal(work.status, 'completed');
+  assert.equal(work.workBranch, null);
+  assert.equal(work.workPath, null);
+  assert.equal(work.runtimePauseReason, null);
+  assert.equal(store.db.prepare('SELECT paused_from_status FROM works WHERE id = ?').get(work.id)!.paused_from_status, null);
+  assert.equal(work.delivery.merge, undefined);
+  assert.equal(work.delivery.completedWithoutMerge, false);
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), daemon.baseline);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
+  assert.equal(existsSync(join(daemon.directory, 'data', 'worktrees', work.id)), false);
+  const events = await daemon.events();
+  const completion = events.filter(event => event.action === 'work-completed');
+  assert.equal(completion.length, 1);
+  assert.deepEqual(completion[0].details, { gateId: gate.id, noCodeChanges: true });
+  assert.ok(!events.some(event => ['base-merge-result', 'base-push-result', 'delivery-status-changed'].includes(event.action)));
+  const rounds = (await daemon.call('list-rounds', { workId: work.id })).result.rounds;
+  assert.ok(rounds.every((round: any) => round.status === 'ended'));
+  for (const event of events.filter(event => event.action === 'round-started')) {
+    assert.equal(existsSync(event.details.outputPath), false);
+    assert.ok(gunzipSync(await readFile(`${event.details.outputPath}.gz`)).length > 0);
+  }
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
+  code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: work.id }));
+  for (const name of ['merge-work', 'finish-work-without-merge', 'push-work']) {
+    code('NO_WORK_BRANCH')(await daemon.call(name, { workId: work.id }));
+  }
+  code('WORK_NOT_MERGED')(await daemon.call('get-work-push-preview', { workId: work.id }));
+});
+
+test('无工作分支的接受与完成共用事务，完成失败时保留待审核', async t => {
+  const daemon = await fixture(t, [[review()]], [], { workCopy: false });
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const store = new TaskStore(join(daemon.directory, 'data'), new AgentCatalog(join(daemon.directory, 'agents')));
+  t.after(() => store.close());
+  store.db.exec(`CREATE TEMP TRIGGER reject_completion BEFORE INSERT ON events
+    WHEN NEW.action = 'work-completed' BEGIN SELECT RAISE(ABORT, 'completion failed'); END`);
+  assert.throws(() => decideReview(store, { type: 'user', id: 'local' }, { workId: daemon.work.id, gateId: gate.id, decision: 'accept' }), /completion failed/);
+  assert.equal(store.work(daemon.work.id).status, 'awaiting-review');
+  assert.equal(store.gate(daemon.work.id, gate.id).status, 'pending');
+  assert.equal(store.gate(daemon.work.id, gate.id).decision, null);
+  assert.ok(!store.events({ workId: daemon.work.id }).some(event => event.object.id === gate.id && event.action === 'gate-decided'));
+});
+
+for (const projectRemoved of [false, true]) test(`旧的无工作分支 accepted 工作启动对账直接完成${projectRemoved ? '，项目已移走也可恢复' : ''}`, async t => {
+  const daemon = await fixture(t, [[review()]], [], { workCopy: false });
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const workId = daemon.work.id;
+  const store = new TaskStore(join(daemon.directory, 'data'), new AgentCatalog(join(daemon.directory, 'agents')));
+  t.after(() => store.close());
+  store.transaction(() => {
+    store.db.prepare("UPDATE gates SET status = 'decided', decision = 'accept' WHERE id = ?").run(gate.id);
+    store.db.prepare("UPDATE works SET status = 'accepted', paused_from_status = 'executing', runtime_pause_reason = 'old pause' WHERE id = ?").run(workId);
+    store.appendEvent({ type: 'user', id: 'local' }, { type: 'gate', id: gate.id }, 'gate-decided', { decision: 'accept' }, { workId });
+  });
+  if (projectRemoved) await rename(daemon.repo, `${daemon.repo}-moved`);
+  code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId }));
+  for (const name of ['merge-work', 'finish-work-without-merge', 'push-work']) {
+    code('NO_WORK_BRANCH')(await daemon.call(name, { workId }));
+  }
+  await reconcileStartup(store);
+  await reconcileStartup(store);
+  assert.equal(store.work(workId).status, 'completed');
+  assert.equal(store.work(workId).runtimePauseReason, null);
+  const events = store.events({ workId });
+  assert.equal(events.filter(event => event.action === 'work-completed').length, 1);
+  assert.ok(!events.some(event => ['base-merge-result', 'base-push-result'].includes(event.action)));
+  for (const event of events.filter(event => event.action === 'round-started')) {
+    const path = (event.details as { outputPath: string }).outputPath;
+    assert.equal(existsSync(path), false);
+    assert.ok(existsSync(`${path}.gz`));
+  }
+  assert.equal((await daemon.conversation()).find(item => item.id === gate.id).review.diffUnavailableReason, null);
+});
 
 for (const baseMoved of [false, true]) test(`合入冲突交给调度者：卡片副本解决并验收，保留接受并展示改动，${baseMoved ? '基准再次更新时重新选择处理' : '再次合入'}`, async t => {
   const executed = hold();
@@ -419,6 +514,7 @@ test('项目目录不在时，会话和待办仍可读，审核说明 diff 读�
     const observed = conversation.result.find((item: any) => item.id === gate.id);
     assert.equal(observed.review.diff, null);
     assert.match(observed.review.diffUnavailableReason, /无法读取工作分支的 diff/);
+    assert.equal(observed.review.noCodeChanges, false);
     ok(await daemon.call('list-pending'));
   } finally { await rename(`${daemon.repo}-moved`, daemon.repo); }
 });
@@ -515,6 +611,7 @@ for (const conflict of [false, true]) test(`同项目合入串行，第二项基
   const secondGate = await until(async () => (await daemon.call('get-conversation', { workId: second.id })).result as any[], values => values.some(gate => gate.kind === 'review'));
   const works = [await daemon.getWork(), (await daemon.call('get-work', { workId: second.id })).result];
   for (const [index, work] of works.entries()) {
+    Object.assign(work, existingWorkCopy(join(daemon.directory, 'data'), work.id));
     const file = conflict ? 'shared.txt' : `result-${index}.txt`;
     await writeFile(join(work.workPath, file), `result ${index}\n`);
     git(work.workPath, 'add', file);

@@ -10,7 +10,8 @@ import { migrations } from '../src/migrations.js';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const identity = ['-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid'];
@@ -55,7 +56,7 @@ console.log(readFileSync(path, 'utf8'));
   let output = '';
   const start = async () => {
     url = ''; token = ''; output = '';
-    child = fork(new URL('./fixtures/reconcile-daemon.js', import.meta.url), [dataDir, purpose], {
+    child = fork(new URL('./fixtures/reconcile-daemon.js', import.meta.url), [dataDir, purpose, String(process.pid)], {
       detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: { ...process.env, PATH: `${processTools}:${process.env.PATH}` },
     });
     daemonGroups.push(child.pid!);
@@ -103,6 +104,7 @@ console.log(readFileSync(path, 'utf8'));
   const scope = { workId: work.id };
   const events = (): Promise<any[]> => call('get-events', scope);
   await until(events, values => values.some(event => event.action === 'round-ended'));
+  if (purpose !== 'no-copy') existingWorkCopy(dataDir, work.id);
   const gate = (await call('list-pending'))[0];
   token = '';
   await call('decide-gate', { ...scope, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
@@ -118,6 +120,23 @@ console.log(readFileSync(path, 'utf8'));
   return { directory, repo, dataDir, remote, processTools, work: currentWork, scope, call, tool, events, create, start, stop, restart, get url() { return url; },
     waitRound: (previous?: string) => until(async () => token, value => Boolean(value) && value !== previous) };
 }
+
+test('没有工作分支和副本的工作可启动对账、取消并删除，不补建副本', async t => {
+  const daemon = await fixture(t, 'no-copy');
+  assert.equal(daemon.work.workBranch, null);
+  assert.equal(daemon.work.workPath, null);
+  await daemon.restart();
+  await daemon.waitRound();
+  const work = await daemon.call('get-work', daemon.scope);
+  assert.equal(work.workBranch, null);
+  assert.equal(work.workPath, null);
+  assert.equal(git(daemon.repo, 'for-each-ref', '--format=%(refname)', 'refs/heads/helm/'), '');
+  assert.equal(git(daemon.repo, 'worktree', 'list', '--porcelain').split('worktree ').length, 2);
+  await daemon.call('cancel-work', daemon.scope);
+  const deleted = await daemon.call('delete-work', { ...daemon.scope, confirm: true });
+  assert.deepEqual(deleted.keptBranches, []);
+  assert.deepEqual(await daemon.call('list-works'), []);
+});
 
 test('已接受工作的冲突处理崩溃后保留接受、清理半截合并并唤醒调度者', async t => {
   const daemon = await fixture(t);
@@ -162,7 +181,7 @@ test('崩溃后先清进程，再补交执行派单；轮次重投且不自动�
   const writer = spawn(process.execPath, ['-e', `
     const fs = require('node:fs');
     process.on('SIGTERM', () => { fs.writeFileSync('terminated.txt', 'saved before commit'); process.exit(0); });
-    console.log('ready'); setInterval(() => {}, 1000);
+    console.log('ready'); ${testProcessWatchdog()}
   `], { cwd: path, detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
   t.after(() => { try { process.kill(-writer.pid!, 'SIGKILL'); } catch {} });
   await new Promise<void>(resolve => writer.stdout!.once('data', () => resolve()));
@@ -316,6 +335,7 @@ test('重启先恢复正在合入的工作，再按请求顺序恢复队列，�
   const pending = await until(async () => await daemon.call('list-pending') as any[], values => values.filter(gate => gate.kind === 'review').length === 2);
   const works = [daemon.work, await daemon.call('get-work', { workId: second.id })];
   for (const [index, work] of works.entries()) {
+    Object.assign(work, existingWorkCopy(daemon.dataDir, work.id));
     await writeFile(join(work.workPath, `result-${index}.txt`), `work ${index}\n`);
     git(work.workPath, 'add', `result-${index}.txt`);
     git(work.workPath, ...identity, 'commit', '-m', `work ${index}`);

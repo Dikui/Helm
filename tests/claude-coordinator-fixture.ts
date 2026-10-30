@@ -51,7 +51,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
         : (round === 0 ? setup : round <= rounds ? driver : drain)).start(options);
     } },
     executorDriver: new FakeDriver([[{ type: 'hang' }]]),
-    browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url))] },
+    browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), '--test-process-pid', String(process.pid)] },
   });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {

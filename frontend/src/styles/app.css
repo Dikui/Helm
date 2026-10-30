@@ -123,6 +123,9 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .gate-actions form, .gate-actions label { display: grid; gap: var(--space-2); }
 .gate-actions input, .gate-actions textarea { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); padding: var(--space-2); }
 .gate-actions textarea { resize: none; min-height: 64px; }
+.git-initialization-details { min-width: 0; overflow-wrap: anywhere; }
+.git-initialization-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.git-ignore-rules { font-family: var(--mono); }
 .error { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); background: var(--danger-soft); overflow-wrap: anywhere; }
 .seg button { border: 0; border-radius: var(--radius-sm); padding: 2px 10px; background: var(--clear); color: var(--muted); }
 .seg button[aria-pressed='true'] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }

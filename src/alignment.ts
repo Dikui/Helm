@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.js';
 import { refreshCardReadiness } from './graph.js';
 import { deleteBranch } from './branch-cleanup.js';
+import { runtimeMessage } from './work-control.js';
+import { projectGitReady, projectGitRoot } from './project-reads.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -16,13 +18,31 @@ function resolveBaseCommit(project: string, baseRef: string) {
   return git(project, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`);
 }
 
+function validWorkCopy(project: string, path: string, branch: string) {
+  try {
+    return !lstatSync(path).isSymbolicLink() && git(path, 'rev-parse', '--show-toplevel') === path
+      && git(path, 'symbolic-ref', '--short', 'HEAD') === branch
+      && realpathSync(git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+        === realpathSync(git(project, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
+  } catch { return false; }
+}
+
+function assertOwnedWorkPath(store: TaskStore, workId: string, path: string) {
+  const expected = resolve(join(store.dataDir, 'worktrees', workId, '_work'));
+  let parent = dirname(path);
+  while (!existsSync(parent)) parent = dirname(parent);
+  const suffix = relative(realpathSync(store.dataDir), realpathSync(parent));
+  if (path !== expected || suffix === '..' || suffix.startsWith('../') || isAbsolute(suffix)) {
+    throw new RuleError('WORK_PATH_CONFLICT', '工作副本只能在 Helm 数据目录内修复。');
+  }
+}
+
 export function projectPath(store: TaskStore, workId: string) {
   const work = store.work(workId);
   return String(store.db.prepare('SELECT path FROM projects WHERE id = ?').get(work.projectId)!.path);
 }
 
-// Also used before the first round of an older work that has no copy yet.
-export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: string) {
+export function recordBaseBranch(store: TaskStore, workId: string, selectedBase?: string) {
   const work = store.work(workId);
   const project = projectPath(store, workId);
   const draft = store.descriptions(workId).at(-1);
@@ -37,19 +57,48 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
       git(project, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${baseRef}^{commit}`);
     } catch { throw new RuleError('INVALID_BASE_BRANCH', '基准必须是已存在的本地分支，请指定基准分支。', 400); }
   }
-  const baseCommit = work.baseCommit ?? draft?.baseCommit ?? resolveBaseCommit(project, baseRef);
+  store.db.prepare('UPDATE works SET base_ref = ? WHERE id = ?').run(baseRef, workId);
+  return baseRef;
+}
+
+export function ensureWorkCopy(store: TaskStore, workId: string) {
+  const work = store.work(workId);
+  const project = projectPath(store, workId);
+  const baseRef = recordBaseBranch(store, workId);
+  const baseCommit = work.workBranch ? work.baseCommit ?? resolveBaseCommit(project, baseRef) : resolveBaseCommit(project, baseRef);
   const workBranch = work.workBranch ?? `helm/${work.id}`;
   const workPath = work.workPath ?? resolve(join(store.dataDir, 'worktrees', work.id, '_work'));
+  const projectDiffers = !work.workPath && (git(project, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${baseRef}`
+    || Boolean(git(project, 'status', '--porcelain')));
   let createdBranch = false;
   let addingCopy = false;
   try {
     const branches = git(project, 'for-each-ref', '--format=%(refname:short)', `refs/heads/${workBranch}`);
-    if (!branches) { git(project, 'branch', workBranch, baseCommit); createdBranch = true; }
-    else if (!work.workBranch && git(project, 'rev-parse', workBranch) !== baseCommit) {
-      throw new RuleError('WORK_BRANCH_CONFLICT', '已有工作分支不指向工作的基准提交。');
+    if (branches && !work.workBranch) {
+      // A rolled-back transaction may leave a branch at an older base commit.
+      // Only reuse it when every commit is already contained in the current base.
+      try { git(project, 'merge-base', '--is-ancestor', `refs/heads/${workBranch}`, baseCommit); }
+      catch { throw new RuleError('WORK_BRANCH_CONFLICT', '已有工作分支包含基准之外的提交。'); }
     }
+    const validCopy = validWorkCopy(project, workPath, workBranch);
+    if (!work.workBranch) {
+      assertOwnedWorkPath(store, work.id, workPath);
+      if (!validCopy) {
+        // Only this Helm-owned path is disposable; never follow a parent symlink outside dataDir.
+        if (existsSync(workPath) && !lstatSync(workPath).isSymbolicLink()) {
+          try { git(project, 'worktree', 'remove', '--force', workPath); } catch { /* Checkout may have stopped before registration. */ }
+        }
+        rmSync(workPath, { recursive: true, force: true });
+        git(project, 'worktree', 'prune');
+      }
+      if (branches && git(project, 'rev-parse', `refs/heads/${workBranch}`) !== baseCommit) {
+        if (validCopy) git(workPath, 'reset', '--keep', baseCommit);
+        else git(project, 'branch', '-f', workBranch, baseCommit);
+      }
+    }
+    if (!branches) { git(project, 'branch', workBranch, baseCommit); createdBranch = true; }
     if (existsSync(workPath)) {
-      if (git(workPath, 'rev-parse', '--show-toplevel') !== workPath || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch) {
+      if (!validCopy) {
         throw new RuleError('WORK_PATH_CONFLICT', '工作分支的 _work 路径已被占用。');
       }
     } else {
@@ -67,6 +116,8 @@ export function ensureWorkCopy(store: TaskStore, workId: string, selectedBase?: 
   }
   store.db.prepare('UPDATE works SET base_ref = ?, base_commit = ?, work_branch = ?, work_path = ? WHERE id = ?')
     .run(baseRef, baseCommit, workBranch, workPath, work.id);
+  if (projectDiffers) runtimeMessage(store, workId, 'runtime-work-copy',
+    `已从基准分支 ${baseRef} 的最新提交建立工作副本。项目目录当前检出的不是基准分支，或有未提交改动；工作副本不包含这些差异和未提交改动。`);
   return store.work(workId);
 }
 
@@ -77,8 +128,9 @@ export function confirmationDetails<T extends object>(store: TaskStore, gate: T)
   const work = store.work(String(fields.workId));
   let uncommittedChanges = '';
   // Keep history and the confirmation gate readable after cleanup or a failed copy repair.
-  if (work.workPath && existsSync(work.workPath)) {
-    try { uncommittedChanges = git(work.workPath, 'status', '--porcelain'); } catch { /* Confirmation reports the git error when retried. */ }
+  const path = work.workPath ?? projectPath(store, work.id);
+  if (existsSync(path)) {
+    try { uncommittedChanges = git(path, 'status', '--porcelain'); } catch { /* Confirmation reports the git error when retried. */ }
   }
   return { ...gate, description, baseRef: description?.baseRef ?? null, baseCommit: description?.baseCommit ?? null,
     uncommittedChanges };
@@ -92,13 +144,9 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   const existing = versions.find(item => item.key === params.key);
   if (existing) return existing;
   const path = projectPath(store, work.id);
-  let baseRef = work.baseRef ?? params.baseRef;
-  if (!baseRef) {
-    try { baseRef = execFileSync('git', ['-C', path, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
-    catch { baseRef = 'HEAD'; }
-  }
   if (work.baseRef && params.baseRef && params.baseRef !== work.baseRef) throw new RuleError('BASE_REF_FIXED', '创建后不能改变工作的基准分支。');
-  const baseCommit = work.baseCommit ?? git(path, 'rev-parse', '--verify', '--end-of-options', `${baseRef}^{commit}`);
+  const baseRef = (work.baseRef ? projectGitRoot(path) : projectGitReady(path)) ? recordBaseBranch(store, work.id, params.baseRef) : null;
+  const baseCommit = baseRef ? work.baseCommit ?? resolveBaseCommit(path, baseRef) : null;
   let gate = store.db.prepare(`SELECT id FROM gates WHERE work_id = ? AND kind = 'work-confirmation' AND status = 'pending'`).get(work.id);
   if (!gate) {
     const id = randomUUID();
@@ -135,20 +183,26 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
   if (gate.status === 'decided') return store.work(work.id);
   const description = store.descriptions(work.id).find(item => item.id === params.descriptionId);
   if (!description) throw new RuleError('NO_DESCRIPTION', '调度者尚未起草工作说明。');
-  const prepared = store.transaction(() => ensureWorkCopy(store, work.id));
-  const workPath = prepared.workPath!;
-  const workBranch = prepared.workBranch!;
-  const baseRef = prepared.baseRef!;
-  let baseCommit = prepared.baseCommit!;
+  const { workPath, workBranch } = work;
+  const project = projectPath(store, work.id);
+  const baseRef = (work.baseRef ? projectGitRoot(project) : projectGitReady(project)) ? recordBaseBranch(store, work.id) : null;
+  let baseCommit = baseRef ? work.baseCommit ?? description.baseCommit : null;
+  if (workPath && workBranch && (git(workPath, 'rev-parse', '--show-toplevel') !== workPath
+    || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch)) {
+    throw new RuleError('WORK_PATH_CONFLICT', '工作分支的 _work 路径已被占用。');
+  }
   // Equality with the recorded starting point means there are no work commits to preserve.
-  if (git(workPath, 'rev-parse', 'HEAD') === baseCommit) {
-    const latest = resolveBaseCommit(projectPath(store, work.id), baseRef);
-    if (latest !== baseCommit) git(workPath, 'reset', '--keep', latest);
+  if (baseRef && (!workBranch || git(project, 'rev-parse', `refs/heads/${workBranch}`) === baseCommit)) {
+    const latest = resolveBaseCommit(project, baseRef);
+    if (workBranch && latest !== baseCommit) {
+      if (workPath) git(workPath, 'reset', '--keep', latest);
+      else git(project, 'branch', '-f', workBranch, latest);
+    }
     baseCommit = latest;
   }
   return store.transaction(() => {
     store.db.prepare(`UPDATE work_descriptions SET status = 'superseded' WHERE work_id = ? AND status = 'active'`).run(work.id);
-    store.db.prepare(`UPDATE work_descriptions SET status = 'active', base_commit = ? WHERE id = ?`).run(baseCommit, description.id);
+    store.db.prepare(`UPDATE work_descriptions SET status = 'active', base_ref = ?, base_commit = ? WHERE id = ?`).run(baseRef, baseCommit, description.id);
     store.db.prepare(`UPDATE gates SET status = 'decided', decision = ? WHERE id = ?`).run(params.decision, params.gateId);
     const status = store.gates(work.id).some(item => item.kind === 'review' && item.status === 'pending') ? 'awaiting-review' : 'executing';
     store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE ? END,

@@ -340,3 +340,22 @@ test('跳过节点及致因、汇总标记、切断连线、泳道和摘要随�
   expect(within(english).getAllByTitle('Skipped · “旧方向确认” withdrawn').length).toBe(2);
   expect(within(english).getAllByText('Aggregate').length).toBe(2);
 });
+
+
+test('卡片图节点和卡片详情显示只读标记，随中英文切换显示', async () => {
+  daemon = await uiFixture([[draft], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'research', content: '调查现有行为', readOnly: true }), check: ok },
+  ]]);
+  const work = await executeWork();
+  window.history.replaceState(null, '', `/works/${work.id}/structure`);
+  render(<App baseUrl={daemon.url} />);
+  const graph = await screen.findByRole('region', { name: '卡片图' });
+  const node = await within(graph).findByRole('button', { name: /卡片 \d+：调查现有行为/ });
+  expect(within(node).getByText('只读')).toBeTruthy();
+  fireEvent.click(node);
+  const detail = screen.getByRole('complementary', { name: '卡片检查器' });
+  expect(within(detail).getByText('只读')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(node).getByText('Read-only')).toBeTruthy();
+  expect(within(detail).getByText('Read-only')).toBeTruthy();
+});

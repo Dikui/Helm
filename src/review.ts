@@ -6,6 +6,7 @@ import { cardGraph } from './graph.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import type { ReviewReport } from './review-report.js';
 import { workContentRef } from './work-reads.js';
+import { completeReviewedWork } from './delivery.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -32,16 +33,20 @@ export function reviewDetails<T extends object>(store: TaskStore, gate: T) {
     });
   // A finished work's branch or project may since have been removed; the rest of the conversation must stay readable.
   let workCommit: string | null = null, diff: string | null = null, diffUnavailableReason: string | null = null;
+  const ref = workContentRef(store, work.id);
+  const noCodeChanges = !work.workBranch && !ref;
   try {
-    const ref = workContentRef(store, work.id);
-    if (!ref) throw new Error('找不到工作分支或合入提交。');
-    workCommit = git(project, 'rev-parse', ref).trim();
-    diff = git(project, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', work.baseCommit!, workCommit, '--');
+    if (noCodeChanges) diff = '';
+    else {
+      if (!ref) throw new Error('找不到工作分支或合入提交。');
+      workCommit = git(project, 'rev-parse', ref).trim();
+      diff = git(project, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', work.baseCommit!, workCommit, '--');
+    }
   } catch (error) {
     diffUnavailableReason = `无法读取工作分支的 diff：${error instanceof Error && 'stderr' in error ? String(error.stderr).trim() : String(error)}`;
   }
   return { ...gate, review: {
-    baseRef: work.baseRef, baseCommit: work.baseCommit, workBranch: work.workBranch, workCommit, diff, diffUnavailableReason,
+    baseRef: work.baseRef, baseCommit: work.baseCommit, workBranch: work.workBranch, workCommit, diff, diffUnavailableReason, noCodeChanges,
     overallVerification,
     rejectedOperationCount: store.events({ workId: work.id }).filter(event => event.action === 'operation-rejected').length,
     undeclaredDispatchCount: dispatches.filter(dispatch => dispatch.status === 'ended' && dispatch.conclusion === 'undeclared').length,
@@ -84,7 +89,8 @@ export function decideReview(store: TaskStore, actor: Actor, params: { workId: s
     store.db.prepare(`UPDATE gates SET status = 'decided', decision = ?, comment = ? WHERE id = ?`).run(params.decision, params.comment ?? null, gate.id);
     const event = store.appendEvent(actor, { type: 'gate', id: gate.id }, 'gate-decided', { decision: params.decision, comment: params.comment ?? null }, { workId: gate.workId });
     if (params.decision === 'accept') {
-      store.db.prepare("UPDATE works SET status = 'accepted', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(gate.workId);
+      if (!store.work(gate.workId).workBranch) completeReviewedWork(store, actor, gate.workId, { gateId: gate.id, noCodeChanges: true });
+      else store.db.prepare("UPDATE works SET status = 'accepted', paused_from_status = NULL, runtime_pause_reason = NULL WHERE id = ?").run(gate.workId);
     }
     if (params.decision === 'return') {
       store.db.prepare(`UPDATE works SET status = CASE WHEN status = 'paused' THEN status ELSE 'executing' END,
@@ -97,7 +103,7 @@ export function decideReview(store: TaskStore, actor: Actor, params: { workId: s
 
 export function withdrawAcceptance(store: TaskStore, actor: Actor, workId: string) {
   const work = store.work(workId);
-  if (work.status !== 'accepted') throw new RuleError('ACCEPTANCE_LOCKED', '只能在合入前撤回接受。');
+  if (work.status !== 'accepted' || !work.workBranch) throw new RuleError('ACCEPTANCE_LOCKED', '只能在合入前撤回接受。');
   const gate = store.gates(workId).findLast(item => item.kind === 'review' && item.decision === 'accept');
   if (!gate) throw new RuleError('REVIEW_NOT_ACCEPTED', '工作尚未接受审核。');
   store.db.prepare("UPDATE gates SET status = 'pending', decision = NULL, comment = NULL WHERE id = ?").run(gate.id);

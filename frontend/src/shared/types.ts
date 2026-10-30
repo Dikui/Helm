@@ -30,4 +30,6 @@ export interface Gate {
   id: string; workId: string; kind: string; status: string; question: string; body: string; options: string[];
   descriptionId: string | null; description?: { id: string; requirements: string; boundary: string; criteria: string };
   report?: import('../../../src/review-report.js').ReviewReport | null;
+  gitInitialization?: import('../../../src/git-initialization.js').GitInitialization | null;
+  comment?: string | null;
 }

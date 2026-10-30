@@ -31,7 +31,9 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), `这是合入冲突真实冒烟。
 对齐时 draft-work-description：需求是解决 shared.txt 的合并冲突，边界只改 shared.txt，标准是解决后 shared.txt 只有一行字面文本 RESOLVED-BOTH 加一个换行，基准提交是工作分支的祖先。
-首次确认后（没有 delivery.resolution）直接 request-review，key=initial-review，按工具 schema 提交 report：verdict=accept，summary 写“冲突冒烟的起始审核”，exceptions=[]，criteria 填工作说明标准、status=passed、evidence=[{label:"初始代码",kind:"file",ref:"shared.txt"}]，cards=[]，suggestions=[]；初始代码由测试夹具准备，不建卡不派单。不提交 body。
+首次确认后（没有 delivery.resolution），先 create-card，key=seed，content 首行“准备 shared.txt 的工作分支改动”，readOnly=false，needsVerification=false。
+给这张卡片派 claude-executor 执行，key=seed-execute，purpose=execution，needsBrowser=false，content 要求用 Write 把 shared.txt 改为一行字面文本 work 加一个换行，不提交不推送，必须 submit-conclusion(completed)。
+派单结束且 conclusion=completed 后 complete-card；必须等这张卡片完成后才 request-review，key=initial-review，按工具 schema 提交 report：verdict=accept，summary 写“冲突冒烟的起始审核”，exceptions=[]，criteria 填工作说明标准、status=passed、evidence=[{label:"初始代码",kind:"file",ref:"shared.txt"}]，cards 列出 seed 卡片的实际结果和执行派单证据，suggestions=[]。不提交 body。
 收到 conflict-resolution-requested 后严格按角色规则的“接受后的合入冲突”执行。
 只建一张 needsVerification=true 的冲突卡片，key=resolve，首行“解决 shared.txt 冲突”。只派 claude-executor，执行 key=resolve-execute。
 执行者把 shared.txt 整个改写为一行字面文本 RESOLVED-BOTH 加一个换行（不保留 work 或 base 原文），禁止自行 git merge/add/commit，使用运行层预备的合并。
@@ -79,10 +81,16 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
       const gates = await until(() => call('get-conversation', { workId: work.id }), values => values.some((item: any) => item.kind === 'review'));
       const review = gates.find((item: any) => item.kind === 'review');
       const details = await call('get-work', { workId: work.id });
-      // Create genuinely divergent Git histories, independently of the runtime merge implementation.
-      await writeFile(join(details.workPath, 'shared.txt'), 'work\n');
-      execFileSync('git', ['-C', details.workPath, 'add', 'shared.txt']);
-      execFileSync('git', ['-C', details.workPath, 'commit', '-m', 'work change']);
+      assert.ok(details.workPath, '首次写代码执行派单必须建立工作副本');
+      assert.equal(details.workBranch, `helm/${work.id}`);
+      assert.equal(await readFile(join(details.workPath, 'shared.txt'), 'utf8'), 'work\n');
+      const seed = (await call('get-card-graph', { workId: work.id })).find((item: any) => item.type === 'card' && item.key === 'seed');
+      assert.equal(seed.status, 'completed');
+      const seedDispatches = await call('list-dispatches', { workId: work.id, cardId: seed.id });
+      assert.equal(seedDispatches.length, 1);
+      assert.equal(seedDispatches[0].purpose, 'execution');
+      assert.equal(seedDispatches[0].conclusion, 'completed');
+      // Diverge the base from the work commit produced by the real execution dispatch.
       await writeFile(join(repo, 'shared.txt'), `base ${mode}\n`);
       git('add', 'shared.txt'); git('commit', '-m', `base ${mode}`);
       await call('decide-gate', { workId: work.id, gateId: review.id, decision: 'accept' });

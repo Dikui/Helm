@@ -50,6 +50,8 @@ export class UserOperations {
     if (gate.decision === 'accept') {
       this.store.transaction(() => this.abortDispatches(actor, params.workId, '审核接受'));
       await Promise.all([this.executions.settle(params.workId), this.rounds.cancel(params.workId, '审核接受')]);
+      const work = this.store.work(params.workId);
+      if (!work.workBranch && work.status === 'completed') await finishDelivery(this.store, params.workId);
     }
     return this.store.gate(params.workId, gate.id);
   }
@@ -58,6 +60,7 @@ export class UserOperations {
 
   deliverWork(actor: Actor, workId: string, phase: 'merge' | 'push' | 'detect' | 'finish') {
     const work = this.store.work(workId);
+    if (!work.workBranch) throw new RuleError('NO_WORK_BRANCH', '这项工作没有代码改动，接受审核后直接完成。');
     const active = this.workDeliveries.get(workId);
     if (active) {
       if (active.phase !== phase) throw new RuleError('DELIVERY_BUSY', '请等待当前合入或推送操作结束。');

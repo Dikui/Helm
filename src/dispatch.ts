@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
-import { projectPath } from './alignment.js';
+import { ensureWorkCopy, projectPath, recordBaseBranch } from './alignment.js';
 import { cardDetails } from './graph.js';
 import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 import { redactDispatchContent, redactDispatchText } from './project-environment.js';
+import { projectGitReady } from './project-reads.js';
+import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -52,10 +54,12 @@ export function listDispatches(store: TaskStore, workId: string, cardId?: string
     .all(workId, cardId ?? null, cardId ?? null).map(row => readDispatch(row, Boolean(work.outputsDeletedAt)));
 }
 
-// A verification checks the card's own commit, or the work branch when the card is only verified.
+// A verification checks the card branch, or for read-only and verification-only cards the work branch or latest base.
 export function verificationCommit(store: TaskStore, card: { id: string; workId: string; cardBranch?: string | null }) {
-  const executed = store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ? AND purpose = 'execution'`).get(card.id);
-  return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${executed ? card.cardBranch : store.work(card.workId).workBranch}`);
+  const executed = card.cardBranch && store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ? AND purpose = 'execution'`).get(card.id);
+  const work = store.work(card.workId);
+  const branch = executed ? card.cardBranch : work.workBranch ?? work.baseRef;
+  return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${branch}`);
 }
 
 // Read tools flag verification conclusions whose commit the card has since moved past.
@@ -168,9 +172,13 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   }
   const work = store.work(params.workId);
   if (!['executing', 'awaiting-review'].includes(work.status)) throw new RuleError('WORK_NOT_EXECUTING', '对齐中、暂停或终态工作不能派单。');
+  reconcileGitInitialization(store, work.id);
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
+  if ((purpose === 'verification' || !card.readOnly) && !projectGitReady(projectPath(store, work.id))) {
+    requireGitInitialization(store, work.id, card.id);
+  }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended' && (purpose === 'execution' || item.purpose === 'execution'))) {
     throw new RuleError('DISPATCH_ACTIVE', '执行派单独占卡片：有执行派单时不能再派单，有验收派单时不能派执行单。');
@@ -187,7 +195,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   }
   // The card snapshot is always prefixed below; omitted content must not repeat it.
   let content = params.content ?? '';
-  if (card.repairOfCardId && purpose === 'execution') {
+  if (card.repairOfCardId && purpose === 'execution' && !card.readOnly) {
     const original = cardDetails(store, work.id, card.repairOfCardId);
     if (!original.cardBranch || ['completed', 'cancelled'].includes(original.status)) throw new RuleError('REPAIR_SOURCE_UNAVAILABLE', '修复自卡片的分支已不可用。');
     content = `修复自卡片 ${original.id}。请把原卡片分支 ${original.cardBranch} 合进当前卡片分支并解决冲突，保留合并关系。\n\n${content}`;
@@ -195,8 +203,11 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
   const cardContentSnapshot = card.content;
   content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
-  const copy = purpose === 'execution' ? cardCopy(store, work.id, card.id) : card;
+  const needsWorkCopy = purpose === 'execution' && !card.readOnly;
+  if (needsWorkCopy) store.transaction(() => ensureWorkCopy(store, work.id));
+  const copy = needsWorkCopy ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.
+  if (purpose === 'verification' && !work.baseRef) recordBaseBranch(store, work.id);
   const startCommit = purpose === 'verification' ? verificationCommit(store, card) : null;
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');

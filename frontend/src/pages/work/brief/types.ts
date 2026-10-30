@@ -2,7 +2,7 @@ import type { Gate } from '../../../shared/types.js';
 import type { Dispatch } from '../card-graph/types.js';
 
 export interface ReviewData {
-  baseRef: string; baseCommit: string; workBranch: string; workCommit: string | null; diff: string | null; diffUnavailableReason?: string | null;
+  baseRef: string | null; baseCommit: string | null; workBranch: string | null; workCommit: string | null; diff: string | null; diffUnavailableReason?: string | null; noCodeChanges?: boolean;
   overallVerification: {
     cardId: string; dispatchId: string | null; status: Dispatch['status'] | null; endReason: Dispatch['endReason'];
     conclusion: 'passed' | 'failed' | 'undeclared'; reason: string | null;

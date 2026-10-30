@@ -4,6 +4,7 @@ import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import type { HelmEvent, Work } from '../../../shared/types.js';
 import { GateDecision } from '../../inbox/GateActions.js';
+import { GitInitializationDetails } from '../../inbox/GitInitializationDetails.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
 import { Thinking } from './RoundProgress.js';
@@ -87,15 +88,15 @@ export function ConversationView({ work }: { work: Work }) {
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
       {conversation.data?.map(item => <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
-        <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : 'alignmentCoordinator')}</b>
+        <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : item.kind === 'git-initialization' ? 'conversationRuntime' : 'alignmentCoordinator')}</b>
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
         {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
-          ? <GateDecision gate={item} />
-          : <div className="conversation-gate-history"><strong>{item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
-            {item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
+          ? <GateDecision gate={item} decisionWorkId={work.id} />
+          : <div className="conversation-gate-history"><strong>{item.kind === 'git-initialization' ? t('gitInitTitle') : item.question}</strong><span className="pill">{t(item.status === 'decided' ? 'conversationDecided' : item.status === 'withdrawn' ? 'conversationWithdrawn' : 'conversationClosed')}</span>
+            {item.kind === 'git-initialization' ? <GitInitializationDetails gate={item} /> : <>{item.body && <p>{item.body}</p>}{item.decision && <p>{item.kind === 'work-confirmation' && item.decision === 'confirm' ? t('confirm') : item.decision}</p>}</>}{item.withdrawalReason && <p>{item.withdrawalReason}</p>}</div>}
       </article>)}
       <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
     </ConversationScroll>

@@ -7,7 +7,7 @@ import type { PushPreview, Work } from '../../shared/types.js';
 import { ActionDialog } from './ActionDialog.js';
 import './work-delivery.css';
 
-export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'delivery'> }) {
+export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'delivery' | 'workBranch'> }) {
   const { api } = useData();
   const { t } = useI18n();
   const [pending, setPending] = useState(false);
@@ -22,7 +22,8 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
   const merge = work.delivery?.merge;
   const push = work.delivery?.push;
   const withoutMerge = work.delivery?.completedWithoutMerge;
-  const canPush = work.status === 'completed' && !withoutMerge && ['merged', 'already-contained'].includes(merge?.status ?? '') && push?.status !== 'pushed';
+  const noCodeChanges = !work.workBranch;
+  const canPush = !noCodeChanges && work.status === 'completed' && !withoutMerge && ['merged', 'already-contained'].includes(merge?.status ?? '') && push?.status !== 'pushed';
   useEffect(() => {
     setPreview(undefined);
     if (!canPush) return;
@@ -36,6 +37,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
   const solving = resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status);
   const manual = resolution?.status === 'manual' && work.status === 'accepted';
   const resolved = resolution?.status === 'resolved';
+  if (noCodeChanges && work.status !== 'completed') return null;
   if (!solving && !['accepted', 'merge-queued', 'merging', 'completed'].includes(work.status)) return null;
   const failedMerge = work.status === 'accepted' && merge?.status === 'failed';
   const conflict = work.status === 'accepted' && merge?.status === 'conflict';
@@ -62,7 +64,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
     <p>{t(solving ? 'deliverySolvingHint' : manual ? 'deliveryManualHint' : resolved && work.status === 'accepted' ? 'deliveryResolvedHint'
       : work.status === 'accepted' ? conflict ? 'deliveryConflictHint' : 'deliveryAcceptedHint'
       : work.status === 'merge-queued' ? 'deliveryQueuedHint' : work.status === 'merging' ? 'deliveryMergingHint'
-      : withoutMerge ? 'deliveryFinishedWithoutMerge' : 'deliveryCompletedHint')}</p>
+      : noCodeChanges ? 'deliveryNoCodeChanges' : withoutMerge ? 'deliveryFinishedWithoutMerge' : 'deliveryCompletedHint')}</p>
     {(failedMerge || failedPush) && <p role="alert" className="agent-text">{failedPush ? push?.reason : merge?.reason}</p>}
     {(solving || conflict && !resolved) && <table><thead><tr><th>{t('deliveryConflictFiles')}</th></tr></thead><tbody>
       {merge?.conflictFiles?.map(file => <tr key={file}><td className="agent-text">{file}</td></tr>)}

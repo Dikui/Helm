@@ -1,10 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
-import { confirmationDetails, confirmDescription, draftDescription, ensureWorkCopy } from './alignment.js';
+import { confirmationDetails, confirmDescription, draftDescription, projectPath, recordBaseBranch } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, markOutdated, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
@@ -16,7 +15,7 @@ import { reviewReportSchema } from './review-report.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
-import { listDirectories, projectBranches, projectGitStatus } from './project-reads.js';
+import { listDirectories, projectBranches, projectGitReady, projectGitRoot, projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
@@ -25,6 +24,7 @@ import { listWorkFiles, readWorkFile } from './work-files.js';
 import { previewWorkPush } from './delivery.js';
 import { resolveMergeConflict, finishConflictResolution, conflictResolutionChanges, resolvingConflict } from './conflict-resolution.js';
 import { changeProjectEnvironment, projectEnvironmentName, projectEnvironmentNames } from './project-environment.js';
+import { decideGitInitialization } from './git-initialization.js';
 
 interface Context { store: TaskStore; actor: Actor; userOperations: UserOperations }
 interface Operation {
@@ -248,13 +248,12 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, path, encoding }) => readWorkFile(store, workId, path, encoding),
   }),
   operation({
-    name: 'register-project', description: '登记本机 git 项目', callers: ['user'], keyed: false, mutates: true,
-    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), initGit: z.boolean().optional() }).strict(),
+    name: 'register-project', description: '登记本机目录为项目', callers: ['user'], keyed: false, mutates: true,
+    schema: z.object({ path: z.string().min(1), name: z.string().trim().min(1).optional(), createDirectory: z.boolean().optional() }).strict(),
     execute({ store, actor }, params) {
       const requested = resolve(params.path);
-      const created = !existsSync(requested);
-      if (created) {
-        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '项目路径不存在。', 400, { initializable: true, missing: true });
+      if (!existsSync(requested)) {
+        if (!params.createDirectory) throw new RuleError('INVALID_PROJECT', '项目路径不存在。', 400, { missing: true });
         try { mkdirSync(requested, { recursive: true }); } catch (error) { throw new RuleError('INVALID_PROJECT', `创建目录失败：${(error as Error).message}`, 400); }
       }
       let candidate: string;
@@ -262,24 +261,7 @@ export const operations: readonly Operation[] = [
         candidate = realpathSync(requested);
         if (!statSync(candidate).isDirectory()) throw new Error();
       } catch { throw new RuleError('INVALID_PROJECT', '项目路径不存在或不是目录。', 400); }
-      const git = (...args: string[]) => execFileSync('git', ['-C', candidate, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      let path: string;
-      try {
-        // A directory created for a new project gets its own repository, even inside another work tree.
-        if (created) throw new Error('new directory');
-        path = realpathSync(git('rev-parse', '--show-toplevel'));
-      } catch {
-        let insideGit = !created;
-        if (insideGit) try { git('rev-parse', '--git-dir'); } catch { insideGit = false; }
-        if (insideGit) throw new RuleError('INVALID_PROJECT', '项目路径必须位于本机 git 工作树中。', 400);
-        if (!params.initGit) throw new RuleError('INVALID_PROJECT', '这个目录还不是 git 仓库。Helm 需要用 git 记录开工起点并开工作分支。', 400, { initializable: true });
-        // Helm needs a commit to fix the base on; an empty one leaves the user's files untouched.
-        try {
-          git('init');
-          git('-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Initial commit');
-        } catch (error) { throw new RuleError('INVALID_PROJECT', `git 初始化失败：${(error as Error).message}`, 400); }
-        path = candidate;
-      }
+      const path = projectGitRoot(candidate) ?? candidate;
       const existing = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE path = ?`).get(path);
       if (existing) return projectSettings(store, existing);
       const id = randomUUID();
@@ -488,10 +470,7 @@ export const operations: readonly Operation[] = [
       if (['completed', 'cancelled'].includes(work.status)) throw new RuleError('TERMINAL_WORK', '完成或已取消的工作不能再修改。');
       if ((params.attachments?.length || params.references?.length) && actor.type !== 'user') throw new RuleError('FORBIDDEN', '只有用户可以发送附件或引用工作。', 403);
       if (params.cardId) cardDetails(store, workId, params.cardId);
-      if (params.gateId) {
-        const gate = store.db.prepare('SELECT id FROM gates WHERE id = ? AND work_id = ?').get(params.gateId, workId);
-        if (!gate) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
-      }
+      if (params.gateId) store.gate(workId, params.gateId);
       const id = randomUUID();
       const uploads = [...params.attachments ?? [], ...(params.references ?? []).map(reference => referenceSnapshot(store, workId!, reference))];
       if (new Set(uploads.map(item => item.name)).size !== uploads.length) throw new RuleError('INVALID_PARAMS', '附件名与引用快照重名。', 400);
@@ -509,7 +488,7 @@ export const operations: readonly Operation[] = [
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
-        ensureWorkCopy(store, workId, params.baseRef);
+        if (projectGitReady(projectPath(store, workId))) recordBaseBranch(store, workId, params.baseRef);
       }
       return { work: store.work(workId), message: store.message(workId, params.key) };
     },
@@ -605,10 +584,11 @@ export const operations: readonly Operation[] = [
     execute: ({ actor, userOperations }, { workId }) => userOperations.withdrawAcceptance(actor, workId),
   }),
   operation({
-    name: 'decide-gate', description: '用户确认工作说明、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
-    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional() }).strict(),
+    name: 'decide-gate', description: '用户确认工作说明、初始化 git、决定一般关卡，或接受 / 退回审核并附意见', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ workId: z.string().min(1), gateId: z.string().min(1), decision: z.string().trim().min(1), descriptionId: z.string().min(1).optional(), comment: z.string().optional(), ignoreRules: z.string().max(100_000).optional() }).strict(),
     execute({ store, actor, userOperations }, params) {
       const kind = store.gate(params.workId, params.gateId).kind;
+      if (kind === 'git-initialization') return decideGitInitialization(store, actor, params);
       if (kind === 'review') return userOperations.decideReview(actor, params);
       if (kind !== 'work-confirmation') return decideGate(store, actor, params);
       if (params.decision !== 'confirm' || !params.descriptionId) throw new RuleError('INVALID_PARAMS', '确认工作说明须指定所查看的版本并选择 confirm。', 400);
@@ -641,14 +621,14 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, gateId }) => gateHistory(store, workId, gateId),
   }),
   operation({
-    name: 'create-card', description: '建卡片；aggregate 标记汇总卡片，上游取消、撤回或跳过时只等其余上游完成；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
+    name: 'create-card', description: '建卡片；readOnly 标记只读卡片（调研、分析、审查），默认 false 表示写代码；aggregate 标记汇总卡片，上游取消、撤回或跳过时只等其余上游完成；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
+    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), readOnly: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
       writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => createCard(store, actor, params),
   }),
   operation({
-    name: 'update-card', description: '修改卡片内容、汇总标记（aggregate）、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
-    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(),
+    name: 'update-card', description: '修改卡片内容、只读标记（readOnly）、汇总标记（aggregate）、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
+    schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), readOnly: z.boolean().optional(),
       writeScopes: writeScopesSchema }).strict(),
     execute: ({ store, actor }, params) => updateCard(store, actor, params),
   }),

@@ -9,6 +9,7 @@ import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '..
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
 import { reviewReport } from './fixtures/review-report.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -208,14 +209,16 @@ test('验收在一次性副本里运行，结束后整个删除，不建卡片�
   assert.equal(existsSync(workPath), false);
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
   const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
-  assert.equal(git(work.workPath, 'rev-parse', work.workBranch), startCommit);
-  assert.equal(git(work.workPath, 'status', '--porcelain'), '');
-  assert.equal(await readFile(join(work.workPath, 'result.txt'), 'utf8'), 'baseline\n');
+  assert.equal(work.workPath, null);
+  assert.equal(work.workBranch, null);
+  assert.equal(git(daemon.repo, 'rev-parse', work.baseRef), startCommit);
+  assert.equal(git(daemon.repo, 'status', '--porcelain'), '');
+  assert.equal(await readFile(join(daemon.repo, 'result.txt'), 'utf8'), 'baseline\n');
   const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: result.id })).result;
   const evidence = artifacts.find((item: any) => item.kind === 'test-output');
   assert.equal((await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: evidence.id })).result.content, 'tests: passed\n');
   assert.equal(artifacts.find((item: any) => item.kind === 'branch').commitSha, startCommit);
-  assert.equal(artifacts.find((item: any) => item.kind === 'branch').ref, work.workBranch);
+  assert.equal(artifacts.find((item: any) => item.kind === 'branch').ref, work.workBranch ?? work.baseRef);
   assert.ok(!artifacts.some((item: any) => item.kind === 'file'));
 });
 
@@ -239,7 +242,7 @@ test('验收先结束副本子目录的残留进程，再删除副本', async t 
         process.exit(0);
       });
       fs.writeFileSync('ready', 'ready');
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `], { cwd: join(workPath, '.cache'), detached: true, stdio: 'ignore' });
     return [{ type: 'hang', until: end.promise }];
   }]);
@@ -278,7 +281,7 @@ test('后续验收未声明、不通过或异常结束不影响当前提交已�
       const before = (await daemon.cards())[0];
       assert.equal(before.status, 'verifying');
       assertNoCardCopy(daemon, before);
-      assert.equal(git(daemon.repo, 'show', `helm/${daemon.work.id}:result.txt`), 'baseline');
+      assert.equal(git(daemon.repo, 'show', `${latest.startCommit}:result.txt`), 'baseline');
       last.release();
       await daemon.finished();
       assert.equal((await daemon.cards())[0].status, 'completed');
@@ -569,12 +572,12 @@ test('验收进程组中的进程拒绝 SIGTERM 时等待五秒再 SIGKILL，之
     const childCode = `
       process.on('SIGTERM', () => {});
       require('fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `;
     const parent = spawn(process.execPath, ['-e', `
       require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(childCode)}], { cwd: '..', stdio: 'ignore' });
       process.on('SIGTERM', () => process.exit(0));
-      setInterval(() => {}, 1000);
+      ${testProcessWatchdog()}
     `], { cwd: workPath, detached: true, stdio: 'ignore' });
     group = parent.pid!;
     return [{ type: 'write', path: 'result.txt', content: 'must be reset\n' },
@@ -651,7 +654,7 @@ test('验收看门狗限制无输出和总时长，超时先清进程再删除�
         const fs = require('fs');
         process.on('SIGTERM', () => { fs.writeFileSync('../result.txt', 'termination write'); process.exit(0); });
         fs.writeFileSync('ready', 'ready');
-        setInterval(() => {}, 1000);
+        ${testProcessWatchdog()}
       `], { cwd: join(workPath, '.cache'), detached: true, stdio: 'ignore' });
       return [
         { type: 'hang', until: until(async () => readFile(join(workPath, '.cache/ready'), 'utf8').catch(() => ''), Boolean).then(() => {}) },
@@ -731,6 +734,8 @@ test('验收留下 index.lock 和未完成合并时仍整个删除副本，工�
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(workPath));
   assertNoCardCopy(daemon, (await daemon.cards())[0]);
   const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
-  assert.equal(git(work.workPath, 'rev-parse', work.workBranch), result.startCommit);
-  assert.equal(git(work.workPath, 'status', '--porcelain'), '');
+  assert.equal(work.workPath, null);
+  assert.equal(work.workBranch, null);
+  assert.equal(git(daemon.repo, 'rev-parse', work.baseRef), result.startCommit);
+  assert.equal(git(daemon.repo, 'status', '--porcelain'), '');
 });

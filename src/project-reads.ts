@@ -1,8 +1,30 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { RuleError } from './store.js';
+
+export function projectGitRoot(path: string): string | null {
+  try {
+    return realpathSync(execFileSync('git', ['-C', path, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
+    }).trim());
+  } catch { return null; }
+}
+
+// Copies need a checked-out local branch with a commit, not just git init.
+export function projectGitReady(path: string): boolean {
+  if (!projectGitRoot(path)) return false;
+  const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
+  }).trim();
+  try {
+    const branch = git('symbolic-ref', 'HEAD');
+    if (!branch.startsWith('refs/heads/')) return false;
+    git('rev-parse', '--verify', '--end-of-options', `${branch}^{commit}`);
+    return true;
+  } catch { return false; }
+}
 
 // shortcut: symlinked directories are not listed; follow them if users keep projects behind links.
 export function listDirectories(path = homedir()) {
@@ -28,6 +50,9 @@ export function projectBranches(path: string) {
 
 // Keep live git metadata out of persisted project settings and write responses.
 export function projectGitStatus(project: Record<string, unknown>) {
+  const isGit = projectGitReady(String(project.path));
+  if (!isGit) return { ...project, isGit, currentBranch: null, headCommit: null, uncommittedChanges: null,
+    gitStatusReason: '项目目录没有可读取的 git 工作树、本地检出分支或初始提交。' };
   const git = (...args: string[]) => execFileSync('git', ['-C', String(project.path), ...args], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
   });
@@ -43,9 +68,9 @@ export function projectGitStatus(project: Record<string, unknown>) {
       // A rename/copy has a second NUL-delimited pathname, not another change.
       if (/[RC]/.test(entry.slice(0, 2))) index++;
     }
-    return { ...project, currentBranch: branch === 'HEAD' ? null : branch, headCommit, uncommittedChanges, gitStatusReason: null };
+    return { ...project, isGit, currentBranch: branch === 'HEAD' ? null : branch, headCommit, uncommittedChanges, gitStatusReason: null };
   } catch (error) {
-    return { ...project, currentBranch: null, headCommit: null, uncommittedChanges: null,
+    return { ...project, isGit, currentBranch: null, headCommit: null, uncommittedChanges: null,
       gitStatusReason: `无法读取项目 git 状态：${error instanceof Error ? error.message : String(error)}` };
   }
 }

@@ -6,9 +6,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { testProcessWatchdog, watchTestProcess } from './test-process.js';
 
 const script = JSON.parse(readFileSync(process.argv[2]!, 'utf8'));
-if (script.stubborn) { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
+const watchdog = watchTestProcess(script.testProcessPid).unref();
+if (script.stubborn) { process.on('SIGTERM', () => {}); watchdog.ref(); }
 const emit = (message: object) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 async function writeChunks(chunks: (string | { base64: string })[]) {
   for (const chunk of chunks) {
@@ -107,7 +109,7 @@ async function handle(line: string) {
       for (const dispose of disposers) dispose();
     }
     if (script.spawnChild) {
-      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+      const child = spawn(process.execPath, ['-e', testProcessWatchdog(script.testProcessPid)], { detached: true, stdio: 'ignore' });
       child.unref();
       appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/child', pid: child.pid })}\n`);
     }

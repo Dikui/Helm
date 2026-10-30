@@ -108,7 +108,7 @@ export async function signalProcess(target: number, value: NodeJS.Signals) {
   }
 }
 
-export async function cleanupWorktreeProcesses(path: string, managed: ManagedProcess[] = []) {
+export async function cleanupWorktreeProcesses(path: string, managed: ManagedProcess[] = [], includeDirectory = true) {
   const root = await realpath(path);
   let snapshot = await processDirectories();
   const ownGroup = snapshot.find(entry => entry.pid === process.pid)?.pgid;
@@ -117,7 +117,7 @@ export async function cleanupWorktreeProcesses(path: string, managed: ManagedPro
     const suffix = relative(root, cwd);
     return suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
   };
-  const matches = snapshot.filter(entry => entry.pid !== process.pid && (inside(entry.cwd)
+  const matches = snapshot.filter(entry => entry.pid !== process.pid && ((includeDirectory && inside(entry.cwd))
     || managed.some(item => item.pgid === entry.pgid)));
   const groups = new Set(matches.filter(entry => entry.pgid !== ownGroup).map(entry => entry.pgid));
   const individual = new Set(matches.filter(entry => entry.pgid === ownGroup).map(entry => entry.pid));

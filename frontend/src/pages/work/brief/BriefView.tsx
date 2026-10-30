@@ -36,8 +36,8 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
       {shown && <>
         {(['requirements', 'boundary', 'criteria'] as const).map(field => <section key={field}><h3>{t(field)}</h3><Markdown text={shown[field]} workId={work.id} files={files} onOpen={preview.open} /></section>)}
         {preview.preview}
-        <dl className="brief-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd>
-          <dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{work.workBranch || '—'}</span></dd></dl>
+        {shown.baseCommit ? <dl className="brief-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd>
+          <dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{work.workBranch || '—'}</span></dd></dl> : <p className="muted">{t('projectWithoutGitHint')}</p>}
       </>}
       <p className="muted">{t('briefChangeHint')}</p>
       <Link href={`/works/${encodeURIComponent(work.id)}`}>{t('briefChangeInChat')}</Link>

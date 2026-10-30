@@ -10,6 +10,7 @@ import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep, type SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -207,7 +208,7 @@ test('调度轮次拉起进程时也记录 pgid 与启动时间', async t => {
   t.after(() => { if (pid > 1) try { process.kill(-pid, 'SIGKILL'); } catch {} });
   const daemon = await fixture(t, [], [], { alignment: [{ type: 'tool', name: 'get-work', arguments: ctx => {
     startedAt = new Date().toISOString();
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: ctx.options.cwd, detached: true, stdio: 'ignore' });
+    const child = spawn(process.execPath, ['-e', testProcessWatchdog()], { cwd: ctx.options.cwd, detached: true, stdio: 'ignore' });
     pid = child.pid!;
     ctx.options.onProcess?.({ pid, pgid: pid, startedAt });
     return { workId: workIdOf(ctx) };
@@ -288,7 +289,7 @@ test('任意结束方式都按副本目录清理 nohup 后台进程，SIGTERM �
     let pid = 0;
     t.after(() => { if (pid > 1) try { process.kill(pid, 'SIGKILL'); } catch {} });
     const daemon = await fixture(t, [create, dispatch()], [ctx => {
-      const program = 'const fs = require("node:fs"); process.on("SIGTERM", () => { fs.writeFileSync("stopped.txt", "stopped before commit\\n"); process.exit(0); }); fs.writeFileSync("ready.txt", "ready"); setInterval(() => {}, 1000);';
+      const program = testProcessWatchdog() + 'const fs = require("node:fs"); process.on("SIGTERM", () => { fs.writeFileSync("stopped.txt", "stopped before commit\\n"); process.exit(0); }); fs.writeFileSync("ready.txt", "ready");';
       const child = spawn('/bin/sh', ['-c', 'nohup "$1" -e "$2" >/dev/null 2>&1 & echo $!', 'helm-test', process.execPath, program],
         { cwd: ctx.options.cwd, detached: true });
       let output = '';
@@ -322,8 +323,8 @@ test('看门狗记录执行者 pgid 和启动时间，SIGTERM 后等 5 秒再杀
     // The group member leaves the copy, but must still be killed with its group.
     const program = `const fs = require('node:fs'); const cp = require('node:child_process');
       process.on('SIGTERM', () => fs.writeFileSync('term.txt', String(Date.now())));
-      const child = cp.spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { cwd: '..', stdio: 'ignore' });
-      fs.writeFileSync('child.pid', String(child.pid)); setInterval(() => {}, 1000);`;
+      const child = cp.spawn(process.execPath, ['-e', ${JSON.stringify("process.on('SIGTERM', () => {});" + testProcessWatchdog())}], { cwd: '..', stdio: 'ignore' });
+      fs.writeFileSync('child.pid', String(child.pid)); ${testProcessWatchdog()}`;
     const child = spawn(process.execPath, ['-e', program], { cwd: path, detached: true, stdio: 'ignore' });
     pid = child.pid!;
     options.onProcess?.({ pid, pgid: pid, startedAt });
