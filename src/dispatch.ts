@@ -3,12 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
-import { ensureWorkCopy, projectPath } from './alignment.js';
+import { ensureWorkCopy, projectPath, recordBaseBranch } from './alignment.js';
 import { cardDetails } from './graph.js';
 import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 import { redactDispatchContent, redactDispatchText } from './project-environment.js';
+import { projectGitRoot } from './project-reads.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -173,6 +174,9 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
+  if ((purpose === 'verification' || !card.readOnly) && !projectGitRoot(projectPath(store, work.id))) {
+    throw new RuleError('GIT_REQUIRED', '写代码的执行派单和验收派单需要 git 仓库，请先在项目目录初始化 git 并创建提交。');
+  }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
   if (listDispatches(store, work.id, card.id).some(item => item.status !== 'ended' && (purpose === 'execution' || item.purpose === 'execution'))) {
     throw new RuleError('DISPATCH_ACTIVE', '执行派单独占卡片：有执行派单时不能再派单，有验收派单时不能派执行单。');
@@ -201,6 +205,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   if (needsWorkCopy) store.transaction(() => ensureWorkCopy(store, work.id));
   const copy = needsWorkCopy ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.
+  if (purpose === 'verification' && !work.baseRef) recordBaseBranch(store, work.id);
   const startCommit = purpose === 'verification' ? verificationCommit(store, card) : null;
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');

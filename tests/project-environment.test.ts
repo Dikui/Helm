@@ -52,7 +52,8 @@ test('项目变量设置/覆盖/删除只返回名字，校验名字、受管变
     assert.equal(result.status, 404);
   }
   for (const valid of ['_PRIVATE', 'JAVA_HOME', 'GOPATH', 'ANDROID_HOME']) ok(await daemon.call('set-project-environment', { projectId, name: valid, value: original }));
-  const another = (await daemon.call('register-project', { path: join(daemon.directory, 'another'), initGit: true })).result;
+  await mkdir(join(daemon.directory, 'another'));
+  const another = (await daemon.call('register-project', { path: join(daemon.directory, 'another') })).result;
   const projects = (await daemon.call('list-projects')).result;
   assert.deepEqual(projects.find((project: any) => project.id === another.id).environmentNames, []);
   const deleted = await daemon.call('delete-project-environment', { projectId, name });

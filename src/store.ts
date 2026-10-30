@@ -19,7 +19,7 @@ export interface Work {
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string; key: string;
   requirements: string; boundary: string; criteria: string; gateId: string;
-  baseRef: string; baseCommit: string;
+  baseRef: string | null; baseCommit: string | null;
 }
 export interface Gate {
   id: string; workId: string; kind: string; status: string; key: string | null;

@@ -249,4 +249,13 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE cards ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0 CHECK(read_only IN (0, 1));
   `,
+  `
+  ALTER TABLE work_descriptions RENAME COLUMN base_ref TO legacy_base_ref;
+  ALTER TABLE work_descriptions RENAME COLUMN base_commit TO legacy_base_commit;
+  ALTER TABLE work_descriptions ADD COLUMN base_ref TEXT;
+  ALTER TABLE work_descriptions ADD COLUMN base_commit TEXT;
+  UPDATE work_descriptions SET base_ref = legacy_base_ref, base_commit = legacy_base_commit;
+  ALTER TABLE work_descriptions DROP COLUMN legacy_base_ref;
+  ALTER TABLE work_descriptions DROP COLUMN legacy_base_commit;
+  `,
 ];
