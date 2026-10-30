@@ -8,7 +8,7 @@ import { test, type TestContext } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 import { TaskStore } from '../src/store.js';
 import { AgentCatalog } from '../src/agents.js';
 import { pushReviewedWork } from '../src/delivery.js';
@@ -123,6 +123,7 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   const work = (await call('send-message', { projectId: project.id, key: 'start', body: '请实现并交给我审核' })).result.work;
   const events = async (): Promise<any[]> => (await call('get-events', { workId: work.id })).result;
   await until(events, values => values.some(event => event.action === 'round-ended'));
+  Object.assign(work, existingWorkCopy(join(directory, 'data'), work.id));
   const confirmation = (await call('list-pending')).result[0];
   ok(await call('decide-gate', { workId: work.id, gateId: confirmation.id, descriptionId: confirmation.description.id, decision: 'confirm' }));
   const getWork = async () => (await call('get-work', { workId: work.id })).result;
@@ -515,6 +516,7 @@ for (const conflict of [false, true]) test(`同项目合入串行，第二项基
   const secondGate = await until(async () => (await daemon.call('get-conversation', { workId: second.id })).result as any[], values => values.some(gate => gate.kind === 'review'));
   const works = [await daemon.getWork(), (await daemon.call('get-work', { workId: second.id })).result];
   for (const [index, work] of works.entries()) {
+    Object.assign(work, existingWorkCopy(join(daemon.directory, 'data'), work.id));
     const file = conflict ? 'shared.txt' : `result-${index}.txt`;
     await writeFile(join(work.workPath, file), `result ${index}\n`);
     git(work.workPath, 'add', file);

@@ -19,8 +19,7 @@ test('Claude 调度者接入运行层：带令牌 MCP 改卡片图，打断后�
       const brief = JSON.parse(args.prompt as string) as StartupBrief;
       const attempt = briefs.push(brief);
       sessions.push(sdk.sessionId!);
-      assert.equal(sdk.cwd, brief.work.workPath);
-      assert.ok(sdk.cwd!.endsWith('/_work'));
+      assert.ok(sdk.cwd!.endsWith(brief.work.workPath ? '/_work' : '/project'));
       const endpoint = sdk.mcpServers!.helm!;
       assert.ok('url' in endpoint && endpoint.type === 'http');
       tokens.push(endpoint.headers!.Authorization!);

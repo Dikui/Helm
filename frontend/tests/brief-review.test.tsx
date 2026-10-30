@@ -16,6 +16,7 @@ function expandRow(text: HTMLElement) {
 import type { FakeContext, FakeStep } from '../../src/driver.js';
 import type { ReviewReport } from '../../src/review-report.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+const { existingWorkCopy }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -266,7 +267,8 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 2')).toBeTruthy();
   expect(within(brief).getByText('生效中')).toBeTruthy();
-  expect(within(brief).getByText(`helm/${work.id}`)).toBeTruthy();
+  expect(within(brief).getByText('—')).toBeTruthy();
+  expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
   const versions = within(brief).getByLabelText('版本');
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).getByText('需求原文 1')).toBeTruthy();
@@ -478,6 +480,7 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('没有代码变更') }), check: ok },
   ]]);
   const work = await createWork();
+  existingWorkCopy(join(daemon.directory, 'data'), work.id);
   await confirmVersion(work.id, 1);
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon.url} />);

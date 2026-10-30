@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { z } from 'zod';
 import { RuleError, TaskStore, type Actor, type ActorType } from './store.js';
-import { confirmationDetails, confirmDescription, draftDescription, ensureWorkCopy } from './alignment.js';
+import { confirmationDetails, confirmDescription, draftDescription, recordBaseBranch } from './alignment.js';
 import { addDependency, cardDetails, cardGraph, createCard, decideGate, gateHistory, proposeGate, removeDependency, updateCard, updateGate, withdrawGate } from './graph.js';
 import { activeDispatch, createDispatch, dispatchArtifacts, dispatchOutput, getDispatch, listDispatches, markOutdated, readArtifact, revokeDispatch, submitConclusion } from './dispatch.js';
 import { listAgents, saveAgentSchema } from './agents.js';
@@ -505,7 +505,7 @@ export const operations: readonly Operation[] = [
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
-        ensureWorkCopy(store, workId, params.baseRef);
+        recordBaseBranch(store, workId, params.baseRef);
       }
       return { work: store.work(workId), message: store.message(workId, params.key) };
     },

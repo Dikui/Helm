@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -67,7 +67,7 @@ test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请�
   expect(within(screen.getByRole('complementary', { name: 'Helm' })).getByText('对齐中')).toBeTruthy();
 });
 
-test('基准分支默认当前检出分支，可选择其他分支并用它创建对齐副本', async () => {
+test('基准分支默认当前检出分支，可选择其他分支，创建工作不建副本', async () => {
   daemon = await uiFixture();
   execFileSync('git', ['-C', daemon.repo, 'branch', 'release/1.0']);
   window.history.replaceState(null, '', '/new');
@@ -81,8 +81,11 @@ test('基准分支默认当前检出分支，可选择其他分支并用它创�
   await screen.findByRole('heading', { name: '从发布分支开始' });
   const work = (await daemon.call('list-works')).result[0];
   expect(work.baseRef).toBe('release/1.0');
-  expect(await readFile(join(work.workPath, 'README.md'), 'utf8')).toBe('baseline\n');
-  expect(await screen.findByText(/工作副本已创建；对齐阶段只读此副本/)).toBeTruthy();
+  expect(work.baseCommit).toBeNull();
+  expect(work.workBranch).toBeNull();
+  expect(work.workPath).toBeNull();
+  expect(existsSync(join(daemon.directory, 'data', 'worktrees', work.id, '_work'))).toBe(false);
+  expect(screen.queryByText(/工作副本已创建；对齐阶段只读此副本/)).toBeNull();
 });
 
 test('基准加载、失败和空分支时不能开始，重试和刷新后可创建工作', async () => {

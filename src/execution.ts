@@ -37,7 +37,8 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
   const card = cardDetails(store, dispatch.workId, dispatch.cardId);
   if (dispatch.purpose === 'verification') {
     removeVerificationCopy(store, dispatch.workId, verificationPath(store, dispatch));
-    const branch = card.cardBranch ?? store.work(dispatch.workId).workBranch!;
+    const work = store.work(dispatch.workId);
+    const branch = card.cardBranch ?? work.workBranch ?? work.baseRef!;
     if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }

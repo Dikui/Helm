@@ -42,7 +42,7 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
     assert.equal(card.workPath, null);
     assert.equal(card.cardBranch, null);
     const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
-    await assert.rejects(stat(join(work.workPath, 'inside.txt')), { code: 'ENOENT' });
+    await assert.rejects(stat(join(work.workPath ?? daemon.repo, 'inside.txt')), { code: 'ENOENT' });
     assert.equal(dispatch.startCommit, dispatch.endCommit, '验收改动被运行层丢弃');
     assert.equal(dispatch.resumeSessionId, null);
   }
