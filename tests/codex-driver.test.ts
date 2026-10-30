@@ -253,7 +253,7 @@ for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} 中
 
 test('Codex 拒绝错误的沙箱和多个可写根，启动前不创建 app-server', async t => {
   const ctx = await fixture(t, []);
-  for (const sandbox of [{ mode: 'read-only', writableRoots: [] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] }] as const) {
+  for (const sandbox of [{ mode: 'read-only', writableRoots: [ctx.directory] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] }] as const) {
     await assert.rejects(ctx.driver.start({ ...ctx.options, sandbox: { ...sandbox, writableRoots: [...sandbox.writableRoots] } }), /executor card copy/);
   }
   assert.deepEqual(await ctx.requests(), []);
@@ -411,4 +411,23 @@ test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近
   assert.equal(thread.params.threadId, 'thread-scripted');
   assert.equal(thread.params.sandbox, 'read-only');
   assert.equal(thread.params.config.mcp_servers.helm.http_headers.Authorization, 'Bearer round-2');
+});
+
+
+test('Codex 只读卡片在新建和续跑的 thread 与 turn 都使用只读沙箱', async t => {
+  const ctx = await fixture(t, [completed()]);
+  for (const resumeSessionId of [undefined, 'thread-scripted']) {
+    const session = await ctx.driver.start({ ...ctx.options, resumeSessionId, sandbox: { mode: 'read-only', writableRoots: [] } });
+    await session.send('只读分析');
+    await collect(session.events);
+    session.cancel();
+  }
+  const requests = await ctx.requests();
+  for (const thread of requests.filter(request => ['thread/start', 'thread/resume'].includes(request.method))) {
+    assert.equal(thread.params.sandbox, 'read-only');
+    assert.equal(thread.params.config.sandbox_workspace_write, undefined);
+  }
+  for (const turn of requests.filter(request => request.method === 'turn/start')) {
+    assert.deepEqual(turn.params.sandboxPolicy, { type: 'readOnly' });
+  }
 });

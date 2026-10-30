@@ -343,10 +343,10 @@ test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第
   });
 });
 
-test('Grok 沙箱根必须恰为卡片副本，拒绝只读或额外根', async t => {
+test('Grok 沙箱根必须恰为卡片副本，只读沙箱拒绝可写根，可写沙箱拒绝额外根', async t => {
   const ctx = await acpFixture(t);
   for (const sandbox of [
-    { mode: 'read-only' as const, writableRoots: [] },
+    { mode: 'read-only' as const, writableRoots: [ctx.cwd] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, ctx.home] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.home] },
   ]) await assert.rejects(ctx.driver.start({ ...ctx.options, sandbox }), /card copy/);
@@ -551,5 +551,39 @@ test('Grok 按字段保留未知用量，明确零用量不丢失', async t => {
     await session.send('用量');
     const end = (await collect(session.events)).at(-1);
     assert.deepEqual(end?.type === 'end' && end.usage, expected);
+  }
+});
+
+
+test('ACP 只读卡片在进程环境中覆盖沙箱；DeepSeek 拒绝扩大为可写沙箱', async t => {
+  for (const kind of ['grok', 'deepseek'] as const) {
+    const permissions = [
+      { optionId: 'allow', name: '允许一次', kind: 'allow_once' },
+      { optionId: 'reject', name: '拒绝一次', kind: 'reject_once' },
+    ];
+    const ctx = await acpFixture(t, {
+      permissions: [permissions, permissions],
+      permissionToolCalls: [
+        { toolCallId: 'read', title: '读取', rawInput: { sandbox_permissions: 'read-only' } },
+        { toolCallId: 'write', title: '写入', rawInput: { sandbox_permissions: 'workspace-write' } },
+      ],
+      ...(kind === 'deepseek' ? { configOptions: [
+        { id: 'model', name: 'Model', type: 'select', currentValue: '["deepseek-account","deepseek-flash"]', options: [{ value: '["deepseek-account","deepseek-flash"]', name: 'Flash' }] },
+        { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }] },
+      ] } : {}),
+    }, false, kind);
+    const session = await ctx.driver.start({ ...ctx.options,
+      env: { ...ctx.options.env, GROK_SANDBOX: 'off', DSH_PERMISSION_MODE: 'danger-full-access' },
+      sandbox: { mode: 'read-only', writableRoots: [] } });
+    await session.send('只读分析');
+    const events = await collect(session.events);
+    session.cancel();
+    const spawn = (await ctx.requests()).find(request => request.method === 'fixture/spawn');
+    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], 'read-only');
+    if (kind === 'deepseek') {
+      const decisions = events.filter(event => event.type === 'output').map(event => JSON.parse(event.text))
+        .filter(message => message.method === 'session/request_permission');
+      assert.deepEqual(decisions.map(message => message.allowed), [true, false]);
+    }
   }
 });

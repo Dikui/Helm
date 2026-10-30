@@ -141,7 +141,9 @@ test('去掉 Agent 表的迁移保留已有派单快照、卡片 Agent id 和成
     return body.result;
   };
   assert.deepEqual((await call('get-dispatch', { workId: 'work', dispatchId: 'dispatch' })).agent, snapshot);
-  assert.equal((await call('get-card', { workId: 'work', cardId: 'card' })).agentId, 'legacy-executor');
+  const card = await call('get-card', { workId: 'work', cardId: 'card' });
+  assert.equal(card.agentId, 'legacy-executor');
+  assert.equal(card.readOnly, false, '已有卡片迁移后按写代码处理');
   assert.equal((await call('get-dispatch-artifacts', { workId: 'work', dispatchId: 'dispatch' }))[0].id, 'artifact');
   assert.equal((await call('read-artifact', { workId: 'work', artifactId: 'artifact' })).content, '旧成果');
 });

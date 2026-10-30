@@ -246,4 +246,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE coordinator_rounds ADD COLUMN context TEXT;
   `,
+  `
+  ALTER TABLE cards ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0 CHECK(read_only IN (0, 1));
+  `,
 ];

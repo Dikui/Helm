@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { deepseekUsage } from './deepseek-usage.js';
-import type { ModelOption, TokenUsage } from './driver.js';
+import type { ModelOption, TokenUsage, SessionOptions } from './driver.js';
 import type { AgentConfig } from './agents.js';
 
 // Only agent differences belong here; ACP sequencing stays in AcpDriver.
@@ -17,7 +17,7 @@ interface AcpAgentProfile {
   environment: { set: Record<string, string>; unset: string[] };
   homeVariable?: string;
   homeConfigFiles?: string[];
-  permissionAllowed?(input: unknown): boolean;
+  permissionAllowed?(input: unknown, mode: SessionOptions['sandbox']['mode']): boolean;
   unavailable(agent: AgentConfig): string | undefined;
   initializationUnavailable(agent: AgentConfig, response: InitializeResponse): string | undefined;
   sessionSettings(agent: AgentConfig, options: SessionConfigOption[] | null | undefined): { id: string; value: string; apply: boolean; optional?: boolean }[];
@@ -78,11 +78,11 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     environment: { set: { DSH_PERMISSION_MODE: 'workspace-write' }, unset: ['DEEPSEEK_API_KEY', 'DSH_HOME'] },
     homeVariable: 'DSH_HOME',
     homeConfigFiles: ['.credentials.yaml', '.env', 'cordis.patch.yml'],
-    permissionAllowed(input) {
+    permissionAllowed(input, mode) {
       // dsh's bash/fs tools can request a per-call sandbox escalation. Never
       // auto-approve a wider boundary than the standing card sandbox.
       if (!input || typeof input !== 'object' || !('sandbox_permissions' in input)) return true;
-      return input.sandbox_permissions === 'read-only' || input.sandbox_permissions === 'workspace-write';
+      return input.sandbox_permissions === 'read-only' || (mode === 'workspace-write' && input.sandbox_permissions === 'workspace-write');
     },
     unavailable(agent) {
       if (agent.role !== 'executor') return 'DeepSeek 本阶段只支持执行者，不支持调度者。';

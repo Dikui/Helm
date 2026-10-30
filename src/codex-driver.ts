@@ -104,16 +104,17 @@ export class CodexDriver implements Driver {
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
+    const readOnly = options.sandbox.mode === 'read-only';
     const agent = options.agent;
     if (coordinator && (agent.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
       || options.sandbox.writableRoots.length)) {
       throw new Error('CodexCoordinatorDriver requires a read-only coordinator round');
     }
-    if (!coordinator && (agent.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
+    if (!coordinator && (agent.role !== 'executor' || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1))) {
       throw new Error('CodexExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
+    if (!readOnly && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
     if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
@@ -143,7 +144,7 @@ export class CodexDriver implements Driver {
       const pluginRoots = await localPluginSkillRoots(env.CODEX_HOME ?? join(options.env.HOME ?? homedir(), '.codex'));
       await rpc.request('skills/extraRoots/set', { extraRoots: [...agent.skillsPath ? [agent.skillsPath] : [], ...pluginRoots] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
-        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: coordinator ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
+        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: readOnly ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
@@ -152,7 +153,7 @@ export class CodexDriver implements Driver {
           ...(!coordinator ? { shell_environment_policy: { inherit: 'all', ignore_default_excludes: true,
             exclude: [], include_only: [], set: {}, experimental_use_profile: false } } : {}),
           ...(agent.fast ? { service_tier: 'fast' } : {}),
-          ...(!coordinator ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
+          ...(!readOnly ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             ...(server.type === 'stdio' ? { command: server.command, args: server.args, env: server.env }
               : { url: server.url, http_headers: server.headers }),
@@ -170,7 +171,7 @@ export class CodexDriver implements Driver {
           if (sent || cancelled) throw new Error('Codex session already received input or was cancelled');
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
-            approvalPolicy: 'never', sandboxPolicy: coordinator ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
+            approvalPolicy: 'never', sandboxPolicy: readOnly ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
             ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },

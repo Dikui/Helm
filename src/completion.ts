@@ -49,6 +49,18 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (card.needsVerification && !passed.length) {
     throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须至少有一票正常结束且通过的验收才能标完成；计票由调度者负责。');
   }
+  if (card.readOnly) {
+    const checkedCommit = card.needsVerification ? verificationCommit(store, card) : null;
+    if (card.needsVerification && !passed.some(item => item.startCommit === checkedCommit)) {
+      throw new RuleError('VERIFICATION_OUTDATED', '当前提交没有有效的通过验收票，须重新验收。');
+    }
+    return store.transaction(() => {
+      store.db.prepare("UPDATE cards SET status = 'completed' WHERE id = ?").run(card.id);
+      store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit: null, checkedCommit }, { workId: work.id, cardId: card.id });
+      refreshCardReadiness(store, work.id);
+      return cardDetails(store, work.id, card.id);
+    });
+  }
   const executed = dispatches.some(item => item.purpose === 'execution');
   if (!work.workPath || !work.workBranch || (executed && !card.cardBranch)) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
   if (dispatchGit(work.workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(work.workPath, 'status', '--porcelain')) {

@@ -36,6 +36,15 @@ export async function reconcileStartup(store: TaskStore) {
         { pgid: row.browser_pgid, startedAt: row.browser_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
     }
   }
+  // Read-only executors can run in the project directory, outside the copy tree.
+  const readOnlyProcesses = store.db.prepare(`SELECT d.id, d.work_id, d.card_id, d.pgid, d.process_started_at FROM dispatches d
+    JOIN cards c ON c.id = d.card_id WHERE c.read_only = 1 AND d.purpose = 'execution' AND d.pgid IS NOT NULL`).all();
+  for (const row of readOnlyProcesses) {
+    if (row.process_started_at && await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) {
+      store.transaction(() => store.appendEvent(runtime, { type: 'dispatch', id: String(row.id) }, 'dispatch-processes-cleaned',
+        { pgid: row.pgid, startedAt: row.process_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
+    }
+  }
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
 
@@ -107,7 +116,7 @@ export async function reconcileStartup(store: TaskStore) {
       } else if (['merging', 'merge-queued'].includes(work.status)) await mergeReviewedWork(store, work.id);
     }
     for (const node of cardGraph(store, work.id)) {
-      if (node.type !== 'card' || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
+      if (node.type !== 'card' || node.readOnly || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
       removeCardCopy(store, { ...node, workPath: node.workPath ?? join(root, work.id, node.id), cardBranch: node.cardBranch ?? `helm-card/${work.id}/${node.id}` });
     }
     const workPath = work.workPath ?? join(root, work.id, '_work');

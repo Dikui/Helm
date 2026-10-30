@@ -10,7 +10,7 @@ import { CardInspector } from './CardInspector.js';
 import { graphSummary, dispatchDuration } from './presentation.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
-import { gateDecision, nodeTitle, NodeStatus, AggregateBadge } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus, AggregateBadge, ReadOnlyBadge } from './labels.js';
 import type { Dispatch, GraphNode } from './types.js';
 import type { Work } from '../../../shared/types.js';
 import { CoordinatorView } from './CoordinatorView.js';
@@ -71,7 +71,7 @@ export function CardGraphView({ work }: { work: Work }) {
       <aside className="cg-inspector" aria-label={t(coordinatorSelected ? 'tokenCoordinator' : selected?.type === 'gate' ? 'graphGateInspector' : 'graphInspector')}>
         {coordinatorSelected ? <CoordinatorTokens rounds={rounds.data?.rounds} /> : !selected ? <p className="hint">{t('graphSelect')}</p> : <>
           <header className="cg-inspector-head"><small className="muted">{t(selected.type === 'card' ? 'graphCard' : 'graphGate')}{selected.type === 'card' ? ` ${ordinal(selected.id)}` : ''}</small><h2>{nodeTitle(selected)}</h2>
-            <div className="row"><NodeStatus node={selected} />{selected.type === 'card' && selected.aggregate && <AggregateBadge />}{selected.type === 'card' && <time className="muted">{selectedDispatches ? elapsed(new Date(0).toISOString(), dispatchDuration(selectedDispatches, now)) : '—'}</time>}
+            <div className="row"><NodeStatus node={selected} />{selected.type === 'card' && selected.readOnly && <ReadOnlyBadge />}{selected.type === 'card' && selected.aggregate && <AggregateBadge />}{selected.type === 'card' && <time className="muted">{selectedDispatches ? elapsed(new Date(0).toISOString(), dispatchDuration(selectedDispatches, now)) : '—'}</time>}
               {!!summary.sendBacks.get(selected.id) && <span className="cg-rework">↺ {t('graphSendBackPrefix')} {summary.sendBacks.get(selected.id)} {t('graphSendBackSuffix')}</span>}</div>
             {selected.type === 'card' && <UsageSummary usage={selected.usage} />}
           </header>
