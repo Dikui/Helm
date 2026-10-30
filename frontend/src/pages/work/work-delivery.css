@@ -7,3 +7,5 @@
 .release-panel .conflict-diff { max-height: 440px; overflow: auto; white-space: pre; padding: 12px; border: 1px solid var(--border); }
 @media (max-width: 600px) { .release-panel { margin: 12px; padding: 16px; } }
 .brief-view > .release-panel { width: 100%; max-width: 960px; min-width: 0; margin: 0 auto; }
+/* Above chat and structure the panel scrolls, so the graph keeps its height. */
+.inset > .release-panel { flex-shrink: 0; max-height: 180px; overflow: auto; }
