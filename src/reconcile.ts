@@ -45,6 +45,13 @@ export async function reconcileStartup(store: TaskStore) {
         { pgid: row.pgid, startedAt: row.process_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
     }
   }
+  const rounds = store.db.prepare(`SELECT id, work_id, event_ids, pgid, process_started_at FROM coordinator_rounds WHERE status = 'running'`).all();
+  for (const row of rounds) {
+    if (row.pgid && row.process_started_at && await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) {
+      store.transaction(() => store.appendEvent(runtime, { type: 'coordinator-round', id: String(row.id) }, 'round-processes-cleaned',
+        { pgid: row.pgid, startedAt: row.process_started_at }, { workId: String(row.work_id) }));
+    }
+  }
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
 
@@ -68,7 +75,7 @@ export async function reconcileStartup(store: TaskStore) {
       });
     }
   }
-  for (const row of store.db.prepare(`SELECT id, work_id, event_ids FROM coordinator_rounds WHERE status = 'running'`).all()) {
+  for (const row of rounds) {
     store.transaction(() => {
       store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = 'aborted' WHERE id = ?`).run(new Date().toISOString(), String(row.id));
       store.appendEvent(runtime, { type: 'coordinator-round', id: String(row.id) }, 'round-ended',

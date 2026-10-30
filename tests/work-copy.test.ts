@@ -71,26 +71,20 @@ test('创建工作可选择其他本地基准分支，拒绝无效基准且不�
   assert.equal(git('for-each-ref', '--format=%(refname)'), refs);
 });
 
-test('detached HEAD 新建工作必须指定本地基准分支，拒绝后可用原请求重试', async t => {
+test('detached HEAD 新建工作视为 git 尚未就绪，仍可对齐且不记录基准分支', async t => {
   const daemon = await uiFixture();
   t.after(() => daemon.close());
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
   git('checkout', '--detach');
   const refs = git('for-each-ref', '--format=%(refname)');
   const copies = git('worktree', 'list', '--porcelain');
-  const params = { projectId: daemon.project.id, key: 'detached', body: '选择基准后创建' };
-  const rejected = await daemon.call('send-message', params);
-  assert.equal(rejected.status, 400);
-  assert.equal(rejected.error.code, 'INVALID_BASE_BRANCH');
-  assert.match(rejected.error.reason, /请指定基准分支/);
-  assert.deepEqual((await daemon.call('list-works')).result, []);
+  const params = { projectId: daemon.project.id, key: 'detached', body: '先只读分析' };
+  const response = await daemon.call('send-message', params);
+  assert.equal(response.ok, true);
+  assert.equal(response.result.work.baseRef, null);
+  assert.equal(response.result.work.baseCommit, null);
   assert.equal(git('for-each-ref', '--format=%(refname)'), refs);
   assert.equal(git('worktree', 'list', '--porcelain'), copies);
-
-  const response = await daemon.call('send-message', { ...params, baseRef: 'main' });
-  assert.equal(response.ok, true);
-  assert.equal(response.result.work.baseRef, 'main');
-  assert.equal(response.result.work.baseCommit, null);
   assert.equal((await daemon.call('list-works')).result.length, 1);
 });
 

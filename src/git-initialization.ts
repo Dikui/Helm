@@ -16,7 +16,7 @@ export interface GitInitialization {
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const largeBytes = 32 * 1024 * 1024;
 const dependencies = new Set(['node_modules', '.venv', 'venv', 'dist', 'build', 'target', '__pycache__', '.next', '.cache']);
-const secret = /^(?:\.env.*|.*\.(?:pem|key)|id_rsa.*|credentials.*)$/i;
+const secret = /^(?:\.env.*|.*\.(?:pem|key|p12|pfx|keystore|jks)|id_.*|credentials.*)$/i;
 
 function git(path: string, ...args: string[]) {
   return execFileSync('git', ['-C', path, '-c', 'core.hooksPath=/dev/null', ...args], {

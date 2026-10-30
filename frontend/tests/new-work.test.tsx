@@ -121,7 +121,7 @@ test('基准加载、失败和空分支时不能开始，重试和刷新后可�
   await screen.findByText(/此项目尚无可用分支/);
   expect((base as HTMLSelectElement).disabled).toBe(true);
   expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
-  git('branch', 'restored');
+  git('checkout', '-b', 'restored');
   fireEvent.click(screen.getByRole('button', { name: '刷新分支' }));
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('restored'));
   await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
@@ -136,10 +136,20 @@ const draft = (key: string, requirements: string): import('../../src/driver.js')
   }), check: value => expect((value as any).ok).toBe(true),
 });
 
-test('切换到非 git 项目不读取或提交基准分支，可创建、确认并查看工作说明', async () => {
+for (const state of ['plain', 'unborn', 'detached'] as const) test(`切换到 ${state} 项目不读取或提交基准分支，可创建、确认并查看工作说明`, async () => {
   daemon = await uiFixture([[draft('plain', '非 git 工作')]]);
   const directory = join(daemon.directory, 'plain');
   await mkdir(directory);
+  if (state !== 'plain') {
+    const git = (...args: string[]) => execFileSync('git', ['-C', directory, ...args], { stdio: 'pipe' });
+    git('init', '-b', 'main');
+    if (state === 'detached') {
+      await writeFile(join(directory, 'notes.txt'), 'baseline');
+      git('add', 'notes.txt');
+      git('-c', 'user.name=Test', '-c', 'user.email=test@localhost', 'commit', '-m', 'baseline');
+      git('checkout', '--detach');
+    }
+  }
   const project = (await daemon.call('register-project', { path: directory })).result;
   const submissions: any[] = [], branchReads: string[] = [];
   const realFetch = fetch;
@@ -154,14 +164,14 @@ test('切换到非 git 项目不读取或提交基准分支，可创建、确认
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('main'));
   fireEvent.change(screen.getByLabelText('项目'), { target: { value: project.id } });
   expect(screen.queryByLabelText('基准分支')).toBeNull();
-  expect(await screen.findByText(/此项目尚未使用 git/)).toBeTruthy();
+  expect(await screen.findByText(/项目 git 尚未就绪/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '非 git 工作' } });
   await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
   const brief = await screen.findByRole('complementary', { name: '工作说明' });
   const confirm = await within(brief).findByRole('button', { name: '确认这一版' });
   await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
-  expect(within(brief).getByText(/此项目尚未使用 git/)).toBeTruthy();
+  expect(within(brief).getByText(/项目 git 尚未就绪/)).toBeTruthy();
   expect(branchReads).not.toContain(project.id);
   expect(submissions).toHaveLength(1);
   expect(submissions[0].projectId).toBe(project.id);
@@ -171,10 +181,10 @@ test('切换到非 git 项目不读取或提交基准分支，可创建、确认
   fireEvent.click(confirm);
   const briefLink = await screen.findByRole('link', { name: '工作说明' });
   fireEvent.click(briefLink);
-  expect(await screen.findByText(/此项目尚未使用 git/)).toBeTruthy();
+  expect(await screen.findByText(/项目 git 尚未就绪/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(screen.getByText(/This project does not use git yet/)).toBeTruthy();
-  expect(existsSync(join(directory, '.git'))).toBe(false);
+  expect(screen.getByText(/Git is not ready for this project/)).toBeTruthy();
+  expect(existsSync(join(directory, '.git'))).toBe(state !== 'plain');
 });
 
 for (const language of ['zh', 'en'] as const) for (const hasCopy of [false, true]) {

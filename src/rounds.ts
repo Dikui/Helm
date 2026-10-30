@@ -8,7 +8,7 @@ import { cardGraph } from './graph.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
-import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
+import { cleanupWorktreeProcesses, processStartTime, type ManagedProcess } from './processes.js';
 import { projectEnvironmentNames } from './project-environment.js';
 
 export interface StartupBrief {
@@ -209,9 +209,9 @@ export class RoundScheduler {
       this.sessions.delete(workId);
       if (stopReason || this.stopping || abortReason) { reason = this.stopping || abortReason ? 'aborted' : stopReason!; finalAnswer = undefined; }
       if (this.stopping) abortReason ??= '运行层重启';
-      if (brief.work.workPath) {
+      if (brief.work.workPath || processes.length) {
         try {
-          const cleaned = await cleanupWorktreeProcesses(brief.work.workPath, processes);
+          const cleaned = await cleanupWorktreeProcesses(brief.work.workPath ?? projectPath(this.store, workId), processes, Boolean(brief.work.workPath));
           if (cleaned.pids.length) this.store.transaction(() => {
             this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-processes-cleaned', cleaned, { workId });
           });
@@ -281,10 +281,11 @@ export class RoundScheduler {
         onProcess: process => {
           processes.push(process);
           if (!accepting) return;
+          const startedAt = processStartTime(process.pid) ?? process.startedAt;
           this.store.transaction(() => {
-            this.store.db.prepare('UPDATE coordinator_rounds SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, process.startedAt, id);
+            this.store.db.prepare('UPDATE coordinator_rounds SET pgid = ?, process_started_at = ? WHERE id = ?').run(process.pgid, startedAt, id);
             this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'process-started',
-              { ...process, cwd, role: 'coordinator' }, { workId });
+              { ...process, startedAt, cwd, role: 'coordinator' }, { workId });
           });
         },
       });

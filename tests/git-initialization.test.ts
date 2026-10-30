@@ -208,6 +208,47 @@ test('用户只执行 git init 尚无初始提交时明确提示，仍能拒绝�
   assert.equal((await ctx.dispatch(card.id)).purpose, 'execution');
 });
 
+for (const state of ['unborn', 'detached'] as const) for (const existingGate of [false, true]) for (const purpose of ['execution', 'verification'] as const) {
+  test(`${state} 项目的 ${purpose} 派单${existingGate ? '复用' : '创建'}初始化关卡，不绕过用户决定`, async t => {
+    const ctx = fixture(t);
+    const first = ctx.card('work', purpose === 'verification');
+    if (existingGate) await assert.rejects(ctx.dispatch(first.id, 'work', purpose), code('GIT_INITIALIZATION_PENDING'));
+    const gateId = existingGate ? ctx.gate().id : undefined;
+    git(ctx.project, 'init', '-b', 'user-base');
+    if (state === 'detached') {
+      git(ctx.project, 'add', 'README.md');
+      git(ctx.project, '-c', 'user.name=Test', '-c', 'user.email=test@localhost', 'commit', '-m', 'baseline');
+      git(ctx.project, 'checkout', '--detach');
+    }
+    // Use a new card to reach the readiness check even when the first card already waits on a gate.
+    const second = ctx.card('work', purpose === 'verification');
+    await assert.rejects(ctx.dispatch(second.id, 'work', purpose), code('GIT_INITIALIZATION_PENDING'));
+    if (gateId) assert.equal(ctx.gate().id, gateId);
+    assert.equal(ctx.store.gates('work').length, 1);
+    assert.equal(ctx.gate().status, 'pending');
+    assert.throws(() => ctx.decide(), code('GIT_INITIAL_COMMIT_REQUIRED'));
+    assert.equal(ctx.store.work('work').workBranch, null);
+    assert.deepEqual(listDispatches(ctx.store, 'work'), []);
+    assert.equal(cardDetails(ctx.store, 'work', second.id).status, 'waiting');
+  });
+}
+
+test('SSH 私钥和常见私钥容器进入可疑路径与预填规则，确认后不进入初始提交', async t => {
+  const ctx = fixture(t);
+  const names = ['id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa', 'id_custom', 'id_ed25519.pub',
+    'client.p12', 'client.pfx', 'wallet.keystore', 'server.jks', 'UPPER.PFX'];
+  mkdirSync(join(ctx.project, 'keys'));
+  for (const name of names) writeFileSync(join(ctx.project, 'keys', name), 'private-key-fixture');
+  await assert.rejects(ctx.dispatch(ctx.card().id), code('GIT_INITIALIZATION_PENDING'));
+  const details = ctx.gate().gitInitialization!;
+  assert.deepEqual(details.suspiciousPaths.map(item => item.path).sort(), names.map(name => `keys/${name}`).sort());
+  assert.ok(details.suspiciousPaths.every(item => item.reason === 'secret'));
+  assert.deepEqual(details.ignoreRules.trim().split('\n').sort(), names.map(name => `/keys/${name}`).sort());
+  ctx.decide('initialize', details.ignoreRules);
+  assert.deepEqual(git(ctx.project, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n'), ['.gitignore', 'README.md']);
+  for (const name of names) assert.equal(readFileSync(join(ctx.project, 'keys', name), 'utf8'), 'private-key-fixture');
+});
+
 test('上次进程中断留下的临时路径会明确报告，不把残留元数据提交进项目，处理后可重试', async t => {
   const ctx = fixture(t);
   await assert.rejects(ctx.dispatch(ctx.card().id), code('GIT_INITIALIZATION_PENDING'));

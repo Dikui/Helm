@@ -19,8 +19,9 @@ test('HTTP 项目读取包含分支、HEAD 和改动数，git 不可读时保留
   await writeFile(join(path, 'new\nfile.md'), 'untracked');
   assert.equal((await read()).uncommittedChanges, 2);
   git('checkout', '--detach', head);
+  assert.equal((await read()).isGit, false);
   assert.equal((await read()).currentBranch, null);
-  assert.equal((await read()).headCommit, head);
+  assert.equal((await read()).headCommit, null);
   await rm(path, { recursive: true, force: true });
   const unavailable = await read();
   assert.equal(unavailable.id, daemon.project.id);
@@ -115,5 +116,12 @@ test('HTTP 列出子目录并标出 git 仓库；登记只接受已有目录，�
   // Empty git directories are accepted without Helm adding an initial commit.
   execFileSync('git', ['init', directory], { stdio: 'ignore' });
   assert.equal((await daemon.call('register-project', { path: directory })).result.id, project.id);
+  const empty = (await daemon.call('list-projects')).result.find((item: any) => item.id === project.id);
+  assert.equal(empty.isGit, false);
+  assert.equal(empty.currentBranch, null);
+  assert.equal(empty.headCommit, null);
+  const work = await daemon.call('send-message', { projectId: project.id, key: 'unborn', body: '先只读' });
+  assert.equal(work.ok, true);
+  assert.equal(work.result.work.baseRef, null);
   assert.throws(() => execFileSync('git', ['-C', directory, 'rev-parse', '--verify', 'HEAD'], { stdio: 'pipe' }));
 });

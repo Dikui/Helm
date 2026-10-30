@@ -179,8 +179,9 @@ export class ClaudeDriver implements Driver {
     const sdkOptions: Options = {
       // The coordinator only uses helm MCP and read tools; the user's global plugins, hooks, CLAUDE.md and connectors would
       // only grow every round's context (ADR 0014). A dedicated home holds just the API settings, so it still loads.
+      // Read-only executors must not start project/local hooks or discover project MCP servers.
       cwd, env, pathToClaudeCodeExecutable: executable,
-      settingSources: agent.home === 'dedicated' ? ['user'] : coordinator ? [] : ['user', 'project', 'local'],
+      settingSources: agent.home === 'dedicated' ? ['user'] : coordinator ? [] : readOnly ? ['user'] : ['user', 'project', 'local'],
       ...(coordinator ? { strictMcpConfig: true } : {}),
       settings: { autoMemoryEnabled: false, fastMode: false, ...(coordinator ? { disableClaudeAiConnectors: true } : {}),
         // Ask rules precede settings allow rules; otherwise they can skip our

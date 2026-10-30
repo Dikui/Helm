@@ -12,6 +12,20 @@ export function projectGitRoot(path: string): string | null {
   } catch { return null; }
 }
 
+// Copies need a checked-out local branch with a commit, not just git init.
+export function projectGitReady(path: string): boolean {
+  if (!projectGitRoot(path)) return false;
+  const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
+  }).trim();
+  try {
+    const branch = git('symbolic-ref', 'HEAD');
+    if (!branch.startsWith('refs/heads/')) return false;
+    git('rev-parse', '--verify', '--end-of-options', `${branch}^{commit}`);
+    return true;
+  } catch { return false; }
+}
+
 // shortcut: symlinked directories are not listed; follow them if users keep projects behind links.
 export function listDirectories(path = homedir()) {
   const directory = resolve(path);
@@ -36,9 +50,9 @@ export function projectBranches(path: string) {
 
 // Keep live git metadata out of persisted project settings and write responses.
 export function projectGitStatus(project: Record<string, unknown>) {
-  const isGit = Boolean(projectGitRoot(String(project.path)));
+  const isGit = projectGitReady(String(project.path));
   if (!isGit) return { ...project, isGit, currentBranch: null, headCommit: null, uncommittedChanges: null,
-    gitStatusReason: '项目目录不是可读取的 git 工作树。' };
+    gitStatusReason: '项目目录没有可读取的 git 工作树、本地检出分支或初始提交。' };
   const git = (...args: string[]) => execFileSync('git', ['-C', String(project.path), ...args], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3_000,
   });

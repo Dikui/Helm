@@ -268,7 +268,7 @@ test('界面真实冒烟：新建 → 对齐 → 执行 → 审核，真实 Clau
     await screenshot('02c-register-directory', registration);
     await click(registration.getByRole('button', { name: '登记', exact: true }));
     await registration.waitFor({ state: 'hidden' });
-    await visible(main.getByText('此项目尚未使用 git；调度者和只读卡片在项目目录只读运行。写代码或验收需要 git 仓库。', { exact: true }));
+    await visible(main.getByText('项目 git 尚未就绪；调度者和只读卡片在项目目录只读运行。写代码或验收前，需要检出有提交的本地分支。', { exact: true }));
     assert.equal(await main.getByRole('combobox', { name: '基准分支', exact: true }).count(), 0);
     assert.equal(await main.getByRole('button', { name: '开始', exact: true }).isEnabled(), true);
     assert.equal(existsSync(join(plain, '.git')), false);

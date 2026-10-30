@@ -786,6 +786,7 @@ test('Claude 只读卡片沿用只读沙箱并拒绝写工具和 Bash 越界', a
   const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
+      assert.deepEqual(sdk.settingSources, ['user'], '只读执行者不加载项目和本地 hooks 或项目 MCP');
       assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd] });
       assert.ok(!(sdk.tools as string[]).includes('Write'));
       assert.ok(!(sdk.tools as string[]).includes('Edit'));

@@ -9,7 +9,7 @@ import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
 import { redactDispatchContent, redactDispatchText } from './project-environment.js';
-import { projectGitRoot } from './project-reads.js';
+import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 
 export interface Dispatch {
@@ -176,7 +176,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
-  if ((purpose === 'verification' || !card.readOnly) && !projectGitRoot(projectPath(store, work.id))) {
+  if ((purpose === 'verification' || !card.readOnly) && !projectGitReady(projectPath(store, work.id))) {
     requireGitInitialization(store, work.id, card.id);
   }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.

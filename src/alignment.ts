@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { RuleError, TaskStore, type Actor, type WorkDescription } from './store.js';
 import { refreshCardReadiness } from './graph.js';
 import { deleteBranch } from './branch-cleanup.js';
 import { runtimeMessage } from './work-control.js';
-import { projectGitRoot } from './project-reads.js';
+import { projectGitReady, projectGitRoot } from './project-reads.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
@@ -16,6 +16,25 @@ function git(path: string, ...args: string[]) {
 function resolveBaseCommit(project: string, baseRef: string) {
   const ref = `refs/heads/${baseRef}`;
   return git(project, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`);
+}
+
+function validWorkCopy(project: string, path: string, branch: string) {
+  try {
+    return !lstatSync(path).isSymbolicLink() && git(path, 'rev-parse', '--show-toplevel') === path
+      && git(path, 'symbolic-ref', '--short', 'HEAD') === branch
+      && realpathSync(git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+        === realpathSync(git(project, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
+  } catch { return false; }
+}
+
+function assertOwnedWorkPath(store: TaskStore, workId: string, path: string) {
+  const expected = resolve(join(store.dataDir, 'worktrees', workId, '_work'));
+  let parent = dirname(path);
+  while (!existsSync(parent)) parent = dirname(parent);
+  const suffix = relative(realpathSync(store.dataDir), realpathSync(parent));
+  if (path !== expected || suffix === '..' || suffix.startsWith('../') || isAbsolute(suffix)) {
+    throw new RuleError('WORK_PATH_CONFLICT', '工作副本只能在 Helm 数据目录内修复。');
+  }
 }
 
 export function projectPath(store: TaskStore, workId: string) {
@@ -55,12 +74,31 @@ export function ensureWorkCopy(store: TaskStore, workId: string) {
   let addingCopy = false;
   try {
     const branches = git(project, 'for-each-ref', '--format=%(refname:short)', `refs/heads/${workBranch}`);
-    if (!branches) { git(project, 'branch', workBranch, baseCommit); createdBranch = true; }
-    else if (!work.workBranch && git(project, 'rev-parse', workBranch) !== baseCommit) {
-      throw new RuleError('WORK_BRANCH_CONFLICT', '已有工作分支不指向工作的基准提交。');
+    if (branches && !work.workBranch) {
+      // A rolled-back transaction may leave a branch at an older base commit.
+      // Only reuse it when every commit is already contained in the current base.
+      try { git(project, 'merge-base', '--is-ancestor', `refs/heads/${workBranch}`, baseCommit); }
+      catch { throw new RuleError('WORK_BRANCH_CONFLICT', '已有工作分支包含基准之外的提交。'); }
     }
+    const validCopy = validWorkCopy(project, workPath, workBranch);
+    if (!work.workBranch) {
+      assertOwnedWorkPath(store, work.id, workPath);
+      if (!validCopy) {
+        // Only this Helm-owned path is disposable; never follow a parent symlink outside dataDir.
+        if (existsSync(workPath) && !lstatSync(workPath).isSymbolicLink()) {
+          try { git(project, 'worktree', 'remove', '--force', workPath); } catch { /* Checkout may have stopped before registration. */ }
+        }
+        rmSync(workPath, { recursive: true, force: true });
+        git(project, 'worktree', 'prune');
+      }
+      if (branches && git(project, 'rev-parse', `refs/heads/${workBranch}`) !== baseCommit) {
+        if (validCopy) git(workPath, 'reset', '--keep', baseCommit);
+        else git(project, 'branch', '-f', workBranch, baseCommit);
+      }
+    }
+    if (!branches) { git(project, 'branch', workBranch, baseCommit); createdBranch = true; }
     if (existsSync(workPath)) {
-      if (git(workPath, 'rev-parse', '--show-toplevel') !== workPath || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch) {
+      if (!validCopy) {
         throw new RuleError('WORK_PATH_CONFLICT', '工作分支的 _work 路径已被占用。');
       }
     } else {
@@ -107,7 +145,7 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   if (existing) return existing;
   const path = projectPath(store, work.id);
   if (work.baseRef && params.baseRef && params.baseRef !== work.baseRef) throw new RuleError('BASE_REF_FIXED', '创建后不能改变工作的基准分支。');
-  const baseRef = projectGitRoot(path) ? recordBaseBranch(store, work.id, params.baseRef) : null;
+  const baseRef = (work.baseRef ? projectGitRoot(path) : projectGitReady(path)) ? recordBaseBranch(store, work.id, params.baseRef) : null;
   const baseCommit = baseRef ? work.baseCommit ?? resolveBaseCommit(path, baseRef) : null;
   let gate = store.db.prepare(`SELECT id FROM gates WHERE work_id = ? AND kind = 'work-confirmation' AND status = 'pending'`).get(work.id);
   if (!gate) {
@@ -147,7 +185,7 @@ export function confirmDescription(store: TaskStore, actor: Actor, params: {
   if (!description) throw new RuleError('NO_DESCRIPTION', '调度者尚未起草工作说明。');
   const { workPath, workBranch } = work;
   const project = projectPath(store, work.id);
-  const baseRef = projectGitRoot(project) ? recordBaseBranch(store, work.id) : null;
+  const baseRef = (work.baseRef ? projectGitRoot(project) : projectGitReady(project)) ? recordBaseBranch(store, work.id) : null;
   let baseCommit = baseRef ? work.baseCommit ?? description.baseCommit : null;
   if (workPath && workBranch && (git(workPath, 'rev-parse', '--show-toplevel') !== workPath
     || git(workPath, 'symbolic-ref', '--short', 'HEAD') !== workBranch)) {

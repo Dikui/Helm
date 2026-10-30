@@ -15,7 +15,7 @@ import { reviewReportSchema } from './review-report.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
-import { listDirectories, projectBranches, projectGitRoot, projectGitStatus } from './project-reads.js';
+import { listDirectories, projectBranches, projectGitReady, projectGitRoot, projectGitStatus } from './project-reads.js';
 import { coordinatorNotes, listRounds, roundOutput } from './round-reads.js';
 import { deleteLibraryEntry, installSkill, libraryName, listLibrary, mcpSchema, registerMcp } from './library.js';
 import { attachmentsSchema, saveAttachments } from './attachments.js';
@@ -480,7 +480,7 @@ export const operations: readonly Operation[] = [
           gateId, workId, 'work-confirmation', 'pending', '确认工作说明', created.time, created.id,
         );
         store.appendEvent(runtime, { type: 'gate', id: gateId }, 'needs-user-attention', { kind: 'work-confirmation' }, { workId });
-        if (projectGitRoot(projectPath(store, workId))) recordBaseBranch(store, workId, params.baseRef);
+        if (projectGitReady(projectPath(store, workId))) recordBaseBranch(store, workId, params.baseRef);
       }
       return { work: store.work(workId), message: store.message(workId, params.key) };
     },
