@@ -133,5 +133,14 @@ export async function reconcileStartup(store: TaskStore) {
     }
     await compressWorkOutputs(store, work.id);
   }
-  store.transaction(() => checkOutputUsage(store));
+  store.transaction(() => {
+    store.db.prepare(`INSERT OR IGNORE INTO wake_queue (event_id, work_id)
+      SELECT e.id, c.work_id FROM cards c JOIN works w ON w.id = c.work_id
+      JOIN events e ON e.id = (SELECT MAX(id) FROM events WHERE dispatch_id = c.latest_dispatch_id AND action = 'dispatch-ended')
+      WHERE w.status = 'executing' AND c.auto_flow IS NOT NULL AND c.status NOT IN ('completed', 'cancelled')
+        AND NOT EXISTS (SELECT 1 FROM dispatches WHERE card_id = c.id AND status IN ('queued', 'running'))
+        AND NOT EXISTS (SELECT 1 FROM events WHERE card_id = c.id AND id > e.id
+          AND action IN ('card-completed', 'dispatch-created', 'auto-flow-stopped'))`).run();
+    checkOutputUsage(store);
+  });
 }

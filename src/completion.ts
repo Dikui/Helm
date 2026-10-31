@@ -3,7 +3,14 @@ import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
 import { dispatchGit, listDispatches, revokeDispatch, verificationCommit } from './dispatch.js';
 import { cancelCard as recordCancellation, cardDetails, refreshCardReadiness, type Card } from './graph.js';
-import { RuleError, TaskStore, type Actor } from './store.js';
+import { RuleError, TaskStore, type Actor, type HelmEvent } from './store.js';
+
+function wakeAutoCompletion(store: TaskStore, actor: Actor, card: Card, event: HelmEvent) {
+  if (actor.type !== 'runtime' || !card.autoFlow) return;
+  const newlyReady = store.db.prepare("SELECT 1 FROM events WHERE work_id = ? AND action = 'card-ready' AND id > ?").get(card.workId, event.id);
+  const active = store.db.prepare("SELECT 1 FROM dispatches WHERE work_id = ? AND status IN ('queued', 'running')").get(card.workId);
+  if (newlyReady || !active) store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, card.workId);
+}
 
 export function removeCardCopy(store: TaskStore, card: Card) {
   if (!card.workPath && !card.cardBranch) return;
@@ -56,8 +63,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     }
     return store.transaction(() => {
       store.db.prepare("UPDATE cards SET status = 'completed' WHERE id = ?").run(card.id);
-      store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit: null, checkedCommit }, { workId: work.id, cardId: card.id });
+      const event = store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit: null, checkedCommit }, { workId: work.id, cardId: card.id });
       refreshCardReadiness(store, work.id);
+      wakeAutoCompletion(store, actor, card, event);
       return cardDetails(store, work.id, card.id);
     });
   }
@@ -94,8 +102,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     store.db.prepare(`UPDATE cards SET status = 'completed' WHERE id = ?`).run(card.id);
     store.db.prepare(`UPDATE artifacts SET ref = ?, commit_sha = ? WHERE kind = 'branch'
       AND dispatch_id IN (SELECT id FROM dispatches WHERE card_id = ?)`).run(work.workBranch ?? work.baseRef, mergeCommit, card.id);
-    store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit, checkedCommit }, { workId: work.id, cardId: card.id });
+    const event = store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit, checkedCommit }, { workId: work.id, cardId: card.id });
     refreshCardReadiness(store, work.id);
+    wakeAutoCompletion(store, actor, card, event);
     return cardDetails(store, work.id, card.id);
   });
 }

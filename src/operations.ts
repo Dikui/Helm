@@ -56,6 +56,9 @@ export const eventFilterSchema = z.object({
 const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();
 const dependencySchema = z.object({ workId: z.string().min(1), upstream: nodeSchema, downstream: nodeSchema }).strict();
 const writeScopesSchema = z.array(z.string().trim().min(1)).max(50).optional();
+const autoFlowSchema = z.object({ verifications: z.array(z.object({
+  agentId: z.string().min(1), content: z.string(), needsBrowser: z.boolean().optional(),
+}).strict()) }).strict();
 const projectColumns = 'id, name, path, created_at, default_coordinator_agent_id AS defaultCoordinatorAgentId';
 const projectSettings = (store: TaskStore, project: Record<string, unknown>) =>
   ({ ...project, environmentNames: projectEnvironmentNames(store, String(project.id)) });
@@ -621,15 +624,15 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, gateId }) => gateHistory(store, workId, gateId),
   }),
   operation({
-    name: 'create-card', description: '建卡片；readOnly 标记只读卡片（调研、分析、审查），默认 false 表示写代码；aggregate 标记汇总卡片，上游取消、撤回或跳过时只等其余上游完成；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
+    name: 'create-card', description: '建卡片；autoFlow 预写验收票并启用自动完成，不需验收时 verifications 须为空；readOnly 标记只读卡片（调研、分析、审查），默认 false 表示写代码；aggregate 标记汇总卡片，上游取消、撤回或跳过时只等其余上游完成；writeScopes 写预计改动的仓库相对路径前缀，卡片图对没有依赖、范围重叠的卡片给出 writeScopeWarnings（只提示，不拦）', callers: ['coordinator-round'], keyed: true, mutates: true,
     schema: z.object({ workId: z.string().min(1), key: z.string().min(1), content: z.string().trim().min(1), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), readOnly: z.boolean().optional(), repairOfCardId: z.string().min(1).optional(),
-      writeScopes: writeScopesSchema }).strict(),
+      writeScopes: writeScopesSchema, autoFlow: autoFlowSchema.optional() }).strict(),
     execute: ({ store, actor }, params) => createCard(store, actor, params),
   }),
   operation({
-    name: 'update-card', description: '修改卡片内容、只读标记（readOnly）、汇总标记（aggregate）、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
+    name: 'update-card', description: '修改卡片内容、自动流程（autoFlow 整组替换，null 清除）、只读标记（readOnly）、汇总标记（aggregate）、是否需要验收或写入范围（writeScopes 整组替换）', callers: ['coordinator-round'], keyed: false, mutates: true,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1), content: z.string().trim().min(1).optional(), needsVerification: z.boolean().optional(), aggregate: z.boolean().optional(), readOnly: z.boolean().optional(),
-      writeScopes: writeScopesSchema }).strict(),
+      writeScopes: writeScopesSchema, autoFlow: autoFlowSchema.nullable().optional() }).strict(),
     execute: ({ store, actor }, params) => updateCard(store, actor, params),
   }),
   operation({

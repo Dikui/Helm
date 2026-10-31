@@ -20,6 +20,9 @@ export function CardInspector({ card, dispatches, initialDispatchId, initialStep
   const [detailOpen, setDetailOpen] = useState(Boolean(initialDispatchId || initialStep));
   return <>
     <dl className="cg-kv"><dt>{t('executors')}</dt><dd>{card.agentId ?? t('graphNoAgent')}</dd><dt>{t('graphStep')}</dt><dd>{card.currentStep || '—'}</dd><dt>{t('graphLatestStep')}</dt><dd>{card.latestStepSummary || t('graphNoSteps')}</dd></dl>
+    {card.autoFlow && <p className="cg-prose">{card.autoFlow.verifications.length
+      ? t('graphAutoFlow').replace('{count}', String(card.autoFlow.verifications.length)).replace('{agents}', card.autoFlow.verifications.map(vote => vote.agentId).join(', '))
+      : t(card.needsVerification ? 'graphAutoFlowManualVerification' : 'graphAutoFlowExecution')}</p>}
     {dispatches && dispatches.length > 0 && <UsageTable kind="dispatch" rows={dispatches.map((dispatch, index) => ({ ...dispatch, label: `#${index + 1} · ${t(dispatch.purpose === 'execution' ? 'graphExecution' : 'graphVerification')}` }))} />}
     <h3 className="sect">{t('graphDispatches')} <span className="count">{dispatches?.length ?? '—'}</span></h3>
     {!dispatches ? <p role="status">{t('loading')}</p> : !dispatches.length ? <p className="muted">{t('graphNoDispatches')}</p> : <ol className="cg-history">
