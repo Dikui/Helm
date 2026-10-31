@@ -35,19 +35,25 @@ export function useResource<T>(operation: string, params: object = {}, affects?:
     const controller = new AbortController();
     const input = JSON.parse(key);
     let queued = Promise.resolve();
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = 1_000;
     const refresh = (): Promise<void> => {
       // Serialize refreshes so an earlier response cannot overwrite a newer read.
       queued = queued.catch(() => {}).then(async () => {
         if (controller.signal.aborted) return;
         try {
           const data = await api.call<T>(operation, input, controller.signal);
-          if (!controller.signal.aborted) setState({ identity, data });
+          if (controller.signal.aborted) return;
+          setState({ identity, data });
+          clearTimeout(retry); retry = undefined; retryDelay = 1_000;
         } catch (error) {
-          // A reload or unmount superseded this read; the replacement read takes over, so the event stream must not replay.
           if (controller.signal.aborted) return;
           setState(previous => ({ identity,
             data: previous.identity === identity ? previous.data : undefined, error: error as Error }));
-          throw error;
+          // A failed read retries on its own with backoff so no update is lost. Failing the event
+          // stream instead would show "connection lost" and replay in a loop while the read keeps failing.
+          retry ??= setTimeout(() => { retry = undefined; void refresh(); }, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 30_000);
         }
       });
       return queued;
@@ -58,7 +64,7 @@ export function useResource<T>(operation: string, params: object = {}, affects?:
     };
     listeners.add(listener);
     void refresh().catch(() => {});
-    return () => { controller.abort(); listeners.delete(listener); };
+    return () => { controller.abort(); clearTimeout(retry); listeners.delete(listener); };
     // params are compared by value; callers keep custom predicates stable.
   }, [api, listeners, operation, key, identity, affects, version]);
   return { ...(state.identity === identity ? state : {}), reload };

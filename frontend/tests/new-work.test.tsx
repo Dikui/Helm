@@ -387,7 +387,8 @@ test.each(['zh', 'en'])('登记弹窗缺失目录经确认创建并选中非 git
   fireEvent.click(within(dialog).getByRole('button', { name: labels.register }));
   expect(await within(dialog).findByText(labels.hint)).toBeTruthy();
   expect(path.value).toBe(created);
-  expect(document.activeElement).toBe(path);
+  // Focus leaves the busy panel only after the render that ends the pending request.
+  await waitFor(() => expect(document.activeElement).toBe(path));
   expect(existsSync(created)).toBe(false);
   fireEvent.click(within(dialog).getByRole('button', { name: labels.create }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

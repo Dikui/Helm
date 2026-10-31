@@ -252,6 +252,8 @@ test('本轮步骤提取真实驱动输出中的文字与工具名称，详情�
   const categories = [
     [{ type: 'user', message: { content: [{ type: 'tool_result', content: '\n检查通过\n更详细的工具结果' }] } }, '工具返回 · 检查通过', 'Tool result · 检查通过'],
     [{ type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: '块状工具结果\n详情' }] }] } }, '工具返回 · 块状工具结果', 'Tool result · 块状工具结果'],
+    [{ type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: '{"ok":true,"result":{"id":"card-1","workId":"w"}}' }] }] } }, '工具返回 · 成功', 'Tool result · ok'],
+    [{ type: 'user', message: { content: [{ type: 'tool_result', content: '{"ok":false,"error":{"code":"CARD_NOT_DISPATCHABLE","reason":"等待前置的卡片不能派单"}}' }] } }, '工具返回 · 被拒：等待前置的卡片不能派单', 'Tool result · rejected：等待前置的卡片不能派单'],
     [{ type: 'system', subtype: 'init' }, '会话初始化', 'Session initialized'],
     [{ type: 'system', subtype: 'status' }, '系统消息 · status', 'System message · status'],
     [{ type: 'system', subtype: 'hook_response' }, 'Hook 执行 · hook_response', 'Hook execution · hook_response'],

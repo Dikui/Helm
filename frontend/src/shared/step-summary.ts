@@ -11,9 +11,20 @@ export function stepSummary(raw: string, t: (key: MessageKey) => string): string
     const content = object(value.message).content;
     const results = Array.isArray(content) ? content.map(object).filter(item => item.type === 'tool_result') : [];
     if (results.length) {
-      const result = results.map(item => typeof item.content === 'string' ? item.content : Array.isArray(item.content)
+      const body = results.map(item => typeof item.content === 'string' ? item.content : Array.isArray(item.content)
         ? item.content.map(object).filter(block => block.type === 'text').map(block => block.text).filter(text => typeof text === 'string').join('\n') : '')
-        .join('\n').split(/\r?\n/).find(line => line.trim());
+        .join('\n');
+      // Helm MCP answers are one JSON line; show the outcome, never the payload.
+      let parsed: unknown;
+      try { parsed = JSON.parse(body); } catch { parsed = undefined; }
+      if (parsed !== undefined) {
+        const answer = object(parsed);
+        if (answer.ok === true) return `${t('conversationToolResult')} · ${t('conversationToolOk')}`;
+        const reason = object(answer.error).reason;
+        if (answer.ok === false) return `${t('conversationToolResult')} · ${t('conversationToolRejected')}${typeof reason === 'string' ? `：${reason}` : ''}`;
+        return t('conversationToolResult');
+      }
+      const result = body.split(/\r?\n/).find(line => line.trim());
       return `${t('conversationToolResult')}${result ? ` · ${result.trim()}` : ''}`;
     }
   }

@@ -166,7 +166,7 @@ test('运行层暂停带原因归等你处理，计时来自时间戳并每秒�
   expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy();
 });
 
-test('事件触发的数据读取失败时保留游标，恢复后补读而不丢更新', async () => {
+test('事件触发的数据读取失败时由该资源自行重试，恢复后补读而不丢更新，实时连接不中断', async () => {
   daemon = await uiFixture();
   const realFetch = fetch;
   let failReads = false;
@@ -185,9 +185,9 @@ test('事件触发的数据读取失败时保留游标，恢复后补读而不�
   expect((await screen.findByRole('alert')).textContent).toContain('数据读取暂时失败');
   failReads = false;
   await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 4'), { timeout: 5_000 });
-  expect(cursors.length).toBeGreaterThan(1);
-  const changed = (await daemon.call('get-events')).result.find((event: any) => event.action === 'concurrency-set');
-  expect(Number(cursors.at(-1))).toBeLessThan(changed.id);
+  // The failed read recovered by its own retry; the stream was never torn down or replayed.
+  expect(cursors).toHaveLength(1);
+  expect(screen.queryByText('连接已断开，正在重连…')).toBeNull();
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
 

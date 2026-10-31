@@ -294,6 +294,32 @@ test('项目删除遇到新增工作的竞争时显示服务端错误并保留�
   expect((await daemon.call('list-projects')).result[0].id).toBe(daemon.project.id);
 });
 
+test('事件触发的刷新失败只在该资源上报错，不断开实时更新、不重放事件', async () => {
+  daemon = await uiFixture();
+  let streams = 0;
+  let failing = false;
+  let failedReads = 0;
+  const transport: typeof fetch = async (url, options) => {
+    if (String(url).endsWith('/events')) streams++;
+    if (failing && String(url).endsWith('/api/list-projects')) {
+      failedReads++;
+      return new Response(JSON.stringify({ ok: false, error: { code: 'INTERNAL_ERROR', reason: '读取失败' } }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }
+    return fetch(url, options);
+  };
+  window.history.replaceState(null, '', '/settings/projects');
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  await screen.findByRole('form', { name: `项目 ${daemon.project.name}` });
+  await screen.findByText('实时更新已连接');
+  failing = true;
+  await daemon.call('send-message', { projectId: daemon.project.id, body: '触发事件', key: 'event' });
+  await waitFor(() => expect(failedReads).toBeGreaterThan(0));
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  expect(screen.queryByText('连接已断开，正在重连…')).toBeNull();
+  // Replaying an event requires a new stream, so one stream means no replay.
+  expect(streams).toBe(1);
+});
+
 test('保存后的 reload 取消事件触发的刷新，不会断开实时更新', async () => {
   daemon = await uiFixture();
   let streams = 0;
