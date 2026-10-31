@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { query, type CanUseTool, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage } from './driver.js';
+import { credentialPaths, type Driver, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import { managedProcess } from './processes.js';
@@ -188,7 +188,8 @@ export class ClaudeDriver implements Driver {
         // Ask rules precede settings allow rules; otherwise they can skip our
         // path and sandbox checks in canUseTool, even in default mode.
         // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
-        permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] },
+        permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'],
+          deny: credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]) },
       },
       // Claude discovers skills/ under this dispatch or coordinator round's copy.
       ...(agent.skillsPath ? { plugins: [{ type: 'local', path: resolve(agent.skillsPath, '..'), skipMcpDiscovery: true }] } : {}),
@@ -217,7 +218,7 @@ export class ClaudeDriver implements Driver {
         // these session settings cannot remove those user sandbox exceptions.
         // Claude grants cwd writes by default; an empty allowWrite alone does
         // not make it read-only. Explicitly deny cwd, including temp worktrees.
-        filesystem: readOnly ? { disabled: false, allowWrite: [], denyWrite: [cwd] } : { disabled: false, allowWrite: [cwd] },
+        filesystem: { disabled: false, ...readOnly ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] }, denyRead: credentialPaths() },
         network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) =>

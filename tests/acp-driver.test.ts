@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AcpDriver } from '../src/acp-driver.js';
+import { ensureGrokSandboxProfiles } from '../src/acp-agents.js';
+import { credentialPaths } from '../src/driver.js';
 import { RuleError } from '../src/store.js';
 import { AgentCatalog, type AgentConfig } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
@@ -200,7 +203,10 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   assert.deepEqual(processes, [spawn.pid]);
   assert.deepEqual(spawn.args, ['agent', '--effort', 'low', 'stdio']);
   assert.equal(spawn.env.HOME, ctx.home);
-  assert.equal(spawn.env.GROK_SANDBOX, 'workspace');
+  assert.equal(spawn.env.GROK_SANDBOX, 'helm');
+  const profiles = await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8');
+  assert.match(profiles, /\[profiles\.helm\]\nextends = "workspace"\n/);
+  assert.ok(profiles.includes(`deny = ${JSON.stringify(credentialPaths(ctx.home))}`), 'Grok 配置档禁止读写凭据目录');
   assert.equal(spawn.env.GROK_SUBAGENTS, '0');
   assert.equal(spawn.env.GROK_WORKFLOWS, '0');
   assert.equal(spawn.env.XAI_API_KEY, undefined);
@@ -279,7 +285,7 @@ test('Grok 原样下发 CLI 的推理强度；每次派单新开进程，默认�
     assert.equal(spawn.env.HOME, ctx.home);
   }
   await assert.rejects(stat(join(ctx.home, '.helm')), { code: 'ENOENT' });
-  await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '只写 Helm 的沙箱配置档，不复制登录');
 });
 
 test('Grok Agent 拒绝调度者、未指定模型或推理强度、fast 和 API 主目录', async t => {
@@ -309,7 +315,7 @@ test('Grok 可用性只完成 initialize 并检查 cached_token / HTTP MCP，不
   const [spawn, ...requests] = await ctx.requests();
   assert.equal(spawn.env.HOME, ctx.home);
   assert.deepEqual(requests.map(r => r.method), ['initialize']);
-  await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '只写 Helm 的沙箱配置档，不复制登录');
 });
 
 for (const initialize of [
@@ -579,11 +585,31 @@ test('ACP 只读卡片在进程环境中覆盖沙箱；DeepSeek 拒绝扩大为�
     const events = await collect(session.events);
     session.cancel();
     const spawn = (await ctx.requests()).find(request => request.method === 'fixture/spawn');
-    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], 'read-only');
+    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], kind === 'grok' ? 'helm-read-only' : 'read-only');
     if (kind === 'deepseek') {
       const decisions = events.filter(event => event.type === 'output').map(event => JSON.parse(event.text))
         .filter(message => message.method === 'session/request_permission');
       assert.deepEqual(decisions.map(message => message.allowed), [true, false]);
     }
   }
+});
+
+test('Grok 沙箱配置档只维护 sandbox.toml 里 Helm 的标记段，保留用户自己的配置，内容不变时不重写', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'helm-grok-home-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const path = join(home, '.grok', 'sandbox.toml');
+  await mkdir(join(home, '.grok'));
+  const user = '[profiles.executor]\nextends = "workspace"\ndeny = ["/x"]';
+  await writeFile(path, user);
+  await ensureGrokSandboxProfiles(home);
+  const first = await readFile(path, 'utf8');
+  assert.ok(first.startsWith(`${user}\n\n# >>> Helm sandbox profiles`));
+  assert.match(first, /\[profiles\.helm-read-only\]\nextends = "read-only"\n/);
+  const written = (await stat(path)).mtimeMs;
+  await ensureGrokSandboxProfiles(home);
+  assert.equal((await stat(path)).mtimeMs, written, '内容不变不重写');
+  // An outdated block is replaced in place; text after it stays.
+  await writeFile(path, first.replace('extends = "read-only"', 'extends = "workspace"') + '\n[profiles.mine]\nextends = "read-only"\n');
+  await ensureGrokSandboxProfiles(home);
+  assert.equal(await readFile(path, 'utf8'), first + '\n[profiles.mine]\nextends = "read-only"\n');
 });

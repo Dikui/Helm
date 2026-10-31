@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { invoke, rejectOperation } from './operations.js';
+import { escapeOperations, invoke, rejectOperation } from './operations.js';
 import { RuleError, TaskStore, type Actor, type EventFilter } from './store.js';
 import { handleMcp } from './mcp.js';
 import type { DriverRegistry } from './driver.js';
@@ -18,6 +18,7 @@ import { McpLibrary, SkillLibrary } from './library.js';
 import { seedPrompts } from './prompts.js';
 import { monitorAgentAvailability } from './availability.js';
 import { defaultStaticDir, serveStatic, staticPath } from './static-files.js';
+import { isAgentPeer } from './processes.js';
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' });
@@ -89,6 +90,12 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       if (request.method !== 'POST') throw new RuleError('METHOD_NOT_ALLOWED', '请使用 HTTP POST。', 405);
       // Attachments travel as base64 inside send-message, which inflates them by a third.
       const input = await readBody(request, path === '/api/send-message' ? 30 * 1024 * 1024 : 1024 * 1024);
+      if (actor.type === 'user' && requestedOperations(path, name, input).some(operation => escapeOperations.has(operation))) {
+        let agent: boolean;
+        try { agent = await isAgentPeer(request.socket.remotePort!, join(store.dataDir, 'worktrees')); }
+        catch (error) { throw new RuleError('PEER_UNKNOWN', `无法确认请求来自用户，已拒绝：${error instanceof Error ? error.message : String(error)}`, 403); }
+        if (agent) throw new RuleError('AGENT_PEER', 'Agent 进程不能执行这个操作，请在界面或终端里由用户操作。', 403);
+      }
       if (path === '/mcp') return await handleMcp(request, response, input, store, actor, userOperations, () => executions.browserFor(actor));
       if (path === '/events') {
         let filter = input;
@@ -161,6 +168,15 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       return closing;
     },
   };
+}
+
+// MCP names the operation inside the JSON-RPC body (possibly a batch) rather than the path.
+function requestedOperations(path: string, name: string, input: unknown): string[] {
+  if (path !== '/mcp') return [name];
+  return (Array.isArray(input) ? input : [input]).flatMap(message => {
+    const params = message && typeof message === 'object' && 'params' in message ? message.params : undefined;
+    return params && typeof params === 'object' && 'name' in params && typeof params.name === 'string' ? [params.name] : [];
+  });
 }
 
 function streamEvents(store: TaskStore, response: ServerResponse, filter: EventFilter) {

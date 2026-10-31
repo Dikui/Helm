@@ -38,7 +38,8 @@ test('Grok Agent skills 通过进程插件加载，两个并行 Agent 及续跑�
   }
   assert.deepEqual(spawns[4].args, ['agent', '--effort', 'low', '--no-leader', '--plugin-dir', agents[0]!.directory, 'stdio']);
   assert.equal(spawns[5].args.includes('--plugin-dir'), false);
-  assert.deepEqual(await readdir(ctx.home), [], '不写 .grok、.claude 或 .helm 全局位置');
+  assert.deepEqual(await readdir(ctx.home), ['.grok'], '不写 .claude 或 .helm 全局位置');
+  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '.grok 下只有 Helm 的沙箱配置档');
 });
 
 for (const home of ['shared', 'dedicated'] as const) test(`DeepSeek ${home} Agent 独立进程补丁叠加 skills，并行及续跑隔离且退出清理补丁`, async t => {

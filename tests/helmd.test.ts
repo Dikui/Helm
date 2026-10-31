@@ -65,6 +65,21 @@ async function fixture(t: TestContext) {
   return { ...daemon, directory, repo, dataDir };
 }
 
+test('不带令牌的危险操作若来自副本里的进程（Agent）被拒绝，用户的请求照常执行', async t => {
+  const daemon = await fixture(t);
+  const copy = join(daemon.dataDir, 'worktrees', 'work', 'card');
+  await mkdir(copy, { recursive: true });
+  const config = { type: 'stdio', command: 'local-mcp' };
+  const post = (path: string, body: object) => `fetch(${JSON.stringify(daemon.url + path)}, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: ${JSON.stringify(JSON.stringify(body))} })
+    .then(response => response.text()).then(text => console.log(text))`;
+  const fromCopy = async (path: string, body: object) => (await exec(process.execPath, ['-e', post(path, body)], { cwd: copy })).stdout;
+  assert.match(await fromCopy('/api/register-mcp', { name: 'agent', config }), /AGENT_PEER/);
+  assert.match(await fromCopy('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'set-prompt', arguments: {} } }), /AGENT_PEER/);
+  // Operations that cannot escape the sandbox stay open to processes in the copy.
+  assert.match(await fromCopy('/api/get-settings', {}), /"ok":true/);
+  assert.equal((await daemon.call('register-mcp', { name: 'user', config })).body.ok, true);
+});
+
 test('用户登记项目、设置全局并发上限，重启后仍能读取', async t => {
   const daemon = await fixture(t);
   assert.match(daemon.url, /^http:\/\/127\.0\.0\.1:\d+$/);

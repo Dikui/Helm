@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { test, type TestContext } from 'node:test';
@@ -8,7 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CanUseTool, Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
-import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
+import { credentialPaths, type Driver, type DriverEvent, type SessionOptions } from '../src/driver.js';
 import { AgentCatalog } from '../src/agents.js';
 import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
@@ -307,7 +307,7 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
       assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
       assert.deepEqual(sdk.sandbox, {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd] }, network: { allowLocalBinding: true },
+        filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
       });
       assert.equal(sdk.strictMcpConfig, true);
       assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
@@ -353,12 +353,14 @@ test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和�
         assert.equal(sdk.cwd, options.cwd);
         assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
         assert.deepEqual(sdk.settings, { autoMemoryEnabled: false, fastMode: false,
-          permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'] } });
+          permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'],
+            deny: credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]) } });
+        assert.ok(credentialPaths().includes(join(homedir(), '.ssh')), '执行者不能读 SSH 私钥等凭据');
         assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
         assert.equal(sdk.permissionMode, 'default');
         assert.deepEqual(sdk.sandbox, {
           enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-          filesystem: { disabled: false, allowWrite: [options.cwd] }, network: { allowLocalBinding: true },
+          filesystem: { disabled: false, allowWrite: [options.cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
         });
         assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
         assert.equal(Object.hasOwn(sdk, 'strictMcpConfig'), false);
@@ -788,7 +790,7 @@ test('Claude 只读卡片沿用只读沙箱并拒绝写工具和 Bash 越界', a
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
       assert.deepEqual(sdk.settingSources, ['user'], '只读执行者不加载项目和本地 hooks 或项目 MCP');
-      assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd] });
+      assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd], denyRead: credentialPaths() });
       assert.ok(!(sdk.tools as string[]).includes('Write'));
       assert.ok(!(sdk.tools as string[]).includes('Edit'));
       assert.ok((sdk.tools as string[]).includes('WebSearch'));
