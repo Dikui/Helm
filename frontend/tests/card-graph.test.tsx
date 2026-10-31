@@ -359,3 +359,28 @@ test('卡片图节点和卡片详情显示只读标记，随中英文切换显�
   expect(within(node).getByText('Read-only')).toBeTruthy();
   expect(within(detail).getByText('Read-only')).toBeTruthy();
 });
+
+test('卡片详情显示自动流程票数与 Agent，中英文切换；未配置的卡片不显示', async () => {
+  daemon = await uiFixture([[draft], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'automatic', content: '自动验收卡片', needsVerification: true,
+      autoFlow: { verifications: [{ agentId: 'codex-executor', content: '重跑 npm test' }, { agentId: 'claude-executor', content: '检查边界' }] } }), check: ok },
+    card('manual', '手动卡片'),
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'direct', content: '直接完成卡片', autoFlow: { verifications: [] } }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'manual-votes', content: '手动派票卡片', needsVerification: true, autoFlow: { verifications: [] } }), check: ok },
+  ]]);
+  const work = await executeWork();
+  window.history.replaceState(null, '', `/works/${work.id}/structure`);
+  render(<App baseUrl={daemon.url} />);
+  const graph = await screen.findByRole('region', { name: '卡片图' });
+  fireEvent.click(await within(graph).findByRole('button', { name: /卡片 \d+：自动验收卡片/ }));
+  const detail = screen.getByRole('complementary', { name: '卡片检查器' });
+  expect(await within(detail).findByText('自动流程：执行完成后自动派 2 票验收（codex-executor, claude-executor），全部通过后自动完成')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(detail).getByText('Auto flow: dispatch 2 verifications after execution (codex-executor, claude-executor), then complete automatically when all pass')).toBeTruthy();
+  fireEvent.click(await within(graph).findByRole('button', { name: /Card \d+：手动卡片/ }));
+  expect(within(detail).queryByText(/^Auto flow:/)).toBeNull();
+  fireEvent.click(await within(graph).findByRole('button', { name: /Card \d+：直接完成卡片/ }));
+  expect(within(detail).getByText('Auto flow: complete automatically after execution')).toBeTruthy();
+  fireEvent.click(await within(graph).findByRole('button', { name: /Card \d+：手动派票卡片/ }));
+  expect(within(detail).getByText('Auto flow: coordinator dispatches verifications, then complete automatically when all pass')).toBeTruthy();
+});

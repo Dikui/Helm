@@ -2,13 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
-import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
+import { abortCardGit, activeDispatch, committedFile, createDispatch, dispatchGit, getDispatch, listDispatches, markOutdated, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
-import { removeCardCopy } from './completion.js';
+import { completeCard, removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
 import { checkOutputUsage } from './outputs.js';
@@ -74,6 +74,7 @@ export class ExecutionRunner {
   private browsers = new Map<string, BrowserProcess>();
   private ports = new Map<string, { start: number; end: number }>();
   private stops = new Map<string, AbortController>();
+  private autoVerifying = new Set<string>();
   private scheduled = false;
   private stopping = false;
   private unsubscribe: () => void;
@@ -110,7 +111,7 @@ export class ExecutionRunner {
     setImmediate(() => {
       this.scheduled = false;
       if (this.stopping) return;
-      const queued = this.store.db.prepare(`SELECT d.id, d.work_id AS workId FROM dispatches d
+      const queued = this.store.db.prepare(`SELECT d.id, d.work_id AS workId, d.card_id AS cardId FROM dispatches d
         JOIN works w ON w.id = d.work_id JOIN cards c ON c.id = d.card_id
         WHERE d.status = 'queued' AND w.status IN ('executing', 'awaiting-review')
         AND c.status NOT IN ('paused', 'completed', 'cancelled')
@@ -118,6 +119,8 @@ export class ExecutionRunner {
       const limit = Number(this.store.db.prepare('SELECT concurrency_limit FROM settings WHERE id = 1').get()!.concurrency_limit);
       for (const row of queued) {
         if (this.running.size >= limit) break;
+        // Agent probes yield; publish the whole automatic vote batch before any vote can finish.
+        if (this.autoVerifying.has(String(row.cardId))) continue;
         const id = String(row.id);
         if (this.running.has(id)) continue;
         if (!this.start(id, String(row.workId))) break;
@@ -359,7 +362,7 @@ export class ExecutionRunner {
       if (reason === 'timed-out') failure = [failure, '派单超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       if (reason !== 'completed') finalAnswer = null;
       if (failure) failure = redact(failure);
-      this.store.transaction(() => {
+      const ended = this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, final_answer = ?, usage = ?, failure = ?, end_commit = ?,
           conclusion = CASE WHEN ? = 'completed' THEN conclusion ELSE 'undeclared' END,
           conclusion_reason = CASE WHEN ? = 'completed' THEN conclusion_reason ELSE NULL END WHERE id = ?`)
@@ -370,10 +373,60 @@ export class ExecutionRunner {
         // A vote batch is judged together: only the last verification to end wakes the coordinator; earlier ones reach it as recent events.
         const batchOpen = dispatch.purpose === 'verification' && this.store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ?
           AND purpose = 'verification' AND status IN ('queued', 'running')`).get(dispatch.cardId);
-        if (!batchOpen) this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
+        const currentCard = cardDetails(this.store, dispatch.workId, card.id);
+        const flow = currentCard.autoFlow;
+        const automatic = !batchOpen && flow && this.store.work(dispatch.workId).status === 'executing'
+          && !['completed', 'cancelled', 'paused'].includes(currentCard.status)
+          && (dispatch.purpose === 'verification' || (result.endReason === 'completed' && result.conclusion === 'completed'
+            && (!currentCard.needsVerification || flow.verifications.length > 0)));
+        if (!batchOpen && !automatic) this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
         checkOutputUsage(this.store);
+        return { event, automatic };
       });
       releaseEnvironment();
+      if (ended.automatic) await this.advanceAutoFlow(getDispatch(this.store, dispatch.workId, dispatch.id), ended.event.id);
+    }
+  }
+
+  private async advanceAutoFlow(dispatch: Dispatch, eventId: number) {
+    const { workId, cardId } = dispatch;
+    const card = cardDetails(this.store, workId, cardId);
+    const step = dispatch.purpose === 'execution' && card.needsVerification ? 'verify' : 'complete';
+    try {
+      if (step === 'verify') {
+        this.autoVerifying.add(cardId);
+        try {
+          for (const [index, vote] of card.autoFlow!.verifications.entries()) {
+            await createDispatch(this.store, runtime, { workId, cardId, key: `auto-verify-${dispatch.id}-${index}`,
+              purpose: 'verification', ...vote });
+          }
+        } finally {
+          this.autoVerifying.delete(cardId);
+          this.schedule();
+        }
+        return;
+      }
+      if (dispatch.purpose === 'verification') {
+        const dispatches = listDispatches(this.store, workId, cardId);
+        const execution = dispatches.findLast(item => item.purpose === 'execution');
+        // A crash or failed Agent probe can leave only part of the planned batch persisted.
+        const incomplete = execution && card.autoFlow!.verifications.some((_, index) =>
+          !dispatches.some(item => item.key === `auto-verify-${execution.id}-${index}`));
+        const votes = markOutdated(this.store, dispatches)
+          .filter(item => item.purpose === 'verification' && item.status === 'ended' && !item.outdated);
+        if (incomplete || !votes.length || votes.some(item => item.endReason !== 'completed' || item.conclusion !== 'passed')) {
+          this.store.transaction(() => this.store.db.prepare('INSERT OR IGNORE INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(eventId, workId));
+          return;
+        }
+      }
+      await completeCard(this.store, runtime, { workId, cardId });
+    } catch (error) {
+      this.store.transaction(() => {
+        const event = this.store.appendEvent(runtime, { type: 'card', id: cardId }, 'auto-flow-stopped', {
+          step, code: error instanceof RuleError ? error.code : 'INTERNAL_ERROR', reason: error instanceof Error ? error.message : String(error),
+        }, { workId, cardId });
+        this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, workId);
+      });
     }
   }
 

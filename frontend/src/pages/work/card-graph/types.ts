@@ -5,6 +5,7 @@ export interface CardNode {
   type: 'card'; id: string; workId: string; content: string;
   status: 'ready' | 'waiting' | 'executing' | 'verifying' | 'paused' | 'completed' | 'cancelled' | 'skipped';
   aggregate?: boolean; readOnly?: boolean; skippedBy?: { type: 'card' | 'gate'; id: string; status: 'cancelled' | 'withdrawn'; title: string }[];
+  needsVerification?: boolean; autoFlow?: import('../../../../../src/graph.js').AutoFlow | null;
   agentId: string | null; latestDispatchId: string | null; currentStep: number; latestStepSummary: string | null;
   cardBranch: string | null; workPath: string | null; usage: Usage; dependencies: NodeRef[];
 }

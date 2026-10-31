@@ -2,8 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import type { TokenUsage } from './driver.js';
 
+export interface AutoFlow {
+  verifications: { agentId: string; content: string; needsBrowser?: boolean }[];
+}
+
 export interface Card {
   id: string; workId: string; key: string; content: string; needsVerification: boolean; aggregate: boolean; readOnly: boolean;
+  autoFlow: AutoFlow | null;
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
   agentId?: string | null; latestDispatchId?: string | null; currentStep?: number;
   latestStepSummary?: string | null; lastEndReason?: string | null; lastConclusion?: string | null;
@@ -13,7 +18,7 @@ export interface Card {
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
-const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, aggregate, read_only AS readOnly, status, created_at AS createdAt,
+const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, aggregate, read_only AS readOnly, auto_flow AS autoFlow, status, created_at AS createdAt,
   work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, write_scopes AS writeScopes, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
@@ -27,7 +32,7 @@ function readCard(row: Record<string, unknown>): Card {
   const { incomplete, cacheReadTokens, cacheWriteTokens, ...usage } = JSON.parse(String(row.usage));
   if (cacheReadTokens !== null) usage.cacheReadTokens = cacheReadTokens;
   if (cacheWriteTokens !== null) usage.cacheWriteTokens = cacheWriteTokens;
-  return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), readOnly: Boolean(row.readOnly), writeScopes: JSON.parse(String(row.writeScopes)),
+  return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), readOnly: Boolean(row.readOnly), autoFlow: JSON.parse(String(row.autoFlow)), writeScopes: JSON.parse(String(row.writeScopes)),
     usage: incomplete && (usage.inputTokens !== null || usage.outputTokens !== null) ? { ...usage, incomplete: true } : usage } as unknown as Card;
 }
 
@@ -66,8 +71,15 @@ function wake(store: TaskStore, eventId: number, workId: string) {
   store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(eventId, workId);
 }
 
+function validateAutoFlow(autoFlow: AutoFlow | null, needsVerification: boolean) {
+  if (autoFlow && ((!needsVerification && autoFlow.verifications.length) || autoFlow.verifications.some(vote => !vote.content.trim()))) {
+    throw new RuleError('AUTO_FLOW_INVALID', '自动流程的验收内容不能为空；不需要验收时验收列表必须为空。', 400);
+  }
+}
+
 export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...params }: {
   workId: string; key: string; content: string; needsVerification?: boolean; aggregate?: boolean; readOnly?: boolean; repairOfCardId?: string; writeScopes?: string[];
+  autoFlow?: AutoFlow;
 }) {
   store.work(params.workId);
   const existing = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? AND key = ?`).get(params.workId, params.key);
@@ -75,10 +87,12 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
   const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false, aggregate: params.aggregate ?? false, readOnly: params.readOnly ?? false,
+    autoFlow: params.autoFlow ?? null,
     writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: null, outputTokens: null } };
-  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, aggregate, read_only, status, created_at, repair_of_card_id, write_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  validateAutoFlow(card.autoFlow, card.needsVerification);
+  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, aggregate, read_only, status, created_at, repair_of_card_id, write_scopes, auto_flow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), Number(card.aggregate), Number(card.readOnly), card.status, card.createdAt, card.repairOfCardId ?? null,
-      JSON.stringify(card.writeScopes));
+      JSON.stringify(card.writeScopes), card.autoFlow ? JSON.stringify(card.autoFlow) : null);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
   store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
   return card;
@@ -86,11 +100,14 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
 
 export function updateCard(store: TaskStore, actor: Actor, params: {
   workId: string; cardId: string; content?: string; needsVerification?: boolean; aggregate?: boolean; readOnly?: boolean; writeScopes?: string[];
+  autoFlow?: AutoFlow | null;
 }) {
   const card = cardDetails(store, params.workId, params.cardId);
   requireMutable(card);
   const content = params.content ?? card.content;
   const needsVerification = params.needsVerification ?? card.needsVerification;
+  const autoFlow = params.autoFlow === undefined ? card.autoFlow : params.autoFlow;
+  validateAutoFlow(autoFlow, needsVerification);
   const aggregate = params.aggregate ?? card.aggregate;
   const readOnly = params.readOnly ?? card.readOnly;
   if (readOnly !== card.readOnly) {
@@ -103,9 +120,9 @@ export function updateCard(store: TaskStore, actor: Actor, params: {
   // Explicitly choosing read-only also releases a gate added by a verification attempt.
   const released = params.readOnly === true ? store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND downstream_type = 'card' AND downstream_id = ?
     AND upstream_type = 'gate' AND upstream_id IN (SELECT id FROM gates WHERE kind = 'git-initialization')`).run(card.workId, card.id).changes : 0;
-  if (!released && content === card.content && needsVerification === card.needsVerification && aggregate === card.aggregate && readOnly === card.readOnly && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
-  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, read_only = ?, write_scopes = ? WHERE id = ?')
-    .run(content, Number(needsVerification), Number(aggregate), Number(readOnly), JSON.stringify(writeScopes), card.id);
+  if (!released && content === card.content && needsVerification === card.needsVerification && JSON.stringify(autoFlow) === JSON.stringify(card.autoFlow) && aggregate === card.aggregate && readOnly === card.readOnly && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
+  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, read_only = ?, write_scopes = ?, auto_flow = ? WHERE id = ?')
+    .run(content, Number(needsVerification), Number(aggregate), Number(readOnly), JSON.stringify(writeScopes), autoFlow ? JSON.stringify(autoFlow) : null, card.id);
   const updated = cardDetails(store, card.workId, card.id);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-updated', { before: card, after: updated }, { workId: card.workId, cardId: card.id });
   refreshCardReadiness(store, card.workId);

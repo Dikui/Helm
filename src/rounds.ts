@@ -90,7 +90,7 @@ export class RoundScheduler {
     private retryDelaysMs: readonly [number, number] = [30_000, 120_000]) {
     this.unsubscribe = store.subscribe(events => {
       const wakes = events.filter(event => (event.action === 'message-sent' && event.actor.type === 'user')
-        || ['conflict-resolution-requested', 'gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended'].includes(event.action));
+        || ['conflict-resolution-requested', 'gate-decided', 'card-cancelled', 'card-paused', 'card-resumed', 'work-paused', 'work-resumed', 'round-interrupted', 'coordinator-agent-changed', 'gate-withdrawn', 'dispatch-ended', 'card-completed', 'auto-flow-stopped'].includes(event.action));
       if (wakes.length) this.schedule();
     });
     this.schedule();
