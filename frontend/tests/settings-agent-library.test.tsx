@@ -19,13 +19,13 @@ test('Agent 自带 skill 只读，勾选库 skill 和 MCP 保存到 config.json�
   await installSkill('shared-skill');
   expect((await daemon.call('register-mcp', { name: 'remote', config: { type: 'http', url: 'https://tools.example.invalid/mcp' } })).ok).toBe(true);
   expect((await daemon.call('register-mcp', { name: 'local', config: { type: 'stdio', command: 'test-mcp' } })).ok).toBe(true);
-  const own = join(daemon.directory, 'agents', 'claude-executor', 'skills', 'own-skill');
+  const own = join(daemon.directory, 'agents', 'claude-executor', 'skills', 'shared-skill');
   await mkdir(own, { recursive: true }); await writeFile(join(own, 'SKILL.md'), '自带技能');
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
   const editor = await screen.findByRole('form', { name: 'Agent 详情' });
   const ownSkills = within(editor).getByRole('group', { name: 'Agent 自带 skill · skills/' });
-  expect(within(ownSkills).getByText('own-skill/')).toBeTruthy();
+  expect(within(ownSkills).getByText('shared-skill/')).toBeTruthy();
   expect(within(ownSkills).queryByRole('checkbox')).toBeNull();
   const skills = await within(editor).findByRole('group', { name: '库 skill' });
   const mcp = within(editor).getByRole('group', { name: '库 MCP' });
@@ -34,6 +34,10 @@ test('Agent 自带 skill 只读，勾选库 skill 和 MCP 保存到 config.json�
   fireEvent.click(within(mcp).getByRole('checkbox', { name: 'local' }));
   fireEvent.click(within(editor).getByRole('button', { name: '保存' }));
   await within(editor).findByText('已保存');
+  const warning = /库 skill shared-skill.*自带.*同名.*覆盖/;
+  expect(await within(editor).findByText(warning)).toBeTruthy();
+  const row = screen.getByRole('link', { name: /claude-executor.*可用/ });
+  expect(within(row).getByText(warning)).toBeTruthy();
   const path = join(daemon.directory, 'agents', 'claude-executor', 'config.json');
   expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ skills: ['shared-skill'], mcp: ['remote', 'local'] });
   cleanup(); render(<App baseUrl={daemon.url} />);

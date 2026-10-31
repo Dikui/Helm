@@ -29,7 +29,8 @@ export function AgentsSection({ agentId, creating = false }: { agentId?: string;
           {entries.map(item => <Link key={item.id} href={`/settings/agents/${encodeURIComponent(item.id)}`} className={`settings-agent-row${item.available ? '' : ' off'}`} aria-current={item.id === selected?.id ? 'page' : undefined}>
             <span className="settings-driver mono">{item.driver ? { 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[item.driver] : '?'}</span>
             <span><b className="mono">{item.id}</b><span className="settings-meta">{item.driver} · {item.model ?? t('driverDefault')}{item.reasoningEffort ? ` · ${item.reasoningEffort}` : ''} <span className="settings-bill">{t(item.billing === 'api' ? 'apiBilling' : 'subscription')}</span></span><span className="settings-meta">{item.description}</span>
-              {!item.available && <span className="settings-reason">{item.reason}{item.command && <> <code>{item.command}</code></>}</span>}</span>
+              {!item.available && <span className="settings-reason">{item.reason}{item.command && <> <code>{item.command}</code></>}</span>}
+              {item.warnings?.map(warning => <span key={warning} className="settings-warning muted">{warning}</span>)}</span>
             <span className="settings-agent-status"><span className={`pill ${item.available ? 'ok' : 'bad'}`}>{t(item.available ? 'available' : 'unavailable')}</span>
               <span>{item.runningDispatches} {t('dispatchCount')} · {item.activeWorks} {t('workCount')}</span></span>
           </Link>)}

@@ -220,7 +220,6 @@ export class AgentCatalog {
     for (const name of agent.skills ?? []) {
       try { this.library.read(name); }
       catch (error) { return `库 skill ${name} 不可用：${error instanceof Error ? error.message : String(error)}`; }
-      if (agent.skillsPath && readdirSync(agent.skillsPath).includes(name)) return `Agent 自带 skill 与库 skill 同名：${name}`;
     }
     try { this.mcpServers(agent); }
     catch (error) { return error instanceof Error ? error.message : '库 MCP 不可用。'; }
@@ -228,7 +227,10 @@ export class AgentCatalog {
   }
 
   private warnings(agent: AgentConfig): string[] {
-    if (agent.home !== 'shared' || !agent.skills?.length) return [];
+    const ownEntries = agent.skillsPath ? readdirSync(agent.skillsPath) : [];
+    const warnings = (agent.skills ?? []).filter(name => ownEntries.includes(name))
+      .map(name => `库 skill ${name} 被 Agent 自带的同名 skill 覆盖，快照仅使用自带版本。`);
+    if (agent.home !== 'shared' || !agent.skills?.length) return warnings.sort();
     // Only the CLI's default user roots: runtimeEnvironment drops home overrides.
     // Do not inspect skill contents, plugin registries or project settings.
     const roots = {
@@ -237,7 +239,6 @@ export class AgentCatalog {
       grok: ['.grok/skills', '.claude/skills', '.agents/skills'],
       deepseek: ['.dsh/skills', '.agents/skills'],
     }[agent.driver];
-    const warnings: string[] = [];
     for (const root of roots) {
       const directory = join(process.env.HOME ?? homedir(), root);
       try {
@@ -306,11 +307,9 @@ export class AgentCatalog {
     const skillsPath = join(dataDir, 'skills');
     try {
       const ownEntries = agent.skillsPath ? readdirSync(agent.skillsPath) : [];
-      const selected = [...new Set(agent.skills ?? [])].map(name => ({ name, path: this.library.read(name) }));
+      const selected = [...new Set(agent.skills ?? [])].filter(name => !ownEntries.includes(name))
+        .map(name => ({ name, path: this.library.read(name) }));
       if (!ownEntries.length && !selected.length) return { ...agent, skillsPath: null };
-      for (const { name } of selected) if (ownEntries.includes(name)) {
-        throw new Error(`Agent 自带 skill 与库 skill 同名：${name}`);
-      }
       mkdirSync(dataDir, { recursive: true });
       if (ownEntries.length) cpSync(agent.skillsPath!, skillsPath, { recursive: true, dereference: true });
       else mkdirSync(skillsPath);

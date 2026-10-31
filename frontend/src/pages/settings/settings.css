@@ -15,6 +15,7 @@
 .settings-meta { display: block; color: var(--muted); margin-top: 3px; }
 .settings-agent-status { display: grid; align-content: start; justify-items: end; gap: var(--space-2); color: var(--muted); }
 .settings-reason { display: block; color: var(--danger); overflow-wrap: anywhere; }
+.settings-warning { display: block; font-size: var(--text-sm); }
 .settings-editor { min-width: 0; border-left: 1px solid var(--border); }
 .settings-detail-head { padding: var(--space-4); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .settings-detail-head h2 { font-family: var(--mono); }

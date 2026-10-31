@@ -144,6 +144,32 @@ test('订阅 Agent 的库 skill 与全局目录同名只返回警告，API 和�
   assert.deepEqual((await list()).find((agent: any) => agent.id === 'subscription').warnings, []);
 });
 
+test('自带同名 skill 覆盖警告对所有驱动和 home 返回，未选中的库 skill 不警告', async t => {
+  const daemon = await fixture(t, { 'claude-sdk': new FakeDriver(), codex: new FakeDriver(), grok: new FakeDriver(), deepseek: new FakeDriver() });
+  const source = join(daemon.directory, 'shared');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), '库 skill');
+  ok(await daemon.call('install-skill', { path: source }));
+  for (const [driver, model] of [['claude-sdk', 'haiku'], ['codex', 'gpt-6-luna'], ['grok', 'grok-4.7'], ['deepseek', 'deepseek-flash']]) {
+    for (const home of ['shared', 'dedicated']) {
+      const id = `${driver}-${home}`;
+      await daemon.writeAgent(id, { driver, model, home, skills: ['shared'] });
+      const own = join(daemon.agentDir, id, 'skills', 'shared');
+      await mkdir(own, { recursive: true });
+      await writeFile(join(own, 'SKILL.md'), 'Agent 自带 skill');
+    }
+  }
+  const agents = (await daemon.call('list-agents')).result;
+  assert.equal(agents.length, 8);
+  for (const agent of agents) {
+    assert.equal(agent.warnings.length, 1, agent.id);
+    assert.match(agent.warnings[0], /库 skill shared.*自带.*同名.*覆盖/);
+    if (agent.id !== 'grok-dedicated') assert.equal(agent.available, true, agent.reason);
+    await daemon.writeAgent(agent.id, { ...agent.config, skills: [] });
+  }
+  assert.ok((await daemon.call('list-agents')).result.every((agent: any) => agent.warnings.length === 0));
+});
+
 test('全局重名按驱动检查默认目录，目录符号链接也警告，普通文件和断链不警告', async t => {
   for (const [driver, model, roots, foreign] of [
     ['claude-sdk', 'haiku', ['.claude'], '.codex'],
@@ -1164,10 +1190,10 @@ test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', a
   });
 });
 
-test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，健康 Agent 仍能派单', async t => {
+test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，同名 skill Agent 仍能派单', async t => {
   const rounds = new FakeDriver([alignment, ctx => [
     { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '检查不可用 Agent' }, saveAs: 'card', check: ok },
-    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'clashing-skill', 'missing-mcp', 'reserved-mcp', 'stdio-grok', 'stdio-deepseek'].map(agentId => ({
+    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'missing-mcp', 'reserved-mcp', 'stdio-grok', 'stdio-deepseek'].map(agentId => ({
       type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: agentId, agentId }),
       check: (value: any) => {
         assert.equal(value.ok, false, JSON.stringify(value));
@@ -1176,7 +1202,7 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
         if (agentId.startsWith('stdio-')) assert.match(value.error.reason, /ACP.*(grok|deepseek).*不支持 stdio.*local/);
       },
     })),
-    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'healthy', agentId: 'healthy' }), check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'clashing-skill', agentId: 'clashing-skill' }), check: ok },
   ]]);
   const daemon = await fixture(t, {
     'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => (options.agent?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) },
@@ -1184,7 +1210,6 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
     deepseek: { checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 DeepSeek Agent 不得启动'); } },
   });
   await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
-  await daemon.writeAgent('healthy');
   await daemon.writeAgent('fast', { fast: true });
   await daemon.writeAgent('broken');
   await writeFile(join(daemon.agentDir, 'broken', 'config.json'), '{');
@@ -1198,10 +1223,17 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   const library = join(daemon.directory, 'data', 'library', 'skills', 'shared');
   await mkdir(library, { recursive: true });
   await writeFile(join(library, 'SKILL.md'), '库 skill');
-  await mkdir(join(daemon.agentDir, 'clashing-skill', 'skills', 'shared'), { recursive: true });
+  await writeFile(join(library, 'library-only.txt'), '库 skill 独有文件');
+  const own = join(daemon.agentDir, 'clashing-skill', 'skills', 'shared');
+  await mkdir(own, { recursive: true });
+  await writeFile(join(own, 'SKILL.md'), 'Agent 自带 skill');
   const agents = (await daemon.call('list-agents')).result;
+  const clashing = agents.find((entry: any) => entry.id === 'clashing-skill');
+  assert.equal(clashing.available, true);
+  assert.equal(clashing.reason, null);
+  assert.ok(clashing.warnings.some((warning: string) => /库 skill shared.*自带.*同名.*覆盖/.test(warning)));
   for (const [id, reason] of [
-    ['missing-skill', /absent/], ['clashing-skill', /同名.*shared/], ['missing-mcp', /absent/], ['reserved-mcp', /helm.*冲突/],
+    ['missing-skill', /absent/], ['missing-mcp', /absent/], ['reserved-mcp', /helm.*冲突/],
     ['stdio-grok', /ACP.*grok.*不支持 stdio.*local/], ['stdio-deepseek', /ACP.*deepseek.*不支持 stdio.*local/],
   ] as const) {
     const agent = agents.find((entry: any) => entry.id === id);
@@ -1217,12 +1249,16 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   const gate = (await daemon.call('list-pending')).result[0];
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const values = await until(events, values => values.some(value => value.action === 'dispatch-ended'));
-  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 10);
+  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 9);
   assert.ok(!JSON.stringify(await daemon.call('list-agents')).includes('private-stdio-token'));
   assert.ok(!JSON.stringify(await daemon.call('get-events')).includes('private-stdio-token'));
   const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;
   assert.equal(dispatches.length, 1);
-  assert.equal(dispatches[0].agentId, 'healthy');
+  assert.equal(dispatches[0].agentId, 'clashing-skill');
+  assert.equal(dispatches[0].endReason, 'completed');
+  const snapshot = join(dispatches[0].agent.skillsPath, 'shared');
+  assert.equal(await readFile(join(snapshot, 'SKILL.md'), 'utf8'), 'Agent 自带 skill');
+  assert.deepEqual(await readdir(snapshot), ['SKILL.md']);
 });
 
 test('删除 Agent 移除目录；仍被项目默认调度者使用、不存在或 id 非法时拒绝', async t => {
