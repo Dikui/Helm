@@ -10,6 +10,7 @@ import { deliveryDetails, mergeReviewedWork, completeReviewedWork, cleanupReview
 import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
+import { projectGitRoot } from './project-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -91,13 +92,13 @@ export async function reconcileStartup(store: TaskStore) {
     if (accepted && !work.workBranch && work.status === 'accepted') {
       store.transaction(() => completeReviewedWork(store, runtime, work.id, { gateId: accepted.id, noCodeChanges: true }));
     }
-    // A deleted project has no repository to repair; keep the work as recorded instead of failing startup.
-    if (!existsSync(projectPath(store, work.id))) { await compressWorkOutputs(store, work.id); continue; }
+    // A deleted project, or one whose repository was removed, has nothing to repair; keep the work as recorded instead of failing startup.
+    const project = projectPath(store, work.id);
+    if (!existsSync(project) || (work.workBranch && !projectGitRoot(project))) { await compressWorkOutputs(store, work.id); continue; }
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
     if (accepted && work.workBranch) {
-      const project = projectPath(store, work.id);
       const events = store.events({ workId: work.id });
       const intent = events.filter(event => event.action === 'base-merge-started').at(-1);
       const settled = events.filter(event => ['base-merge-result', 'base-merge-aborted'].includes(event.action)).at(-1);
