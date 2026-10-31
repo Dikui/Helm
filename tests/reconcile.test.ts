@@ -408,6 +408,18 @@ test('已接受工作的项目目录被删除后，重启仍能启动并保留�
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'accepted');
 });
 
+test('已接受工作的项目目录不再是 git 仓库时，重启仍能启动并保留工作状态', async t => {
+  const daemon = await fixture(t, 'settled');
+  const { card, read } = await daemon.create();
+  await until(read, value => value.status === 'ended');
+  await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  await rm(join(daemon.repo, '.git'), { recursive: true, force: true });
+  await daemon.restart();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'accepted');
+});
+
 test('监听端口被占用时启动失败，不对正在运行的 helmd 做对账', async t => {
   const daemon = await fixture(t);
   const active = await daemon.create();
