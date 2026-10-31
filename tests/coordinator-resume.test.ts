@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -70,4 +70,49 @@ test('调度者上下文小时续跑上一轮会话并只收变化；压缩、Ag
     assert.equal(fresh!.brief.resumed, undefined);
     assert.match(fresh!.brief.coordinatorNotes!, /^第 \d 轮笔记$/);
   }
+});
+
+test('执行阶段规则在确认后的那一轮附上一次，续跑会话不再重复，新会话重新附上', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-phase-rules-')));
+  const repo = join(directory, 'project');
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  await writeFile(join(repo, 'README.md'), 'baseline\n');
+  execFileSync('git', ['-C', repo, 'add', 'README.md']);
+  execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline'], { stdio: 'ignore' });
+  const briefs: StartupBrief[] = [];
+  const small = { type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } } as const;
+  const round = (...steps: FakeStep[]) => (context: FakeContext): FakeStep[] => { briefs.push(JSON.parse(context.input)); return steps; };
+  const daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory), driver: new FakeDriver([
+    round({ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', key: 'draft' }) }, small),
+    round(small),
+    round(small),
+    round({ type: 'compaction' }, small),
+    round(small),
+  ]) });
+  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const call = async (name: string, params: object = {}) => (await (await fetch(`${daemon.url}/api/${name}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any).result;
+  const ended = async (count: number) => {
+    const deadline = Date.now() + 5_000;
+    while ((await call('get-events', { workId: work.id }) as any[]).filter(event => event.action === 'round-ended').length < count) {
+      assert.ok(Date.now() < deadline, '等待轮次结束超时');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  const project = await call('register-project', { path: repo });
+  const work = (await call('send-message', { projectId: project.id, body: '开始', key: 'start' })).work;
+  await ended(1);
+  const gate = (await call('list-pending')).find((item: any) => item.kind === 'work-confirmation');
+  await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
+  await ended(2);
+  for (const [index, key] of ['m1', 'm2', 'm3'].entries()) {
+    await call('send-message', { workId: work.id, body: '补充', key });
+    await ended(3 + index);
+  }
+
+  const executing = await readFile(join(directory, 'data', 'prompts', 'coordinator-executing.md'), 'utf8');
+  assert.deepEqual(briefs.map(brief => brief.resumed ?? false), [false, true, true, true, false]);
+  // Aligning gets none; the resumed round after confirmation gets them once; a fresh session after compaction gets them again.
+  assert.deepEqual(briefs.map(brief => brief.phaseRules), [undefined, executing, undefined, undefined, executing]);
 });

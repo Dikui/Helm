@@ -10,6 +10,7 @@ import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkD
 import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { projectEnvironmentNames } from './project-environment.js';
+import { readPrompt } from './prompts.js';
 
 export interface StartupBrief {
   projectEnvironmentNames: string[];
@@ -17,6 +18,7 @@ export interface StartupBrief {
   delivery: ReturnType<typeof deliveryDetails>;
   // A resumed session already holds the description and notes; it gets only what changed (ADR 0017).
   resumed?: true;
+  phaseRules?: string;
   workDescription?: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
   activeWorkDescription?: WorkDescription | null;
   cardGraph: ReturnType<typeof cardGraph>;
@@ -38,8 +40,12 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   // Agent snapshots carry whole prompts; the coordinator has its own and dispatches keep agentId.
   const brief = (event: HelmEvent) => event.action.startsWith('dispatch-') && event.details && typeof event.details === 'object' && 'agent' in event.details
     ? { ...event, details: { ...event.details, agent: undefined } } : event;
+  // Executing rules enter a session once, so the system prompt stays fixed for resume (ADR 0017).
+  const resumedStart = resumedRoundId && store.db.prepare(`SELECT details FROM events WHERE action = 'round-started' AND object_id = ?`).get(resumedRoundId);
+  const sessionHasExecutingRules = resumedStart && JSON.parse(String(resumedStart.details)).executingRules === true;
   return {
     projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),
+    ...(work.activeDescriptionId && !sessionHasExecutingRules ? { phaseRules: readPrompt(store.agents.promptDirectory, 'coordinator-executing') } : {}),
     ...(resumedRoundId ? { resumed: true } : {
       activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
       workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
@@ -149,7 +155,7 @@ export class RoundScheduler {
       const brief = startupBrief(this.store, workId, ids, resume?.roundId);
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
-      this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started', { eventIds: ids, outputPath }, { workId });
+      this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started', { eventIds: ids, outputPath, executingRules: Boolean(brief.work.activeDescriptionId) }, { workId });
       return { ids, brief, resume };
     });
     const ids = started.ids;

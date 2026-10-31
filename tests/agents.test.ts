@@ -85,7 +85,7 @@ const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', r
 test('规则提示词首次启动从仓库复制到数据目录，之后只读数据目录，改写后 Agent 立即带上且不被再次复制覆盖', async t => {
   const daemon = await fixture(t);
   const promptDir = join(daemon.directory, 'data', 'prompts');
-  for (const name of ['coordinator-role', 'coordinator-runtime', 'executor-role', 'executor-runtime']) {
+  for (const name of ['coordinator-role', 'coordinator-executing', 'coordinator-runtime', 'executor-role', 'executor-runtime']) {
     assert.equal(await readFile(join(promptDir, `${name}.md`), 'utf8'), await readFile(join(defaultPromptDir, `${name}.md`), 'utf8'));
   }
   await daemon.writeAgent('executor', {}, '附加要求');
@@ -98,6 +98,19 @@ test('规则提示词首次启动从仓库复制到数据目录，之后只读�
   assert.equal(await readFile(join(promptDir, 'executor-role.md'), 'utf8'), '自定义执行者规则');
   const agent = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'executor');
   assert.match(agentPrompt(agent), /^自定义执行者规则\n\n附加要求\n\n输入 JSON 的 content/);
+});
+
+test('拆出执行阶段规则前种下的调度者规则被新版覆盖一次，执行者规则和之后的改写保留', async t => {
+  const promptDir = await mkdtemp(join(tmpdir(), 'helm-prompts-'));
+  t.after(() => rm(promptDir, { recursive: true, force: true }));
+  for (const name of ['coordinator-role', 'coordinator-runtime', 'executor-role', 'executor-runtime']) await writeFile(join(promptDir, `${name}.md`), `旧版 ${name}`);
+  seedPrompts(promptDir);
+  for (const name of ['coordinator-role', 'coordinator-executing', 'coordinator-runtime'])
+    assert.equal(await readFile(join(promptDir, `${name}.md`), 'utf8'), await readFile(join(defaultPromptDir, `${name}.md`), 'utf8'));
+  assert.equal(await readFile(join(promptDir, 'executor-role.md'), 'utf8'), '旧版 executor-role');
+  await writeFile(join(promptDir, 'coordinator-role.md'), '自定义调度者规则');
+  seedPrompts(promptDir);
+  assert.equal(await readFile(join(promptDir, 'coordinator-role.md'), 'utf8'), '自定义调度者规则');
 });
 
 test('订阅 Agent 的库 skill 与全局目录同名只返回警告，API 和未选中的 skill 不警告，目录变化立即生效', async t => {
