@@ -499,7 +499,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
     const [first] = await daemon.ended();
     assert.deepEqual(first.usage, { inputTokens: 100, outputTokens: 8 });
     await until(daemon.events, events => events.filter(e => e.action === 'round-started').length === events.filter(e => e.action === 'round-ended').length);
-    await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), ...script }));
+    await writeFile(join(acp.directory, 'script.json'), JSON.stringify({ record: join(acp.directory, 'requests.jsonl'), ...script, testProcessPid: process.pid }));
     daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: { workId: daemon.work.id, cardId: first.cardId,
       agentId: 'deepseek-executor', key: 'resume', resumeSessionId: first.sessionId, content: '续跑后中止' }, check: ok }]);
     ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume', body: '续跑' }));

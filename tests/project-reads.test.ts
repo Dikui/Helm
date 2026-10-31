@@ -13,14 +13,15 @@ test('HTTP 项目读取包含分支、HEAD 和改动数，git 不可读时保留
   const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8' }).trim();
   const head = git('rev-parse', 'HEAD');
   const read = async () => (await daemon.call('list-projects')).result[0];
-  assert.deepEqual(await read(), { ...daemon.project, currentBranch: 'main', headCommit: head, uncommittedChanges: 0, gitStatusReason: null });
+  assert.deepEqual(await read(), { ...daemon.project, isGit: true, currentBranch: 'main', headCommit: head, uncommittedChanges: 0, gitStatusReason: null });
   await rename(join(path, 'README.md'), join(path, 'renamed\nfile.md'));
   git('add', 'README.md', 'renamed\nfile.md');
   await writeFile(join(path, 'new\nfile.md'), 'untracked');
   assert.equal((await read()).uncommittedChanges, 2);
   git('checkout', '--detach', head);
+  assert.equal((await read()).isGit, false);
   assert.equal((await read()).currentBranch, null);
-  assert.equal((await read()).headCommit, head);
+  assert.equal((await read()).headCommit, null);
   await rm(path, { recursive: true, force: true });
   const unavailable = await read();
   assert.equal(unavailable.id, daemon.project.id);
@@ -84,7 +85,7 @@ test('HTTP 删除有工作的项目被拒绝，工作数包含已取消的工作
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'project-deleted').length, 0);
 });
 
-test('HTTP 列出子目录并标出 git 仓库；登记不存在的路径时先拒绝，确认后新建目录并独立初始化', async t => {
+test('HTTP 列出子目录并标出 git 仓库；登记已有目录不初始化 git', async t => {
   const daemon = await uiFixture();
   t.after(() => daemon.close());
   await mkdir(join(daemon.directory, '.hidden'));
@@ -93,13 +94,66 @@ test('HTTP 列出子目录并标出 git 仓库；登记不存在的路径时先�
   assert.deepEqual(listing.directories.find((entry: any) => entry.name === 'project'), { name: 'project', git: true });
   assert.ok(!listing.directories.some((entry: any) => entry.name === '.hidden'));
   assert.equal((await daemon.call('list-directories', { path: join(daemon.directory, 'missing') })).error.code, 'DIRECTORY_UNAVAILABLE');
-  // Created inside the registered repo: must become its own repository, not normalize to the parent.
   const created = join(daemon.repo, 'new', 'app');
   const refused = await daemon.call('register-project', { path: created });
   assert.equal(refused.error.code, 'INVALID_PROJECT');
-  assert.deepEqual(refused.error.details, { initializable: true, missing: true });
+  assert.match(refused.error.reason, /不存在/);
+  assert.equal(refused.error.details.missing, true);
   assert.equal(existsSync(created), false);
-  const project = (await daemon.call('register-project', { path: created, initGit: true })).result;
-  assert.equal(project.path, created);
-  assert.equal(execFileSync('git', ['-C', created, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(), created);
+  assert.equal((await daemon.call('register-project', { path: created, initGit: true })).error.code, 'INVALID_PARAMS');
+  for (const createDirectory of [false, true]) {
+    const file = await daemon.call('register-project', { path: join(daemon.repo, 'README.md'), createDirectory });
+    assert.equal(file.error.code, 'INVALID_PROJECT');
+    assert.equal(file.error.details?.missing, undefined);
+  }
+  const directory = join(daemon.directory, 'plain');
+  await mkdir(directory);
+  await writeFile(join(directory, 'existing.txt'), '保留原文件');
+  const project = (await daemon.call('register-project', { path: directory })).result;
+  assert.equal(project.path, directory);
+  assert.equal((await daemon.call('register-project', { path: directory })).result.id, project.id);
+  const read = (await daemon.call('list-projects')).result.find((item: any) => item.id === project.id);
+  assert.equal(read.isGit, false);
+  assert.equal(read.currentBranch, null);
+  assert.equal(read.headCommit, null);
+  assert.equal(existsSync(join(directory, '.git')), false);
+  assert.equal(await readFile(join(directory, 'existing.txt'), 'utf8'), '保留原文件');
+  // Empty git directories are accepted without Helm adding an initial commit.
+  execFileSync('git', ['init', directory], { stdio: 'ignore' });
+  assert.equal((await daemon.call('register-project', { path: directory })).result.id, project.id);
+  const empty = (await daemon.call('list-projects')).result.find((item: any) => item.id === project.id);
+  assert.equal(empty.isGit, false);
+  assert.equal(empty.currentBranch, null);
+  assert.equal(empty.headCommit, null);
+  const work = await daemon.call('send-message', { projectId: project.id, key: 'unborn', body: '先只读' });
+  assert.equal(work.ok, true);
+  assert.equal(work.result.work.baseRef, null);
+  assert.throws(() => execFileSync('git', ['-C', directory, 'rev-parse', '--verify', 'HEAD'], { stdio: 'pipe' }));
+});
+
+for (const segments of [['created'], ['new', 'app']]) test(`HTTP 缺失目录 ${segments.join('/')} 确认后递归创建并登记，不初始化 git`, async t => {
+  const daemon = await uiFixture([], undefined, { registerProject: false });
+  t.after(() => daemon.close());
+  const path = join(daemon.directory, ...segments);
+  for (const params of [{ path }, { path, createDirectory: false }]) {
+    const refused = await daemon.call('register-project', params);
+    assert.equal(refused.status, 400);
+    assert.equal(refused.error.code, 'INVALID_PROJECT');
+    assert.equal(refused.error.details.missing, true);
+    assert.equal(existsSync(join(daemon.directory, segments[0]!)), false);
+    assert.deepEqual((await daemon.call('list-projects')).result, []);
+  }
+  const response = await daemon.call('register-project', { path, createDirectory: true });
+  assert.equal(response.status, 200);
+  assert.equal(response.result.path, path);
+  assert.equal(response.result.name, segments.at(-1));
+  assert.ok((await lstat(path)).isDirectory());
+  const projects = (await daemon.call('list-projects')).result;
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].id, response.result.id);
+  assert.equal(projects[0].isGit, false);
+  assert.equal(projects[0].currentBranch, null);
+  assert.equal(projects[0].headCommit, null);
+  for (let index = 1; index <= segments.length; index++) assert.equal(existsSync(join(daemon.directory, ...segments.slice(0, index), '.git')), false);
+  assert.equal((await daemon.call('register-project', { path, createDirectory: true })).result.id, response.result.id);
 });

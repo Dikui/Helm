@@ -7,7 +7,8 @@ import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { RuleError } from '../src/store.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -494,14 +495,14 @@ test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项�
       child = spawn(process.execPath, ['-e', `
         const { spawn } = require('node:child_process');
         ${outcome === 'ignores-sigterm' ? "process.on('SIGTERM', () => {});" : ''}
-        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: '/', stdio: 'ignore' });
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(testProcessWatchdog())}], { cwd: '/', stdio: 'ignore' });
         child.once('spawn', () => console.log(child.pid));
-        setInterval(() => {}, 1000);
+        ${testProcessWatchdog()}
       `], { cwd: ctx.options.cwd, detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
       const ready = new Promise<void>(resolve => child!.stdout!.once('data', chunk => { descendant = Number(String(chunk).trim()); resolve(); }));
       return [{ type: 'hang', until: ready }, ...(reason === 'timed-out' ? [{ type: 'hang' } as FakeStep] : [{ type: 'end', reason } as FakeStep])];
     }, []]);
-    outside = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: daemon.repo, detached: true, stdio: 'ignore' });
+    outside = spawn(process.execPath, ['-e', testProcessWatchdog()], { cwd: daemon.repo, detached: true, stdio: 'ignore' });
     t.after(() => {
       for (const processId of [child?.pid, outside?.pid]) if (processId) {
         try { process.kill(-processId, 'SIGKILL'); } catch { /* Already cleaned by helmd. */ }
@@ -509,6 +510,7 @@ test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项�
     });
     const work = await daemon.begin();
     await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+    existingWorkCopy(daemon.dataDir, work.id);
     if (reason === 'timed-out') ok(await daemon.call('set-round-watchdog', { totalTimeoutMs: 2000, idleTimeoutMs: 30_000 }));
     await daemon.confirm(work.id);
     const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length >= 2);

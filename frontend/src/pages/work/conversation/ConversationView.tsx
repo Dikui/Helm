@@ -88,13 +88,13 @@ export function ConversationView({ work }: { work: Work }) {
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
       {conversation.data?.map(item => <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
-        <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : 'alignmentCoordinator')}</b>
+        <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : item.kind === 'git-initialization' ? 'conversationRuntime' : 'alignmentCoordinator')}</b>
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
         {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
-          ? <GateDecision gate={item} />
+          ? <GateDecision gate={item} decisionWorkId={work.id} />
           : <GateHistory gate={item} />}
       </article>)}
       <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />

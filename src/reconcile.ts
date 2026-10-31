@@ -10,6 +10,7 @@ import { deliveryDetails, mergeReviewedWork, completeReviewedWork, cleanupReview
 import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
+import { projectGitRoot } from './project-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -35,6 +36,18 @@ export async function reconcileStartup(store: TaskStore) {
       store.transaction(() => store.appendEvent(runtime, { type: 'dispatch', id: String(row.id) }, 'browser-processes-cleaned',
         { pgid: row.browser_pgid, startedAt: row.browser_started_at }, { workId: String(row.work_id), cardId: String(row.card_id), dispatchId: String(row.id) }));
     }
+  }
+  // Agents may leave the worktree; their recorded groups are still ours.
+  const agents = store.db.prepare(`SELECT 'dispatch' AS type, id, work_id, card_id, pgid, process_started_at FROM dispatches
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL
+    UNION ALL SELECT 'coordinator-round', id, work_id, NULL, pgid, process_started_at FROM coordinator_rounds
+    WHERE status = 'running' AND pgid IS NOT NULL AND process_started_at IS NOT NULL`).all();
+  for (const row of agents) {
+    if (!await cleanupRecordedProcessGroup(Number(row.pgid), String(row.process_started_at))) continue;
+    const dispatch = row.type === 'dispatch';
+    store.transaction(() => store.appendEvent(runtime, { type: String(row.type), id: String(row.id) },
+      dispatch ? 'dispatch-processes-cleaned' : 'round-processes-cleaned', { pgid: row.pgid, startedAt: row.process_started_at },
+      { workId: String(row.work_id), ...dispatch ? { cardId: String(row.card_id), dispatchId: String(row.id) } : {} }));
   }
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
@@ -75,14 +88,17 @@ export async function reconcileStartup(store: TaskStore) {
   const recoveryWorks = [...works].sort((a, b) => recoveryRank(a.status) - recoveryRank(b.status)
     || (queuedAt.get(a.id) ?? 0) - (queuedAt.get(b.id) ?? 0));
   for (const work of recoveryWorks) {
-    // A deleted project has no repository to repair; keep the work as recorded instead of failing startup.
-    if (!existsSync(projectPath(store, work.id))) { await compressWorkOutputs(store, work.id); continue; }
+    const accepted = store.gates(work.id).findLast(gate => gate.kind === 'review' && gate.decision === 'accept');
+    if (accepted && !work.workBranch && work.status === 'accepted') {
+      store.transaction(() => completeReviewedWork(store, runtime, work.id, { gateId: accepted.id, noCodeChanges: true }));
+    }
+    // A deleted project, or one whose repository was removed, has nothing to repair; keep the work as recorded instead of failing startup.
+    const project = projectPath(store, work.id);
+    if (!existsSync(project) || (work.workBranch && !projectGitRoot(project))) { await compressWorkOutputs(store, work.id); continue; }
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
-    const accepted = store.gates(work.id).find(gate => gate.kind === 'review' && gate.decision === 'accept');
-    if (accepted) {
-      const project = projectPath(store, work.id);
+    if (accepted && work.workBranch) {
       const events = store.events({ workId: work.id });
       const intent = events.filter(event => event.action === 'base-merge-started').at(-1);
       const settled = events.filter(event => ['base-merge-result', 'base-merge-aborted'].includes(event.action)).at(-1);
@@ -107,7 +123,7 @@ export async function reconcileStartup(store: TaskStore) {
       } else if (['merging', 'merge-queued'].includes(work.status)) await mergeReviewedWork(store, work.id);
     }
     for (const node of cardGraph(store, work.id)) {
-      if (node.type !== 'card' || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
+      if (node.type !== 'card' || node.readOnly || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
       removeCardCopy(store, { ...node, workPath: node.workPath ?? join(root, work.id, node.id), cardBranch: node.cardBranch ?? `helm-card/${work.id}/${node.id}` });
     }
     const workPath = work.workPath ?? join(root, work.id, '_work');

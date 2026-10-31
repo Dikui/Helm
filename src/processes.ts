@@ -9,6 +9,15 @@ export interface ManagedProcess { pid: number; pgid: number; startedAt: string }
 interface ProcessDirectory { pid: number; pgid: number; cwd: string }
 const exec = promisify(execFile);
 
+// Drivers call this right after spawning a detached group leader. The OS start
+// time lets restart cleanup tell the recorded group from a reused PID.
+export function managedProcess(pid: number): ManagedProcess {
+  let startedAt: string | null = null;
+  // shortcut: an unreadable start time falls back to now, so restart cleanup skips that group; fine while helmd may run ps.
+  try { startedAt = processStartTime(pid); } catch { /* keep the fallback */ }
+  return { pid, pgid: pid, startedAt: startedAt ?? new Date().toISOString() };
+}
+
 // Use the OS timestamp rather than the time helmd happened to observe a PID.
 export function processStartTime(pid: number): string | null {
   try {
@@ -99,7 +108,7 @@ export async function signalProcess(target: number, value: NodeJS.Signals) {
   }
 }
 
-export async function cleanupWorktreeProcesses(path: string, managed: ManagedProcess[] = []) {
+export async function cleanupWorktreeProcesses(path: string, managed: ManagedProcess[] = [], includeDirectory = true) {
   const root = await realpath(path);
   let snapshot = await processDirectories();
   const ownGroup = snapshot.find(entry => entry.pid === process.pid)?.pgid;
@@ -108,7 +117,7 @@ export async function cleanupWorktreeProcesses(path: string, managed: ManagedPro
     const suffix = relative(root, cwd);
     return suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
   };
-  const matches = snapshot.filter(entry => entry.pid !== process.pid && (inside(entry.cwd)
+  const matches = snapshot.filter(entry => entry.pid !== process.pid && ((includeDirectory && inside(entry.cwd))
     || managed.some(item => item.pgid === entry.pgid)));
   const groups = new Set(matches.filter(entry => entry.pgid !== ownGroup).map(entry => entry.pgid));
   const individual = new Set(matches.filter(entry => entry.pgid === ownGroup).map(entry => entry.pid));

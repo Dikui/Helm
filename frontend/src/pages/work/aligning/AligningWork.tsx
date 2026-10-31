@@ -57,7 +57,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
   const chat = useRef<HTMLElement>(null);
   const composer = useRef<HTMLFormElement>(null);
   const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
-  const copyNotice = workBranch && <p className="warn"><span>!</span><span>{t('alignmentCopyReady')}</span></p>;
+  const copyNotice = <p className="warn"><span>!</span><span>{t(shown && !shown.baseRef ? 'projectWithoutGitHint' : workBranch ? 'alignmentCopyReady' : 'alignmentCopyPending')}</span></p>;
   return <div className="aligning-work">
     <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
       <ConversationScroll key={workId} className="aligning-thread">
@@ -74,7 +74,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
             }}>
               <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
               <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
-              {shown && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t('alignmentCopyRefresh')}</p>}
+              {shown?.baseCommit && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}
             </div>
             : item.status === 'pending' ? <GateDecision key={item.id} gate={item} /> : <GateHistory key={item.id} gate={item} />)}
         {confirmError && <ErrorNotice error={confirmError} />}
@@ -110,7 +110,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
             return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
               <li key={index}>{previous && !oldLines.includes(line) ? <mark>{line}</mark> : line}</li>)}</ul></section>;
           })}
-          <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>
+          {shown.baseCommit && <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>}
           {copyNotice}
           <p className="muted">{t('alignmentNewEntriesHint')}</p>
           {latest?.id !== shown.id && <p>{t('alignmentHistoricalDraft')}</p>}

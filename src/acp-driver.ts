@@ -193,11 +193,12 @@ export class AcpDriver implements Driver {
     const profile = this.profile;
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
-    if (agent.driver !== this.agent || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1) {
+    const readOnly = options.sandbox.mode === 'read-only';
+    if (agent.driver !== this.agent || agent.role !== 'executor' || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1)) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
+    if (!readOnly && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
     options.signal?.throwIfAborted();
     const queue: DriverEvent[] = [];
     let wake: (() => void) | undefined;
@@ -226,6 +227,7 @@ export class AcpDriver implements Driver {
       void close();
     };
     const env = this.environment(options.env, agent);
+    if (readOnly) env[this.agent === 'deepseek' ? 'DSH_PERMISSION_MODE' : 'GROK_SANDBOX'] = 'read-only';
     const home = await this.homeAvailability(agent, env);
     if (home) throw new Error(home.reason);
     const { acp, close: closeAgent } = await this.launch(agent, { ...options, cwd }, env, {
@@ -251,7 +253,7 @@ export class AcpDriver implements Driver {
       },
       permission(request) {
         const input = request.toolCall.rawInput ?? toolInputs.get(request.toolCall.toolCallId);
-        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input) ?? true);
+        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, options.sandbox.mode) ?? true);
         const option = allowed ? request.options.find(option => option.kind === 'allow_once') : undefined;
         // Selecting a persistent rejection can also mutate the user's settings.
         const reject = request.options.find(option => option.kind === 'reject_once');

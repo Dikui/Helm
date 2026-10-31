@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
-import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 import type { StartupBrief } from '../src/rounds.js';
 
 type AlignmentScript = FakeStep[] | ((context: FakeContext & { brief: StartupBrief }) => FakeStep[]);
@@ -51,7 +51,7 @@ const workIdOf = (context: FakeContext) => (JSON.parse(context.input) as Startup
 
 const description = { requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开' };
 
-test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，用户确认已有工作分支', async t => {
+test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，用户确认后仍不建工作分支和副本', async t => {
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'description-1' }) },
     { type: 'tool', name: 'send-message', arguments: ctx => ({ workId: workIdOf(ctx), body: '请确认工作说明', key: 'reply-1' }) },
@@ -68,7 +68,7 @@ test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，
   assert.equal(pending.description.status, 'draft');
   assert.equal(pending.baseRef, 'main');
   assert.equal(pending.baseCommit, head);
-  assert.equal(pending.uncommittedChanges, '');
+  assert.match(pending.uncommittedChanges, /uncommitted.txt/);
   const conversation = (await daemon.call('get-conversation', { workId: work.id })).result;
   assert.equal(conversation.at(-1).sender, 'coordinator-round');
   assert.equal(conversation.at(-1).body, '请确认工作说明');
@@ -76,11 +76,10 @@ test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，
   assert.equal(confirmed.status, 200);
   const current = (await daemon.call('get-work', { workId: work.id })).result;
   assert.equal(current.status, 'executing');
-  assert.equal(current.workBranch, `helm/${work.id}`);
-  assert.equal(daemon.git('rev-parse', current.workBranch), head);
+  assert.equal(current.workBranch, null);
+  assert.equal(current.workPath, null);
+  assert.equal(daemon.git('for-each-ref', '--format=%(refname)', 'refs/heads/helm/'), '');
   assert.equal(daemon.git('branch', '--show-current'), 'main');
-  assert.equal(await readFile(join(current.workPath, 'README.md'), 'utf8'), 'baseline\n');
-  assert.match(current.workPath, /\/_work$/);
   assert.equal(await readFile(join(daemon.repo, 'uncommitted.txt'), 'utf8'), '用户的未提交改动');
   const versions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   assert.equal(versions[0].status, 'active');
@@ -139,8 +138,8 @@ test('MCP 从轮次令牌确定工作，HTTP 保留范围检查，令牌限制�
   const daemon = await fixture(t, [ctx => {
     headers = ctx.options.mcpServers.helm!.headers;
     ownWorkId = workIdOf(ctx);
-    assert.equal(ctx.options.cwd, ctx.brief.work.workPath);
-    assert.notEqual(ctx.options.cwd, daemon.repo);
+    assert.equal(ctx.options.cwd, daemon.repo);
+    assert.equal(ctx.brief.work.workPath, null);
     assert.equal(ctx.options.sandbox.mode, 'read-only');
     assert.equal(ctx.options.resumeSessionId, undefined);
     assert.ok(ctx.options.env.NO_PROXY?.split(',').includes('127.0.0.1'));
@@ -224,7 +223,7 @@ test('确认后的工作说明修订需新关卡，旧版继续生效直到用�
   assert.equal((await confirm(firstGate)).status, 200);
   await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'round-ended').length === 2);
   assert.equal(revisionBrief!.workDescription!.confirmation, '已确认');
-  assert.equal(revisionBrief!.work.workPath!.endsWith('/_work'), true);
+  assert.equal(revisionBrief!.work.workPath, null);
   const pending = (await daemon.call('list-pending')).result;
   assert.equal(pending.length, 1);
   assert.notEqual(pending[0].id, firstGate.id);
@@ -300,7 +299,7 @@ test('驱动逐条输出带步骤号，压缩通知和结束消息保存在轮�
   assert.equal(output[3].finalAnswer, undefined);
 });
 
-test('确认时无工作提交则跟上基准最新提交，并记录实际生效的基准', async t => {
+test('确认时不建副本并记录基准最新提交', async t => {
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'pinned' }) },
   ], []]);
@@ -314,45 +313,51 @@ test('确认时无工作提交则跟上基准最新提交，并记录实际生�
   assert.notEqual(laterHead, gate.baseCommit);
   const confirmed = await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
   assert.equal(confirmed.status, 200);
-  assert.equal(daemon.git('rev-parse', `helm/${work.id}`), laterHead);
+  assert.equal(confirmed.result.workBranch, null);
+  assert.equal(confirmed.result.workPath, null);
   assert.equal(daemon.git('rev-parse', 'main'), laterHead);
   assert.equal(confirmed.result.baseCommit, laterHead);
-  assert.equal(await readFile(join(work.workPath, 'README.md'), 'utf8'), 'changed after draft\n');
   const versions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   assert.equal(versions[0].baseCommit, laterHead);
 });
 
-test('确认时 git 外部动作失败不改变生效版本，移除阻碍后重试复用已创建的工作分支', async t => {
+test('已有工作副本没有自己的提交时，确认跟上基准最新提交且保留副本', async t => {
   const daemon = await fixture(t, [[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'retry-confirm' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'legacy-confirm' }) },
   ], []]);
-  const work = await daemon.begin();
-  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+  const initial = await daemon.begin();
+  await until(() => daemon.events(initial.id), events => events.some(event => event.action === 'round-ended'));
+  const work = existingWorkCopy(daemon.dataDir, initial.id);
   const gate = (await daemon.call('list-pending')).result[0];
-  const workPath = join(daemon.dataDir, 'worktrees', work.id, '_work');
-  daemon.git('worktree', 'remove', workPath);
-  await writeFile(workPath, '路径被占用');
+  await writeFile(join(daemon.repo, 'README.md'), 'new base\n');
+  daemon.git('add', 'README.md');
+  daemon.git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'new base');
+  const latest = daemon.git('rev-parse', 'HEAD');
   const params = { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' };
+  await writeFile(join(work.workPath!, 'README.md'), 'uncommitted work copy\n');
   assert.equal((await daemon.call('decide-gate', params)).ok, false);
-  const unchanged = (await daemon.call('get-work', { workId: work.id })).result;
-  assert.equal(unchanged.status, 'aligning');
-  assert.equal(unchanged.activeDescriptionId, null);
+  assert.equal((await daemon.call('get-work', { workId: work.id })).result.activeDescriptionId, null);
   assert.equal((await daemon.call('list-pending')).result[0].status, 'pending');
-  assert.equal(daemon.git('rev-parse', `helm/${work.id}`), gate.baseCommit);
-  await rm(workPath);
-  assert.equal((await daemon.call('decide-gate', params)).status, 200);
-  assert.equal((await daemon.call('get-work', { workId: work.id })).result.status, 'executing');
+  execFileSync('git', ['-C', work.workPath!, 'restore', '--worktree', 'README.md']);
+  assert.equal(execFileSync('git', ['-C', work.workPath!, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+  const confirmed = await daemon.call('decide-gate', params);
+  assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+  assert.equal(confirmed.result.workPath, work.workPath);
+  assert.equal(confirmed.result.baseCommit, latest);
+  assert.equal(daemon.git('rev-parse', work.workBranch!), latest);
+  assert.equal(await readFile(join(work.workPath!, 'README.md'), 'utf8'), 'new base\n');
 });
 
 test('工作分支已有提交时，确认保留提交和副本内容，不跟随基准变化', async t => {
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'keep-commits' }) },
   ], []]);
-  const work = await daemon.begin();
-  await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
+  const initial = await daemon.begin();
+  await until(() => daemon.events(initial.id), events => events.some(event => event.action === 'round-ended'));
+  const work = existingWorkCopy(daemon.dataDir, initial.id);
   const gate = (await daemon.call('list-pending')).result[0];
-  const git = (...args: string[]) => execFileSync('git', ['-C', work.workPath, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
-  await writeFile(join(work.workPath, 'README.md'), 'work commit\n');
+  const git = (...args: string[]) => execFileSync('git', ['-C', work.workPath!, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+  await writeFile(join(work.workPath!, 'README.md'), 'work commit\n');
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'work change');
   const tip = git('rev-parse', 'HEAD');
@@ -363,5 +368,5 @@ test('工作分支已有提交时，确认保留提交和副本内容，不跟�
   assert.equal(confirmed.ok, true);
   assert.equal(git('rev-parse', 'HEAD'), tip);
   assert.equal(confirmed.result.baseCommit, work.baseCommit);
-  assert.equal(await readFile(join(work.workPath, 'README.md'), 'utf8'), 'work commit\n');
+  assert.equal(await readFile(join(work.workPath!, 'README.md'), 'utf8'), 'work commit\n');
 });

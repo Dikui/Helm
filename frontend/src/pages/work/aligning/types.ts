@@ -4,7 +4,7 @@ import type { Attachment } from '../../../shared/attachments.js';
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string;
   requirements: string; boundary: string; criteria: string;
-  gateId: string; baseRef: string; baseCommit: string;
+  gateId: string; baseRef: string | null; baseCommit: string | null;
 }
 export type ConversationItem = (Gate & { type: 'gate'; createdAt: string; decision: string | null; withdrawalReason: string | null }) | {
   id: string; type: 'message'; sender: string; body: string; createdAt: string; attachments?: Attachment[]; withdrawnAt?: string | null;

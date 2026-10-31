@@ -145,7 +145,7 @@
 /* 已跳过：沿用设计稿的虚线、浅灰斜纹与不划线的淡化名字。 */
 .cg-skip-fill, .cg-node.skipped, .cs-block.skipped { background: repeating-linear-gradient(135deg, var(--surface-soft) 0 4px, var(--surface) 4px 8px); }
 .cg-skip-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px dashed var(--border-strong); border-radius: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.cg-aggregate { display: inline-flex; flex-shrink: 0; align-items: center; height: 16px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.cg-aggregate, .cg-read-only { display: inline-flex; flex-shrink: 0; align-items: center; height: 16px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--muted); font-size: 10px; font-weight: 500; }
 .cg-node.skipped { border-style: dashed; box-shadow: none; color: var(--muted); }
 .cg-node.skipped .cg-node-name { opacity: .75; }
 .cg-node.skipped .cg-node-meta { opacity: .75; }

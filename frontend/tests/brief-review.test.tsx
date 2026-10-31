@@ -16,6 +16,7 @@ function expandRow(text: HTMLElement) {
 import type { FakeContext, FakeStep } from '../../src/driver.js';
 import type { ReviewReport } from '../../src/review-report.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+const { existingWorkCopy }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -266,7 +267,8 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 2')).toBeTruthy();
   expect(within(brief).getByText('生效中')).toBeTruthy();
-  expect(within(brief).getByText(`helm/${work.id}`)).toBeTruthy();
+  expect(within(brief).getByText('—')).toBeTruthy();
+  expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
   const versions = within(brief).getByLabelText('版本');
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).getByText('需求原文 1')).toBeTruthy();
@@ -478,6 +480,7 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('没有代码变更') }), check: ok },
   ]]);
   const work = await createWork();
+  existingWorkCopy(join(daemon.directory, 'data'), work.id);
   await confirmVersion(work.id, 1);
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon.url} />);
@@ -491,6 +494,43 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
   fireEvent.click(within(review).getByRole('button', { name: '查看 diff' }));
   expect(within(review).getByText('没有代码差异。')).toBeTruthy();
   expect(within(review).queryByLabelText('Diff 内容')).toBeNull();
+});
+
+test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接受后直接完成并隐藏交付按钮（%s）', async language => {
+  let release!: () => void;
+  const executionEnded = new Promise<void>(resolve => { release = resolve; });
+  daemon = await uiFixture([[draft(1)], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '只读分析', readOnly: true }), saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }), check: ok },
+    { type: 'hang', until: executionEnded },
+    { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('只读分析结论') }), check: ok },
+  ]], undefined, { executorScripts: [[{ type: 'output', text: '只读分析结果' }]] });
+  const work = await createWork();
+  try {
+    await confirmVersion(work.id, 1);
+    await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result[0]?.status === 'ended');
+    release();
+    await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
+    localStorage.setItem('helm.language', language);
+    window.history.replaceState(null, '', `/works/${work.id}/brief`);
+    render(<App baseUrl={daemon.url} transport={trackDecisions} />);
+    const review = await screen.findByRole('region', { name: language === 'zh' ? '审核' : 'Review' });
+    expect(await within(review).findByText(language === 'zh' ? '退回必须附意见。这项工作没有代码改动，接受后将直接完成。'
+      : 'A comment is required to send back. This work has no code changes and will complete when accepted.')).toBeTruthy();
+    fireEvent.click(within(review).getByText(language === 'zh' ? '审核记录与全部改动' : 'Review records and all changes'));
+    expect(within(review).getByText(language === 'zh' ? '这项工作没有代码改动。' : 'This work has no code changes.')).toBeTruthy();
+    expect(within(review).queryByRole('button', { name: /查看 diff|View diff/ })).toBeNull();
+    expect(within(review).queryByText(/无法读取.*diff/)).toBeNull();
+    fireEvent.click(within(review).getByRole('button', { name: language === 'zh' ? '接受' : 'Accept' }));
+    const delivery = await screen.findByRole('region', { name: language === 'zh' ? '合入与推送' : 'Merge and push' });
+    expect(await within(delivery).findByRole('heading', { name: language === 'zh' ? '已完成' : 'Completed' })).toBeTruthy();
+    expect(within(delivery).queryAllByRole('button')).toEqual([]);
+    const completed = (await daemon.call('get-work', { workId: work.id })).result;
+    expect(completed.status).toBe('completed');
+    expect(completed.workBranch).toBeNull();
+    expect(completed.delivery.merge).toBeUndefined();
+  } finally { release(); }
 });
 
 

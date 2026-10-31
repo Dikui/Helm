@@ -1,5 +1,5 @@
 export interface Project {
-  id: string; name: string; path: string; defaultCoordinatorAgentId: string;
+  id: string; name: string; path: string; defaultCoordinatorAgentId: string; isGit: boolean;
   currentBranch: string | null; headCommit: string | null;
   uncommittedChanges: number | null; gitStatusReason: string | null;
 }

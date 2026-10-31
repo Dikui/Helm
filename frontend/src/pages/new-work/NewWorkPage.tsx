@@ -32,11 +32,12 @@ export function NewWorkPage() {
     : coordinators.find(item => item.available)?.id ?? projectDefault);
   const chosen = coordinators.find(item => item.id === selectedAgent);
   const available = Boolean(chosen?.available);
-  const branchReady = base?.projectId === project?.id && Boolean(base?.baseRef);
+  const branchReady = !project?.isGit || (base?.projectId === project.id && Boolean(base?.baseRef));
   const locked = submission.pending || submission.uncertain;
   const send = async () => {
     if (!project || (!submission.uncertain && (!available || !branchReady)) || !body.trim()) return;
-    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent, baseRef: base?.baseRef, body: body.trim(), attachments: await encodeFiles(files), references });
+    const result = await submission.send({ projectId: project.id, coordinatorAgentId: selectedAgent,
+      ...(project.isGit && base?.projectId === project.id ? { baseRef: base.baseRef } : {}), body: body.trim(), attachments: await encodeFiles(files), references });
     if (result) navigate(`/works/${encodeURIComponent(result.work.id)}`);
   };
   const registered = (id: string) => {
@@ -73,7 +74,8 @@ export function NewWorkPage() {
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>
-      <div className="new-context"><BaseBranchField key={project.id} project={project} selection={base} onSelect={setBase} locked={locked} />
+      <div className="new-context">{project.isGit ? <BaseBranchField key={project.id} project={project} selection={base} onSelect={setBase} locked={locked} />
+        : <section className="new-base"><p className="mono">{project.path}</p><p className="muted">{t('projectWithoutGitHint')}</p></section>}
       {Boolean(project.uncommittedChanges) && <p className="warn"><span>!</span><span>{project.uncommittedChanges} {t('newWorkUncommittedHint')}</span></p>}</div>
       <div className="new-tips"><span><kbd>⏎</kbd> {t('newWorkStart')}</span><span><kbd>⇧⏎</kbd> {t('conversationNewline')}</span><span>{t('newWorkAlignmentNext')}</span></div>
     </div>}

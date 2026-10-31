@@ -217,7 +217,7 @@ draft、smoke-implementation、smoke-overall
     }]).start(options);
   } } satisfies Pick<Driver, 'start'>;
   daemon = await startTestHelmd({ port: 0, agentDir, dataDir: join(directory, 'data'), driver, executorDriver,
-    browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url))] } });
+    browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), '--test-process-pid', String(process.pid)] } });
   const call = async (name: string, params: object = {}): Promise<any> => {
     const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
     const body = await response.json() as any;

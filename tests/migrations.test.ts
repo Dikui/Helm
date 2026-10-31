@@ -17,6 +17,45 @@ import { reviewReport } from './fixtures/review-report.js';
 const legacySql = (await readFile(new URL('../../tests/fixtures/legacy-migrations.sql', import.meta.url), 'utf8'))
   .split('\n-- migration\n').slice(1);
 
+test('工作说明允许空基准的迁移保留旧基准和派单引用，升级后可保存非 git 工作说明', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-description-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    const nullableBase = migrations.findIndex(sql => sql.includes('RENAME COLUMN base_ref TO legacy_base_ref'));
+    assert.ok(nullableBase > 0);
+    for (const [index, sql] of migrations.slice(0, nullableBase).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`
+      INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/old/project', '2026-01-01');
+      INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'project', 'executing', 'start', '2026-01-01');
+      INSERT INTO events (id, time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+        VALUES (1, '2026-01-01', 'runtime', 'test', 'gate', 'gate', 'gate-created', '{}', 'work');
+      INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence)
+        VALUES ('gate', 'work', 'work-confirmation', 'decided', '确认', '2026-01-01', 1);
+      INSERT INTO work_descriptions VALUES ('description', 'work', 1, 'active', 'brief', '需求', '边界', '标准', 'gate', 'main', 'old-commit');
+      INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at)
+        VALUES ('card', 'work', 'card', '旧卡片', 0, 'completed', '2026-01-01');
+      INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, output_path, work_description_id)
+        VALUES ('dispatch', 'work', 'card', 'dispatch', 'execution', 'executor', '{}', '旧派单', 'ended', '2026-01-01', '/old/steps', 'description');
+    `);
+  } finally { db.close(); }
+  const agents = new AgentCatalog(join(directory, 'agents'));
+  let store = new TaskStore(directory, agents);
+  try {
+    assert.equal(store.descriptions('work')[0]!.baseRef, 'main');
+    assert.equal(store.descriptions('work')[0]!.baseCommit, 'old-commit');
+    assert.equal(store.db.prepare('SELECT work_description_id AS id FROM dispatches').get()!.id, 'description');
+    assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
+    store.db.exec("INSERT INTO work_descriptions VALUES ('plain', 'work', 2, 'draft', 'plain', '只读', '本机', '结论', 'gate', NULL, NULL)");
+  } finally { store.close(); }
+  store = new TaskStore(directory, agents);
+  try {
+    assert.equal(store.descriptions('work')[1]!.baseRef, null);
+    assert.equal(store.descriptions('work')[1]!.baseCommit, null);
+  } finally { store.close(); }
+});
+
 test('结构化报告迁移保留旧版审核正文，新版报告在重启后可读取', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'helm-report-migration-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -141,7 +180,9 @@ test('去掉 Agent 表的迁移保留已有派单快照、卡片 Agent id 和成
     return body.result;
   };
   assert.deepEqual((await call('get-dispatch', { workId: 'work', dispatchId: 'dispatch' })).agent, snapshot);
-  assert.equal((await call('get-card', { workId: 'work', cardId: 'card' })).agentId, 'legacy-executor');
+  const card = await call('get-card', { workId: 'work', cardId: 'card' });
+  assert.equal(card.agentId, 'legacy-executor');
+  assert.equal(card.readOnly, false, '已有卡片迁移后按写代码处理');
   assert.equal((await call('get-dispatch-artifacts', { workId: 'work', dispatchId: 'dispatch' }))[0].id, 'artifact');
   assert.equal((await call('read-artifact', { workId: 'work', artifactId: 'artifact' })).content, '旧成果');
 });

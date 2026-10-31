@@ -5,6 +5,7 @@ import type { TokenUsage } from './driver.js';
 import { migrations } from './migrations.js';
 import type { AgentCatalog } from './agents.js';
 import type { ReviewReport } from './review-report.js';
+import type { GitInitialization } from './git-initialization.js';
 
 export type ActorType = 'user' | 'coordinator-round' | 'dispatch' | 'runtime';
 export interface Actor { type: ActorType; id: string; workId?: string }
@@ -19,7 +20,7 @@ export interface Work {
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string; key: string;
   requirements: string; boundary: string; criteria: string; gateId: string;
-  baseRef: string; baseCommit: string;
+  baseRef: string | null; baseCommit: string | null;
 }
 export interface Gate {
   id: string; workId: string; kind: string; status: string; key: string | null;
@@ -27,15 +28,17 @@ export interface Gate {
   createdAt: string; sequence: number; descriptionId: string | null;
   decision: string | null; withdrawalReason: string | null; comment: string | null;
   report: ReviewReport | null;
+  gitInitialization: GitInitialization | null;
 }
 
 const gateColumns = `id, work_id AS workId, kind, status, key, question, body, options, multi_select AS multiSelect,
   creator_type AS creatorType, creator_id AS creatorId, created_at AS createdAt, sequence,
-  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment, report`;
+  description_id AS descriptionId, decision, withdrawal_reason AS withdrawalReason, comment, report, git_initialization AS gitInitialization`;
 
 function readGate(row: Record<string, unknown>): Gate {
-  const { creatorType, creatorId, options, multiSelect, report, ...fields } = row;
+  const { creatorType, creatorId, options, multiSelect, report, gitInitialization, ...fields } = row;
   return { ...fields, options: JSON.parse(String(options)), multiSelect: multiSelect === 1, report: report ? JSON.parse(String(report)) : null,
+    gitInitialization: gitInitialization ? JSON.parse(String(gitInitialization)) : null,
     creator: { type: creatorType, id: creatorId } } as Gate;
 }
 export interface EventFilter {
@@ -186,26 +189,32 @@ COMMIT;`);
       FROM messages WHERE work_id = ?
       UNION ALL
       SELECT 'gate', id, work_id, NULL, NULL, NULL, NULL, kind, status, question, created_at, sequence, description_id, decision, NULL, NULL
-      FROM gates WHERE work_id = ? ORDER BY sequence
-    `).all(workId, workId).map(item => item.type === 'gate' ? { ...item, ...this.gate(workId, String(item.id)) }
+      FROM gates WHERE work_id = ? OR (kind = 'git-initialization' AND id IN
+        (SELECT upstream_id FROM dependencies WHERE work_id = ? AND upstream_type = 'gate')) ORDER BY sequence
+    `).all(workId, workId, workId).map(item => item.type === 'gate' ? { ...item, ...this.gate(workId, String(item.id)) }
       : Object.assign(item, { attachments: JSON.parse(String(item.attachments)) as unknown[] }));
   }
 
   gate(workId: string, gateId: string): Gate {
     this.work(workId);
-    const row = this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE id = ? AND work_id = ?`).get(gateId, workId);
+    const row = this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE id = ? AND (work_id = ? OR
+      (kind = 'git-initialization' AND work_id IN (SELECT id FROM works WHERE project_id = (SELECT project_id FROM works WHERE id = ?))
+        AND id IN (SELECT upstream_id FROM dependencies WHERE work_id = ? AND upstream_type = 'gate')))`).get(gateId, workId, workId, workId);
     if (!row) throw new RuleError('INVALID_GATE', '关卡必须属于这项工作。', 400);
     return readGate(row);
   }
 
   gates(workId: string): Gate[] {
     this.work(workId);
-    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE work_id = ? ORDER BY sequence`).all(workId).map(readGate);
+    return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE work_id = ? OR (kind = 'git-initialization' AND id IN
+      (SELECT upstream_id FROM dependencies WHERE work_id = ? AND upstream_type = 'gate')) ORDER BY sequence`).all(workId, workId).map(readGate);
   }
 
   pending() {
     return this.db.prepare(`SELECT ${gateColumns} FROM gates WHERE status = 'pending'
-      AND work_id IN (SELECT id FROM works WHERE status NOT IN ('completed', 'cancelled')) ORDER BY sequence`).all().map(readGate);
+      AND (work_id IN (SELECT id FROM works WHERE status NOT IN ('completed', 'cancelled')) OR
+        (kind = 'git-initialization' AND id IN (SELECT upstream_id FROM dependencies WHERE upstream_type = 'gate'
+          AND work_id IN (SELECT id FROM works WHERE status NOT IN ('completed', 'cancelled'))))) ORDER BY sequence`).all().map(readGate);
   }
 
   subscribe(listener: (events: HelmEvent[]) => void) {

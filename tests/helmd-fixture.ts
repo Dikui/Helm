@@ -3,9 +3,19 @@ import { join } from 'node:path';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 import { fileURLToPath } from 'node:url';
+import { ensureWorkCopy } from '../src/alignment.js';
+import { AgentCatalog } from '../src/agents.js';
+import { TaskStore } from '../src/store.js';
 
 // Agent configs for tests; the role rules are built into src/prompts.ts.
 export const fixtureAgentDir = fileURLToPath(new URL('../../tests/fixtures/agents/', import.meta.url));
+
+// Persist an existing copy for scenarios that exercise legacy work or delivery.
+export function existingWorkCopy(dataDir: string, workId: string) {
+  const store = new TaskStore(dataDir, new AgentCatalog(fixtureAgentDir));
+  try { return store.transaction(() => ensureWorkCopy(store, workId)); }
+  finally { store.db.close(); }
+}
 
 // A logged-in Codex in a fresh home re-downloads its plugin catalog and curated plugins (~50 MB) on
 // every start. Share those caches across test homes; login, config and sessions stay per test.

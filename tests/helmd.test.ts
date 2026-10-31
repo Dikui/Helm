@@ -206,10 +206,9 @@ test('SSE 积压超过写缓冲时等待读取而不断开；不带游标只推�
 
 test('约束失败返回结构化错误并记录拒绝事件，事务回滚且固定关卡不能撤回', async t => {
   const daemon = await fixture(t);
-  const invalidProject = await daemon.call('register-project', { path: daemon.directory });
+  const invalidProject = await daemon.call('register-project', { path: join(daemon.directory, 'missing') });
   assert.equal(invalidProject.status, 400);
   assert.equal(invalidProject.body.error.code, 'INVALID_PROJECT');
-  assert.equal(invalidProject.body.error.details.initializable, true);
   assert.ok(invalidProject.body.error.reason);
   assert.ok(invalidProject.body.error.allowedOperations.includes('register-project'));
   assert.deepEqual((await daemon.call('list-projects')).body.result, []);

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { existingWorkCopy } from './helmd-fixture.js';
 import { uiFixture, until } from './ui-fixture.js';
 
 test('HTTP 读取工作分支上的文件和本工作的附件，拒绝范围外和不存在的路径', async t => {
@@ -14,6 +15,8 @@ test('HTTP 读取工作分支上的文件和本工作的附件，拒绝范围外
   const sent = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '见附件',
     attachments: [{ name: 'spec.md', content: Buffer.from('# 规格\n').toString('base64') }] })).result;
   const workId = sent.work.id;
+  assert.deepEqual((await daemon.call('list-work-files', { workId })).result, []);
+  existingWorkCopy(join(daemon.directory, 'data'), workId);
   assert.deepEqual((await daemon.call('list-work-files', { workId })).result, ['README.md']);
   assert.equal((await daemon.call('read-work-file', { workId, path: 'README.md' })).result.content, 'baseline\n');
   assert.equal((await daemon.call('read-work-file', { workId, path: sent.message.attachments[0].path })).result.content, '# 规格\n');

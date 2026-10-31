@@ -93,7 +93,7 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   }));
   const dataDir = join(directory, 'data');
   daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: { 'claude-sdk': coordinator, [agent]: executor },
-    ...(!config.realBrowser ? { browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url))] } } : {}) });
+    ...(!config.realBrowser ? { browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), '--test-process-pid', String(process.pid)] } } : {}) });
   const call = async (name: string, params: object = {}): Promise<any> =>
     (await fetch(`${daemon!.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json();
   const project = (await call('register-project', { path: repo })).result;

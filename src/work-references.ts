@@ -50,7 +50,7 @@ export function referenceSnapshot(store: TaskStore, workId: string, referencedId
     `# 引用的工作：${work.title}`, '',
     `- 工作 id：${work.id}`, `- 状态：${work.status}`, `- 项目仓库：${project}`,
     `- 基准：${work.baseRef ?? '未知'} @ ${work.baseCommit ?? '未知'}`,
-    commit ? `- 成果提交：${commit}` : `- 成果提交：无法读取（${error}）`,
+    commit ? `- 成果提交：${commit}` : !work.workBranch ? '- 成果提交：无（这项工作没有代码改动）' : `- 成果提交：无法读取（${error}）`,
   ];
   if (commit) {
     lines.push('', '## 改动的文件', '', `读取原文件：\`git -C ${project} show ${commit}:<路径>\``, '');

@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { App } from '../src/App.js';
 import type { FakeScript, FakeStep } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+const { existingWorkCopy }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 // jsdom has no native dialog implementation. Substitute only the platform API.
@@ -305,6 +306,7 @@ test('范围失效时空消息 Ctrl+Enter 仍能打断，打断按钮可终止�
 
 test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗预览', async () => {
   const work = await executingWork([[{ type: 'hang' }]]);
+  existingWorkCopy(join(daemon!.directory, 'data'), work.id);
   const { workPath } = (await daemon!.call('get-work', { workId: work.id })).result;
   const image = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
   await mkdir(join(workPath, 'outputs'));

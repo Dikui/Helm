@@ -117,12 +117,13 @@ function endedWork(store: TaskStore, workId: string) {
 
 function workRecords(store: TaskStore, workId: string) {
   const rows = (table: string) => store.db.prepare(`SELECT * FROM ${table} WHERE work_id = ? ORDER BY rowid`).all(workId);
+  const gateRow = store.db.prepare('SELECT * FROM gates WHERE id = ?');
   return {
     formatVersion: 1,
     work: store.db.prepare('SELECT * FROM works WHERE id = ?').get(workId),
     workDescriptions: rows('work_descriptions'), cards: rows('cards'), dispatches: rows('dispatches'),
     coordinatorRounds: rows('coordinator_rounds'), coordinatorNotes: rows('coordinator_notes'),
-    messages: rows('messages'), gates: rows('gates'), events: store.events({ workId }),
+    messages: rows('messages'), gates: store.gates(workId).map(gate => gateRow.get(gate.id)), events: store.events({ workId }),
     dependencies: rows('dependencies'), wakeQueue: rows('wake_queue'),
     artifacts: store.db.prepare('SELECT * FROM artifacts WHERE dispatch_id IN (SELECT id FROM dispatches WHERE work_id = ?) ORDER BY rowid').all(workId),
   };
@@ -188,6 +189,11 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
     const work = endedWork(store, workId);
     if (!work.outputsExportedAt && !confirm) {
       return { requiresConfirmation: true, message: '尚未导出这项工作的输出，建议先导出。确认删除请设置 confirm: true；删除后工作无法恢复。' };
+    }
+    if (store.db.prepare(`SELECT 1 FROM gates g WHERE g.work_id = ? AND g.kind = 'git-initialization' AND
+      (EXISTS (SELECT 1 FROM dependencies d WHERE d.upstream_type = 'gate' AND d.upstream_id = g.id AND d.work_id != g.work_id)
+        OR EXISTS (SELECT 1 FROM messages m WHERE m.gate_id = g.id AND m.work_id != g.work_id))`).get(workId)) {
+      throw new RuleError('SHARED_GATE_IN_USE', '这项工作的初始化 git 关卡仍被其他工作引用，请先删除引用它的工作。');
     }
     const title = readWork(store, workId).title;
     for (const row of store.db.prepare('SELECT id FROM dispatches WHERE work_id = ?').all(workId)) {

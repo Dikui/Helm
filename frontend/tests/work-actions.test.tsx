@@ -232,6 +232,7 @@ test('删除工作后逐项显示保留的工作及卡片分支和原因，返�
   expect((await daemon!.call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' })).ok).toBe(true);
   await until(() => daemon!.call('get-events', params), value => value.result.some((event: any) => event.action === 'dispatch-step' && event.details.summary === 'Wrote progress.txt'));
   const card = (await daemon!.call('get-card-graph', params)).result.find((node: any) => node.type === 'card');
+  Object.assign(work, (await daemon!.call('get-work', params)).result);
   expect((await daemon!.call('cancel-work', params)).ok).toBe(true);
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
   const workCommit = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid',

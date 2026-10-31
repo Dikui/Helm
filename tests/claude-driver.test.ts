@@ -14,6 +14,7 @@ import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { fixture as dispatchFixture, until } from './browser-fixture.js';
 import { claudeErrors } from './fixtures/claude-errors.js';
+import { testProcessWatchdog } from './fixtures/test-process.js';
 
 async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'executor'): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-')));
@@ -430,7 +431,7 @@ test('Claude canUseTool 只单次批准副本内写入，拒绝路径穿越、�
   assert.equal((await canUseTool('Write', { file_path: 'inside' }, permission({ signal: AbortSignal.abort() })))?.behavior, 'deny');
 });
 
-test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI、只读角色和扩大的可写范围', async t => {
+test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI 和扩大的可写范围', async t => {
   const options = await fixture(t);
   const bin = join(options.cwd, 'bin');
   await mkdir(bin);
@@ -443,7 +444,7 @@ test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI、只读角色和扩�
   assert.equal(path, executable);
   const driver = new ClaudeExecutorDriver({ query: fakeQuery([]) });
   await assert.rejects(driver.start({ ...options, env: { PATH: join(bin, 'missing') } }), /Local claude executable not found/);
-  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'read-only', writableRoots: [] } }), /executor card copy/);
+  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'read-only', writableRoots: [options.cwd] } }), /executor card copy/);
   await assert.rejects(driver.start({ ...options, sandbox: { mode: 'workspace-write', writableRoots: [options.cwd, bin] } }), /only its card copy/);
 });
 
@@ -615,7 +616,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
         // processes leave the copy, so only the registered group can find them.
         const child = sdk.spawnClaudeCodeProcess!({ command: process.execPath, args: ['-e', `
           const fs = require('fs');
-          const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: '/', stdio: 'ignore' });
+          const child = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(testProcessWatchdog())}], { cwd: '/', stdio: 'ignore' });
           fs.writeFileSync(${JSON.stringify(file)}, 'temporary SDK edit');
           process.on('SIGTERM', () => {
             fs.writeFileSync(${JSON.stringify(join(evidence, 'terminated.txt'))}, fs.readFileSync(${JSON.stringify(file)}, 'utf8'));
@@ -623,7 +624,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
           });
           process.chdir('/');
           console.log(process.pid + ':' + child.pid);
-          setInterval(() => {}, 1000);
+          ${testProcessWatchdog()}
         `], cwd: sdk.cwd, env: sdk.env!, signal: new AbortController().signal });
         await new Promise<void>((resolve, reject) => {
           child.once('error', reject);
@@ -668,7 +669,7 @@ test('Claude 进程组登记接入验收收尾：正常、额度用完、看门�
     assert.equal(card.workPath, null);
     assert.equal(card.cardBranch, null);
     const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
-    assert.equal(await readFile(join(work.workPath, 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
+    assert.equal(await readFile(join(work.workPath ?? join(daemon.directory, 'project'), 'index.html'), 'utf8'), '<h1>Helm browser dispatch</h1>');
     assert.equal(await readFile(join(evidence, 'terminated.txt'), 'utf8'), 'temporary SDK edit', '进程必须在删除副本前退出');
     assert.throws(() => process.kill(group, 0), { code: 'ESRCH' });
     assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
@@ -725,7 +726,7 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
     assert.equal(card.status, purpose === 'verification' ? 'verifying' : 'executing');
     if (purpose === 'verification') assert.equal(card.workPath, null);
-    const copyPath = card.workPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath;
+    const copyPath = card.workPath ?? (await daemon.call('get-work', { workId: daemon.work.id })).result.workPath ?? join(daemon.directory, 'project');
     assert.equal(await readFile(join(copyPath, 'index.html'), 'utf8'), purpose === 'verification' ? '<h1>Helm browser dispatch</h1>' : 'temporary SDK edit');
     if (purpose === 'verification') assert.equal(dispatch.endCommit, dispatch.startCommit);
     else assert.notEqual(dispatch.endCommit, dispatch.startCommit);
@@ -777,4 +778,30 @@ test('Claude 调度者可续跑，结束时报告最后一次主会话请求的�
   ], args => assert.equal(args.options!.resume, 'previous-round')) }), options);
   assert.equal(session.id, 'previous-round');
   assert.deepEqual(end?.type === 'end' && end.context, { tokens: 506, window: 200000 });
+});
+
+
+test('Claude 只读卡片沿用只读沙箱并拒绝写工具和 Bash 越界', async t => {
+  const options = await fixture(t);
+  let permission!: CanUseTool;
+  const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    query: fakeQuery([result()], args => {
+      const sdk = args.options!;
+      assert.deepEqual(sdk.settingSources, ['user'], '只读执行者不加载项目和本地 hooks 或项目 MCP');
+      assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd] });
+      assert.ok(!(sdk.tools as string[]).includes('Write'));
+      assert.ok(!(sdk.tools as string[]).includes('Edit'));
+      assert.ok((sdk.tools as string[]).includes('WebSearch'));
+      permission = sdk.canUseTool!;
+    }) });
+  await collect(driver, { ...options, sandbox: { mode: 'read-only', writableRoots: [] } });
+  const context = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request' };
+  for (const tool of ['Write', 'Edit', 'NotebookEdit', 'MultiEdit']) {
+    assert.equal((await permission(tool, { file_path: 'file' }, context))?.behavior, 'deny');
+  }
+  assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
+  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: options.cwd }))?.behavior, 'deny');
+  for (const tool of ['Read', 'Bash', 'WebSearch', 'mcp__helm__submit-conclusion']) {
+    assert.equal((await permission(tool, {}, context))?.behavior, 'allow');
+  }
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { abortCardGit, activeDispatch, committedFile, dispatchGit, getDispatch, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
+import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
@@ -37,10 +38,12 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
   const card = cardDetails(store, dispatch.workId, dispatch.cardId);
   if (dispatch.purpose === 'verification') {
     removeVerificationCopy(store, dispatch.workId, verificationPath(store, dispatch));
-    const branch = card.cardBranch ?? store.work(dispatch.workId).workBranch!;
+    const work = store.work(dispatch.workId);
+    const branch = card.cardBranch ?? work.workBranch ?? work.baseRef!;
     if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }
+  if (card.readOnly) return null;
   const workPath = card.workPath!;
   const conflictMerge = reason === 'completed' && pendingConflictCardMerge(store, dispatch, workPath);
   if (!conflictMerge) abortCardGit(store, dispatch, workPath, card.cardBranch!);
@@ -153,7 +156,9 @@ export class ExecutionRunner {
     let redact = (text: string) => text;
     let releaseEnvironment = () => {};
     const card = cardDetails(this.store, dispatch.workId, dispatch.cardId);
-    const workPath = dispatch.purpose === 'verification' ? verificationPath(this.store, dispatch) : card.workPath!;
+    const readOnly = dispatch.purpose === 'execution' && card.readOnly;
+    const workPath = dispatch.purpose === 'verification' ? verificationPath(this.store, dispatch)
+      : readOnly ? this.store.work(dispatch.workId).workPath ?? projectPath(this.store, dispatch.workId) : card.workPath!;
     const processes: ManagedProcess[] = [];
     const stop = new AbortController();
     const eventStop = new AbortController();
@@ -190,8 +195,8 @@ export class ExecutionRunner {
       }
       dispatch = { ...dispatch, agent };
       if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, dispatch.startCommit ?? verificationCommit(this.store, card));
-      else prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
-      startCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
+      else if (!readOnly) prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
+      startCommit = readOnly ? null : dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), dispatch.id);
@@ -200,7 +205,7 @@ export class ExecutionRunner {
         }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit, portStart: ports.start, portEnd: ports.end }, scope);
       });
-      const conflictResolution = prepareConflictCardMerge(this.store, dispatch, workPath);
+      const conflictResolution = !readOnly && prepareConflictCardMerge(this.store, dispatch, workPath);
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
         if (dispatch.needsBrowser) {
           const browser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), () => {
@@ -217,7 +222,7 @@ export class ExecutionRunner {
         }
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason || this.stopping) return;
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
-        const pushUrls = dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
+        const pushUrls = readOnly ? [] : dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
         const environment = projectEnvironment(this.store, this.store.work(dispatch.workId).projectId);
         const protection = protectDispatchEnvironment(this.store, dispatch.id, environment);
@@ -228,7 +233,7 @@ export class ExecutionRunner {
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls), ...environment,
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           projectEnvironmentNames: Object.keys(environment),
-          sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
+          sandbox: readOnly ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
           signal: stop.signal,
@@ -250,7 +255,7 @@ export class ExecutionRunner {
         this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
         const conclusions = dispatch.purpose === 'verification' ? 'passed 或 failed' : 'completed 或 blocked';
-        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, content: dispatch.content,
+        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, readOnly, content: dispatch.content,
           ...(conflictResolution ? { conflictResolution } : {}),
           conclusionInstruction: `本次派单结束前必须调用 submit-conclusion 并附一句理由，结论只能是 ${conclusions}。` })), stop.signal);
         let previousStep = 0;
@@ -326,8 +331,9 @@ export class ExecutionRunner {
       if (browserFailed) reason = 'error';
       if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
       try {
+        // Shared read-only directories belong to other dispatches or the user; clean only this dispatch's groups.
         // An aborted verification may never have created its copy, and then started no process.
-        const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes) : { pids: [] };
+        const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes, !readOnly) : { pids: [] };
         if (cleaned.pids.length) this.store.transaction(() => this.store.appendEvent(runtime,
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.

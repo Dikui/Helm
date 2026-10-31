@@ -23,7 +23,7 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   const record = join(directory, 'requests.jsonl');
   const path = join(directory, 'script.json');
   await writeFile(record, '');
-  await writeFile(path, JSON.stringify({ record, ...script }));
+  await writeFile(path, JSON.stringify({ record, ...script, testProcessPid: process.pid }));
   const command = { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/acp-agent.js', import.meta.url)), path] };
   // Leave startup/configuration headroom under parallel suite load; timeout scenarios set their own shorter budget.
   const driver = new AcpDriver(kind, { command, timeoutMs: 5000 });
