@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeStep, type AgentAvailability } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
+import { smokeVersions } from '../src/availability.js';
 import { copyAgents } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
@@ -223,7 +224,7 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
   assert.deepEqual((await call('check-agent', { driver: 'claude-sdk' })).result, { installed: true, install: null });
   const environment = (await call('check-environment')).result;
   assert.deepEqual(environment.find((tool: any) => tool.name === 'codex'),
-    { name: 'codex', executable: 'helm-fake-cli', installed: false, version: null, install: command, login: 'helm-fake-cli login' });
+    { name: 'codex', executable: 'helm-fake-cli', installed: false, version: null, smokeVersion: smokeVersions().codex ?? null, install: command, login: 'helm-fake-cli login' });
   assert.equal(environment.at(-1).name, 'browser');
   assert.match(environment.at(-1).install, /install-browser' 'chromium' '--no-shell'$/);
   assert.equal((await call('install-tool', { name: 'claude-sdk' })).error.code, 'NOT_FOUND');

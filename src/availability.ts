@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { DriverRegistry, AgentAvailability, ModelContext } from './driver.js';
 import { findExecutable, runtimeEnvironment } from './environment.js';
@@ -44,6 +45,18 @@ const browserArgs = [...playwrightCommand.args, 'install-browser', 'chromium'];
 const browserInstall = [playwrightCommand.file, ...browserArgs, '--no-shell'].map(quote).join(' ');
 const run = promisify(execFile);
 
+// Each driver CLI version that last passed its real smoke groups, written by the real-smoke runner.
+export const smokeVersionsFile = fileURLToPath(new URL('../../smoke-versions.json', import.meta.url));
+export function smokeVersions(): Record<string, string> {
+  try { return JSON.parse(readFileSync(smokeVersionsFile, 'utf8')); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}; throw error; }
+}
+
+export async function installedVersion(executable: string) {
+  const path = await findExecutable(executable, runtimeEnvironment());
+  return path ? await version(path) : null;
+}
+
 async function version(path: string) {
   try {
     const { stdout, stderr } = await run(path, ['--version'], { env: runtimeEnvironment(), timeout: 10_000, killSignal: 'SIGKILL' });
@@ -62,12 +75,13 @@ async function browserInstalled() {
 
 // Everything outside npm that Helm runs: each driver's CLI plus the browser used for page checks.
 export async function checkEnvironment(drivers: DriverRegistry) {
+  const smoke = smokeVersions();
   const tools = await Promise.all(Object.entries(drivers).flatMap(([name, driver]) => driver.install ? [{ name, ...driver.install }] : [])
     .map(async ({ name, executable, command, login }) => {
       const path = await findExecutable(executable, runtimeEnvironment());
-      return { name, executable, installed: Boolean(path), version: path ? await version(path) : null, install: command, login };
+      return { name, executable, installed: Boolean(path), version: path ? await version(path) : null, smokeVersion: smoke[name] ?? null, install: command, login };
     }));
-  return [...tools, { name: 'browser', executable: 'chromium', installed: await browserInstalled(), version: null, install: browserInstall, login: null }];
+  return [...tools, { name: 'browser', executable: 'chromium', installed: await browserInstalled(), version: null, smokeVersion: null, install: browserInstall, login: null }];
 }
 
 // Asks the CLI itself, so the choices match what is installed; nothing is cached or stored.
