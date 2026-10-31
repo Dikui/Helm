@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, TokenUsage, ContextSize } from './driver.js';
+import { credentialPaths, type Driver, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
 
 interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
   supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
@@ -16,6 +16,7 @@ import { helmVersion } from './version.js';
 
 // With plugins on, every app-server start reinstalls the account's remote connector plugins (~18 MB),
 // even with a warm cache. Helm passes library and local plugin skills through skills/extraRoots instead.
+const helmProfile = 'helm';
 const appServer = { file: 'codex', args: ['app-server', '-c', 'features.plugins=false'] };
 
 function codexHome(agent: AgentConfig, home = homedir()) {
@@ -144,7 +145,7 @@ export class CodexDriver implements Driver {
       const pluginRoots = await localPluginSkillRoots(env.CODEX_HOME ?? join(options.env.HOME ?? homedir(), '.codex'));
       await rpc.request('skills/extraRoots/set', { extraRoots: [...agent.skillsPath ? [agent.skillsPath] : [], ...pluginRoots] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
-        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: readOnly ? 'read-only' : 'workspace-write', approvalPolicy: 'never',
+        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, permissions: helmProfile, approvalPolicy: 'never',
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
@@ -153,7 +154,11 @@ export class CodexDriver implements Driver {
           ...(!coordinator ? { shell_environment_policy: { inherit: 'all', ignore_default_excludes: true,
             exclude: [], include_only: [], set: {}, experimental_use_profile: false } } : {}),
           ...(agent.fast ? { service_tier: 'fast' } : {}),
-          ...(!readOnly ? { sandbox_workspace_write: { writable_roots: [cwd], network_access: true, exclude_slash_tmp: true, exclude_tmpdir_env_var: true } } : {}),
+          // A permissions profile rather than sandbox_workspace_write, which cannot deny reads. Writes
+          // stay limited to the thread cwd (its only workspace root); /tmp and TMPDIR stay read-only.
+          default_permissions: helmProfile,
+          permissions: { [helmProfile]: { filesystem: { ':root': 'read', ...!readOnly ? { ':workspace_roots': 'write' } : {},
+            ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) }, ...!readOnly ? { network: { enabled: true } } : {} } },
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             ...(server.type === 'stdio' ? { command: server.command, args: server.args, env: server.env }
               : { url: server.url, http_headers: server.headers }),
@@ -171,7 +176,7 @@ export class CodexDriver implements Driver {
           if (sent || cancelled) throw new Error('Codex session already received input or was cancelled');
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
-            approvalPolicy: 'never', sandboxPolicy: readOnly ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true },
+            approvalPolicy: 'never', permissions: helmProfile,
             ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },

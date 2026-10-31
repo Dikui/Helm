@@ -83,6 +83,33 @@ async function processDirectories(): Promise<ProcessDirectory[]> {
   return processes;
 }
 
+// Whether the local client behind a loopback TCP port is an agent: a descendant of helmd outside
+// helmd's own process group (drivers always spawn agents detached), or a process (perhaps reparented
+// after its agent exited) whose cwd is in an agent copy. Fails closed.
+export async function isAgentPeer(clientPort: number, agentRoot: string) {
+  const lsof = async (...args: string[]) => {
+    try { return (await exec('lsof', ['-nP', ...args], { maxBuffer: 16 * 1024 * 1024 })).stdout; }
+    catch (error) { if ((error as { code?: unknown }).code === 1) return (error as { stdout?: string }).stdout ?? ''; throw error; }
+  };
+  const field = (output: string, prefix: string) => output.split('\n').filter(line => line.startsWith(prefix)).map(line => line.slice(1));
+  const ends = field(await lsof('-a', `-iTCP@127.0.0.1:${clientPort}`, '-sTCP:ESTABLISHED', '-Fp'), 'p').map(Number);
+  if (!ends.length) throw new Error(`Cannot identify the local process on port ${clientPort}`);
+  // Both ends in helmd means an in-process client, which only embedders such as tests use.
+  const peers = ends.filter(pid => pid !== process.pid);
+  if (!peers.length) return false;
+  const table = new Map((await exec('ps', ['-A', '-o', 'pid=,ppid=,pgid='])).stdout.trim().split('\n')
+    .map(line => { const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number); return [pid!, { ppid: ppid!, pgid: pgid! }]; }));
+  const ownGroup = table.get(process.pid)?.pgid;
+  const agentDescendant = (pid: number) => {
+    if (table.get(pid)?.pgid === ownGroup) return false;
+    for (let current = pid, depth = 0; current > 1 && depth < 1000; current = table.get(current)?.ppid ?? 0, depth++) if (current === process.pid) return true;
+    return false;
+  };
+  if (peers.some(agentDescendant)) return true;
+  const root = await realpath(agentRoot).catch(() => agentRoot);
+  return field(await lsof('-a', '-p', peers.join(','), '-d', 'cwd', '-Fn'), 'n').some(cwd => cwd === root || cwd.startsWith(`${root}/`));
+}
+
 export async function processTargetExists(target: number) {
   try { process.kill(target, 0); }
   catch (error) {
@@ -117,10 +144,13 @@ export async function cleanupWorktreeProcesses(path: string, managed: ManagedPro
     const suffix = relative(root, cwd);
     return suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
   };
-  const matches = snapshot.filter(entry => entry.pid !== process.pid && ((includeDirectory && inside(entry.cwd))
-    || managed.some(item => item.pgid === entry.pgid)));
-  const groups = new Set(matches.filter(entry => entry.pgid !== ownGroup).map(entry => entry.pgid));
-  const individual = new Set(matches.filter(entry => entry.pgid === ownGroup).map(entry => entry.pid));
+  const managedGroup = (entry: ProcessDirectory) => managed.some(item => item.pgid === entry.pgid);
+  const matches = snapshot.filter(entry => entry.pid !== process.pid && ((includeDirectory && inside(entry.cwd)) || managedGroup(entry)));
+  // A whole group is ours only if we spawned it or its leader started in the copy; a user's
+  // editor or terminal with one member inside the copy loses only that member.
+  const leaderInside = (entry: ProcessDirectory) => includeDirectory && snapshot.some(leader => leader.pid === entry.pgid && inside(leader.cwd));
+  const groups = new Set(matches.filter(entry => entry.pgid !== ownGroup && (managedGroup(entry) || leaderInside(entry))).map(entry => entry.pgid));
+  const individual = new Set(matches.filter(entry => !groups.has(entry.pgid)).map(entry => entry.pid));
   const targets = (entries: ProcessDirectory[]) => entries.filter(entry => groups.has(entry.pgid) || individual.has(entry.pid));
   const pids = targets(snapshot).map(entry => entry.pid);
   const result = { pids, pgids: [...groups], escalated: false };

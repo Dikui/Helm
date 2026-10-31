@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
-import { acpAgents, configValues } from './acp-agents.js';
+import { acpAgents, configValues, grokProfiles } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, ModelContext, TokenUsage } from './driver.js';
 import { agentPrompt } from './prompts.js';
@@ -34,7 +34,7 @@ export class AcpDriver implements Driver {
   private async launch(agent: AgentConfig, options: Pick<SessionOptions, 'cwd' | 'onProcess' | 'projectEnvironmentNames'>,
     env: Record<string, string>, handlers: ConstructorParameters<typeof AcpClient>[3]) {
     const command = this.config.command ?? { file: this.profile.command, args: [] };
-    const prepared = await this.profile.prepare?.(agent, options.projectEnvironmentNames);
+    const prepared = await this.profile.prepare?.(agent, options.projectEnvironmentNames, env);
     try {
       const acp = new AcpClient({ file: command.file,
         args: [...command.args, ...this.profile.arguments(agent, options.projectEnvironmentNames), ...(prepared?.args ?? [])] }, options, env, handlers);
@@ -227,7 +227,7 @@ export class AcpDriver implements Driver {
       void close();
     };
     const env = this.environment(options.env, agent);
-    if (readOnly) env[this.agent === 'deepseek' ? 'DSH_PERMISSION_MODE' : 'GROK_SANDBOX'] = 'read-only';
+    if (readOnly) Object.assign(env, this.agent === 'deepseek' ? { DSH_PERMISSION_MODE: 'read-only' } : { GROK_SANDBOX: grokProfiles.readOnly });
     const home = await this.homeAvailability(agent, env);
     if (home) throw new Error(home.reason);
     const { acp, close: closeAgent } = await this.launch(agent, { ...options, cwd }, env, {

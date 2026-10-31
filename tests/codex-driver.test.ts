@@ -5,11 +5,22 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { CodexDriver, CodexCoordinatorDriver, CodexExecutorDriver } from '../src/codex-driver.js';
-import type { DriverEvent, SessionOptions } from '../src/driver.js';
+import { credentialPaths, type DriverEvent, type SessionOptions } from '../src/driver.js';
 import { AgentCatalog, agentEnvironment, type AgentConfig } from '../src/agents.js';
 import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
+
+// Codex runs every Helm agent under one permissions profile: whole-disk read except credentials,
+// and for writing executors the card copy (thread cwd) plus network.
+function assertProfile(thread: any, write: boolean) {
+  assert.equal(thread.permissions, 'helm');
+  assert.equal(Object.hasOwn(thread, 'sandbox'), false);
+  assert.equal(thread.config.default_permissions, 'helm');
+  assert.deepEqual(thread.config.permissions, { helm: {
+    filesystem: { ':root': 'read', ...write ? { ':workspace_roots': 'write' } : {}, ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) },
+    ...write ? { network: { enabled: true } } : {} } });
+}
 
 async function fixture(t: TestContext, notifications: object[], script: object = {}, role: 'executor' | 'coordinator' = 'executor') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-driver-')));
@@ -107,7 +118,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.agent!.skillsPath] });
   const thread = requests[3].params;
   assert.equal(thread.approvalPolicy, 'never');
-  assert.equal(thread.sandbox, 'workspace-write');
+  assertProfile(thread, true);
   assert.equal(thread.serviceTier, 'fast');
   assert.equal(thread.config.service_tier, 'fast');
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
@@ -115,7 +126,8 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.match(thread.developerInstructions, /submit-conclusion/);
   assert.match(thread.developerInstructions, /不要 git commit 或改 git 配置/);
   assert.match(thread.developerInstructions, /不要自己安装或启动浏览器/);
-  assert.deepEqual(requests[4].params.sandboxPolicy, { type: 'workspaceWrite', writableRoots: [ctx.directory], networkAccess: true, excludeSlashTmp: true, excludeTmpdirEnvVar: true });
+  assert.equal(requests[4].params.permissions, 'helm');
+  assert.equal(Object.hasOwn(requests[4].params, 'sandboxPolicy'), false);
   assert.equal(requests[4].params.effort, 'low');
   const env = JSON.parse(events.filter(e => e.type === 'output').map(e => e.text).find(text => text.includes('fixture/environment'))!).params.env;
   assert.equal(Object.hasOwn(env, 'CODEX_HOME'), false);
@@ -329,7 +341,7 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
   assert.equal(requests.some(r => r.method === 'thread/resume'), false);
   for (const [round, thread] of requests.filter(r => r.method === 'thread/start').entries()) {
     assert.equal(thread.params.serviceTier, 'fast');
-    assert.equal(thread.params.sandbox, 'read-only');
+    assertProfile(thread.params, false);
     assert.equal(thread.params.approvalPolicy, 'never');
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);
     assert.deepEqual(thread.params.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp',
@@ -338,7 +350,7 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
     assert.doesNotMatch(thread.params.developerInstructions, /submit-conclusion/);
   }
   for (const turn of requests.filter(r => r.method === 'turn/start')) {
-    assert.deepEqual(turn.params.sandboxPolicy, { type: 'readOnly' });
+    assert.equal(turn.params.permissions, 'helm');
     assert.equal(turn.params.approvalPolicy, 'never');
   }
 });
@@ -409,7 +421,7 @@ test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近
   assert.deepEqual(end.type === 'end' && end.context, { tokens: 34, window: 258400 });
   const thread = (await ctx.requests()).find(request => request.method === 'thread/resume');
   assert.equal(thread.params.threadId, 'thread-scripted');
-  assert.equal(thread.params.sandbox, 'read-only');
+  assertProfile(thread.params, false);
   assert.equal(thread.params.config.mcp_servers.helm.http_headers.Authorization, 'Bearer round-2');
 });
 
@@ -424,10 +436,10 @@ test('Codex 只读卡片在新建和续跑的 thread 与 turn 都使用只读沙
   }
   const requests = await ctx.requests();
   for (const thread of requests.filter(request => ['thread/start', 'thread/resume'].includes(request.method))) {
-    assert.equal(thread.params.sandbox, 'read-only');
+    assertProfile(thread.params, false);
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);
   }
   for (const turn of requests.filter(request => request.method === 'turn/start')) {
-    assert.deepEqual(turn.params.sandboxPolicy, { type: 'readOnly' });
+    assert.equal(turn.params.permissions, 'helm');
   }
 });

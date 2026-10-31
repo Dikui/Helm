@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AgentConfig } from './agents.js';
@@ -11,6 +12,12 @@ export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' 
 // null means the driver has not reported that count; a reported zero stays zero.
 // incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
 // cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
+// Credentials no agent task needs. A prompt-injected agent that can read them could send them
+// out through any web tool, so drivers that support read denial block them for every role.
+export function credentialPaths(home = homedir()) {
+  return ['.ssh', '.aws', '.gnupg', '.kube', '.config/gh', '.git-credentials', '.netrc', '.docker/config.json'].map(path => join(home, path));
+}
+
 export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
 // Session size after the turn; a coordinator round resumes only when its driver reports it (ADR 0017).
 export interface ContextSize { tokens: number; window?: number }

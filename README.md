@@ -102,7 +102,7 @@ helm get-events --workId <工作id>
 
 - **HTTP**：`POST /api/<操作名>`，参数为 JSON；成功返回 `{ ok: true, result }`，被拒返回 `{ ok: false, error: { code, reason, allowedOperations } }`。
 - **SSE**：`POST /events`，筛选参数同 `get-events`，支持 `Last-Event-ID` 续读。
-- **MCP**：`POST /mcp`（Streamable HTTP）。调度轮次和派单带运行层注入的令牌，只能操作自己所属的工作，结束即失效；不带令牌的调用按用户处理。
+- **MCP**：`POST /mcp`（Streamable HTTP）。调度轮次和派单带运行层注入的令牌，只能操作自己所属的工作，结束即失效；不带令牌的调用按用户处理，但登记 MCP、装 skill、保存 Agent、改提示词、设项目环境变量、装 CLI 这几项若来自 Agent 进程（`helmd` 以独立进程组启动的后代，或当前目录在副本里）会被拒绝（[ADR 0016](docs/adr/0016-local-api-cross-site-only.md)）。
 
 消息必须带 `key` 去重。附件每条最多 10 个、合计 20 MiB，存在 `<dataDir>/attachments/`，Agent 按绝对路径读取。
 
@@ -111,9 +111,9 @@ helm get-events --workId <工作id>
 - **并发**：执行派单的全局上限默认 10，满了排队，调度轮次不占名额（`set-concurrency`）。
 - **超时**：派单默认墙钟 30 分钟、无输出 10 分钟（`set-dispatch-watchdog`）；调度轮次同样默认 30 / 10 分钟（`set-round-watchdog`）。调度轮次连续失败三次或额度用完时暂停工作，用 `resume-work` 恢复。
 - **端口**：每次派单分到 20 个连续本机端口（`HELM_PORT_START`、`HELM_PORT_END`），从 20000 起。
-- **进程清理**：派单和轮次结束时，按工作目录找出残留进程，整组 `SIGTERM`，5 秒后 `SIGKILL`（macOS 用 `lsof`，Linux 用 `/proc`）；切到副本外目录的进程可能找不到。
+- **进程清理**：派单和轮次结束时，按工作目录找出残留进程，`SIGTERM`，5 秒后 `SIGKILL`（macOS 用 `lsof`，Linux 用 `/proc`）；切到副本外目录的进程可能找不到。Helm 启动的进程组和组长在副本里的进程组整组结束；组长在副本外的（如编辑器）只结束当前目录在副本里的那个进程。不要在副本里开终端，`helmd` 重启时会结束它；要看代码请检出工作分支。
 - **环境**：Agent 子进程的环境变量按白名单构造，逐项说明见 [src/environment.ts](src/environment.ts)；运行层再注入禁止推送的 git 配置和无效的 `GH_TOKEN`。Claude 会话关闭自动记忆。
-- **沙箱**：执行者只能写自己的卡片副本，调度者只读工作副本，Bash 禁止退出沙箱。**已知缺口**：`~/.claude/settings.json` 里的 `sandbox.filesystem.allowWrite`、`sandbox.excludedCommands` 和 `Edit(...)` 放行路径会话里覆盖不掉，对 Helm 的 Agent 同样生效（[官方说明](https://code.claude.com/docs/en/sandboxing#repository-settings-under-an-admin-required-sandbox)）。
+- **沙箱**：执行者只能写自己的卡片副本，调度者只读工作副本，Bash 禁止退出沙箱。Claude、Codex、Grok 的 Agent 读不到 `~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.kube`、`~/.config/gh`、`~/.git-credentials`、`~/.netrc`、`~/.docker/config.json`（见 `credentialPaths`）：Claude 用 Bash 沙箱 `denyRead` 加 `Read(...)` 拒绝规则；Codex 用权限配置档 `helm`；Grok 用 `helm` / `helm-read-only` 沙箱配置档，Helm 每次启动 Grok 前在 `~/.grok/sandbox.toml` 末尾维护一段带标记的配置（只改标记段，不动你自己的配置）。DeepSeek 的沙箱只限制写、没有按路径禁读的设置，仍读得到。执行者能联网，禁止推送的 git 配置只防误操作，不是安全边界。**已知缺口**：`~/.claude/settings.json` 里的 `sandbox.filesystem.allowWrite`、`sandbox.excludedCommands` 和 `Edit(...)` 放行路径会话里覆盖不掉，对 Helm 的 Agent 同样生效（[官方说明](https://code.claude.com/docs/en/sandboxing#repository-settings-under-an-admin-required-sandbox)）。
 - **浏览器检查**：调度者派单时加 `needsBrowser: true`，运行层在执行者沙箱外为这次派单启动有界面、隔离的 Playwright MCP（固定 `@playwright/mcp@0.0.83` 自带的 Chromium），只转发白名单里的工具。用 `npm run browser:install` 安装浏览器。
 
 ## 开发

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver } from '../src/claude-driver.js';
+import { credentialPaths } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { fixture, until } from './claude-coordinator-fixture.js';
 import { assertInitialization, helmToolNames } from './claude-init.js';
@@ -51,7 +52,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number, cwd
     } else assert.equal(brief.work.workBranch, null);
     assert.deepEqual(sdk.settingSources, []);
     assert.equal(sdk.strictMcpConfig, true);
-    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [sdk.cwd] });
+    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [sdk.cwd], denyRead: credentialPaths() });
     assert.deepEqual(Object.keys(sdk.mcpServers ?? {}), ['helm']);
     const endpoint = sdk.mcpServers!.helm!;
     assert.ok('url' in endpoint && endpoint.type === 'http');

@@ -1,0 +1,6 @@
+{
+  "grok": "grok 1.0.70 (f50904eaee6c)",
+  "deepseek": "0.2.1-rc.2",
+  "claude-sdk": "2.1.300 (Claude Code)",
+  "codex": "codex-cli 0.165.0"
+}

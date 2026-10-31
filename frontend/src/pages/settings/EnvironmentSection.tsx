@@ -3,7 +3,7 @@ import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 
-interface Tool { name: string; executable: string; installed: boolean; version: string | null; install: string; login: string | null }
+interface Tool { name: string; executable: string; installed: boolean; version: string | null; smokeVersion: string | null; install: string; login: string | null }
 const labels: Record<string, string | MessageKey> = { 'claude-sdk': 'Claude Code', codex: 'Codex', grok: 'Grok', deepseek: 'DeepSeek (dsh)', browser: 'toolBrowser' };
 
 export function EnvironmentSection() {
@@ -35,6 +35,8 @@ function ToolRow({ tool, onInstalled }: { tool: Tool; onInstalled: () => void })
       <span className={tool.installed ? 'settings-ok' : 'settings-reason'}>{tool.installed ? [t('toolInstalled'), tool.version].filter(Boolean).join(' · ') : t('toolMissing')}</span></div>
     {!tool.installed && <><p className="muted">{t('installRuns')} <code>{tool.install}</code></p>{error && <ErrorNotice error={error} />}
       <div><button type="button" className="btn sm" disabled={pending} aria-busy={pending} onClick={() => void install()}>{t(pending ? 'installing' : 'install')}</button></div></>}
+    {tool.installed && tool.version && tool.version !== tool.smokeVersion && tool.name !== 'browser' &&
+      <p className="warn"><span>!</span><span>{tool.smokeVersion ? `${t('versionUntested')} ${tool.smokeVersion}` : t('versionNeverTested')}</span></p>}
     {tool.login && <p className="muted">{t('loginHint')} <code>{tool.login}</code></p>}
   </div>;
 }

@@ -56,7 +56,10 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
   assert.equal(observed!.resumeSessionId, undefined);
   assert.equal(observed!.dataDir, join(daemon.dataDir, 'rounds', end.object.id));
   const requests = (await readFile(join(observed!.dataDir!, 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(requests.find(r => r.method === 'thread/start').params.sandbox, 'read-only');
+  const thread = requests.find(r => r.method === 'thread/start').params;
+  assert.equal(thread.permissions, 'helm');
+  assert.deepEqual(Object.keys(thread.config.permissions.helm), ['filesystem'], '调度者不开网络');
+  assert.equal(thread.config.permissions.helm.filesystem[':workspace_roots'], undefined, '调度者只读');
   const before = (await daemon.events()).filter(e => e.action === 'round-started').length;
   // A read operation yields to the scheduler without introducing a wake event.
   for (let i = 0; i < 3; i++) await daemon.call('list-works');

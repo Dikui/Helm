@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { App } from '../src/App.js';
 const { uiFixture }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
@@ -489,4 +490,19 @@ test('DeepSeek 按草稿主目录读取并保存完整路由，模型名称显�
   await waitFor(() => expect(requests.at(-1).agent.home).toBe('dedicated'));
   await screen.findByLabelText('模型', { selector: 'select' });
   expect(fieldValue('模型')).toBe(route);
+});
+
+test('环境页对未经真实冒烟的 CLI 版本给出提示', async () => {
+  const bin = await mkdtemp(join(tmpdir(), 'helm-cli-'));
+  await writeFile(join(bin, 'helm-fake-cli'), '#!/bin/sh\necho "helm-fake-cli 9.9.9"\n', { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    daemon = await uiFixture([], undefined, { codexDriver: Object.assign(new FakeDriver(), { install: { executable: 'helm-fake-cli', command: 'true', login: 'helm-fake-cli login' } }) });
+    window.history.replaceState(null, '', '/settings/environment');
+    render(<App baseUrl={daemon.url} />);
+    const codex = await screen.findByRole('group', { name: 'Codex' });
+    await within(codex).findByText(/helm-fake-cli 9\.9\.9/);
+    expect(within(codex).getByText(/未经真实冒烟|没有通过真实冒烟/)).toBeTruthy();
+  } finally { process.env.PATH = path; await rm(bin, { recursive: true, force: true }); }
 });
