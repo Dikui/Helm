@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    graphReadOnlyCheck: '只读检查', graphReadOnlyViolation: '只读违规', graphReadOnlyUnchanged: '未发现改动', graphReadOnlyPaths: '违规路径',
+    graphReadOnlyProjectDirectory: '在项目目录运行，可能包含用户自己的改动',
+    graphReadOnlyNotGit: '未检查：非 git 目录。', graphReadOnlyCheckFailed: '未检查：无法读取 git 状态。', graphReadOnlyBaselineMissing: '未检查：缺少派单前的 git 状态。',
     eventRoundInterrupted: '打断调度轮次',
     eventCardSkipped: '卡片已跳过',
     eventCardUnblocked: '卡片已解除受阻',
@@ -497,6 +500,9 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
+    graphReadOnlyCheck: 'Read-only check', graphReadOnlyViolation: 'Read-only violation', graphReadOnlyUnchanged: 'No changes detected', graphReadOnlyPaths: 'Violation paths',
+    graphReadOnlyProjectDirectory: 'Ran in the project directory; changes may include your own edits.',
+    graphReadOnlyNotGit: 'Not checked: this directory is not a git repository.', graphReadOnlyCheckFailed: 'Not checked: unable to read git status.', graphReadOnlyBaselineMissing: 'Not checked: git status before the dispatch is missing.',
     eventRoundInterrupted: 'Round interrupted',
     eventCardSkipped: 'Card skipped',
     eventCardUnblocked: 'Card unblocked',
