@@ -1,8 +1,8 @@
 import { normalizePlan } from './plans.js';
 import { execFile } from 'node:child_process';
-import { mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { credentialPaths, type Driver, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
 
@@ -14,41 +14,13 @@ import { agentPrompt } from './prompts.js';
 import type { AgentConfig } from './agents.js';
 import { helmVersion } from './version.js';
 
-// With plugins on, every app-server start reinstalls the account's remote connector plugins (~18 MB),
-// even with a warm cache. Helm passes library and local plugin skills through skills/extraRoots instead.
+// Upstream defect workaround: https://github.com/openai/codex/issues/47483
+// Disable only remote plugins to avoid connector reinstalls; Codex loads local plugins natively.
 const helmProfile = 'helm';
-const appServer = { file: 'codex', args: ['app-server', '-c', 'features.plugins=false'] };
+const appServer = { file: 'codex', args: ['app-server', '-c', 'features.remote_plugin=false'] };
 
 function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);
-}
-
-// features.plugins=false also drops the user's local plugins; pass their skills as extra roots instead.
-export async function localPluginSkillRoots(codexDir: string) {
-  let config: string;
-  try { config = await readFile(join(codexDir, 'config.toml'), 'utf8'); } catch { return []; }
-  const roots = new Set<string>();
-  for (const section of config.split(/^(?=\[)/m)) {
-    const match = /^\[plugins\."([^"@]+)@([^"]+)"\]/.exec(section);
-    if (!match || !/^enabled\s*=\s*true\b/m.test(section)) continue;
-    const plugin = join(codexDir, 'plugins', 'cache', match[2]!, match[1]!);
-    // shortcut: takes the highest version directory, not the one Codex recorded; fine while the cache keeps one.
-    const version = (await readdir(plugin).catch(() => [])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
-    if (!version) continue;
-    const root = join(plugin, version);
-    let skills: string[] = ['skills'];
-    for (const manifest of ['.codex-plugin', '.claude-plugin']) {
-      try { skills = [(JSON.parse(await readFile(join(root, manifest, 'plugin.json'), 'utf8')).skills ?? 'skills')].flat(); break; }
-      catch { /* Try the next manifest location. */ }
-    }
-    for (const path of skills) {
-      const directory = resolve(root, path);
-      // A manifest entry is either one skill or a folder of skills; extraRoots wants the folder.
-      if (await stat(join(directory, 'SKILL.md')).then(() => true, () => false)) roots.add(dirname(directory));
-      else if (await stat(directory).then(entry => entry.isDirectory(), () => false)) roots.add(directory);
-    }
-  }
-  return [...roots];
 }
 
 function quotaExhausted(error: any) {
@@ -142,8 +114,7 @@ export class CodexDriver implements Driver {
       await rpc.request('initialize', { clientInfo: { name: 'helm', title: 'Helm', version: helmVersion }, capabilities: { experimentalApi: true } });
       const initializeDurationMs = Math.round(performance.now() - before);
       rpc.notify('initialized', {});
-      const pluginRoots = await localPluginSkillRoots(env.CODEX_HOME ?? join(options.env.HOME ?? homedir(), '.codex'));
-      await rpc.request('skills/extraRoots/set', { extraRoots: [...agent.skillsPath ? [agent.skillsPath] : [], ...pluginRoots] });
+      await rpc.request('skills/extraRoots/set', { extraRoots: agent.skillsPath ? [agent.skillsPath] : [] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, permissions: helmProfile, approvalPolicy: 'never',
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),

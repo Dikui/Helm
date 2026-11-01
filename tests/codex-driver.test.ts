@@ -51,6 +51,36 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
 
+for (const mode of ['executor', 'coordinator', 'models'] as const) test(`Codex ${mode} 默认启动命令只关闭远程插件`, async t => {
+  const ctx = await fixture(t, [completed()], {}, mode === 'coordinator' ? 'coordinator' : 'executor');
+  const previous = { HOME: process.env.HOME, PATH: process.env.PATH };
+  process.env.HOME = ctx.directory;
+  process.env.PATH = `${ctx.directory}:${previous.PATH}`;
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  const evidence = join(ctx.directory, 'command.json');
+  const executable = join(ctx.directory, 'codex');
+  // A PATH substitute exercises the default command without starting Codex.
+  await writeFile(executable, `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(evidence)}, JSON.stringify(process.argv.slice(2)));\nprocess.argv[2] = ${JSON.stringify(join(ctx.directory, 'script.json'))};\nimport(${JSON.stringify(new URL('./fixtures/codex-app-server.js', import.meta.url).href)});\n`);
+  await chmod(executable, 0o755);
+  if (mode === 'models') {
+    assert.deepEqual(await new CodexDriver().listModels(), []);
+  } else {
+    const driver = mode === 'coordinator' ? new CodexCoordinatorDriver() : new CodexExecutorDriver();
+    const session = await driver.start({ ...ctx.options, env: { ...ctx.options.env, PATH: process.env.PATH } });
+    t.after(() => session.cancel());
+    await session.send('执行');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type === 'end' && end.reason, 'completed');
+    assert.deepEqual((await ctx.requests()).find(request => request.method === 'skills/extraRoots/set').params.extraRoots,
+      [ctx.options.agent.skillsPath]);
+  }
+  assert.deepEqual(JSON.parse(await readFile(evidence, 'utf8')), ['app-server', '-c', 'features.remote_plugin=false']);
+});
+
 test('Codex 执行者的 shell 策略保留项目 KEY，RPC 配置只有策略，没有变量值', async t => {
   const value = 'codex-project-env-shell-probe-17489';
   const ctx = await fixture(t, [completed()], { shellProbe: true });
@@ -186,26 +216,20 @@ test('Codex 成功优先于重试中的额度错误；普通回答中的额度�
   assert.equal(end.type === 'end' && end.reason, 'completed');
 });
 
-test('Codex 关闭插件后，用户启用的本地插件技能经 extraRoots 传入，未启用的不传', async t => {
-  const ctx = await fixture(t, [completed()]);
+for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} extraRoots 只传 Helm skills，本地插件交给原生加载`, async t => {
+  const ctx = await fixture(t, [], {}, role);
   const codexDir = join(ctx.directory, '.codex');
-  const cache = join(codexDir, 'plugins', 'cache');
-  const write = async (path: string, content: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, content); };
-  // Like gungnir: the manifest lists single skills grouped in folders; the highest version wins.
-  await write(join(cache, 'market', 'listed', '4.10.0', '.claude-plugin', 'plugin.json'), JSON.stringify({ skills: ['./engineering/tdd', './engineering/implement', './productivity/grill-me'] }));
-  for (const skill of ['engineering/tdd', 'engineering/implement', 'productivity/grill-me']) await write(join(cache, 'market', 'listed', '4.10.0', skill, 'SKILL.md'), '');
-  await mkdir(join(cache, 'market', 'listed', '4.9.0'), { recursive: true });
-  await write(join(cache, 'local', 'plain', '1.0.0', 'skills', 'review', 'SKILL.md'), '');
-  await write(join(cache, 'market', 'off', '1.0.0', 'skills', 'x', 'SKILL.md'), '');
-  await write(join(codexDir, 'config.toml'), [
-    'model = "m"', '[plugins."listed@market"]', 'enabled = true', '', '[plugins."off@market"]', 'enabled = false',
-    '[plugins."plain@local"]', 'enabled = true', '[plugins."missing@market"]', 'enabled = true', ''].join('\n'));
-  const session = await ctx.driver.start(ctx.options);
-  t.after(() => session.cancel());
-  const requests = await ctx.requests();
-  assert.deepEqual(requests[2].params.extraRoots, [ctx.options.agent!.skillsPath,
-    join(cache, 'market', 'listed', '4.10.0', 'engineering'), join(cache, 'market', 'listed', '4.10.0', 'productivity'),
-    join(cache, 'local', 'plain', '1.0.0', 'skills')]);
+  const skill = join(codexDir, 'plugins', 'cache', 'market', 'local', '1.0.0', 'skills', 'review');
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, 'SKILL.md'), '本地插件技能');
+  await writeFile(join(codexDir, 'config.toml'), '[plugins."local@market"]\nenabled = true\n');
+  for (const skillsPath of [ctx.options.agent.skillsPath, null]) {
+    const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, skillsPath } });
+    t.after(() => session.cancel());
+    const roots = (await ctx.requests()).filter(request => request.method === 'skills/extraRoots/set').at(-1);
+    assert.deepEqual(roots.params.extraRoots, skillsPath ? [skillsPath] : []);
+    session.cancel();
+  }
 });
 
 test('Codex 续跑使用 thread/resume，API 主目录、关闭 fast 和空 skills 均取当前 Agent', async t => {

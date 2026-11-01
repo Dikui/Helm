@@ -20,4 +20,20 @@ Claude 调度者后来不再加载全局配置，见 [ADR 0014](0014-coordinator
 
 ## 2026-10-29：Helm 启动的 Codex 关闭插件
 
+> 以下记录当时的实现；现行实现见 2026-11-01 补记。
+
 Codex 0.165 开着插件时，每次启动 app-server 都会重新下载并安装账号下的远程连接器插件（约 18 MB），缓存再全也一样；Helm 每次派单、调度轮次和列模型都会启动一次，10-22 起每天多耗 2–6 GB 流量。实测只有 `features.plugins=false` 能阻止（`features.apps=false` 无效，也没有只关远程插件的配置项），所以 Helm 启动 app-server 时一律加这个开关。上游缺陷见 [openai/codex#47483](https://github.com/openai/codex/issues/47483)，修好后去掉。开关同时关掉了用户在 `config.toml` 里启用的本地插件（如 gungnir），所以 Codex 驱动读取其中 `enabled = true` 的插件，从插件缓存的最高版本按清单找到技能目录，和 Helm 库技能一起经 `skills/extraRoots` 传入。实测这样 gungnir 的 31 个技能都在，远程插件也不再重装。补回的只有技能：本地插件里的 MCP、hooks 不进入会话，账号下的远程插件也不进入。`~/.agents/skills` 等全局技能照常加载。
+
+### 2026-11-01：只关闭远程插件，本地插件由 Codex 原生加载
+
+调度者在沙箱外用 Codex CLI 0.165.0 复测，保留现有插件缓存，每组冷启动 app-server 并完成 initialize，观察约 25 秒，用系统级 nettop 按进程记录下载字节；同样三组配置另用原生 `skills/list` 检查技能。此版本 `plugins=true`、`remote_plugin` 默认 false，上文“没有只关远程插件的配置项”不再成立。
+
+| 配置 | 下载字节 | skills/list |
+| --- | --- | --- |
+| 不加开关 | 799,994 / 799,950（两次） | 37 个，其中 gungnir 本地插件 31 个 |
+| `features.plugins=false` | 671,515 | 6 个，无本地插件技能 |
+| `features.remote_plugin=false` | 799,983 | 37 个，其中 gungnir 本地插件 31 个 |
+
+三组下载量同为约 0.7–0.8 MB，没有再现约 18 MB 的重复安装。Helm 改为显式传 `features.remote_plugin=false`，防止将来默认值翻转，仍将此开关标为 [openai/codex#47483](https://github.com/openai/codex/issues/47483) 的上游缺陷绕过。删除 Helm 读取本地插件配置和缓存、补回插件 skill 的逻辑；本地插件由 Codex 原生发现，Agent 自带和库 skill 仍经 `skills/extraRoots` 叠加。
+
+本机 gungnir 4.3.0 没有 MCP 或 hooks，本次不能验证这两项的实际执行。原生插件加载后的 MCP、hooks 按 Codex 自身行为进入会话，Helm 不再为本地插件补偿。测量原始数据和 skills 列表保留在本地开发单证据中。
