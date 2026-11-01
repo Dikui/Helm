@@ -185,9 +185,8 @@ export class ClaudeDriver implements Driver {
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
       // A dedicated home holds the API settings and always loads its user layer.
-      // Read-only executors must not start project/local hooks or discover project MCP servers.
       cwd, env, pathToClaudeCodeExecutable: executable,
-      settingSources: agent.home === 'dedicated' ? ['user'] : !loadGlobalConfig ? [] : readOnly && !coordinator ? ['user'] : ['user', 'project', 'local'],
+      settingSources: agent.home === 'dedicated' ? ['user'] : loadGlobalConfig ? ['user', 'project', 'local'] : [],
       ...(!loadGlobalConfig ? { strictMcpConfig: true } : {}),
       settings: { autoMemoryEnabled: false, fastMode: false, ...(!loadGlobalConfig ? { disableClaudeAiConnectors: true } : {}),
         // Ask rules precede settings allow rules; otherwise they can skip our
