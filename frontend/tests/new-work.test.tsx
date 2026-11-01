@@ -54,8 +54,8 @@ test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请�
   await configureTestAgent(agentDir, 'codex-coordinator', { driver: 'grok' });
   await daemon.call('list-agents');
   await within(agent).findByRole('option', { name: /codex-coordinator · / });
-  expect((screen.getByRole('button', { name: '重试发送' }) as HTMLButtonElement).disabled).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '重试发送' }));
+  expect((screen.getByRole('button', { name: '重试原请求' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '重试原请求' }));
   expect(await screen.findByRole('heading', { name: '邮箱验证码登录' })).toBeTruthy();
   expect(screen.getByRole('region', { name: '对话' })).toBeTruthy();
   const works = (await daemon.call('list-works')).result;
@@ -76,6 +76,7 @@ test('基准分支默认当前检出分支，可选择其他分支，创建工�
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('main'));
   expect(within(base).getByRole('option', { name: 'main · 当前检出分支' })).toBeTruthy();
   fireEvent.change(base, { target: { value: 'release/1.0' } });
+  expect((base as HTMLSelectElement).value).toBe('release/1.0');
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '从发布分支开始' } });
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
   await screen.findByRole('heading', { name: '从发布分支开始' });
@@ -94,6 +95,7 @@ test('引用其他工作：下拉选中后显示标签，可移除，发送时�
   const source = (await daemon.call('send-message', { projectId: daemon.project.id, body: '调研缓存方案', key: 'research' })).result.work;
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} />);
+  fireEvent.click(await screen.findByText('附件与项目上下文'));
   const picker = await screen.findByLabelText('引用工作');
   await within(picker).findByRole('option', { name: '调研缓存方案' });
   fireEvent.change(picker, { target: { value: source.id } });
@@ -110,7 +112,7 @@ test('引用其他工作：下拉选中后显示标签，可移除，发送时�
   expect(message.attachments.map((item: any) => item.name)).toEqual([`引用工作-${source.id.slice(0, 8)}.md`]);
 });
 
-test('基准加载、失败和空分支时不能开始，重试和刷新后可创建工作', async () => {
+test('基准加载与失败时不能开始，空分支可先对齐，刷新后可选择恢复的分支', async () => {
   daemon = await uiFixture();
   const realFetch = fetch;
   let failRead!: (error: Error) => void;
@@ -126,19 +128,19 @@ test('基准加载、失败和空分支时不能开始，重试和刷新后可�
   expect((base as HTMLSelectElement).disabled).toBe(true);
   expect(within(base).getByRole('option', { name: '正在读取分支…' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '等分支可用' } });
-  expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '等待基准可用' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.keyDown(screen.getByLabelText('需求'), { key: 'Enter' });
   expect((await daemon.call('list-works')).result).toHaveLength(0);
   failRead(new Error('无法读取项目分支：测试读取失败'));
   expect((await screen.findByRole('alert')).textContent).toContain('测试读取失败');
-  expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '等待基准可用' }) as HTMLButtonElement).disabled).toBe(true);
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { stdio: 'pipe' });
   git('checkout', '--detach');
   git('branch', '-D', 'main');
   fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
   await screen.findByText(/此项目尚无可用分支/);
   expect((base as HTMLSelectElement).disabled).toBe(true);
-  expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
   git('checkout', '-b', 'restored');
   fireEvent.click(screen.getByRole('button', { name: '刷新分支' }));
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('restored'));
@@ -180,9 +182,10 @@ for (const state of ['plain', 'unborn', 'detached'] as const) test(`切换到 ${
   render(<App baseUrl={daemon.url} transport={transport} />);
   const base = await screen.findByLabelText('基准分支');
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('main'));
-  fireEvent.change(screen.getByLabelText('项目'), { target: { value: project.id } });
-  expect(screen.queryByLabelText('基准分支')).toBeNull();
-  expect(await screen.findByText(/项目 git 尚未就绪/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /^项目:/ }));
+  fireEvent.click(await screen.findByRole('menuitemradio', { name: new RegExp('^' + project.name) }));
+  expect((screen.getByLabelText('基准分支') as HTMLSelectElement).disabled).toBe(true);
+  expect(await screen.findByText(/本项目尚未初始化 git/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '非 git 工作' } });
   await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
@@ -301,10 +304,11 @@ test('无项目时直接登记非 git 目录；弹窗登记归一并选中新项
   fireEvent.click(screen.getByRole('button', { name: '登记' }));
   expect(await screen.findByLabelText('需求')).toBeTruthy();
   expect(existsSync(join(empty, '.git'))).toBe(false);
-  expect(screen.queryByLabelText('基准分支')).toBeNull();
+  expect((screen.getByLabelText('基准分支') as HTMLSelectElement).disabled).toBe(true);
   expect(screen.queryByRole('button', { name: /初始化/ })).toBeNull();
-  const trigger = screen.getByRole('button', { name: '登记项目' });
+  const trigger = screen.getByRole('button', { name: /^项目:/ });
   trigger.focus(); fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('menuitem', { name: '登记项目' }));
   const dialog = screen.getByRole('dialog', { name: '登记项目' });
   const path = within(dialog).getByLabelText('项目路径');
   expect(document.activeElement).toBe(path);
@@ -313,10 +317,11 @@ test('无项目时直接登记非 git 目录；弹窗登记归一并选中新项
   fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
   expect(document.activeElement).toBe(path);
   fireEvent.keyDown(path, { key: 'Escape' });
-  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('dialog', { name: '登记项目' })).toBeNull();
   expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger);
-  const reopened = screen.getByRole('dialog');
+  fireEvent.click(screen.getByRole('menuitem', { name: '登记项目' }));
+  const reopened = screen.getByRole('dialog', { name: '登记项目' });
   // Invalid paths stay in the modal so the user can correct them.
   fireEvent.change(within(reopened).getByLabelText('项目路径'), { target: { value: join(daemon.directory, 'missing') } });
   fireEvent.click(within(reopened).getByRole('button', { name: '登记' }));
@@ -329,11 +334,11 @@ test('无项目时直接登记非 git 目录；弹窗登记归一并选中新项
   fireEvent.change(within(reopened).getByLabelText('项目路径'), { target: { value: join(second, 'nested') } });
   expect(within(reopened).queryByRole('button', { name: '新建目录并登记' })).toBeNull();
   fireEvent.click(within(reopened).getByRole('button', { name: '登记' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '登记项目' })).toBeNull());
   const projects = (await daemon.call('list-projects')).result;
   expect(projects).toHaveLength(2);
   const registered = projects.find((project: any) => project.path === second);
-  await waitFor(() => expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe(registered.id));
+  await waitFor(() => expect(screen.getByRole('button', { name: `项目: ${registered.name}` })).toBeTruthy());
 });
 
 test('项目路径下拉列出子目录，选择后进入下一级；不存在的路径提示确认创建', async () => {
@@ -361,7 +366,7 @@ test('项目路径下拉列出子目录，选择后进入下一级；不存在�
   expect(await screen.findByLabelText('需求')).toBeTruthy();
   expect(existsSync(created)).toBe(true);
   expect(existsSync(join(created, '.git'))).toBe(false);
-  expect(screen.queryByLabelText('基准分支')).toBeNull();
+  expect((screen.getByLabelText('基准分支') as HTMLSelectElement).disabled).toBe(true);
 });
 
 test.each(['zh', 'en'])('登记弹窗缺失目录经确认创建并选中非 git 项目（%s）', async language => {
@@ -380,7 +385,8 @@ test.each(['zh', 'en'])('登记弹窗缺失目录经确认创建并选中非 git
   };
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} transport={transport} />);
-  fireEvent.click(await screen.findByRole('button', { name: labels.registerProject }));
+  fireEvent.click(await screen.findByRole('button', { name: language === 'zh' ? /^项目:/ : /^Project:/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: labels.registerProject }));
   const dialog = screen.getByRole('dialog', { name: labels.registerProject });
   expect(within(dialog).getByText(labels.description, { exact: false })).toBeTruthy();
   expect(within(dialog).queryByRole('button', { name: labels.create })).toBeNull();
@@ -394,13 +400,13 @@ test.each(['zh', 'en'])('登记弹窗缺失目录经确认创建并选中非 git
   await waitFor(() => expect(document.activeElement).toBe(path));
   expect(existsSync(created)).toBe(false);
   fireEvent.click(within(dialog).getByRole('button', { name: labels.create }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: labels.registerProject })).toBeNull());
   expect(submissions).toEqual([{ path: created }, { path: created, createDirectory: true }]);
   const projects = (await daemon.call('list-projects')).result;
   const registered = projects.find((project: any) => project.path === created);
   expect(registered.isGit).toBe(false);
   expect(existsSync(join(created, '.git'))).toBe(false);
-  await waitFor(() => expect((screen.getByLabelText(labels.project) as HTMLSelectElement).value).toBe(registered.id));
+  await waitFor(() => expect(screen.getByRole('button', { name: `${language === 'zh' ? '项目' : 'Project'}: ${registered.name}` })).toBeTruthy());
 });
 
 test('草稿更新但网络未送达页面时，确认被运行层拒绝，显示原因且保持对齐', async () => {
@@ -445,19 +451,22 @@ test('项目切换重选默认 Agent，不可用 Agent 显示原因且不能开�
   render(<App baseUrl={daemon.url} />);
   const agents = await screen.findByLabelText('调度者 Agent');
   const unavailable = await within(agents).findByRole('option', { name: /claude-coordinator.*Grok 本阶段只支持执行者/ });
-  expect((unavailable as HTMLOptionElement).selected).toBe(true);
-  expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(await screen.findByText(/1 个未提交改动不会进入工作分支/)).toBeTruthy();
+  await waitFor(() => expect((unavailable as HTMLOptionElement).selected).toBe(true));
+  await waitFor(() => expect((screen.getByLabelText('基准分支') as HTMLSelectElement).value).toBe('main'));
+  expect((await screen.findByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(await screen.findByText(/1 个未提交改动，不会带进工作分支/)).toBeTruthy();
   fireEvent.change(agents, { target: { value: 'codex-coordinator' } });
   const second = join(daemon.directory, 'second');
   execFileSync('git', ['clone', daemon.repo, second], { stdio: 'ignore' });
   execFileSync('git', ['-C', second, 'checkout', '-b', 'second-base'], { stdio: 'ignore' });
   const project = (await daemon.call('register-project', { path: second })).result;
-  await within(screen.getByLabelText('项目')).findByRole('option', { name: /^second · / });
-  fireEvent.change(screen.getByLabelText('项目'), { target: { value: project.id } });
-  expect((agents as HTMLSelectElement).value).toBe('claude-coordinator');
+  fireEvent.click(screen.getByRole('button', { name: /^项目:/ }));
+  fireEvent.click(await screen.findByRole('menuitemradio', { name: /^second/ }));
+  await waitFor(() => expect((agents as HTMLSelectElement).value).toBe('claude-coordinator'));
   await waitFor(() => expect((screen.getByLabelText('基准分支') as HTMLSelectElement).value).toBe('second-base'));
+  fireEvent.click(screen.getByRole('button', { name: '关闭新建工作' }));
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  fireEvent.keyDown(window, { key: 'n', metaKey: true });
   expect(screen.getByLabelText('Coordinator agent')).toBeTruthy();
   expect(screen.getByText(/Choose an available coordinator agent/)).toBeTruthy();
 });

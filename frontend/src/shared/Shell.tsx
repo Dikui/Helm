@@ -6,6 +6,7 @@ import { useI18n } from './i18n.js';
 import { RouteOutlet, useRouter } from './router.js';
 import { Splitter, useStoredSize } from './Splitter.js';
 import { InspectorContext } from './Inspector.js';
+import { NewWorkDialog } from '../pages/new-work/NewWorkDialog.js';
 
 function useStoredFold(key: string) {
   const [folded, setFolded] = useState(() => {
@@ -29,7 +30,9 @@ function useViewportWidth() {
 
 export function Shell() {
   const { t } = useI18n();
-  const { path } = useRouter();
+  const { path, newWorkOpen, closeNewWork } = useRouter();
+  const newWorkShown = useRef(false);
+  if (newWorkOpen) newWorkShown.current = true;
   const width = useViewportWidth();
   const narrow = width <= 680;
   const stacked = width <= 980;
@@ -63,7 +66,11 @@ export function Shell() {
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         if (event.key.toLowerCase() === 'k') { event.preventDefault(); search(); }
         // 走同一个链接，设置页既有的未保存保护也能拦住快捷键。
-        if (event.key.toLowerCase() === 'n') { event.preventDefault(); inbox.current?.querySelector<HTMLAnchorElement>('a[href="/new"]')?.click(); }
+        if (event.key.toLowerCase() === 'n') {
+          event.preventDefault();
+          const trigger = inbox.current?.querySelector<HTMLAnchorElement>('a[href="/new"]');
+          trigger?.focus(); trigger?.click();
+        }
         return;
       }
       const target = event.target instanceof Element ? event.target : document.activeElement;
@@ -105,7 +112,7 @@ export function Shell() {
     ...(sidebar ? { '--sidebar-w': `${sidebarSize}px` } : {}),
     ...(!stacked && inspectorWidth ? { '--inspector-w': `${inspectorSize}px` } : {}),
   } as CSSProperties;
-  return <div className={`shell${folded ? ' inbox-folded' : ''}${narrow && drawerOpen ? ' drawer-open' : ''}`} ref={shell} style={style}>
+  return <><div className={`shell${folded ? ' inbox-folded' : ''}${narrow && drawerOpen ? ' drawer-open' : ''}`} ref={shell} style={style}>
     {narrow && drawerOpen && <button className="inbox-backdrop" aria-label={t('shellCloseBackdrop')} onClick={() => setDrawerOpen(false)} tabIndex={-1} />}
     <div id="inbox-content" className="inbox-pane" ref={inbox} role={narrow && drawerOpen ? 'dialog' : undefined} aria-modal={narrow && drawerOpen ? true : undefined} aria-label={narrow && drawerOpen ? t('shellInbox') : undefined}
       onClick={event => { if (narrow && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && (event.target as Element).closest('a[href]')) setDrawerOpen(false); }}>
@@ -131,5 +138,5 @@ export function Shell() {
       </>}
     </div>
     </InspectorContext>
-  </div>;
+  </div>{newWorkShown.current && <NewWorkDialog open={newWorkOpen} onClose={closeNewWork} />}</>;
 }

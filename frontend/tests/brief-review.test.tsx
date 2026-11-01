@@ -240,9 +240,9 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitValid();
     expect(await within(inspector).findByRole('button', { name: '接受' })).toBeTruthy();
-    expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
+    await waitFor(() => expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
       expect.stringContaining('调度者'), '等你审核建议接受', '说明 v1', '结构',
-    ]);
+    ]));
     expect(screen.queryByText('汇总报告尚不能发起审核')).toBeNull();
   } finally { releaseRead(); submitInvalid(); submitValid(); }
 });
