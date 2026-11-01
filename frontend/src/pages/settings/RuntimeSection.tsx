@@ -4,6 +4,7 @@ import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import type { RuntimeSettings } from './types.js';
 import { SaveFeedback } from './SaveFeedback.js';
+import type { Settings } from '../../shared/types.js';
 import { useSettingsSave } from './useSettingsSave.js';
 
 type NumberField = { name: keyof RuntimeSettings; label: MessageKey; factor: number; min: number; max: number; unit?: MessageKey | 'GB' };
@@ -21,9 +22,10 @@ const fields = {
 } satisfies Record<string, NumberField[]>;
 export function RuntimeSection() {
   const { t } = useI18n();
-  const { data, error, reload } = useResource<RuntimeSettings>('get-settings');
+  const { data, error, reload } = useResource<RuntimeSettings & Settings>('get-settings');
   return <section className="settings-simple" aria-label={t('runtime')}><h2>{t('runtime')}</h2><p className="muted">{t('runtimeHelp')}</p>
     {error && <ErrorNotice error={error} retry={reload} />}{!data && !error && <p role="status">{t('loading')}</p>}
+    <p className="settings-runtime-usage">{t('runtimeUsage')}: {data ? `${data.runningDispatches} / ${data.concurrencyLimit} · ${t('queued')} ${data.queuedDispatches}` : '—'}</p>
     {data && <>
       <RuntimeForm title="concurrencyLimit" hint="concurrencyHint" fields={fields.concurrency} settings={data} operation="set-concurrency" params={value => ({ limit: value.concurrencyLimit })} />
       <RuntimeForm title="dispatchWatchdog" fields={fields.dispatch} settings={data} operation="set-dispatch-watchdog" params={value => ({ wallTimeoutMs: value.dispatchWallTimeoutMs, idleTimeoutMs: value.dispatchIdleTimeoutMs })} />
@@ -60,6 +62,6 @@ function RuntimeForm({ title, hint, fields, settings, operation, params }: {
       disabled={save.pending} value={draft[field.name] ?? String(settings[field.name] / field.factor)} aria-invalid={errors.includes(field.name)} aria-describedby={errors.includes(field.name) ? `runtime-${field.name}-error` : undefined}
       onChange={event => { setDraft({ ...draft, [field.name]: event.target.value }); setErrors(errors.filter(name => name !== field.name)); save.clear(); }} />{field.unit && <span>{field.unit === 'GB' ? 'GB' : t(field.unit)}</span>}</span></div>
       {errors.includes(field.name) && <small className="settings-reason" id={`runtime-${field.name}-error`}>{t('invalidNumber')}</small>}</div>)}
-    <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('save')}</button></div>
+    <SaveFeedback {...save} /><div className="row settings-group-save"><span className="muted">{t('independentSave')}</span><button className="btn primary" disabled={save.pending}>{t('save')}</button></div>
   </form>;
 }

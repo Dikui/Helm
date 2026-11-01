@@ -11,10 +11,15 @@ test('提示词分区显示四段规则，单段保存写入数据目录', async
   daemon = await uiFixture();
   window.history.replaceState(null, '', '/settings/prompts');
   render(<App baseUrl={daemon.url} />);
-  const form = await screen.findByRole('form', { name: '调度者规则' });
+  await screen.findByText('调度者规则 · 编辑');
+  fireEvent.click(screen.getByText('调度者规则 · 编辑'));
+  const form = screen.getByRole('form', { name: '调度者规则' });
   const text = within(form).getByLabelText('调度者规则') as HTMLTextAreaElement;
   expect(text.value).toMatch(/^你是 Helm 调度者/);
-  for (const name of ['调度者运行约束', '执行者规则', '执行者运行约束']) expect(screen.getByRole('form', { name })).toBeTruthy();
+  for (const name of ['调度者执行阶段规则', '调度者运行约束', '执行者规则', '执行者运行约束']) {
+    fireEvent.click(screen.getByText(`${name} · 编辑`));
+    expect(screen.getByRole('form', { name })).toBeTruthy();
+  }
   fireEvent.change(text, { target: { value: '只写结论' } });
   fireEvent.click(within(form).getByRole('button', { name: '保存' }));
   await within(form).findByText('已保存');

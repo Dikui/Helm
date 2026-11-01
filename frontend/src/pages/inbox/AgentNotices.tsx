@@ -13,7 +13,7 @@ export function AgentNotices({ compact = false }: { compact?: boolean }) {
   const notices = data?.filter(item => item.kind === 'agent-unavailable' && item.agentId) ?? [];
   if (error) return <ErrorNotice error={error} retry={reload} />;
   if (!notices.length) return null;
-  return <Link className={compact ? 'rail-alert' : 'inbox-cli-alert'} href="/settings/environment" aria-label={t('inboxCliAlert')}
+  return <Link className={compact ? 'rail-alert' : 'inbox-cli-alert'} href="/settings/agents" aria-label={t('inboxCliAlert')}
     title={notices.map(notice => [notice.agentId, notice.reason, notice.command].filter(Boolean).join(' · ')).join('\n')}>
     <span aria-hidden="true">●</span>{!compact && <span>{notices.map(notice => notice.reason || `${notice.agentId} · ${t('unavailable')}`).join(' · ')}</span>}
   </Link>;

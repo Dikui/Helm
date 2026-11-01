@@ -24,10 +24,10 @@ function PromptForm({ name, text }: { name: PromptName; text: string }) {
     event.preventDefault();
     await save.run(async () => { await api.call('set-prompt', { name, text: draft }); });
   }
-  return <form className="settings-box settings-prompt-group" aria-label={t(name)} noValidate onSubmit={submit} aria-busy={save.pending}>
+  return <details className="settings-prompt-details"><summary>{t(name)} · {t('promptEdit')}</summary><form className="settings-box settings-prompt-group" aria-label={t(name)} noValidate onSubmit={submit} aria-busy={save.pending}>
     <label htmlFor={`prompt-${name}`}><h3>{t(name)}</h3></label>
-    <textarea id={`prompt-${name}`} className="resize-none mono settings-prompt" rows={name.endsWith('runtime') ? 6 : 16} disabled={save.pending} value={draft}
+    <textarea id={`prompt-${name}`} className="resize-none mono settings-prompt" rows={6} disabled={save.pending} value={draft}
       onChange={event => { setDraft(event.target.value); save.clear(); }} />
     <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('save')}</button></div>
-  </form>;
+  </form></details>;
 }

@@ -98,7 +98,7 @@ test('放宽默认依赖图，收窄回列表；折叠和重新展开保持选�
   expect(localStorage.getItem('helm.inspector-width')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '放宽检查器' }));
   fireEvent.click(screen.getByRole('link', { name: '设置' }));
-  expect(await within(screen.getByRole('main')).findByRole('heading', { name: '设置', level: 1 })).toBeTruthy();
+  expect(await within(screen.getByRole('main')).findByRole('heading', { name: 'Agent', level: 1 })).toBeTruthy();
 });
 
 test.each([['chat', null], ['structure', 'graph'], ['graph', 'graph'], ['brief', 'spec']] as const)('旧 %s 路由重定向到工作页与对应检查器', async (view, inspect) => {

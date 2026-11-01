@@ -1,42 +1,68 @@
 import { useState } from 'react';
+import { AgentMark } from '../../shared/AgentMark.js';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
-import { useI18n, type MessageKey } from '../../shared/i18n.js';
+import { useI18n } from '../../shared/i18n.js';
+import { Link } from '../../shared/router.js';
+import type { HelmEvent } from '../../shared/types.js';
+import type { AgentEntry } from './types.js';
 
-interface Tool { name: string; executable: string; installed: boolean; version: string | null; smokeVersion: string | null; install: string; login: string | null }
-const labels: Record<string, string | MessageKey> = { 'claude-sdk': 'Claude Code', codex: 'Codex', grok: 'Grok', deepseek: 'DeepSeek (dsh)', browser: 'toolBrowser' };
+export interface Tool { name: string; executable: string; installed: boolean; version: string | null; smokeVersion: string | null; install: string; login: string | null }
+export const environmentChanged = (event: HelmEvent) => event.object.type === 'tool';
+const labels: Record<string, string> = { 'claude-sdk': 'Claude CLI', codex: 'Codex CLI', grok: 'Grok CLI', deepseek: 'DeepSeek CLI' };
 
+// The browser prerequisite remains available in Advanced after merging the CLI groups into Agents.
 export function EnvironmentSection() {
   const { t } = useI18n();
-  const { data, error, reload } = useResource<Tool[]>('check-environment');
-  return <section className="settings-simple" aria-label={t('environment')}>
-    <div className="settings-heading"><div><h2>{t('environment')}</h2><p className="muted">{t('environmentHelp')}</p></div>
-      <button type="button" className="btn sm" onClick={reload}>{t('recheck')}</button></div>
-    {error && <ErrorNotice error={error} retry={reload} />}{!data && !error && <p role="status">{t('loading')}</p>}
-    {data?.map(tool => <ToolRow key={tool.name} tool={tool} onInstalled={reload} />)}
+  const { data, error, reload } = useResource<Tool[]>('check-environment', {}, environmentChanged);
+  return <section className="settings-simple" aria-label={t('toolBrowser')}>
+    {error && <ErrorNotice error={error} retry={reload} />}
+    {data?.filter(tool => tool.name === 'browser').map(tool => <DriverGroup key={tool.name} driver="browser" tool={tool} entries={[]} onRechecked={reload} />)}
   </section>;
 }
 
-function ToolRow({ tool, onInstalled }: { tool: Tool; onInstalled: () => void }) {
+export function DriverGroup({ driver, tool, entries, selectedId, onRechecked }: {
+  driver: string | null; tool?: Tool; entries: AgentEntry[]; selectedId?: string; onRechecked: () => void;
+}) {
   const { t } = useI18n();
   const { api } = useData();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error>();
-  const label = labels[tool.name] ?? tool.name;
-  const name = label === 'toolBrowser' ? t('toolBrowser') : label;
-  async function install() {
+  const name = driver === 'browser' ? t('toolBrowser') : driver ? labels[driver] ?? driver : t('unrecognizedAgents');
+  // Availability confirms usable credentials for these Agents, not a separate CLI login query.
+  const shared = entries.filter(entry => entry.home === 'shared');
+  const loginFailure = shared.some(entry => !entry.available && /未登录|登录状态|认证|not logged|auth|log.?in/i.test(entry.reason ?? ''));
+  const loginStatus = loginFailure ? 'cliNotLoggedIn' : shared.some(entry => entry.available) ? 'cliCredentialsReady' : 'cliLoginUnknown';
+  async function run(install = false) {
+    if (pending) return;
     setPending(true); setError(undefined);
-    try { await api.call('install-tool', { name: tool.name }); onInstalled(); }
-    catch (failure) { setError(failure as Error); }
+    try {
+      if (install && tool) await api.call('install-tool', { name: tool.name });
+      await Promise.all(entries.map(entry => api.call('recheck-agent', { id: entry.id })));
+      onRechecked();
+    } catch (failure) { setError(failure as Error); }
     finally { setPending(false); }
   }
-  return <div className="settings-box" role="group" aria-label={name}>
-    <div className="settings-tool-head"><strong>{name}</strong>
-      <span className={tool.installed ? 'settings-ok' : 'settings-reason'}>{tool.installed ? [t('toolInstalled'), tool.version].filter(Boolean).join(' · ') : t('toolMissing')}</span></div>
-    {!tool.installed && <><p className="muted">{t('installRuns')} <code>{tool.install}</code></p>{error && <ErrorNotice error={error} />}
-      <div><button type="button" className="btn sm" disabled={pending} aria-busy={pending} onClick={() => void install()}>{t(pending ? 'installing' : 'install')}</button></div></>}
-    {tool.installed && tool.version && tool.version !== tool.smokeVersion && tool.name !== 'browser' &&
-      <p className="warn"><span>!</span><span>{tool.smokeVersion ? `${t('versionUntested')} ${tool.smokeVersion}` : t('versionNeverTested')}</span></p>}
-    {tool.login && <p className="muted">{t('loginHint')} <code>{tool.login}</code></p>}
-  </div>;
+  return <section className="settings-driver-group" role="group" aria-label={name} aria-busy={pending}>
+    <div className="settings-driver-head">{driver !== 'browser' && <AgentMark driver={driver} />}<h3>{name}</h3>
+      <span className="mono muted">{tool?.version ?? '—'}</span>
+      <span className={`pill ${tool && !tool.installed || loginFailure ? 'bad' : ''}`}>{t(tool ? tool.installed ? 'toolInstalled' : 'toolMissing' : 'cliStatusUnknown')}</span>
+      {driver !== 'browser' && <span className={`pill ${loginFailure ? 'bad' : ''}`}>{t(loginStatus)}</span>}
+      <button type="button" className="btn sm" disabled={pending} onClick={() => void run()}>{t('recheck')}</button>
+      {tool && !tool.installed && <button type="button" className="btn sm" disabled={pending} onClick={() => void run(true)}>{t(pending ? 'installing' : 'install')}</button>}
+    </div>
+    {error && <ErrorNotice error={error} />}
+    {tool && <details className="settings-cli-details"><summary>{t('cliInstructions')}</summary><div>
+      {!tool.installed && <p className="muted">{t('installRuns')} <code>{tool.install}</code></p>}
+      {tool.installed && tool.version && tool.version !== tool.smokeVersion && driver !== 'browser' && <p className="settings-reason">{tool.smokeVersion ? `${t('versionUntested')} ${tool.smokeVersion}` : t('versionNeverTested')}</p>}
+      {tool.login && <p className="muted">{t('loginHint')} <code>{tool.login}</code></p>}
+    </div></details>}
+    {entries.map(item => <Link key={item.id} href={`/settings/agents/${encodeURIComponent(item.id)}`} className="settings-agent-row" aria-current={item.id === selectedId ? 'page' : undefined}>
+      <span><b>{item.id}</b> <span className="pill">{t(item.role === 'coordinator' ? 'coordinatorRole' : item.role === 'executor' ? 'executorAgents' : 'unrecognizedAgents')}</span></span>
+      <span className="settings-meta">{item.runningDispatches} {t('dispatchCount')} · {item.activeWorks} {t('workCount')}</span>
+      <span className="settings-meta">{item.model ?? t('driverDefault')}{item.reasoningEffort ? ` · ${item.reasoningEffort}` : ''} · {t(item.billing === 'api' ? 'apiBilling' : 'subscription')}{item.fast ? ' · Fast' : ''} — {item.description}
+        {item.warnings?.map(warning => <span key={warning} className="settings-warning">{warning}</span>)}</span>
+      <span className={item.available ? 'settings-meta' : 'settings-reason'}>{t(item.available ? 'available' : 'unavailable')}{!item.available && <>: {item.reason}{item.command && <> <code>{item.command}</code></>}</>}</span>
+    </Link>)}
+  </section>;
 }

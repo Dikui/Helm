@@ -207,7 +207,7 @@ test('运行层暂停归安静并保留原因；工作页计时每秒走，深�
   cleanup();
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
-  expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Agent' })).toBeTruthy();
 });
 
 test('收件箱用量读取失败时由该资源自行重试，恢复后补读而不丢更新，实时连接不中断', async () => {

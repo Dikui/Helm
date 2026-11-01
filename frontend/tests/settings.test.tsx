@@ -115,7 +115,7 @@ test('Agent 详情重新检测保留未保存输入，检测中禁用操作，�
   expect(fieldValue('职责说明')).toBe('未保存的输入');
 });
 
-test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 复制，API 主目录只显示配置提示', async () => {
+test('设置页按驱动显示角色、可用性与使用数，保存 Agent 并以新 id 复制，API 主目录只显示配置提示', async () => {
   daemon = await uiFixture();
   const skills = join(daemon.directory, 'agents', 'claude-executor', 'skills');
   await mkdir(skills);
@@ -131,8 +131,9 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
   const editor = await screen.findByRole('form', { name: 'Agent 详情' });
-  expect(screen.getByRole('region', { name: '调度者' })).toBeTruthy();
-  expect(screen.getByRole('region', { name: '执行者' })).toBeTruthy();
+  expect(screen.getByRole('group', { name: 'Claude CLI' })).toBeTruthy();
+  expect(within(screen.getByRole('group', { name: 'Claude CLI' })).getByText('调度者')).toBeTruthy();
+  expect(screen.getAllByText('执行者').length).toBeGreaterThan(0);
   expect(screen.getAllByText('可用').length).toBeGreaterThan(0);
   expect(screen.getAllByText('0 个运行中派单 · 0 项未结束工作').length).toBeGreaterThan(0);
   expect(screen.getByText('SKILL.md')).toBeTruthy();
@@ -141,7 +142,7 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   change('模型', 'test-model');
   change('推理强度', 'high');
   change('驱动', 'codex');
-  fireEvent.click(screen.getByLabelText('fast'));
+  fireEvent.click(screen.getByLabelText('Fast 档'));
   change('附加提示词（可选）', '保留原文策略');
   const revision = (await agent('claude-executor')).revision;
   fireEvent.click(within(editor).getByRole('button', { name: '保存' }));
@@ -157,12 +158,12 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   expect(saved.config.mcp).toEqual(['remote']);
   expect(saved.revision).not.toBe(revision);
   fireEvent.click(screen.getByRole('button', { name: '复制为新 Agent' }));
-  change('Agent id', 'claude-executor');
+  change('名字', 'claude-executor');
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await screen.findByRole('alert');
-  expect(screen.getByLabelText('Agent id').getAttribute('aria-invalid')).toBe('true');
+  expect(screen.getByLabelText('名字').getAttribute('aria-invalid')).toBe('true');
   expect((await agent('claude-executor')).revision).toBe(saved.revision);
-  change('Agent id', 'api-copy');
+  change('名字', 'api-copy');
   change('计费方式', 'dedicated');
   expect(screen.getByText(/~\/.helm\/agent-homes\/api-copy\//)).toBeTruthy();
   expect((screen.getByLabelText('角色') as HTMLSelectElement).disabled).toBe(false);
@@ -177,8 +178,8 @@ test('设置页按角色显示可用性与使用数，保存 Agent 并以新 id 
   expect(copy.config.skills).toEqual(['library-skill']);
   expect(copy.config.mcp).toEqual(['remote']);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(screen.getByRole('region', { name: 'Coordinators' })).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Executors' })).toBeTruthy();
+  expect(within(screen.getByRole('group', { name: 'Claude CLI' })).getByText('Coordinators')).toBeTruthy();
+  expect(screen.getAllByText('Executors').length).toBeGreaterThan(0);
 });
 
 test('删除 Agent 须二次确认，删除后回到列表；项目默认调度者的 Agent 拒绝删除并显示原因', async () => {
@@ -225,7 +226,8 @@ test('不可用原因直接显示，字段错误不清空输入，文件冲突�
   expect((await agent('claude-executor')).description).toBe('外部编辑的内容');
   fireEvent.click(screen.getByRole('button', { name: '重新载入 Agent' }));
   await waitFor(() => expect((screen.getByLabelText('职责说明') as HTMLTextAreaElement).value).toBe('外部编辑的内容'));
-  fireEvent.click(screen.getByLabelText('fast'));
+  expect((screen.getByRole('textbox', { name: '重新读取前保留的草稿' }) as HTMLTextAreaElement).value).toContain('尚未保存的输入');
+  fireEvent.click(screen.getByLabelText('Fast 档'));
   change('职责说明', '重新载入后保存');
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await screen.findByText('已保存');
@@ -256,6 +258,7 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   const repo = join(daemon.directory, 'another-project');
   const { execFileSync } = await import('node:child_process');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  fireEvent.click(screen.getByRole('button', { name: '＋ 登记项目' }));
   change('项目名称（可选）', '新项目');
   change('项目路径', repo);
   fireEvent.click(screen.getByRole('button', { name: '登记项目' }));
@@ -387,10 +390,10 @@ test('新建 Agent 使用独立路由，允许 id 为 new；离开未保存 Agen
   expect((screen.getByLabelText('职责说明') as HTMLTextAreaElement).value).toBe('未保存的职责');
   fireEvent.click(screen.getByRole('link', { name: '新建 Agent' }));
   fireEvent.click(screen.getByRole('button', { name: '丢弃并继续' }));
-  change('Agent id', 'new'); change('职责说明', '新 Agent'); change('附加提示词（可选）', '新策略');
+  change('名字', 'new'); change('职责说明', '新 Agent'); change('附加提示词（可选）', '新策略');
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(window.location.pathname).toBe('/settings/agents/new'));
-  expect((screen.getByLabelText('Agent id') as HTMLInputElement).value).toBe('new');
+  expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('new');
   expect((screen.getByLabelText('角色') as HTMLSelectElement).disabled).toBe(true);
   expect((await agent('new')).prompt).toBe('新策略');
 });
@@ -409,7 +412,7 @@ test.each(['刚保存', '未保存'])('%s后复制 Agent 使用编辑器全部�
   const editor = await screen.findByRole('form', { name: 'Agent 详情' });
   change('职责说明', '当前职责'); change('模型', 'current-model'); change('驱动', 'codex');
   change('推理强度', 'high'); change('计费方式', 'dedicated'); change('附加提示词（可选）', '当前策略');
-  fireEvent.click(screen.getByLabelText('fast'));
+  fireEvent.click(screen.getByLabelText('Fast 档'));
   if (mode === '刚保存') {
     const save = within(editor).getByRole('button', { name: '保存' }) as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false));
@@ -424,9 +427,9 @@ test.each(['刚保存', '未保存'])('%s后复制 Agent 使用编辑器全部�
     ['推理强度', 'high'], ['计费方式', 'dedicated'], ['角色', 'executor'], ['附加提示词（可选）', '当前策略']]) {
     expect(fieldValue(label!)).toBe(value);
   }
-  expect((screen.getByLabelText('fast') as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText('Agent id') as HTMLInputElement).value).toBe('');
-  change('Agent id', 'current-copy');
+  expect((screen.getByLabelText('Fast 档') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('');
+  change('名字', 'current-copy');
   const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
   await waitFor(() => expect(save.disabled).toBe(false));
   fireEvent.click(save);
@@ -501,8 +504,9 @@ test('环境页对未经真实冒烟的 CLI 版本给出提示', async () => {
     daemon = await uiFixture([], undefined, { codexDriver: Object.assign(new FakeDriver(), { install: { executable: 'helm-fake-cli', command: 'true', login: 'helm-fake-cli login' } }) });
     window.history.replaceState(null, '', '/settings/environment');
     render(<App baseUrl={daemon.url} />);
-    const codex = await screen.findByRole('group', { name: 'Codex' });
+    const codex = await screen.findByRole('group', { name: 'Codex CLI' });
     await within(codex).findByText(/helm-fake-cli 9\.9\.9/);
+    fireEvent.click(within(codex).getByText('安装、登录与版本说明'));
     expect(within(codex).getByText(/未经真实冒烟|没有通过真实冒烟/)).toBeTruthy();
   } finally { process.env.PATH = path; await rm(bin, { recursive: true, force: true }); }
 });

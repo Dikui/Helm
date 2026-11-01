@@ -33,6 +33,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(initialSaved);
   const [deleting, setDeleting] = useState(false);
+  const [retainedDraft, setRetainedDraft] = useState<string>();
   const deleteButton = useRef<HTMLButtonElement>(null);
   const config = <K extends keyof AgentSettings>(key: K, next: AgentSettings[K]) => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, [key]: next } })); };
   const conflict = error instanceof OperationError && error.failure.code === 'AGENT_CONFLICT';
@@ -69,6 +70,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     } finally { setPending(false); }
   }
   async function reload() {
+    setRetainedDraft(JSON.stringify(value, null, 2));
     setPending(true);
     try {
       const entries = await api.call<AgentEntry[]>('list-agents');
@@ -120,17 +122,18 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
         {fieldError('home')}
       </fieldset>
       <label htmlFor="agent-description">{t('description')}<textarea className="resize-none" {...fieldProps('description')} rows={3} value={value.config.description} onChange={event => config('description', event.target.value)} />{fieldError('description')}</label>
-      <label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="resize-none mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
-      <AgentLibrarySelection ownSkills={creating ? [] : source?.skills ?? []} settings={value.config} change={config} />
+      <details className="settings-extras" open><summary>{t('agentExtras')}</summary><label htmlFor="agent-prompt">{t('promptOptional')}<small className="muted">{t('promptHint')}</small><textarea {...fieldProps('prompt')} className="resize-none mono settings-prompt" rows={6} value={value.prompt} onChange={event => { setSaved(false); setValue({ ...value, prompt: event.target.value }); }} />{fieldError('prompt')}</label>
+      <AgentLibrarySelection ownSkills={creating ? [] : source?.skills ?? []} settings={value.config} change={config} /></details>
       {!creating && !!source?.warnings?.length && <div className="settings-box" role="status" aria-label={t('agentWarnings')}>
         <h3>{t('agentWarnings')}</h3>{source.warnings.map(warning => <p key={warning}>{warning}</p>)}
       </div>}
     </fieldset>
     <div className="settings-feedback">{error && !deleting && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadAgent')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
+    {retainedDraft && <label className="settings-retained">{t('retainedDraft')}<textarea readOnly rows={6} value={retainedDraft} /></label>}
     {(!creating || source) && <p className="settings-duplicate-hint muted" id="agent-duplicate-hint">{t('duplicateAgentHint')}</p>}
     <div className="settings-actions"><span className="muted">{t('nextDispatch')}</span>{!creating && <button type="button" className="btn" aria-describedby="agent-duplicate-hint" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
       {!creating && <button ref={deleteButton} type="button" className="btn work-danger" disabled={pending} onClick={() => { setError(undefined); setDeleting(true); }}>{t('deleteAgent')}</button>}
-      <button className="btn primary" disabled={pending || conflict}>{t('save')}</button></div>
+      <button className="btn primary" disabled={pending || conflict}>{t(pending ? 'savingSettings' : 'save')}</button></div>
     {deleting && <ActionDialog title={t('deleteAgent')} description={`${source!.id} · ${t('deleteAgentConsequence')}`} busy={pending} onClose={() => setDeleting(false)} returnFocus={deleteButton}>
       {error && <ErrorNotice error={error} />}
       <button type="button" className="btn work-danger" disabled={pending} onClick={() => void remove()}>{t('confirmDeleteAgent')}</button>
