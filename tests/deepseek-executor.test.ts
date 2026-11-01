@@ -299,10 +299,10 @@ test('DeepSeek API Agent 使用各自专用 DSH_HOME，凭据只由 CLI 读取�
   assert.deepEqual(settings, Array.from({ length: 4 }, () => ['["deepseek-official","deepseek-v4-flash"]', 'max']).flat());
 });
 
-test('DeepSeek 拒绝调度者、未指定模型和 fast，不启动 CLI', async t => {
+test('DeepSeek 拒绝未指定模型和 fast，不启动 CLI', async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   for (const [settings, reason] of [
-    [{ role: 'coordinator' }, /只支持执行者/], [{ model: null }, /模型 id/], [{ fast: true }, /fast/],
+    [{ model: null }, /模型 id/], [{ fast: true }, /fast/],
   ] as [Partial<AgentConfig>, RegExp][]) {
     const agent = { ...ctx.agent, ...settings };
     const result = await ctx.driver.checkAvailability(agent);
@@ -603,7 +603,7 @@ test('DeepSeek 经假 ACP 调用同端点结论和浏览器，令牌生效且运
   assert.equal((await acp.requests()).filter(r => r.method === 'fixture/mcp').length, 3);
 });
 
-test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显示原因（CLI 替身）', async t => {
+test('startHelmd 默认登记 DeepSeek，调度者 Agent 可用（CLI 替身）', async t => {
   const acp = await acpFixture(t, { configOptions }, true, 'deepseek');
   const bin = join(acp.directory, 'bin');
   await mkdir(bin);
@@ -624,9 +624,9 @@ test('startHelmd 默认登记 DeepSeek，调度者 Agent 列为不可用并显�
     const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any).result;
     const agents = await call('list-agents');
     assert.equal(agents.find((t: any) => t.id === 'deepseek-executor').available, true);
-    assert.equal(agents.find((t: any) => t.id === 'deepseek-coordinator').available, false);
-    assert.match((await call('list-pending')).find((p: any) => p.agentId === 'deepseek-coordinator').reason, /只支持执行者/);
-    assert.throws(() => new AgentCatalog(agentDir, ['deepseek']).get('deepseek-coordinator'), /只支持执行者/);
+    assert.equal(agents.find((t: any) => t.id === 'deepseek-coordinator').available, true);
+    assert.equal((await call('list-pending')).some((p: any) => p.agentId === 'deepseek-coordinator'), false);
+    assert.equal(new AgentCatalog(agentDir, ['deepseek']).get('deepseek-coordinator').role, 'coordinator');
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize', 'session/new', 'session/set_config_option', 'session/close'].includes(r.method)));
   } finally { await daemon.close(); }
 });

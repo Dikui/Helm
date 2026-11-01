@@ -30,6 +30,8 @@ export class AcpDriver implements Driver {
   private environment(base: Record<string, string>, agent: AgentConfig) {
     return driverEnvironment(base, { unset: this.profile.environment.unset, set: {
       ...this.profile.environment.set,
+      ...(agent.role === 'coordinator' ? this.agent === 'deepseek'
+        ? { DSH_PERMISSION_MODE: 'read-only' } : { GROK_SANDBOX: grokProfiles.readOnly } : {}),
       ...(this.profile.homeVariable && agent.home === 'dedicated'
         ? { [this.profile.homeVariable]: join(base.HOME ?? homedir(), '.helm', 'agent-homes', agent.id) } : {}),
     } });
@@ -198,7 +200,10 @@ export class AcpDriver implements Driver {
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
     const readOnly = options.sandbox.mode === 'read-only';
-    if (agent.driver !== this.agent || agent.role !== 'executor' || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1)) {
+    if (agent.role === 'coordinator' && (!readOnly || options.sandbox.writableRoots.length)) {
+      throw new Error('ACP coordinator requires a read-only coordinator round');
+    }
+    if (agent.driver !== this.agent || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1)) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);

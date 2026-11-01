@@ -39,7 +39,9 @@ export async function runRealSmoke(run: SmokeProcess = (args, options) => spawnS
     ['coordinator-resume', 'HELM_COORDINATOR_RESUME_REAL'],
     ['auto-flow', 'HELM_AUTO_FLOW_REAL'],
     ['grok-executor', 'HELM_GROK_EXECUTOR_REAL'],
+    ['grok-coordinator', 'HELM_GROK_COORDINATOR_REAL'],
     ['deepseek-executor', 'HELM_DEEPSEEK_EXECUTOR_REAL'],
+    ['deepseek-coordinator', 'HELM_DEEPSEEK_COORDINATOR_REAL'],
     ['attachments', 'HELM_ATTACHMENTS_REAL'],
     ['ui', 'HELM_UI_REAL'],
   ] as const) {

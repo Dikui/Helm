@@ -12,8 +12,8 @@ test('驱动契约声明当前接入的能力，配置和自动记忆的限制�
   for (const [driver, expected] of [
     [new ClaudeDriver(), [true, true, true, true, 'disabled']],
     [new CodexDriver(), [false, true, true, true, 'disabled']],
-    [new AcpDriver('grok'), [false, true, false, false, 'disabled']],
-    [new AcpDriver('deepseek'), [false, true, false, false, 'unsupported']],
+    [new AcpDriver('grok'), [false, true, false, true, 'disabled']],
+    [new AcpDriver('deepseek'), [false, true, false, true, 'unsupported']],
     [new FakeDriver(), [true, true, true, true, 'absent']],
   ] as const) {
     const capabilities = driver.capabilities;

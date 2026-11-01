@@ -37,6 +37,8 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const [retainedDraft, setRetainedDraft] = useState<string>();
   const { data: driverStatus, error: driverError } = useResource<{ capabilities: {
     cleanStart: { supported: true } | { supported: false; reason: string };
+    coordinator: boolean;
+    coordinatorUnavailableReason?: string;
   } | null }>('check-agent', { driver: value.config.driver });
   const cleanStart = driverStatus?.capabilities?.cleanStart;
   const configReason = cleanStart?.supported === false ? cleanStart.reason : driverError?.message ?? (!cleanStart ? t('loading') : undefined);
@@ -113,7 +115,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       <label htmlFor="agent-id">{t('agentId')}<input {...fieldProps('id')} value={value.id} disabled={!creating} onChange={event => { setSaved(false); setValue({ ...value, id: event.target.value }); }} />{fieldError('id')}</label>
       <div className="settings-two">
         <label htmlFor="agent-role">{t('role')}<select {...fieldProps('role')} disabled={!creating} value={value.config.role} onChange={event => config('role', event.target.value as AgentSettings['role'])}>
-          <option value="coordinator">{t('coordinatorRole')}</option><option value="executor">{t('executors')}</option></select>{!creating && <small className="muted">{t('roleImmutable')}</small>}{fieldError('role')}</label>
+          <option value="coordinator" disabled={driverStatus?.capabilities?.coordinator === false}>{t('coordinatorRole')}</option><option value="executor">{t('executors')}</option></select>{driverStatus?.capabilities?.coordinator === false && <small className="settings-reason">{driverStatus.capabilities.coordinatorUnavailableReason ?? t('coordinatorUnsupported')}</small>}{!creating && <small className="muted">{t('roleImmutable')}</small>}{fieldError('role')}</label>
         <label htmlFor="agent-driver">{t('driver')}<select {...fieldProps('driver')} value={value.config.driver} onChange={event => config('driver', event.target.value as AgentSettings['driver'])}>
           {['claude-sdk', 'codex', 'grok', 'deepseek'].map(driver => <option key={driver}>{driver}</option>)}</select>{fieldError('driver')}</label>
       </div>

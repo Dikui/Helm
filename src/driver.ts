@@ -65,6 +65,7 @@ export interface DriverCapabilities {
   resume: boolean;
   contextUsage: boolean;
   coordinator: boolean;
+  coordinatorUnavailableReason?: string;
   autoMemory: { status: 'absent' } | { status: 'disabled'; mechanism: string } | { status: 'unverified' | 'unsupported'; reason: string };
 }
 export interface Driver {

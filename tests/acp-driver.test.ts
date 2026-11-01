@@ -318,10 +318,10 @@ test('Grok 原样下发 CLI 的推理强度；每次派单新开进程，默认�
   assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '只写 Helm 的沙箱配置档，不复制登录');
 });
 
-test('Grok Agent 拒绝调度者、未指定模型或推理强度、fast 和 API 主目录', async t => {
+test('Grok Agent 拒绝未指定模型或推理强度、fast 和 API 主目录', async t => {
   const ctx = await acpFixture(t);
   const cases: [Partial<AgentConfig>, RegExp][] = [
-    [{ role: 'coordinator' }, /本阶段只支持执行者/], [{ model: null }, /模型 id/],
+    [{ model: null }, /模型 id/],
     [{ reasoningEffort: null }, /推理强度/],
     [{ fast: true }, /fast/], [{ home: 'dedicated' }, /本机登录/],
   ];

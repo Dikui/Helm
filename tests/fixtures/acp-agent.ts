@@ -114,6 +114,9 @@ async function handle(line: string) {
       appendFileSync(script.record, `${JSON.stringify({ method: 'fixture/child', pid: child.pid })}\n`);
     }
     for (const write of script.writes ?? []) writeFileSync(write.path, write.content);
+    for (const call of script.clientRequests ?? []) {
+      await request(call.method, { sessionId, ...call.params });
+    }
     if (script.mcpTools) {
       const server = servers.find(server => server.name === 'helm');
       const client = new Client({ name: 'fake-acp-agent', version: '1' });

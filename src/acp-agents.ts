@@ -59,7 +59,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       // Boot always includes user layers; --patch only overlays them.
       // https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/src/profile-boot.ts
       cleanStart: { supported: false, reason: 'dsh 0.2.1-rc.2 启动 ACP 时始终加载用户 profile 和主目录配置；--patch 不能跳过这些配置及其规则、MCP、skills 和 hooks。' },
-      resume: true, contextUsage: false, coordinator: false,
+      resume: true, contextUsage: false, coordinator: true,
       autoMemory: { status: 'unsupported', reason: 'dsh 0.2.1-rc.2 默认 ACP 栈无内置自动记忆；用户另装的记忆插件或 MCP 没有统一的按会话关闭开关，启用后仍可能读写个人记忆。' },
     },
     name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
@@ -98,7 +98,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       return input.sandbox_permissions === 'read-only' || (mode === 'workspace-write' && input.sandbox_permissions === 'workspace-write');
     },
     unavailable(agent) {
-      if (agent.role !== 'executor') return 'DeepSeek 本阶段只支持执行者，不支持调度者。';
+      if (agent.role === 'coordinator' && !this.capabilities.coordinator) return this.capabilities.coordinatorUnavailableReason ?? `${this.name} 当前驱动能力不支持调度者。`;
       if (!agent.model) return 'DeepSeek Agent 必须指定模型 id 与路由，请在设置页选择 dsh 公布的模型。';
       if (agent.fast) return 'DeepSeek 不支持 Agent fast 档，请设为 false。';
     },
@@ -143,7 +143,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       // GROK_CONFIG is an allowlisted deep-merge overlay, not a replacement.
       // https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md
       cleanStart: { supported: false, reason: 'Grok 1.0.70 没有跳过用户与项目配置的 ACP 开关；GROK_CONFIG 仅叠加配置，仍会加载全局规则、MCP、skills 和 hooks。' },
-      resume: true, contextUsage: false, coordinator: false,
+      resume: true, contextUsage: false, coordinator: true,
       autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
@@ -158,7 +158,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
         toolset: { bash: { login_shell_capture: false } } }),
     }, unset: ['XAI_API_KEY', 'GROK_HOME', 'GROK_CONFIG_PATH'] },
     unavailable(agent) {
-      if (agent.role !== 'executor') return 'Grok 本阶段只支持执行者，不支持调度者。';
+      if (agent.role === 'coordinator' && !this.capabilities.coordinator) return this.capabilities.coordinatorUnavailableReason ?? `${this.name} 当前驱动能力不支持调度者。`;
       if (!agent.model) return 'Grok Agent 必须指定模型 id，不能使用 CLI 默认模型。';
       if (!agent.reasoningEffort) return 'Grok Agent 必须指定推理强度。';
       if (agent.home !== 'shared') return 'Grok 本阶段只支持本机登录，请将 home 设为 shared 并运行 grok login。';
