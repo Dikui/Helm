@@ -162,3 +162,11 @@
   .cg-main { min-height: 440px; flex-shrink: 0; }
   .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; flex-shrink: 0; }
 }
+.work-structure .cg-viewport { background: none; border: 1px solid var(--border); border-radius: 10px; }
+.work-structure .cg-node { padding: 6px 8px; gap: 2px; border-radius: 8px; }
+.work-structure .cg-node-name { font-size: 12px; }
+.work-structure .cg-node-state { font-size: 11px; }
+.work-structure .cg-node-state time { display: none; }
+.work-structure .cg-node-state .pill { font-size: 11px; padding: 0; height: auto; }
+.work-structure .cg-legend { gap: 8px 12px; padding: 8px 0; border: 0; }
+.work-structure .cg-legend:empty { display: none; }

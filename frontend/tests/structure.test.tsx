@@ -65,10 +65,12 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     await clickReady(screen.getByRole('tab', { name: '事件' }));
     const events = screen.getByRole('tabpanel', { name: '事件' });
     const verification = history.find((dispatch: any) => dispatch.purpose === 'verification');
-    fireEvent.change(within(events).getByLabelText('卡片筛选'), { target: { value: verification.cardId } });
-    fireEvent.change(within(events).getByLabelText('派单筛选'), { target: { value: verification.id } });
-    fireEvent.change(within(events).getByLabelText('执行方筛选'), { target: { value: 'runtime' } });
-    const event = await within(events).findByRole('button', { name: 'dispatch-step · 卡片 1 · 步骤 24' });
+    expect(within(events).getAllByRole('combobox')).toHaveLength(1);
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: `card:${verification.cardId}` } });
+    await waitFor(() => expect(filters.some(filter => filter.cardId === verification.cardId)).toBe(true));
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: `dispatch:${verification.id}` } });
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: 'actor:runtime' } });
+    const event = await within(events).findByRole('link', { name: '查看对应步骤：卡片 1 · 派单执行步骤 · 步骤 24 · 验收步骤 24' });
     expect(filters.some(filter => filter.cardId === verification.cardId && filter.dispatchId === verification.id && filter.actorType === 'runtime')).toBe(true);
     expect(within(events).queryByRole('button', { name: /卡片 2/ })).toBeNull();
     await clickReady(event);
@@ -80,12 +82,13 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     expect(document.activeElement?.textContent).toContain('验收步骤 24');
     await clickReady(screen.getByRole('tab', { name: '事件' }));
     const reopenedEvents = screen.getByRole('tabpanel', { name: '事件' });
-    fireEvent.change(within(reopenedEvents).getByLabelText('卡片筛选'), { target: { value: verification.cardId } });
-    fireEvent.change(within(reopenedEvents).getByLabelText('派单筛选'), { target: { value: verification.id } });
-    fireEvent.change(within(reopenedEvents).getByLabelText('执行方筛选'), { target: { value: 'user' } });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `card:${verification.cardId}` } });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `dispatch:${verification.id}` } });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: 'actor:user' } });
+    await waitFor(() => expect(filters.some(filter => filter.actorType === 'user')).toBe(true));
     expect(await within(reopenedEvents).findByText('没有符合筛选条件的事件。')).toBeTruthy();
-    await clickReady(within(reopenedEvents).getByRole('button', { name: '清除筛选' }));
-    expect(await within(reopenedEvents).findByRole('button', { name: 'dispatch-step · 卡片 1 · 步骤 24' })).toBeTruthy();
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: '' } });
+    expect(await within(reopenedEvents).findByRole('link', { name: '查看对应步骤：卡片 1 · 派单执行步骤 · 步骤 24 · 验收步骤 24' })).toBeTruthy();
     await clickReady(screen.getByRole('tab', { name: '依赖图' }));
     await clickReady(await screen.findByRole('button', { name: '卡片 1：验证码登录' }));
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
@@ -112,7 +115,7 @@ async function executeWork() {
   return work;
 }
 async function clickReady(button: HTMLElement) {
-  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((button as HTMLButtonElement).disabled ?? false).toBe(false));
   fireEvent.click(button);
 }
 
@@ -141,6 +144,8 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     expect(await within(panel).findByText('接口通过后做表单')).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText('调度笔记版本'), { target: { value: '1' } });
     expect(await within(panel).findByText('先做接口')).toBeTruthy();
+    expect(within(panel).queryByRole('region', { name: '调度轮次输出' })).toBeNull();
+    await clickReady(within(panel).getByRole('button', { name: '调度轮次 #2' }));
     const output = await within(panel).findByRole('region', { name: '调度轮次输出' });
     expect(await within(output).findByText('调度输出 1')).toBeTruthy();
     expect(within(output).queryByText('调度输出 24')).toBeNull();
@@ -191,10 +196,11 @@ test('无卡片和笔记时显示空态，事件读取错误可重试，轮次�
   expect((await within(events).findByRole('alert')).textContent).toContain('读取事件连接失败');
   fail = false;
   await clickReady(within(events).getByRole('button', { name: '重新读取' }));
-  expect(await within(events).findByText('work-created')).toBeTruthy();
+  expect(await within(events).findByText('创建工作')).toBeTruthy();
   await clickReady(screen.getByRole('tab', { name: '调度轮次' }));
   const coordinator = screen.getByRole('tabpanel', { name: '调度轮次' });
   expect(await within(coordinator).findByText('还没有调度笔记。')).toBeTruthy();
+  await clickReady(within(coordinator).getByRole('button', { name: '调度轮次 #2' }));
   ok(await daemon.call('cancel-work', { workId: work.id }));
   ok(await daemon.call('delete-outputs', { workId: work.id, confirm: true }));
   expect(await within(coordinator).findByText('输出已删除')).toBeTruthy();

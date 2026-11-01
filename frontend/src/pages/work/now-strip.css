@@ -1,18 +1,21 @@
-.now-strip { display: flex; flex: none; align-items: stretch; gap: 6px; overflow-x: auto; padding: 0 22px 12px; border-bottom: 1px solid var(--border); }
-.now-cell { display: flex; flex: none; align-items: center; gap: 8px; min-height: 49px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font-family: var(--font); text-align: left; white-space: nowrap; }
+.now-strip { display: flex; flex: none; align-items: stretch; gap: 6px; min-width: 0; padding: 0 22px 12px; border-bottom: 1px solid var(--border); }
+.now-scroll { display: flex; flex: 1; gap: 6px; min-width: 0; overflow-x: auto; }
+.now-fixed { display: flex; flex: none; gap: 6px; margin-left: auto; }
+.now-cell { display: flex; flex: none; align-items: center; gap: 8px; min-height: 50px; max-width: 150px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font-family: var(--font); text-align: left; white-space: nowrap; }
+.now-cell > span:not(.agent-mark):not(.now-avatar):not(.now-agent-stack) { min-width: 0; }
 .now-cell:hover { border-color: var(--border-strong); }
 .now-cell[aria-pressed='true'] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
-.now-cell b { display: block; font-size: 12.5px; font-weight: 550; }
-.now-cell small { display: block; color: var(--muted); font-size: 11.5px; }
-.now-coordinator small { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.now-cell b, .now-cell small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.now-cell b { font-size: 12.5px; font-weight: 550; }
+.now-cell small { color: var(--muted); font-size: 11.5px; }
+.now-coordinator { max-width: 178px; }
+.now-notice { max-width: 103px; }
 .now-cell.att, .now-cell.blocked { background: var(--attention-soft); border-color: var(--attention-line); }
 .now-cell.att b, .now-cell.att small, .now-cell.blocked small { color: var(--attention); }
 .now-cell.run small { color: var(--running); }
 .now-cell.bad small { color: var(--danger); }
 .now-cell.quiet { padding: 6px 9px; color: var(--muted); }
 .now-avatar { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--text); color: var(--bg); font-size: 11px; font-weight: 600; }
-.now-agent-stack { display: inline-flex; }
-.now-agent-stack .agent-mark { width: 16px; height: 16px; box-shadow: 0 0 0 1.5px var(--surface); }
-.now-agent-stack .agent-mark + .agent-mark { margin-left: -5px; }
-.now-gap { flex: 1; min-width: 8px; }
-@media (max-width: 680px) { .now-strip { padding: 0 12px 10px; } }
+.now-agent-stack { display: inline-flex; flex-direction: column; gap: 12px; max-height: 100px; overflow: hidden; }
+.now-agent-stack .agent-mark { width: 16px; height: 16px; }
+@media (max-width: 680px) { .now-strip { padding: 0 12px 10px; } .now-fixed .now-cell { padding-inline: 6px; font-size: 11px; } }

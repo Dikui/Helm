@@ -43,14 +43,14 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   render(<App baseUrl={daemon.url} />);
   const graph = await screen.findByRole('region', { name: '卡片图' });
   const card = await within(graph).findByRole('button', { name: '卡片 1：用量卡片' });
-  expect(card.textContent).toContain('Token 47');
+  expect(card.getAttribute('title')).toContain('Token 47');
   fireEvent.click(card);
   const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
   expect(within(inspector).getByText('Token 合计 47')).toBeTruthy();
   const table = within(inspector).getByRole('table', { name: '派单 Token' });
   expect(within(table).getAllByRole('row').map(row => row.textContent)).toEqual(['派单总输入未缓存缓存读取缓存写入输出', '#1 · 执行30———5', '#2 · 验收10———2']);
   fireEvent.click(screen.getByRole('tab', { name: '依赖图' }));
-  fireEvent.click(within(await screen.findByRole('region', { name: '卡片图' })).getByRole('button', { name: '调度者 Token 明细' }));
+  fireEvent.click(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
   const coordinator = screen.getByRole('complementary', { name: '调度者 Token 明细' });
   expect(within(coordinator).getAllByText('Token 合计 180').length).toBeGreaterThan(0);
   const rounds = within(coordinator).getByRole('table', { name: '调度轮次 Token' });
@@ -58,7 +58,7 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   fireEvent.click(screen.getByRole('tab', { name: '依赖图' }));
   fireEvent.click(await screen.findByRole('button', { name: '卡片 1：用量卡片' }));
   expect(screen.getByRole('complementary', { name: '卡片检查器' })).toBeTruthy();
-  await waitFor(() => expect(within(screen.getByRole('main')).getByText('Token 227')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('banner', { name: '工作概况' })).getByText('Token 227')).toBeTruthy());
 });
 
 test('对齐阶段顶部显示 Token，未报告用量显示 —；收件箱只显示进展', async () => {
@@ -67,7 +67,7 @@ test('对齐阶段顶部显示 Token，未报告用量显示 —；收件箱只�
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[0]?.status === 'ended');
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
-  await waitFor(() => expect(within(screen.getByRole('main')).getByText('Token —')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('banner', { name: '工作概况' })).getByText('Token —')).toBeTruthy());
   expect(within(screen.getByRole('complementary', { name: 'Helm' })).queryByText(/Token/)).toBeNull();
 });
 
@@ -85,10 +85,10 @@ test('调度者的合计计入已知部分并标出缺项，明细保留已知�
   expect(rows.map(row => row.textContent)).toEqual(['调度轮次总输入未缓存缓存读取缓存写入输出', '#11005801520', '#2 · 出错退出————0']);
 });
 
-test('尚无卡片和轮次时保留独立调度者节点，用量显示 —', () => {
-  render(<I18nProvider><GraphCanvas nodes={[]} dispatches={[]} selectedId={null} sendBacks={new Map()} select={() => {}}
-    coordinator={{ count: 0, usage: sumUsage([]), selected: true, select: () => {} }} /><CoordinatorTokens rounds={[]} /></I18nProvider>);
-  expect(screen.getByRole('button', { name: '调度者 Token 明细' }).textContent).toContain('Token —');
+test('尚无卡片和轮次时依赖图显示空态，调度者用量明细显示 —', () => {
+  render(<I18nProvider><GraphCanvas nodes={[]} dispatches={[]} selectedId={null} sendBacks={new Map()} select={() => {}} /><CoordinatorTokens rounds={[]} /></I18nProvider>);
+  expect(screen.queryByRole('button', { name: '调度者 Token 明细' })).toBeNull();
+  expect(screen.getByText('调度者尚未创建卡片或关卡。')).toBeTruthy();
   expect(screen.getByText('Token 合计 —')).toBeTruthy();
   expect(screen.getAllByText('还没有调度轮次。').length).toBeGreaterThan(0);
 });

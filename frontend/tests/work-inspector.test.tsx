@@ -75,6 +75,9 @@ test('放宽默认依赖图，收窄回列表；折叠和重新展开保持选�
   render(<App baseUrl={daemon.url} />);
   await screen.findByRole('tabpanel', { name: '列表' });
   fireEvent.click(screen.getByRole('button', { name: '放宽检查器' }));
+  expect(screen.queryByRole('region', { name: '对话' })).toBeNull();
+  expect(screen.getByRole('banner', { name: '工作概况' })).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: '现在条' })).toBeTruthy();
   await screen.findByRole('tabpanel', { name: '依赖图' });
   fireEvent.click(screen.getByRole('tab', { name: '事件' }));
   act(() => { Object.defineProperty(window, 'innerWidth', { value: 800, configurable: true }); window.dispatchEvent(new Event('resize')); });
@@ -93,6 +96,9 @@ test('放宽默认依赖图，收窄回列表；折叠和重新展开保持选�
   await screen.findByRole('tabpanel', { name: '调度轮次' });
   expect(screen.getByRole('button', { name: '收起检查器' })).toBeTruthy();
   expect(localStorage.getItem('helm.inspector-width')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '放宽检查器' }));
+  fireEvent.click(screen.getByRole('link', { name: '设置' }));
+  expect(await within(screen.getByRole('main')).findByRole('heading', { name: '设置', level: 1 })).toBeTruthy();
 });
 
 test.each([['chat', null], ['structure', 'graph'], ['graph', 'graph'], ['brief', 'spec']] as const)('旧 %s 路由重定向到工作页与对应检查器', async (view, inspect) => {
@@ -175,6 +181,8 @@ test('列表用真实卡片分组，展示等你决定、验收未过、受阻�
   expect(within(list).getByText('汇总')).toBeTruthy();
   expect(await within(list).findAllByRole('img', { name: 'Claude' })).toHaveLength(4);
   const chat = screen.getByRole('region', { name: '对话' });
+  expect(await within(chat).findByText('卡片 1 · 卡片已完成')).toBeTruthy();
+  expect(within(chat).getByText('你确认了工作说明')).toBeTruthy();
   fireEvent.click(within(list).getByRole('button', { name: '卡片 6：skipped' }));
   const detail = screen.getByRole('complementary', { name: '卡片检查器' });
   expect(detail.contains(document.activeElement)).toBe(true);

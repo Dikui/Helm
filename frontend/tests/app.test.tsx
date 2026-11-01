@@ -270,14 +270,14 @@ test('在跑与安静行不展开；打开工作后仍可暂停、恢复并查�
   await screen.findByRole('heading', { name: '管理进展' });
   await within(screen.getByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 检查邮件模板');
   fireEvent.click(screen.getByRole('button', { name: '操作' }));
-  fireEvent.click(screen.getByRole('button', { name: '暂停工作' }));
+  fireEvent.click(within(screen.getByRole('group', { name: '工作操作' })).getByRole('button', { name: '暂停工作' }));
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'paused');
   fireEvent.click(screen.getByRole('button', { name: /安静/ }));
   const paused = await screen.findByRole('article', { name: '管理进展' });
   expect(within(paused).queryByRole('button')).toBeNull();
   await waitFor(() => expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull());
   fireEvent.click(screen.getByRole('button', { name: '操作' }));
-  fireEvent.click(await screen.findByRole('button', { name: '恢复工作' }));
+  fireEvent.click(await within(screen.getByRole('group', { name: '工作操作' })).findByRole('button', { name: '恢复工作' }));
   await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByRole('article', { name: '管理进展' })).toBeTruthy());
   expect(window.location.pathname).toBe(`/works/${work.id}`);
 });

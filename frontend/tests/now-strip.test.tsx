@@ -81,6 +81,8 @@ test('超过四张按状态合并，分别只列执行、验收、验收未过�
   ] as const) {
     fireEvent.click(within(strip).getByRole('button', { name: new RegExp(label) }));
     const list = await screen.findByRole('tabpanel', { name: '列表' });
+    expect(screen.queryByRole('tablist', { name: '结构' })).toBeNull();
+    expect(screen.getByText('活卡片超过 4 张，按状态合并；只显示所选组。')).toBeTruthy();
     await waitFor(() => expect(within(list).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(names));
     expect(new URLSearchParams(window.location.search).get('inspect')).toBe('list');
     expect(new URLSearchParams(window.location.search).get('cards')).toBe(status);
@@ -110,7 +112,7 @@ test('等你格随确认、决策和审核出现，报告与交付按阶段开�
   const work = await create(false);
   render(<App baseUrl={daemon.url} />);
   const strip = await screen.findByRole('navigation', { name: '现在条' });
-  expect(await within(strip).findByText('工作说明已起草，等你确认')).toBeTruthy();
+  expect(await within(strip).findByText('v1 · 工作说明已起草，等你确认')).toBeTruthy();
   expect(within(strip).queryByRole('button', { name: '汇总报告' })).toBeNull();
   expect(within(strip).queryByRole('button', { name: '交付' })).toBeNull();
   expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringContaining('调度者'), expect.stringContaining('等你确认'), '说明 v1']);

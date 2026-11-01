@@ -32,15 +32,20 @@ function actions() {
   return screen.getByRole('group', { name: '工作操作' });
 }
 
-test('工作菜单暂停、恢复经 HTTP 生效；取消必须二次确认，结束后禁用修改', async () => {
+test('页头直接暂停和恢复经 HTTP 生效，暂停仍可留言；取消必须二次确认，结束后禁用修改', async () => {
   const work = await startWork();
   render(<App baseUrl={daemon!.url} />);
   await screen.findByRole('heading', { name: '管理输出的工作' });
-  fireEvent.click(within(actions()).getByRole('button', { name: '暂停工作' }));
+  fireEvent.click(screen.getByRole('button', { name: '暂停工作' }));
   await waitFor(async () => expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('paused'));
   await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已暂停');
   await waitFor(() => expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull());
-  fireEvent.click(within(actions()).getByRole('button', { name: '恢复工作' }));
+  const input = screen.getByPlaceholderText('工作已暂停，仍可留言…');
+  fireEvent.change(input, { target: { value: '暂停期间补充消息' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await until(() => daemon!.call('get-conversation', { workId: work.id }), value => value.result.some((item: any) => item.body === '暂停期间补充消息'));
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('paused');
+  fireEvent.click(screen.getByRole('button', { name: '恢复工作' }));
   await waitFor(async () => expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('aligning'));
   await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('对齐中');
   await waitFor(() => expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull());

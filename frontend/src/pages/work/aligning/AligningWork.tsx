@@ -11,7 +11,8 @@ import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { Thinking } from '../conversation/RoundProgress.js';
 import { ConversationScroll } from '../conversation/ConversationScroll.js';
-import type { Rounds } from '../conversation/types.js';
+import { RoundSteering } from '../conversation/RoundSteering.js';
+import type { CardReference, Message, Rounds } from '../conversation/types.js';
 import { Inspector } from '../../../shared/Inspector.js';
 import './aligning.css';
 
@@ -23,6 +24,7 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
   const conversation = useResource<ConversationItem[]>('get-conversation', { workId });
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
   const rounds = useResource<Rounds>('list-rounds', { workId });
+  const graph = useResource<CardReference[]>('get-card-graph', { workId });
   const running = rounds.data?.rounds.find(round => round.status === 'running');
   const [version, setVersion] = useState<number>();
   const [confirming, setConfirming] = useState(false);
@@ -34,6 +36,26 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
   const preview = useFilePreview(workId);
   const input = useRef<HTMLTextAreaElement>(null);
   const submission = useSendMessage();
+  const [scope, setScope] = useState('work');
+  const [steering, setSteering] = useState(false);
+  const [steeringError, setSteeringError] = useState<Error>();
+  const steeringBusy = useRef(false);
+  const cards = graph.data?.filter(node => node.type === 'card') ?? [];
+  const gates = conversation.data?.filter(item => item.type === 'gate') ?? [];
+  const scopes = [{ value: 'work', label: t('conversationWholeWork') },
+    ...cards.map(card => ({ value: `card:${card.id}`, label: `${t('conversationCard')} · ${card.content?.split(/\r?\n/, 1)[0] || card.id}` })),
+    ...gates.filter(gate => gate.status === 'pending').map(gate => ({ value: `gate:${gate.id}`, label: `${t('conversationGate')} · ${gate.question}` }))];
+  const validScope = scopes.some(item => item.value === scope);
+  const locked = submission.pending || submission.uncertain || steering;
+  const reference = (message: Message) => message.cardId ? `${t('conversationCard')} · ${cards.find(card => card.id === message.cardId)?.content?.split(/\r?\n/, 1)[0] || message.cardId}`
+    : message.gateId ? `${t('conversationGate')} · ${gates.find(gate => gate.id === message.gateId)?.question || message.gateId}` : undefined;
+  const steer = async (operation: 'interrupt-round' | 'withdraw-message', messageId?: string) => {
+    if (steeringBusy.current || submission.pending || (operation === 'interrupt-round' && (!running || rounds.error))) return;
+    steeringBusy.current = true; setSteering(true); setSteeringError(undefined);
+    try { await api.call(operation, { workId, ...(messageId ? { messageId } : {}) }); }
+    catch (error) { setSteeringError(error as Error); }
+    finally { steeringBusy.current = false; setSteering(false); rounds.reload(); conversation.reload(); }
+  };
   const versions = descriptions.data ?? [];
   const latest = versions.at(-1);
   const shown = version === undefined ? latest : versions.find(item => item.version === version);
@@ -49,9 +71,15 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
     catch (error) { setConfirmError(error as Error); }
     finally { confirmationBusy.current = false; setConfirming(false); }
   };
-  const send = async () => {
-    if (!body.trim()) return;
-    if (await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files), references })) { setBody(''); setFiles([]); setReferences([]); }
+  const send = async (immediate = false) => {
+    if (steeringBusy.current || submission.pending || (immediate && (!running || rounds.error))) return;
+    if (body.trim()) {
+      if (!validScope && !submission.uncertain) return;
+      const target = scope.startsWith('card:') ? { cardId: scope.slice(5) } : scope.startsWith('gate:') ? { gateId: scope.slice(5) } : {};
+      if (!await submission.send({ workId, body: body.trim(), attachments: await encodeFiles(files), references, ...target })) return;
+      setBody(''); setFiles([]); setReferences([]);
+    } else if (!immediate) return;
+    if (immediate) await steer('interrupt-round');
   };
   const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
   const chat = useRef<HTMLElement>(null);
@@ -67,7 +95,7 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
         {conversation.data?.map(item => item.type === 'message'
           ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><div className="aligning-who"><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b>{item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}<time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></div><Markdown text={item.body} workId={workId} files={linkedFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
           : item.kind === 'work-confirmation'
-            ? item.status === 'pending' && <div className="aligning-gate gate-actions" key={item.id} role="group" aria-label={t('alignmentConfirmBrief')} onKeyDown={event => {
+            ? item.status !== 'pending' ? <GateHistory key={item.id} gate={item} /> : <div className="aligning-gate gate-actions" key={item.id} role="group" aria-label={t('alignmentConfirmBrief')} onKeyDown={event => {
               if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
               if (event.key === '1') { event.preventDefault(); void confirm(); }
               if (event.key === '2') { event.preventDefault(); input.current?.focus(); }
@@ -84,12 +112,20 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
       <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
-        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
+        <RoundSteering active={Boolean(running)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={null}
+          busy={steering || submission.pending || Boolean(rounds.error)} interrupt={() => void steer('interrupt-round')} withdraw={id => void steer('withdraw-message', id)} />
+        {steeringError && <ErrorNotice error={steeringError} />}
+        {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
+        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={locked} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(event.metaKey || event.ctrlKey); }
           }} /></label>
-        <button className="btn primary send" disabled={submission.pending || !body.trim()}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
-        <AttachmentPicker files={files} onChange={setFiles} disabled={submission.pending || submission.uncertain} references={references} onReferencesChange={setReferences} workId={workId} />
+        <div className="conversation-hints"><span>{t('composerShortcuts')}</span>
+          <label><span className="sr">{t('conversationAbout')}</span><select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>{!validScope && <option value={scope} disabled>{t('conversationScopeUnavailable')}</option>}{scopes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <button className="btn primary send" disabled={submission.pending || steering || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
+        </div>
+        <details className="composer-attachments"><summary>{t('attachFiles')}</summary><AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={workId} /></details>
+        {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>

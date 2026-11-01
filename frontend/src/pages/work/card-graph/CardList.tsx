@@ -8,7 +8,7 @@ import { AggregateBadge, nodeTitle, NodeStatus, ReadOnlyBadge } from './labels.j
 import { cardDisplayStatus, dispatchDuration, isLiveCardStatus, type CardFilter } from './presentation.js';
 import type { CardNode, Dispatch, GraphNode } from './types.js';
 
-const groups = ['decision', 'executing', 'verifying', 'verification-failed', 'blocked', 'waiting', 'ready', 'paused', 'completed', 'skipped', 'cancelled'];
+const defaultGroups = ['decision', 'executing', 'verifying', 'verification-failed', 'blocked', 'waiting', 'ready', 'paused', 'completed', 'skipped', 'cancelled'];
 export function CardList({ nodes, dispatches, select, filter }: { nodes: GraphNode[]; dispatches?: Dispatch[]; select: (id: string) => void; filter?: CardFilter }) {
   const { t } = useI18n();
   const now = useClock();
@@ -16,6 +16,8 @@ export function CardList({ nodes, dispatches, select, filter }: { nodes: GraphNo
   const cards = nodes.filter((node): node is CardNode => node.type === 'card');
   const labels: Record<string, MessageKey> = { ...cardStatusLabels, decision: 'inspectorNeedsDecision' };
   const status = (card: CardNode) => cardDisplayStatus(card, nodes, dispatches);
+  const groups = cards.filter(card => isLiveCardStatus(status(card))).length > 4
+    ? ['decision', 'verification-failed', 'executing', 'verifying', 'blocked', 'waiting', 'ready', 'paused', 'completed', 'skipped', 'cancelled'] : defaultGroups;
   const shown = cards.filter(card => {
     const value = status(card) === 'decision' ? 'blocked' : status(card);
     return !filter || (filter === 'other' ? !isLiveCardStatus(value) : value === filter);

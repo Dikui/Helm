@@ -46,6 +46,7 @@ export function Shell() {
   const [inspectorContent, setInspectorContent] = useState<HTMLDivElement | null>(null);
   const [inspectorHeading, setInspectorHeading] = useState<HTMLElement | null>(null);
   const [inspectorRail, setInspectorRail] = useState<HTMLElement | null>(null);
+  const [workHeader, setWorkHeader] = useState<HTMLDivElement | null>(null);
   const hasInspector = /^\/works\/[^/]+/.test(path);
   const folded = narrow ? !drawerOpen : leftFolded;
   const inspectFolded = stacked ? mobileRightFolded : rightFolded;
@@ -99,6 +100,7 @@ export function Shell() {
   const inspectorSize = Math.max(330, Math.min(inspectorWidth ?? workspaceWidth * .487, inspectorMax()));
   const measuredInspector = () => inspector.current?.getBoundingClientRect().width || inspectorSize;
   const wide = !stacked && inspectorWidth !== undefined && inspectorWidth >= inspectorMax() - 1;
+  const inspectorWide = hasInspector && wide && !inspectFolded;
   const style = {
     ...(sidebar ? { '--sidebar-w': `${sidebarSize}px` } : {}),
     ...(!stacked && inspectorWidth ? { '--inspector-w': `${inspectorSize}px` } : {}),
@@ -111,10 +113,11 @@ export function Shell() {
     </div>
     {!folded && !narrow && <Splitter label={t('resizeSidebar')} orientation="vertical" min={220} max={sidebarMax} onResize={setSidebar} value={sidebarSize}
       measure={() => inbox.current?.getBoundingClientRect().width || sidebarSize} />}
-    <InspectorContext value={{ content: inspectorContent, heading: inspectorHeading, rail: inspectorRail, wide, width: inspectorWidth,
+    <InspectorContext value={{ content: inspectorContent, heading: inspectorHeading, rail: inspectorRail, header: workHeader, wide, width: inspectorWidth,
       reveal: () => stacked ? setMobileRightFolded(false) : setRightFolded(false) }}>
-    <div className={`workspace${hasInspector ? ' with-inspector' : ''}${inspectFolded ? ' inspector-folded' : ''}`} inert={narrow && drawerOpen ? true : undefined}>
-      <main className="inset"><OutputWarning /><RouteOutlet routes={routes} /></main>
+    <div className={`workspace${hasInspector ? ' with-inspector' : ''}${inspectFolded ? ' inspector-folded' : inspectorWide ? ' inspector-wide' : ''}`} inert={narrow && drawerOpen ? true : undefined}>
+      {hasInspector && <div className="workspace-header" ref={setWorkHeader} />}
+      <main className="inset" aria-hidden={inspectorWide ? true : undefined} inert={inspectorWide ? true : undefined}><OutputWarning /><RouteOutlet routes={routes} /></main>
       {hasInspector && <>
         {!inspectFolded && !stacked && <Splitter label={t('shellResizeInspector')} orientation="vertical" grow={-1} min={330} max={inspectorMax} measure={measuredInspector} onResize={setInspectorWidth} value={inspectorSize} />}
         <aside className="shell-inspector" ref={inspector} aria-label={t('shellInspector')}>

@@ -148,10 +148,10 @@ async function main() {
 
   const active = await create('演示 02 · 执行中：九张卡片、决策关卡、打回与 Token');
   await run(active, [
-    card('done', '基础接口 · 已完成'), card('run', '表单实现 · 执行中'), card('verify', '可访问性检查 · 验收中', { needsVerification: true }),
-    card('failed', '过期校验 · 验收未过，已打回一次', { needsVerification: true }), card('blocked', '外部接口 · 受阻，缺少测试凭据'),
-    card('join', '整体验收 · 等待并行分支汇合', { aggregate: true, needsVerification: true }), card('skipped', '旧存储方案 · 上游关卡撤回'),
-    card('cancelled', '旧导出入口 · 已取消'), card('gated', '存储适配 · 等待单选决定'),
+    card('done', '基础接口'), card('run', '表单实现'), card('verify', '可访问性检查', { needsVerification: true }),
+    card('failed', '过期校验', { needsVerification: true }), card('blocked', '外部接口'),
+    card('join', '整体验收', { aggregate: true, needsVerification: true }), card('skipped', '旧存储方案'),
+    card('cancelled', '旧导出入口'), card('gated', '存储适配'),
     gate('pending', '演示：请选择数据存储方案'), gate('decided', '演示：历史上已决定的存储选择'), gate('withdrawn', '演示：旧方案确认（稍后撤回）'),
     dependency('done', 'run'), dependency('run', 'join'), dependency('verify', 'join'), dependency('skipped', 'join'),
     dependency('pending', 'gated', 'gate'), dependency('decided', 'run', 'gate'), dependency('withdrawn', 'skipped', 'gate'),

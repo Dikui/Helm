@@ -266,7 +266,7 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   await waitFor(() => expect((within(brief).getByRole('button', { name: '确认这一版' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(within(brief).getByRole('button', { name: '确认这一版' }));
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'executing');
-  await waitFor(() => expect(within(screen.getByRole('main')).getByText('执行中')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('banner', { name: '工作概况' })).getByText('执行中')).toBeTruthy());
   const descriptions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   expect(descriptions[1].status).toBe('active');
   const confirmed = (await daemon.call('get-work', { workId: work.id })).result;
@@ -425,7 +425,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   await screen.findByText('实时更新已连接');
   // Wait for replay to finish before dropping the shared stream.
-  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('工作说明已起草，等你确认');
+  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('v1 · 工作说明已起草，等你确认');
   offline = true; controller?.abort();
   await screen.findByText('连接已断开，正在重连…');
   await daemon.call('send-message', { workId: work.id, body: '请更新草稿', key: 'update' });
@@ -495,4 +495,33 @@ test('选中 CLI 未安装的调度者 Agent 时提示去「环境」，在环�
     expect(existsSync(cli)).toBe(true);
     expect(screen.getByRole('group', { name: 'Chromium（浏览器检查）' })).toBeTruthy();
   } finally { process.env.PATH = path; }
+});
+
+test('对齐输入卡保留排队、撤回、关于关卡和快捷键打断', async () => {
+  daemon = await uiFixture([[
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'draft', requirements: '输入卡', boundary: '本机', criteria: '可沟通' }) },
+    { type: 'hang' },
+  ], [{ type: 'output', text: '已收到立即消息' }, { type: 'hang' }]]);
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐输入卡', key: 'start' })).result.work;
+  await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 1);
+  window.history.replaceState(null, '', `/works/${work.id}`);
+  render(<App baseUrl={daemon.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const input = within(chat).getByRole('textbox', { name: '消息' });
+  const about = within(chat).getByLabelText('关于');
+  const gateOption = await within(about).findByRole('option', { name: '关卡 · 确认工作说明' });
+  fireEvent.change(about, { target: { value: (gateOption as HTMLOptionElement).value } });
+  fireEvent.change(input, { target: { value: '排队提问' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  const queue = await within(chat).findByRole('region', { name: '下一轮处理' });
+  expect(await within(queue).findByText('排队提问')).toBeTruthy();
+  fireEvent.click(within(queue).getByRole('button', { name: '撤回' }));
+  await waitFor(() => expect(within(chat).queryByRole('region', { name: '下一轮处理' })).toBeNull());
+  fireEvent.change(input, { target: { value: '立即提问' } });
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[0].reason === 'aborted' && value.result.rounds[1]?.status === 'running');
+  expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 已收到立即消息')).toBeTruthy();
+  const messages = (await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.body === '立即提问');
+  expect(messages).toHaveLength(1);
+  expect(messages[0].gateId).toBe((gateOption as HTMLOptionElement).value.slice(5));
 });

@@ -334,7 +334,7 @@ test('跳过节点及致因、汇总标记、切断连线、泳道和摘要随�
   for (const name of ['依赖：旧方向确认 → 旧方向实现', '依赖：旧方向实现 → 旧方向测试', '依赖：旧方向测试 → 整体验收']) {
     expect(within(graph).getByRole('img', { name })).toBeTruthy();
   }
-  expect(within(graph).getByText('已取消 / 跳过')).toBeTruthy();
+  expect(within(graph).getByRole('status', { name: '缩放比例' }).textContent).toBe('100%');
   expect(within(graph).getByText('上游取消或撤回，不执行')).toBeTruthy();
   expect(within(graph).getByText('不因单个上游取消而跳过')).toBeTruthy();
   expect(screen.getByText('张跳过').textContent).toBe('2 张跳过');
@@ -351,7 +351,7 @@ test('跳过节点及致因、汇总标记、切断连线、泳道和摘要随�
   expect(within(timeline).getByText('Skipped (upstream cancelled or withdrawn)')).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: 'Dependency graph' }));
   const english = screen.getByRole('region', { name: 'Card graph' });
-  expect(within(english).getByText('Cancelled / skipped')).toBeTruthy();
+  expect(within(english).getByRole('status', { name: 'Zoom level' }).textContent).toBe('100%');
   expect(within(english).getAllByTitle('Skipped · “旧方向确认” withdrawn').length).toBe(2);
   expect(within(english).getAllByText('Aggregate').length).toBe(2);
 });

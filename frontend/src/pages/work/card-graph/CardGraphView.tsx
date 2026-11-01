@@ -1,4 +1,3 @@
-import { sumUsage } from '../../../shared/token-usage.js';
 import { CoordinatorTokens, UsageSummary } from './TokenDetails.js';
 import type { Rounds } from '../conversation/types.js';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
@@ -11,6 +10,7 @@ import { graphSummary, dispatchDuration, type CardFilter } from './presentation.
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { gateDecision, nodeTitle, NodeStatus, AggregateBadge, ReadOnlyBadge } from './labels.js';
+import type { AgentEntry } from '../../settings/types.js';
 import type { Dispatch, GraphNode } from './types.js';
 import type { Work } from '../../../shared/types.js';
 import { CoordinatorView } from './CoordinatorView.js';
@@ -32,10 +32,12 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
   const tab = structureViews.includes(inspection as StructureView) ? inspection as StructureView : null;
   const tabId = useId();
   const [roundId, setRoundId] = useState<string>();
+  const [roundStep, setRoundStep] = useState<number>();
   const tabButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const rounds = useResource<Rounds>('list-rounds', { workId });
   const latestRound = rounds.data?.rounds.find(round => round.status === 'running') ?? rounds.data?.rounds.at(-1);
   const coordinatorSelected = inspection === 'coord';
+  const agents = useResource<AgentEntry[]>('list-agents');
   const graph = useResource<GraphNode[]>('get-card-graph', { workId });
   // An ended work keeps its review gate pending on purpose; show the work's end state instead of a ticking "pending".
   const nodes = ['completed', 'cancelled'].includes(work.status)
@@ -61,7 +63,10 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
     <div className="cg-errors">{rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}{dispatches.error && <ErrorNotice error={dispatches.error} retry={dispatches.reload} />}</div>
     {!nodes ? <p className="hint" role="status">{graph.error ? '' : t('loading')}</p> : <>
       <div className="cg-main">
-        <div className="cg-bar" hidden={Boolean(filter)}><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
+        {work.status === 'paused' && <p className="structure-paused">{t('structurePausedHint')}</p>}
+        {filter && <p className="muted group-hint">{t(filter === 'other' ? 'nowOtherCardsHint' : 'nowGroupHint')}</p>}
+
+        {!filter && <div className="cg-bar"><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
           {structureViews.map((key, index) => <button key={key} ref={element => { tabButtons.current[index] = element; }} type="button" role="tab"
             id={`${tabId}-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key} tabIndex={tab === key || !tab && index === 0 ? 0 : -1}
             onClick={() => inspect(key)} onKeyDown={event => {
@@ -72,13 +77,13 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
           <span><b>{nodes.filter(node => node.type === 'card' && node.status === 'completed').length}/{summary.cards}</b> {t('completed')}</span><span><b>{summary.parallel}</b> {t('shellRunning')}</span>
           <span><b>{dispatches.data ? summary.retries : '—'}</b> {t('graphSummaryRetries')}</span><span><b>{summary.cancelled}</b> {t('graphSummaryCancelled')}</span>
           {summary.skipped > 0 && <span><b>{summary.skipped}</b> {t('graphSummarySkipped')}</span>}
-        </div></div>
-        <div hidden={!tab} className={`cs-panel ${tab === 'graph' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-labelledby={tab ? `${tabId}-${tab}` : undefined}>
+        </div></div>}
+        <div hidden={!tab} className={`cs-panel ${tab === 'graph' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-label={filter ? t('inspectorList') : undefined} aria-labelledby={tab && !filter ? `${tabId}-${tab}` : undefined}>
           {tab === 'list' && <CardList nodes={nodes} dispatches={dispatches.data} select={select} filter={filter} />}
-          {tab === 'graph' && <GraphCanvas nodes={nodes} dispatches={dispatches.data ?? []} selectedId={selectedId} sendBacks={summary.sendBacks} select={select} coordinator={{ count: rounds.data?.rounds.length, usage: sumUsage(rounds.data?.rounds ?? []), selected: false, select: () => inspect('coord') }} />}
-          {tab === 'rounds' && <CoordinatorView key={roundId} work={work} initialRoundId={roundId} />}
-          {tab === 'timeline' && <TimelineView inspectRound={id => { setRoundId(id); inspect('rounds'); tabButtons.current[3]?.focus(); }} workId={workId} nodes={nodes} dispatches={dispatches.data} selectedId={selectedId} select={select} />}
-          {tab === 'events' && <EventsView workId={workId} nodes={nodes} dispatches={dispatches.data} select={select} />}
+          {tab === 'graph' && <GraphCanvas agents={agents.data} nodes={nodes} dispatches={dispatches.data ?? []} selectedId={selectedId} sendBacks={summary.sendBacks} select={select} />}
+          {tab === 'rounds' && <CoordinatorView key={roundId} work={work} initialRoundId={roundId} initialStep={roundStep} compact />}
+          {tab === 'timeline' && <TimelineView inspectRound={id => { setRoundStep(undefined); setRoundId(id); inspect('rounds'); tabButtons.current[3]?.focus(); }} workId={workId} nodes={nodes} dispatches={dispatches.data} selectedId={selectedId} select={select} />}
+          {tab === 'events' && <EventsView workId={workId} nodes={nodes} dispatches={dispatches.data} select={select} inspectRound={(id, step) => { setRoundId(id); setRoundStep(step); inspect('rounds'); }} />}
         </div>
       </div>
       <aside hidden={Boolean(tab)} className="cg-inspector" ref={details} tabIndex={-1} aria-label={t(coordinatorSelected ? 'tokenCoordinator' : selected?.type === 'gate' ? 'graphGateInspector' : 'graphInspector')}>

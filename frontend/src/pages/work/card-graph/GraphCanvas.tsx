@@ -1,5 +1,6 @@
+import { AgentMark } from '../../../shared/AgentMark.js';
+import type { AgentEntry } from '../../settings/types.js';
 import { formatUsage } from '../../../shared/token-usage.js';
-import type { Usage } from '../../../shared/types.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { graphlib, layout, type Point } from '@dagrejs/dagre';
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
@@ -8,10 +9,10 @@ import { elapsed, useClock } from '../../../shared/clock.js';
 import { displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
 
-const nodeWidth = 140;
-const nodeHeight = 84;
+const nodeWidth = 148;
+const nodeHeight = 48;
 function arrange(nodes: Pick<GraphNode, 'id' | 'dependencies'>[]) {
-  const graph = new graphlib.Graph().setGraph({ rankdir: 'TB', nodesep: 20, ranksep: 48, marginx: 24, marginy: 24 });
+  const graph = new graphlib.Graph().setGraph({ rankdir: 'TB', nodesep: 20, ranksep: 36, marginx: 24, marginy: 24 });
   graph.setDefaultEdgeLabel(() => ({}));
   for (const node of nodes) graph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
   for (const node of nodes) for (const dependency of node.dependencies) {
@@ -42,8 +43,8 @@ function relatedNodes(nodes: GraphNode[], focus: string | null) {
   return related;
 }
 
-export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, coordinator }: {
-  coordinator?: { count?: number; usage: Usage; selected: boolean; select: () => void };
+export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, agents = [] }: {
+  agents?: AgentEntry[];
   nodes: GraphNode[]; dispatches: Dispatch[]; selectedId: string | null; sendBacks: Map<string, number>; select: (id: string) => void;
 }) {
   const { t, language } = useI18n();
@@ -59,27 +60,29 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   const positions = useMemo(() => arrange(JSON.parse(topology)), [topology]);
   const byId = new Map(nodes.map(node => [node.id, node]));
   const related = relatedNodes(nodes.map(node => ({ ...node, dependencies: positions.edges.filter(edge => edge.to === node.id).map(edge => ({ type: byId.get(edge.from)!.type, id: edge.from })) })), hovered ?? focused);
-  const fit = useCallback(() => {
+  const reset = useCallback(() => {
     const element = viewport.current;
     if (!element?.clientWidth) return;
-    // Fit width only: long chains scroll vertically instead of shrinking to unreadable nodes.
-    setZoom(Math.max(.25, Math.min(1, Math.max(1, element.clientWidth - 48) / positions.width)));
-    element.scrollLeft = 0; element.scrollTop = 0;
+    // Keep names readable; larger graphs scroll in both directions.
+    setZoom(1);
+    element.scrollLeft = Math.max(0, (positions.width - element.clientWidth + 48) / 2); element.scrollTop = 0;
   }, [positions]);
   useEffect(() => {
-    fit();
+    reset();
     if (typeof ResizeObserver === 'undefined' || !viewport.current) return;
-    const observer = new ResizeObserver(fit);
+    const observer = new ResizeObserver(reset);
     // Observe the panel, so scrollbars appearing during zoom do not reset it.
     observer.observe(viewport.current.parentElement!);
     return () => observer.disconnect();
-  }, [fit]);
+  }, [reset]);
+  const fit = () => {
+    const element = viewport.current;
+    if (!element?.clientWidth) return;
+    setZoom(Math.max(.25, Math.min(1, (element.clientWidth - 48) / positions.width)));
+    element.scrollLeft = 0; element.scrollTop = 0;
+  };
   const percent = new Intl.NumberFormat(language === 'zh' ? 'zh-CN' : 'en', { style: 'percent', maximumFractionDigits: 0 }).format(zoom);
   return <section className="cg-graph" aria-label={t('graphTitle')}>
-    {coordinator && <button className={`cg-coordinator-node ${coordinator.selected ? 'selected' : ''}`} aria-label={t('tokenCoordinator')} aria-pressed={coordinator.selected} onClick={coordinator.select}>
-      <span className="cg-node-name">{t('structureCoordinator')} · {coordinator.count ?? '—'} {t('structureRounds')}</span>
-      <span className="cg-node-meta">Token {formatUsage(coordinator.usage, language)} · {t('tokenByRound')}</span>
-    </button>}
     <div className="cg-canvas-wrap"><div className="cg-viewport" ref={viewport} tabIndex={0} aria-label={t('graphPanHelp')}
       onPointerDown={event => {
         if (event.button !== 0 || (event.target as Element).closest('button')) return;
@@ -110,16 +113,15 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
             const ordinal = nodes.filter(item => item.type === 'card').findIndex(item => item.id === node.id) + 1;
             const name = node.type === 'card' ? `${t('graphCard')} ${ordinal}：${nodeTitle(node)}` : `${t('graphGate')}：${nodeTitle(node)}`;
             return <button key={node.id} className={`cg-node ${node.type} ${node.status} ${selectedId === node.id ? 'selected' : ''} ${related && !related.has(node.id) ? 'dim' : ''}`}
-              style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }} aria-label={name} title={[name, node.type === 'card' ? `${node.agentId ?? t('graphNoAgent')} · ${t('graphStep')} ${node.currentStep}\n${node.latestStepSummary ?? t('graphNoSteps')}` : gateDecision(node, t) || node.body].join('\n')} aria-pressed={selectedId === node.id}
+              style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }} aria-label={name} title={[name, node.type === 'card' ? `${node.agentId ?? t('graphNoAgent')} · ${t('graphStep')} ${node.currentStep}\n${node.latestStepSummary ?? t('graphNoSteps')} · Token ${formatUsage(node.usage, language)}` : gateDecision(node, t) || node.body].join('\n')} aria-pressed={selectedId === node.id}
               aria-describedby={`${marker}-${node.id}-state`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
-              <span className="cg-node-name"><span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span><span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
+              <span className="cg-node-name">{node.type === 'card' ? <AgentMark driver={agents.find(agent => agent.id === (dispatches.find(dispatch => dispatch.id === node.latestDispatchId)?.agentId ?? node.agentId))?.driver} /> : <span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span>}<span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
               <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{node.type === 'card' && node.readOnly && <ReadOnlyBadge />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
                 {node.type === 'gate' && node.status === 'pending' && <time dateTime={node.createdAt}>{elapsed(node.createdAt, now)}</time>}
                 {node.type === 'card' && node.status !== 'skipped' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}
               </span>
-              {node.type === 'card' && <span className="cg-node-meta">Token {formatUsage(node.usage, language)}</span>}
             </button>;
           })}
         </div>
@@ -133,10 +135,9 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
     </div>
     </div>
     <div className="cg-legend">
-      {(['met', 'flow', 'todo', 'att', 'cut'] as const).map(tone => <span key={tone}><svg viewBox="0 0 22 6" aria-hidden="true"><path className={`cg-edge ${tone}`} d="M0 3 H22" /></svg>{t(({ met: 'graphLegendMet', flow: 'graphLegendFlow', todo: 'graphLegendWaiting', att: 'graphLegendAttention', cut: 'graphLegendCut' } as const)[tone])}</span>)}
-      <span><span className="cg-skip-chip cg-skip-fill">{t('skipped')}</span>{t('graphLegendSkipped')}</span>
-      <span><AggregateBadge />{t('graphLegendAggregate')}</span>
-      <span><span className="cg-rework">↺</span>{t('graphSendBacks')}</span><span>{t('graphParallel')}</span>
+      {nodes.some(node => node.status === 'skipped') && <span><span className="cg-skip-chip cg-skip-fill">{t('skipped')}</span>{t('graphLegendSkipped')}</span>}
+      {nodes.some(node => node.type === 'card' && node.aggregate) && <span><AggregateBadge />{t('graphLegendAggregate')}</span>}
+      {sendBacks.size > 0 && <span><span className="cg-rework">↺</span>{t('graphSendBacks')}</span>}
     </div>
   </section>;
 }

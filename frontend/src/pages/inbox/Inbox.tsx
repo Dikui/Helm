@@ -101,7 +101,7 @@ export function Inbox({ folded, drawer, onToggle, searchRequest }: {
       {works && works.length > 0 && filtered?.length === 0 && <p className="hint">{t('noMatches')}</p>}
       {Boolean(filtered?.length) && (['attention', 'running'] as const).map(category => {
         const rows = filtered!.filter(work => inboxGroup(work) === category);
-        return <section key={category} aria-label={t(groupLabels[category])}><h2 className={`sect${category === 'attention' ? ' attention' : ''}`}>{t(groupLabels[category])}<span className="count">{rows.length}</span></h2>
+        return <section key={category} aria-label={t(groupLabels[category])}><h2 className={`sect${category === 'attention' ? ' attention' : ''}`}>{category === 'attention' && <span className="spark att" aria-hidden="true" />}{t(groupLabels[category])}<span className="count">{rows.length}</span></h2>
           {rows.map(work => <InboxRow key={work.id} work={work} />)}</section>;
       })}
       {Boolean(filtered?.length) && <section aria-label={t('inboxQuiet')}>

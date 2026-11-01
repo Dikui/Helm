@@ -8,6 +8,7 @@ import { useSendMessage } from '../../new-work/useSendMessage.js';
 import { RoundSteering } from './RoundSteering.js';
 import { Thinking } from './RoundProgress.js';
 import { ConversationScroll } from './ConversationScroll.js';
+import { eventSummary } from '../card-graph/event-summary.js';
 import { GateHistory } from './GateHistory.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
@@ -23,6 +24,7 @@ export function ConversationView({ work }: { work: Work }) {
     && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted'), [work.id]);
   const cardsAffects = useCallback((event: HelmEvent) => event.workId === work.id && event.action.startsWith('card-'), [work.id]);
   const conversation = useResource<ConversationItem[]>('get-conversation', params, conversationAffects);
+  const events = useResource<HelmEvent[]>('get-events', params);
   const graph = useResource<CardReference[]>('get-card-graph', params, cardsAffects);
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
@@ -82,12 +84,20 @@ export function ConversationView({ work }: { work: Work }) {
     } else if (!immediate) return;
     if (immediate) await interrupt();
   };
+  const milestones = (events.data ?? []).filter(event => event.action === 'card-completed' || event.action === 'work-paused' || event.action === 'work-resumed'
+    || event.action === 'dispatch-ended' && (event.details as { conclusion?: string } | null)?.conclusion === 'failed');
+  const items = [...(conversation.data ?? []).map(item => ({ time: item.type === 'gate' && item.status !== 'pending' ? events.data?.findLast(event => event.object.id === item.id && ['gate-decided', 'gate-withdrawn'].includes(event.action))?.time ?? item.createdAt : item.createdAt, item, event: undefined as HelmEvent | undefined })),
+    ...milestones.map(event => ({ time: event.time, item: undefined, event }))].sort((a, b) => a.time.localeCompare(b.time));
   return <section className="conversation-view" aria-label={t('chat')} ref={view}>
     <ConversationScroll key={work.id} className="conversation-thread">
       <h2 className="sr">{t('chat')}</h2>
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
-      {conversation.data?.map(item => <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
+      {items.map(({ item, event, time }) => event ? <div key={`event:${event.id}`} className={`conversation-event ${event.action === 'dispatch-ended' ? 'bad' : event.action === 'card-completed' ? 'ok' : ''}`}>
+        <time dateTime={event.time}>{new Date(event.time).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
+        <span title={eventSummary(event, t, cards.findIndex(card => card.id === event.cardId) + 1)}>{eventSummary(event, t, cards.findIndex(card => card.id === event.cardId) + 1)}</span>
+      </div> : !item ? null : item.type === 'gate' && (item.status !== 'pending' || readOnly) ? <GateHistory key={item.id} gate={item} decidedAt={time} />
+        : item.type === 'message' && item.sender === 'runtime' ? <div className="conversation-event" key={item.id}><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time><span title={item.body}>{item.body}</span></div> : <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
         <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : item.kind === 'git-initialization' ? 'conversationRuntime' : 'alignmentCoordinator')}</b>
           <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
@@ -109,21 +119,22 @@ export function ConversationView({ work }: { work: Work }) {
     {withdrawError && <ErrorNotice error={withdrawError} />}
     {interruptError && <ErrorNotice error={interruptError} />}
     <form className="conversation-composer" noValidate aria-busy={submission.pending || interrupting} onSubmit={event => { event.preventDefault(); void send(); }}>
-      <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
+      <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t(work.status === 'paused' ? 'conversationPausedPlaceholder' : 'conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
         if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.metaKey || event.ctrlKey) { event.preventDefault(); void send(true); }
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
       }} /></label>
-      <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
-      <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
-      <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
-        <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>
-        <button type="button" className="conversation-interrupt" aria-label={t('conversationInterrupt')} disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()} title={t('conversationInterrupt')}><span aria-hidden="true">❚❚</span></button>
-        <label>{t('conversationAbout')}<select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>
+      <div className="conversation-hints"><span>{t('composerShortcuts')}</span>
+        <label><span className="sr">{t('conversationAbout')}</span><select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>
           {!validScope && <option value={scope} disabled>{t('conversationScopeUnavailable')}</option>}
           {scopes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select></label>
+        <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
       </div>
+      <details className="composer-attachments"><summary>{t('attachFiles')}</summary>
+        <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
+        <button type="button" className="conversation-now" disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()}>{t('conversationInterrupt')}</button>
+      </details>
       {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}
       {submission.error && <ErrorNotice error={submission.error} />}
       {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}

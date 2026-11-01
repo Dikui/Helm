@@ -229,3 +229,35 @@ button.ref:hover { border-color: var(--ring); color: var(--text); background: va
   .inspector-content { padding: 14px 12px 40px; }
 }
 @media (forced-colors: active) { .agent-mark { border: 1px solid CanvasText; } }
+
+.workspace.with-inspector { grid-template-rows: auto minmax(0, 1fr); }
+.workspace-header { grid-column: 1 / -1; min-width: 0; }
+.with-inspector > .inset { grid-column: 1; grid-row: 2; }
+.with-inspector > .shell-inspector { grid-column: 2; grid-row: 2; }
+.workspace.with-inspector.inspector-wide { grid-template-columns: 0 minmax(0, 1fr); }
+.inspector-wide > .inset { visibility: hidden; }
+.inspector-wide > .splitter { display: none; }
+.workspace > .splitter { top: auto; grid-column: 2; grid-row: 2; right: auto; left: -4px; height: 100%; }
+.top.work-header { align-items: flex-start; gap: 16px; border: 0; }
+.work-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.work-meta .ref { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-badge { padding: 1px 7px; border-radius: 999px; background: var(--surface-soft); font-size: 11.5px; white-space: nowrap; }
+.work-badge.run { color: var(--running); background: var(--running-soft); }
+.work-badge.att { color: var(--attention); background: var(--attention-soft); }
+.work-badge.ok { color: var(--success); background: var(--success-soft); }
+.work-badge.bad { color: var(--danger); background: var(--danger-soft); }
+.work-header .work-actions { display: flex; flex: none; gap: 6px; }
+.work-header .work-pause { color: var(--running); }
+.sb-head .shell-fold { margin-left: auto; }
+.sb-head .btn { margin-left: 0; }
+.sb-foot > a { color: var(--running); text-decoration: underline; }
+@media (max-width: 980px) {
+  .workspace.with-inspector { display: flex; }
+  .workspace-header { flex: none; }
+}
+@media (max-width: 680px) {
+  .top.work-header { gap: 8px; }
+  .work-header .work-title { flex-basis: 100%; }
+  .work-header .work-actions { margin-left: 0; }
+}
+[hidden] { display: none !important; }

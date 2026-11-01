@@ -54,8 +54,8 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     : work.delivery?.resolution?.status === 'resolved' ? 'deliveryResolved'
     : work.delivery?.merge?.status === 'conflict' ? 'deliveryConflict'
     : work.delivery?.merge?.status === 'failed' ? 'deliveryMergeFailed' : 'nowAwaitingMerge';
-  const deliveryTone = pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' ? 'run'
-    : work.status === 'completed' && work.delivery?.push?.status !== 'failed' ? 'quiet' : 'att';
+  const deliveryTone = work.delivery?.push?.status === 'failed' ? 'bad' : pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' ? 'run'
+    : work.status === 'completed' ? 'quiet' : 'att';
   const reviewGate = report.gate ?? nodes.filter(node => node.type === 'gate').findLast(node => node.kind === 'review');
   const verdict = reviewGate?.report?.verdict;
   const verdictLabels = { accept: 'reportAccept', reservations: 'reportReservations', return: 'reportReturn' } as const;
@@ -93,19 +93,19 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
   const cardTitle = (card: CardNode) => `#${ordinal(card)} · ${nodeTitle(card)} · ${label(card)}`;
   return <>
     <nav className="now-strip" aria-label={t('nowStrip')}>
-      <button type="button" className="now-cell now-coordinator" aria-pressed={inspection === 'coord'} onClick={() => choose('coord')}>
+      <div className="now-scroll"><button type="button" className="now-cell now-coordinator" aria-pressed={inspection === 'coord'} onClick={() => choose('coord')}>
         <span className="now-avatar" aria-hidden="true">{t('nowCoordinatorMark')}</span><span><b>{t('alignmentCoordinator')}</b>
-          {running ? <small title={progress}>{progress}</small> : idle ? <small>{t(idle)}</small>
+          {running ? <small title={progress}>{progress}</small> : idle ? <small title={idle === 'nowDraftReady' && version ? `v${version} · ${t(idle)}` : t(idle)}>{idle === 'nowDraftReady' && version ? `v${version} · ${t(idle)}` : t(idle)}</small>
             : latestRound ? <EndedProgress workId={work.id} round={latestRound} fallback={t(live.length ? 'nowWaitingCards' : 'conversationIdle')} />
             : <small>{rounds.data ? t('nowNoRounds') : t('loading')}</small>}
         </span>
       </button>
-      {notice && <button type="button" className={`now-cell ${notice.tone ?? ''}`} aria-label={notice.target === 'delivery' ? t('inspectorDelivery') : undefined} aria-pressed={inspection === notice.target} onClick={() => choose(notice.target)}>
+      {notice && <button type="button" title={`${t(notice.title)} · ${notice.detail}`} className={`now-cell now-notice ${notice.tone ?? ''}`} aria-label={notice.target === 'delivery' ? t('inspectorDelivery') : undefined} aria-pressed={inspection === notice.target} onClick={() => choose(notice.target)}>
         <span><b>{t(notice.title)}</b><small>{notice.detail}</small></span>
       </button>}
       {live.length > 4 ? liveCardStatuses.map(group => {
         const members = live.filter(card => status(card) === group);
-        return members.length > 0 && <button type="button" key={group} className={`now-cell ${cardStatusTones[group]}`} aria-pressed={filter === group} title={members.map(cardTitle).join('\n')} onClick={() => chooseCards(group)}>
+        return members.length > 0 && <button type="button" key={group} className={`now-cell now-group ${cardStatusTones[group]}`} aria-pressed={filter === group} title={members.map(cardTitle).join('\n')} onClick={() => chooseCards(group)}>
           <span className="now-agent-stack">{members.map(card => <AgentMark key={card.id} driver={driver(card)} />)}</span>
           <span><b>{t(cardStatusLabels[group]!)} × {members.length}</b><small>{members.map(card => `#${ordinal(card)}`).join(' ')}</small></span>
         </button>;
@@ -113,9 +113,10 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
         <AgentMark driver={driver(card)} /><span><b>#{ordinal(card)}</b><small>{label(card)}</small></span>
       </button>)}
       {other > 0 && <button type="button" className="now-cell quiet" aria-pressed={filter === 'other'} title={t('nowOtherCards').replace('{count}', String(other))} onClick={() => chooseCards('other')}>+{other}</button>}
-      <span className="now-gap" />
+      </div><div className="now-fixed">
       <button type="button" className="now-cell quiet" aria-label={t('brief')} aria-pressed={inspection === 'spec'} onClick={() => choose('spec')}>{t('nowSpec')}{version ? ` v${version}` : ''}</button>
       {showStructure && <button type="button" className="now-cell quiet" aria-pressed={['list', 'graph', 'timeline', 'rounds', 'events'].includes(inspection) && !filter} onClick={() => choose('list')}>{t('structure')}</button>}
+      </div>
     </nav>
     {[graph, dispatches, rounds, descriptions, agents].map((resource, index) => resource.error && <ErrorNotice key={index} error={resource.error} retry={resource.reload} />)}
   </>;

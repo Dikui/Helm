@@ -14,7 +14,7 @@ import type { Dispatch } from './types.js';
 
 interface Notes { body: string; version: number; versions: { body: string; version: number; time: string }[] }
 
-export function CoordinatorView({ work, initialRoundId }: { work: Work; initialRoundId?: string }) {
+export function CoordinatorView({ work, initialRoundId, initialStep, compact = false }: { work: Work; initialRoundId?: string; initialStep?: number; compact?: boolean }) {
   const { t, language } = useI18n();
   const now = useClock();
   const files = useWorkFiles(work.id);
@@ -30,6 +30,37 @@ export function CoordinatorView({ work, initialRoundId }: { work: Work; initialR
   const affects = useCallback((event: HelmEvent) => event.workId === work.id &&
     (event.object.id === selected?.id || event.action === 'outputs-deleted'), [work.id, selected?.id]);
   const date = (value: string) => new Date(value).toLocaleString(language === 'zh' ? 'zh-CN' : 'en');
+  const notesSection = <section className="cs-notes" aria-label={t('structureNotes')}>
+      <h3 className="sect">{t('structureNotes')}{note?.version ? <span className="count">v{note.version}</span> : null}</h3>
+      {notes.error && <ErrorNotice error={notes.error} retry={notes.reload} />}
+      {!notes.data ? <p role="status">{notes.error ? '' : t('loading')}</p> : notes.data.version === 0 ? <p className="muted">{t('structureNoNotes')}</p> : <>
+        <label>{t('structureNotesVersion')}<select value={note?.version} onChange={event => selectVersion(Number(event.target.value))}>
+          {notes.data.versions.slice().reverse().map(note => <option key={note.version} value={note.version}>v{note.version} · {date(note.time)}</option>)}
+        </select></label>
+        <div className="cs-note"><Markdown text={note?.body ?? ''} workId={work.id} files={files} onOpen={preview.open} /></div>
+      </>}
+    </section>;
+  const roundDetails = selected && <section className="cs-round-detail" aria-label={`${t('structureRound')} #${selected.number}`}>
+        <h3>{t('structureRound')} #{selected.number}</h3>
+        <dl className="cg-kv"><dt>{t('structureTokens')}</dt><dd className="mono" title={`${selected.usage.inputTokens} / ${selected.usage.outputTokens}`}>{formatTokens(selected.usage.inputTokens, language)} / {formatTokens(selected.usage.outputTokens, language)}</dd></dl>
+        <OutputSteps initialStep={initialStep} key={`${selected.id}:${initialStep}`} workId={work.id} roundId={selected.id} affects={affects} />
+      </section>;
+  if (compact) return <div className="cs-coordinator cs-rounds-view">
+    {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
+    {rounds.data && <span className="sr" role="status">{t(current ? 'structureRunning' : paused ? 'structureFailurePause' : 'conversationIdle')}</span>}
+    {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
+    {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : !rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds compact">
+      {rounds.data.rounds.map(round => <li key={round.id}>
+        <span className={`spark ${round.status === 'running' ? 'run busy' : round.reason === 'completed' ? 'ok' : 'bad'}`} aria-hidden="true" />
+        <span>{t('structureRound')} #{round.number} · <span>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span></span>
+        <time>{elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}</time>
+        <button className="cs-event-link" aria-label={`${t('structureRound')} #${round.number}`} aria-pressed={roundId === round.id} onClick={() => selectRound(round.id)}>{t('roundView')}</button>
+      </li>)}
+    </ol>}
+    {notesSection}
+    {roundId && roundDetails}
+    {preview.preview}
+  </div>;
   return <div className="cs-coordinator">
     <div className="row"><h2>{t('structureCoordinator')}</h2>{rounds.data && <span className={`pill ${current ? 'run' : paused ? 'bad' : ''}`} role="status">{current ? t('structureRunning') : paused ? t('structureFailurePause') : t('conversationIdle')}</span>}</div>
     {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
@@ -46,22 +77,9 @@ export function CoordinatorView({ work, initialRoundId }: { work: Work; initialR
           <small className="muted"><time dateTime={round.startedAt}>{date(round.startedAt)}</time> → {round.endedAt ? <time dateTime={round.endedAt}>{date(round.endedAt)}</time> : t('structureNow')}</small>
         </li>)}
       </ol>}
-      {selected && <section className="cs-round-detail" aria-label={`${t('structureRound')} #${selected.number}`}>
-        <h3>{t('structureRound')} #{selected.number}</h3>
-        <dl className="cg-kv"><dt>{t('structureTokens')}</dt><dd className="mono" title={`${selected.usage.inputTokens} / ${selected.usage.outputTokens}`}>{formatTokens(selected.usage.inputTokens, language)} / {formatTokens(selected.usage.outputTokens, language)}</dd></dl>
-        <OutputSteps key={selected.id} workId={work.id} roundId={selected.id} affects={affects} />
-      </section>}
+      {roundDetails}
     </>}
-    <section className="cs-notes" aria-label={t('structureNotes')}>
-      <h3 className="sect">{t('structureNotes')}{note?.version ? <span className="count">v{note.version}</span> : null}</h3>
-      {notes.error && <ErrorNotice error={notes.error} retry={notes.reload} />}
-      {!notes.data ? <p role="status">{notes.error ? '' : t('loading')}</p> : notes.data.version === 0 ? <p className="muted">{t('structureNoNotes')}</p> : <>
-        <label>{t('structureNotesVersion')}<select value={note?.version} onChange={event => selectVersion(Number(event.target.value))}>
-          {notes.data.versions.slice().reverse().map(note => <option key={note.version} value={note.version}>v{note.version} · {date(note.time)}</option>)}
-        </select></label>
-        <div className="cs-note"><Markdown text={note?.body ?? ''} workId={work.id} files={files} onOpen={preview.open} /></div>
-      </>}
-    </section>
+    {notesSection}
     {preview.preview}
   </div>;
 }
