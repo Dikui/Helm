@@ -6,7 +6,7 @@ import './brief.css';
 
 // Bound the rendered text even when the diff contains a single very long line.
 const DIFF_PAGE_SIZE = 20_000;
-function ReviewDiff({ diff }: { diff: string }) {
+export function ReviewDiff({ diff }: { diff: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);

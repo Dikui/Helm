@@ -1,6 +1,8 @@
 import { formatUsage } from '../../shared/token-usage.js';
-import { WorkDelivery } from './WorkDelivery.js';
-import { useEffect, useState, type ReactNode } from 'react';
+import { DeliveryDialogs, WorkDelivery } from './WorkDelivery.js';
+import { DeliveryPin } from './DeliveryPin.js';
+import { useWorkDelivery } from './useWorkDelivery.js';
+import { useEffect, type ReactNode } from 'react';
 import { elapsed, useClock } from '../../shared/clock.js';
 import { WorkActions } from './WorkActions.js';
 import { useResource } from '../../shared/data.js';
@@ -44,20 +46,23 @@ function SelectedWork({ route }: { route: RouteParams }) {
   const summary = summaries.data?.find(item => item.id === route.workId);
   const project = projects.data?.find(item => item.id === work?.projectId);
   const { header } = useInspector();
+  const solving = work?.delivery?.resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status);
   const status = work?.delivery?.push?.status === 'failed' ? 'nowPushFailed'
-    : work?.delivery?.resolution?.status === 'solving' ? 'deliverySolving'
+    : solving ? 'deliverySolving'
+    : work?.status === 'accepted' && work.delivery?.resolution?.status === 'manual' ? 'deliveryManual'
+    : work?.status === 'accepted' && work.delivery?.resolution?.status === 'resolved' ? 'deliveryResolved'
     : work?.status === 'accepted' && work.delivery?.merge?.status === 'conflict' ? 'deliveryConflict'
     : work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'deliveryMergeFailed'
     : work?.status === 'completed' ? work.delivery?.completedWithoutMerge ? 'nowWithoutMerge'
     : work.delivery?.push?.status === 'pushed' ? 'nowPushed' : work.delivery?.merge?.status === 'already-contained' ? 'nowContained'
     : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowReadOnly'
     : work?.status === 'accepted' ? 'nowAwaitingMerge' : work?.status;
-  const tone = work?.delivery?.push?.status === 'failed' || work?.delivery?.merge?.status === 'failed' ? 'bad'
-    : work?.status === 'executing' || work?.status === 'merging' || work?.delivery?.resolution?.status === 'solving' ? 'run'
+  const tone = work?.delivery?.push?.status === 'failed' || work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'bad'
+    : work?.status === 'executing' || work?.status === 'merging' || solving ? 'run'
     : work?.status === 'completed' ? 'ok' : work && ['awaiting-review', 'accepted', 'merge-queued'].includes(work.status) ? 'att' : '';
-  const heading = <header className="top work-header" aria-label={t('workHeader')}>
+  const heading = (pushing: boolean) => <header className="top work-header" aria-label={t('workHeader')}>
     <div className="work-title"><div>
-      {work && <div className="work-meta"><span className={`work-badge ${tone}`}>{status && t(status)}</span>
+      {work && <div className="work-meta"><span className={`work-badge ${pushing ? 'ok' : tone}`}>{pushing ? t('nowPushing') : status && t(status)}</span>
         <span>· {project?.name}</span>{work.workBranch && <span className="ref">{work.workBranch}</span>}
         {summary && <time dateTime={summary.statusSince}>· {elapsed(['completed', 'cancelled'].includes(work.status) ? work.createdAt : summary.statusSince, ['completed', 'cancelled'].includes(work.status) ? Date.parse(summary.statusSince) : now)}</time>}
         <span>·</span><span title={work.usage.incomplete ? t('tokenIncomplete') : 'tokens'}>Token {formatUsage(work.usage, language)}</span>
@@ -68,28 +73,30 @@ function SelectedWork({ route }: { route: RouteParams }) {
   </header>;
   return <>
     {error && <ErrorNotice error={error} retry={reload} />}
-    {work ? <WorkContent work={work} heading={heading} /> : header && createPortal(<p className="hint" role="status">{t('loading')}</p>, header)}
+    {work ? <WorkContent work={work} heading={heading} reload={reload} /> : header && createPortal(<p className="hint" role="status">{t('loading')}</p>, header)}
   </>;
 }
 
-function WorkContent({ work, heading }: { work: Work; heading: ReactNode }) {
+function WorkContent({ work, heading, reload }: { work: Work; heading: (pushing: boolean) => ReactNode; reload: () => void }) {
   const { t } = useI18n();
   const { header } = useInspector();
-  const [pushing, setPushing] = useState(false);
+  const delivery = useWorkDelivery(work);
   const report = useWorkReview(work.id);
-  const { inspection, choose, filter, chooseCards } = useWorkInspector(work.id, work.status);
+  const { inspection, choose, filter, chooseCards } = useWorkInspector(work.id, delivery.solving ? 'accepted' : work.status);
   const graph = useResource<GraphNode[]>('get-card-graph', { workId: work.id });
   const selectedCard = graph.data?.filter(node => node.type === 'card').findIndex(node => inspection === `card:${node.id}`);
   const structure = !['spec', 'report', 'delivery'].includes(inspection);
   const title = selectedCard !== undefined && selectedCard >= 0 ? `${t('graphCard')} ${selectedCard + 1}` : filter ? filter === 'other' ? t('nowInactiveCards') : t('nowFilteredCards').replace('{status}', t(cardStatusLabels[filter]!))
     : t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
   return <>
-    {header && createPortal(<>{heading}<NowStrip work={work} inspection={inspection} filter={filter} choose={choose} chooseCards={chooseCards} pushing={pushing} report={report} /></>, header)}
-    {work.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} title={work.title} workBranch={work.workBranch} showBrief={inspection === 'spec'} inspectorTitle={title} /> : <ConversationView work={work} report={report} />}
+    {header && createPortal(<>{heading(delivery.pushing)}<NowStrip work={work} inspection={inspection} filter={filter} choose={choose} chooseCards={chooseCards} pushing={delivery.pushing} report={report} /></>, header)}
+    {work.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} title={work.title} workBranch={work.workBranch} showBrief={inspection === 'spec'} inspectorTitle={title} /> : <ConversationView work={work} report={report}
+      deliveryPin={delivery.visible && !delivery.solving && !delivery.pushing && (delivery.failedPush || work.status === 'accepted') ? <DeliveryPin delivery={delivery} /> : undefined} />}
     {inspection === 'spec' && work.status !== 'aligning' && <Inspector title={title}><BriefView work={work} /></Inspector>}
     {inspection === 'report' && <Inspector title={title}><WorkReview work={work} report={report} /></Inspector>}
-    {inspection === 'delivery' && <Inspector title={title}><WorkDelivery work={work} onPushingChange={setPushing} /></Inspector>}
+    {inspection === 'delivery' && <Inspector title={title}><WorkDelivery delivery={delivery} reload={reload} /></Inspector>}
     {structure && <Inspector title={title}><CardGraphView work={work} inspection={inspection} filter={filter} inspect={choose} /></Inspector>}
+    <DeliveryDialogs delivery={delivery} report={report} />
   </>;
 }
 

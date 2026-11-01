@@ -15,7 +15,7 @@ export interface Delivery {
 }
 export interface Work {
   id: string; projectId: string; title: string; status: WorkStatus; createdAt: string;
-  delivery?: Delivery; runtimePauseReason: string | null; usage: Usage; workBranch?: string | null;
+  delivery?: Delivery; runtimePauseReason: string | null; usage: Usage; workBranch?: string | null; baseRef?: string | null;
 }
 export interface WorkSummary extends Work {
   summary: string; statusSince: string; completedCards: number; totalCards: number;

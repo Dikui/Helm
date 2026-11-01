@@ -62,7 +62,7 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     deliveryConflict: 'nowIdleConflict', deliverySolving: 'nowSolvingConflict', deliveryResolved: 'nowIdleResolved',
     deliveryManual: 'nowIdleManual', nowReadOnly: 'nowEndedReadOnly', nowWithoutMerge: 'nowEndedWithoutMerge',
   };
-  const deliveryTone = work.delivery?.push?.status === 'failed' ? 'bad' : pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' ? 'run'
+  const deliveryTone = work.delivery?.push?.status === 'failed' ? 'bad' : pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status) ? 'run'
     : work.status === 'completed' ? 'quiet' : 'att';
   const reviewGate = report.gate ?? nodes.filter(node => node.type === 'gate').findLast(node => node.kind === 'review');
   const verdict = reviewGate?.report?.verdict;

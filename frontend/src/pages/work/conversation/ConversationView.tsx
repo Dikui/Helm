@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useData, useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
@@ -21,7 +21,7 @@ import { GatePin } from '../GatePin.js';
 import { useRouter } from '../../../shared/router.js';
 import './conversation.css';
 
-export function ConversationView({ work, report }: { work: Work; report: ReturnType<typeof useWorkReview> }) {
+export function ConversationView({ work, report, deliveryPin }: { work: Work; report: ReturnType<typeof useWorkReview>; deliveryPin?: ReactNode }) {
   const { api } = useData();
   const { navigate } = useRouter();
   const { t, language } = useI18n();
@@ -95,7 +95,8 @@ export function ConversationView({ work, report }: { work: Work; report: ReturnT
   const items = [...(conversation.data ?? []).map(item => ({ time: item.type === 'gate' && item.status !== 'pending' ? events.data?.findLast(event => event.object.id === item.id && ['gate-decided', 'gate-withdrawn'].includes(event.action))?.time ?? item.createdAt : item.createdAt, item, event: undefined as HelmEvent | undefined })),
     ...milestones.map(event => ({ time: event.time, item: undefined, event }))].sort((a, b) => a.time.localeCompare(b.time));
   return <section className="conversation-view" aria-label={t('chat')} ref={view}>
-    {(pendingGates.some(gate => gate.kind !== 'review') && !readOnly || report.conversation.error || report.events.error || report.invalid || report.gate?.status === 'pending' && work.status === 'awaiting-review' || gates.at(-1)?.status === 'withdrawn') && <div className="gate-pins">
+    {(deliveryPin || pendingGates.some(gate => gate.kind !== 'review') && !readOnly || report.conversation.error || report.events.error || report.invalid || report.gate?.status === 'pending' && work.status === 'awaiting-review' || gates.at(-1)?.status === 'withdrawn') && <div className="gate-pins">
+      {deliveryPin}
       {!readOnly && pendingGates.filter(gate => gate.kind !== 'review').map(gate => <GateDecision key={gate.id} gate={gate} decisionWorkId={work.id} pinned source={gate.kind === 'git-initialization' ? t('pinProjectShared') : `${t('pinAwaitingDecision')} · ${cards.filter(card => card.dependencies.some(ref => ref.id === gate.id)).map(card => `${t('graphCard')} ${cards.indexOf(card) + 1}`).join(', ') || t('alignmentCoordinator')}`} />)}
       <ReviewPin work={work} report={report} />
       {!pendingGates.length && gates.at(-1)?.status === 'withdrawn' && <GatePin label={t('conversationWithdrawn')} source={t('conversationWithdrawn')} title={gates.at(-1)!.question} tone="neutral"><button aria-keyshortcuts="1" onClick={() => navigate(`/works/${encodeURIComponent(work.id)}?inspect=list`)}><kbd aria-hidden="true">1</kbd>{t('pinSkippedReason')}</button></GatePin>}
