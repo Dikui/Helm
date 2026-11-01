@@ -26,5 +26,5 @@ export function useSendMessage() {
     } catch (error) { setError(error as Error); }
     finally { busy.current = false; setPending(false); }
   };
-  return { send, pending, error, uncertain };
+  return { send, pending, error, uncertain, resumeEditing: () => { attempt.current = undefined; setError(undefined); } };
 }

@@ -3,19 +3,33 @@ export interface RouteParams { workId?: string; view?: string; section?: string;
 export interface RouteDefinition {
   pattern: RegExp; params: (match: RegExpMatchArray) => RouteParams; component: ComponentType<{ route: RouteParams }>;
 }
-const Context = createContext<{ path: string; search: string; navigate: (path: string, replace?: boolean) => void } | null>(null);
+interface Location { path: string; search: string }
+const isNewWork = (path: string) => /^\/new\/?$/.test(path);
+const Context = createContext<{ path: string; search: string; newWorkOpen: boolean; closeNewWork: () => void; navigate: (path: string, replace?: boolean) => void } | null>(null);
 export function Router({ children }: { children: ReactNode }) {
-  const [location, setLocation] = useState(() => ({ path: window.location.pathname, search: window.location.search }));
+  const readLocation = () => ({ path: window.location.pathname, search: window.location.search,
+    background: window.history.state?.newWorkBackground as Location | undefined });
+  const [location, setLocation] = useState(readLocation);
   useEffect(() => {
-    const pop = () => setLocation({ path: window.location.pathname, search: window.location.search });
+    const pop = () => setLocation(readLocation());
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
   }, []);
-  const navigate = (next: string, replace = false) => {
-    window.history[replace ? 'replaceState' : 'pushState'](null, '', next);
-    setLocation({ path: window.location.pathname, search: window.location.search });
+  const newWorkOpen = isNewWork(location.path);
+  const page = newWorkOpen ? location.background ?? { path: '/', search: '' } : location;
+  const changeLocation = (next: string, replace: boolean, state: object | null = null) => {
+    window.history[replace ? 'replaceState' : 'pushState'](state, '', next);
+    setLocation(readLocation());
   };
-  return <Context value={{ ...location, navigate }}>{children}</Context>;
+  const navigate = (next: string, replace = false) => {
+    const destination = new URL(next, window.location.origin);
+    // SSE can change the background work's default inspector while a draft is open.
+    if (newWorkOpen && replace && destination.pathname === page.path) {
+      changeLocation(`${location.path}${location.search}`, true, { newWorkBackground: { path: destination.pathname, search: destination.search } });
+    } else changeLocation(next, replace, isNewWork(destination.pathname) ? { newWorkBackground: { path: page.path, search: page.search } } : null);
+  };
+  return <Context value={{ path: page.path, search: page.search, newWorkOpen, navigate,
+    closeNewWork: () => changeLocation(`${page.path}${page.search}`, true) }}>{children}</Context>;
 }
 export function useRouter() {
   const value = useContext(Context);

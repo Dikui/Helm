@@ -42,6 +42,7 @@ test('两侧可独立收起、恢复；快捷键避开输入和 IME；收起后�
   fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
   expect(window.location.pathname).toBe('/new');
   expect(await screen.findByRole('heading', { name: '新建工作' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '关闭新建工作' }));
   fireEvent.click(screen.getByRole('link', { name: '设置' }));
   expect(await screen.findByRole('heading', { name: '设置' })).toBeTruthy();
 });
