@@ -425,7 +425,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   await screen.findByText('实时更新已连接');
   // Wait for replay to finish before dropping the shared stream.
-  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('v1 · 工作说明已起草，等你确认');
+  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('v1 已起草，等你确认');
   offline = true; controller?.abort();
   await screen.findByText('连接已断开，正在重连…');
   await daemon.call('send-message', { workId: work.id, body: '请更新草稿', key: 'update' });
@@ -520,7 +520,10 @@ test('对齐输入卡保留排队、撤回、关于关卡和快捷键打断', as
   fireEvent.change(input, { target: { value: '立即提问' } });
   fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[0].reason === 'aborted' && value.result.rounds[1]?.status === 'running');
-  expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 已收到立即消息')).toBeTruthy();
+  const strip = screen.getByRole('navigation', { name: '现在条' });
+  expect(await within(strip).findByText('正在更新工作说明 v1')).toBeTruthy();
+  fireEvent.click(within(strip).getByRole('button', { name: /调度者/ }));
+  expect(await within(await screen.findByRole('region', { name: '本轮步骤' })).findByText('已收到立即消息', { selector: 'summary' })).toBeTruthy();
   const messages = (await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.body === '立即提问');
   expect(messages).toHaveLength(1);
   expect(messages[0].gateId).toBe((gateOption as HTMLOptionElement).value.slice(5));

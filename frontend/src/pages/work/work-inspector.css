@@ -11,7 +11,8 @@
 .work-structure .cs-summary { width: 100%; justify-content: flex-start; font-size: 12px; }
 .work-structure .cs-panel { margin-top: 14px; padding: 0; overflow: visible; }
 .work-structure .cs-panel:has(.cs-timeline) { overflow-x: auto; }
-.work-structure .cs-graph-panel { min-height: 480px; height: min(70dvh, 760px); }
+.work-structure .cs-graph-panel { min-height: 480px; height: auto; flex: none; }
+.work-structure .cg-canvas-wrap { min-height: var(--graph-height, 360px); }
 .work-structure .cg-inspector { border: 0; overflow: visible; }
 .work-structure .cg-inspector-head { padding: 0 0 16px; }
 .work-structure .cg-inspector-body { padding: 16px 0 0; }

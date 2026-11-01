@@ -1,10 +1,22 @@
 import { outputSummary } from '../../../src/output-summary.js';
+import { systemValueLabel } from './system-labels.js';
 import type { MessageKey } from './i18n.js';
 
 export function stepSummary(raw: string, t: (key: MessageKey) => string): string {
   const summary = outputSummary(raw);
-  if (summary) return summary;
   const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  if (summary) {
+    let value: Record<string, unknown>;
+    try { value = object(JSON.parse(raw)); } catch { return summary; }
+    const content = object(value.message).content;
+    if (value.type === 'assistant' && Array.isArray(content)) return content.map(object).map(block => block.type === 'tool_use'
+      ? [systemValueLabel(String(block.name ?? ''), t), object(block.input).command].filter(Boolean).join(' · ')
+      : block.type === 'text' ? block.text : '').filter(Boolean).join(' · ') || summary;
+    const params = object(value.params);
+    const update = object(params.update);
+    if (value.tool || object(params.item).type === 'mcpToolCall' || update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') return systemValueLabel(summary, t);
+    return summary;
+  }
   let value: Record<string, unknown>;
   try { value = object(JSON.parse(raw)); } catch { return t('conversationOutput'); }
   if (value.type === 'user') {
@@ -30,10 +42,10 @@ export function stepSummary(raw: string, t: (key: MessageKey) => string): string
   }
   if (value.type === 'system') {
     if (value.subtype === 'init') return t('conversationSessionInit');
-    if (typeof value.subtype === 'string' && value.subtype.startsWith('hook_')) return `${t('conversationHook')} · ${value.subtype}`;
-    return `${t('conversationSystem')}${typeof value.subtype === 'string' ? ` · ${value.subtype}` : ''}`;
+    if (typeof value.subtype === 'string' && value.subtype.startsWith('hook_')) return t('conversationHook');
+    return t('conversationSystem');
   }
-  if (typeof value.type === 'string' && value.type.startsWith('hook_')) return `${t('conversationHook')} · ${value.type}`;
+  if (typeof value.type === 'string' && value.type.startsWith('hook_')) return t('conversationHook');
   if (value.type === 'rate_limit_event') return t('conversationRateLimit');
   if (value.type === 'stream_event') return t('conversationStream');
   if (value.type === 'result') return t('conversationRoundEnded');

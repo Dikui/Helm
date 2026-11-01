@@ -10,6 +10,7 @@
 .now-cell small { color: var(--muted); font-size: 11.5px; }
 .now-coordinator { max-width: 178px; }
 .now-notice { max-width: 103px; }
+.now-notice.now-delivery { max-width: none; }
 .now-cell.att, .now-cell.blocked { background: var(--attention-soft); border-color: var(--attention-line); }
 .now-cell.att b, .now-cell.att small, .now-cell.blocked small { color: var(--attention); }
 .now-cell.run small { color: var(--running); }
@@ -18,4 +19,4 @@
 .now-avatar { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--text); color: var(--bg); font-size: 11px; font-weight: 600; }
 .now-agent-stack { display: inline-flex; flex-direction: column; gap: 12px; max-height: 100px; overflow: hidden; }
 .now-agent-stack .agent-mark { width: 16px; height: 16px; }
-@media (max-width: 680px) { .now-strip { padding: 0 12px 10px; } .now-fixed .now-cell { padding-inline: 6px; font-size: 11px; } }
+@media (max-width: 680px) { .now-strip { padding: 0 12px 10px; overflow-x: auto; } .now-scroll, .now-fixed { display: contents; } .now-fixed .now-cell { padding-inline: 6px; font-size: 11px; } }

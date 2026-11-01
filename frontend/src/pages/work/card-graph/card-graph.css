@@ -162,7 +162,7 @@
   .cg-main { min-height: 440px; flex-shrink: 0; }
   .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; flex-shrink: 0; }
 }
-.work-structure .cg-viewport { background: none; border: 1px solid var(--border); border-radius: 10px; }
+.work-structure .cg-viewport { padding: 12px; background: none; border: 1px solid var(--border); border-radius: 10px; }
 .work-structure .cg-node { padding: 6px 8px; gap: 2px; border-radius: 8px; }
 .work-structure .cg-node-name { font-size: 12px; }
 .work-structure .cg-node-state { font-size: 11px; }

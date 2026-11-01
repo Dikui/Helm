@@ -112,7 +112,7 @@ test('等你格随确认、决策和审核出现，报告与交付按阶段开�
   const work = await create(false);
   render(<App baseUrl={daemon.url} />);
   const strip = await screen.findByRole('navigation', { name: '现在条' });
-  expect(await within(strip).findByText('v1 · 工作说明已起草，等你确认')).toBeTruthy();
+  expect(await within(strip).findByText('v1 已起草，等你确认')).toBeTruthy();
   expect(within(strip).queryByRole('button', { name: '汇总报告' })).toBeNull();
   expect(within(strip).queryByRole('button', { name: '交付' })).toBeNull();
   expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringContaining('调度者'), expect.stringContaining('等你确认'), '说明 v1']);
@@ -169,6 +169,8 @@ test('等待决策的卡片作为受阻活卡片，决定后恢复为非活跃�
   expect(within(strip).queryByRole('button', { name: /#1 等你决定/ })).toBeNull();
   ok(await daemon.call('pause-work', { workId: work.id }));
   expect(await within(strip).findByText('已暂停')).toBeTruthy();
+  expect(screen.queryByRole('tablist', { name: '结构' })).toBeNull();
+  expect(screen.getByText('工作已暂停。恢复后才继续调度与派单。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(await within(strip).findByText('Paused')).toBeTruthy();
   ok(await daemon.call('cancel-work', { workId: work.id }));
@@ -222,4 +224,23 @@ test('没有卡片和已保存轮次的读取状态只有调度者和说明，�
   expect(await screen.findByRole('complementary', { name: '检查器' })).toBeTruthy();
   fireEvent.click(within(strip).getByRole('button', { name: '工作说明' }));
   expect(window.location.search).toBe('?inspect=spec');
+});
+
+
+test('对齐的多选提问优先固定说明确认，回答后回到说明确认', async () => {
+  daemon = await uiFixture([[draft, { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workId(ctx), key: 'scope', question: '选择覆盖范围', options: ['桌面', '窄屏'], multiSelect: true }), check: ok }]]);
+  const work = await create(false);
+  render(<App baseUrl={daemon.url} />);
+  const strip = await screen.findByRole('navigation', { name: '现在条' });
+  const choice = await within(strip).findByRole('button', { name: '等你决定 选择覆盖范围' });
+  expect(within(strip).queryByRole('button', { name: /^等你确认/ })).toBeNull();
+  expect(within(strip).getByRole('button', { name: '工作说明' })).toBeTruthy();
+  fireEvent.click(choice);
+  expect(await screen.findByRole('heading', { name: '选择覆盖范围' })).toBeTruthy();
+  const gates = (await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'gate');
+  const general = gates.find((gate: any) => gate.kind === 'general');
+  expect(gates.filter((gate: any) => gate.status === 'pending')).toHaveLength(2);
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: general.id, decision: '桌面\n窄屏' }));
+  expect(await within(strip).findByRole('button', { name: '等你确认 工作说明 v1' })).toBeTruthy();
+  expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('aligning');
 });

@@ -211,8 +211,10 @@ test('调度者连续失败后从工作和轮次读取连败暂停与原始原�
   const work = await executeWork();
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.runtimePauseReason === '调度者连续失败 3 次');
   render(<App baseUrl={daemon.url} />);
-  await clickReady(await screen.findByRole('tab', { name: '调度轮次' }));
-  const coordinator = screen.getByRole('tabpanel', { name: '调度轮次' });
+  await screen.findByText('工作已暂停。恢复后才继续调度与派单。');
+  expect(screen.queryByRole('tablist', { name: '结构' })).toBeNull();
+  fireEvent.click(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
+  const coordinator = screen.getByRole('complementary', { name: '调度者 Token 明细' });
   expect(await within(coordinator).findByText('连败暂停')).toBeTruthy();
   expect(await within(coordinator).findByText('调度者连续失败 3 次')).toBeTruthy();
   expect(within(coordinator).getAllByText('出错退出')).toHaveLength(3);

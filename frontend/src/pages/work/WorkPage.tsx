@@ -7,6 +7,7 @@ import { useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
 import type { RouteParams } from '../../shared/router.js';
+import type { GraphNode } from './card-graph/types.js';
 import type { Work, WorkSummary } from '../../shared/types.js';
 import { AligningWork } from './aligning/AligningWork.js';
 import { Link, useRouter } from '../../shared/router.js';
@@ -77,8 +78,10 @@ function WorkContent({ work, heading }: { work: Work; heading: ReactNode }) {
   const [pushing, setPushing] = useState(false);
   const report = useWorkReview(work.id);
   const { inspection, choose, filter, chooseCards } = useWorkInspector(work.id, work.status);
+  const graph = useResource<GraphNode[]>('get-card-graph', { workId: work.id });
+  const selectedCard = graph.data?.filter(node => node.type === 'card').findIndex(node => inspection === `card:${node.id}`);
   const structure = !['spec', 'report', 'delivery'].includes(inspection);
-  const title = filter ? filter === 'other' ? t('nowInactiveCards') : t('nowFilteredCards').replace('{status}', t(cardStatusLabels[filter]!))
+  const title = selectedCard !== undefined && selectedCard >= 0 ? `${t('graphCard')} ${selectedCard + 1}` : filter ? filter === 'other' ? t('nowInactiveCards') : t('nowFilteredCards').replace('{status}', t(cardStatusLabels[filter]!))
     : t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
   return <>
     {header && createPortal(<>{heading}<NowStrip work={work} inspection={inspection} filter={filter} choose={choose} chooseCards={chooseCards} pushing={pushing} report={report} /></>, header)}

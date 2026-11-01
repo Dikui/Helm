@@ -99,7 +99,7 @@ export function ConversationView({ work }: { work: Work }) {
       </div> : !item ? null : item.type === 'gate' && (item.status !== 'pending' || readOnly) ? <GateHistory key={item.id} gate={item} decidedAt={time} />
         : item.type === 'message' && item.sender === 'runtime' ? <div className="conversation-event" key={item.id}><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time><span title={item.body}>{item.body}</span></div> : <article key={item.id} className={item.type === 'message' && item.sender === 'user' ? 'conversation-item me' : 'conversation-item'}>
         <div className="conversation-who"><b>{t(item.type === 'message' ? item.sender === 'user' ? 'alignmentYou' : item.sender === 'runtime' ? 'conversationRuntime' : 'alignmentCoordinator' : item.kind === 'git-initialization' ? 'conversationRuntime' : 'alignmentCoordinator')}</b>
-          <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
+          <time className={item.type === 'message' && item.sender === 'user' ? 'sr' : undefined} dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>

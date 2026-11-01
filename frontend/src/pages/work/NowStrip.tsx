@@ -39,7 +39,8 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
   const other = cards.length - live.length;
   const running = rounds.data?.rounds.find(round => round.status === 'running');
   const latestRound = running ?? rounds.data?.rounds.at(-1);
-  const pending = !['paused', 'completed', 'cancelled'].includes(work.status) ? nodes.find(node => node.type === 'gate' && node.status === 'pending') : undefined;
+  const pending = !['paused', 'completed', 'cancelled'].includes(work.status) ? (nodes.find(node => node.type === 'gate' && node.status === 'pending' && node.kind !== 'work-confirmation')
+    ?? nodes.find(node => node.type === 'gate' && node.status === 'pending')) : undefined;
   const gate = pending?.type === 'gate' ? pending : undefined;
   const review = work.status === 'awaiting-review' || gate?.kind === 'review';
   const delivery = ['accepted', 'merge-queued', 'merging', 'completed'].includes(work.status)
@@ -54,6 +55,13 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     : work.delivery?.resolution?.status === 'resolved' ? 'deliveryResolved'
     : work.delivery?.merge?.status === 'conflict' ? 'deliveryConflict'
     : work.delivery?.merge?.status === 'failed' ? 'deliveryMergeFailed' : 'nowAwaitingMerge';
+  const deliveryIdle: Partial<Record<MessageKey, MessageKey>> = {
+    nowAwaitingMerge: 'nowWaitingMerge', 'merge-queued': 'nowIdleQueued', merging: 'nowIdleMerging',
+    deliveryMergeFailed: 'nowIdleMergeFailed', nowMerged: 'nowEndedMerged', nowContained: 'nowEndedContained',
+    nowPushing: 'nowEndedPushing', nowPushFailed: 'nowEndedPushFailed', nowPushed: 'nowEndedPushed',
+    deliveryConflict: 'nowIdleConflict', deliverySolving: 'nowSolvingConflict', deliveryResolved: 'nowIdleResolved',
+    deliveryManual: 'nowIdleManual', nowReadOnly: 'nowEndedReadOnly', nowWithoutMerge: 'nowEndedWithoutMerge',
+  };
   const deliveryTone = work.delivery?.push?.status === 'failed' ? 'bad' : pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' ? 'run'
     : work.status === 'completed' ? 'quiet' : 'att';
   const reviewGate = report.gate ?? nodes.filter(node => node.type === 'gate').findLast(node => node.kind === 'review');
@@ -65,20 +73,20 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     && nodes.some(node => node.id === event.object.id && node.type === 'gate' && node.kind === 'general' && node.status === 'decided'));
   const decided = nodes.find(node => node.id === decidedEvent?.object.id);
   let notice: { title: MessageKey; detail: string; target: Inspection; tone?: string; idle?: MessageKey } | undefined;
-  if (delivery) notice = { title: 'inspectorDelivery', detail: t(deliveryState), target: 'delivery', tone: deliveryTone, idle: deliveryState === 'nowAwaitingMerge' ? 'nowWaitingMerge' : deliveryState };
+  if (delivery) notice = { title: 'inspectorDelivery', detail: t(deliveryState), target: 'delivery', tone: deliveryTone, idle: deliveryIdle[deliveryState] ?? deliveryState };
   else if (reportSelected && (report.conversation.error || report.events.error)) notice = { title: 'reviewReport', detail: t('nowReportFailed'), target: 'report', tone: 'bad', idle: 'nowReportReadFailed' };
   else if (reportSelected && (!report.conversation.data || !report.events.data)) notice = { title: 'reviewReport', detail: t('nowReportLoading'), target: 'report', idle: 'nowReportReading' };
-  else if (review) notice = { title: 'nowAwaitingReview', detail: t(verdict ? verdictLabels[verdict] : 'nowLegacyReport'), target: 'report', tone: 'att', idle: 'nowReportSubmitted' };
+  else if (review) notice = { title: 'nowAwaitingReview', detail: t(verdict ? verdictLabels[verdict] : 'nowLegacyReport'), target: 'report', tone: 'att', idle: reviewGate && !reviewGate.report ? 'nowLegacyIdle' : 'nowReportSubmitted' };
   else if (reviewGate?.decision === 'return') notice = { title: 'nowReviewReturned', detail: t('nowReturnedHint'), target: 'report', idle: 'nowWaitingReturn' };
   else if (report.invalid) notice = { title: 'reviewReport', detail: t('nowReportIncomplete'), target: 'report', idle: 'nowReportNeedsFields' };
-  else if (work.status === 'aligning' && running) notice = { title: 'nowBriefUpdating', detail: `${t('brief')}${version ? ` v${version}` : ''}`, target: 'spec', tone: 'run' };
+  else if (work.status === 'aligning' && running && (!gate || gate.kind === 'work-confirmation')) notice = { title: 'nowBriefUpdating', detail: `${t('brief')}${version ? ` v${version}` : ''}`, target: 'spec', tone: 'run' };
   else if (gate) notice = { title: gate.kind === 'work-confirmation' ? 'nowAwaitingConfirmation' : gate.kind === 'git-initialization' ? 'nowGitDecision' : 'inspectorNeedsDecision',
     detail: gate.kind === 'work-confirmation' ? `${t('brief')}${version ? ` v${version}` : ''}` : gate.question,
     target: gate.kind === 'work-confirmation' ? 'spec' : `card:${gate.id}`, tone: 'att', idle: gate.kind === 'work-confirmation' ? 'nowDraftReady' : gate.kind === 'git-initialization' ? 'nowWaitingGit' : 'nowWaitingDecision' };
   else if (reportSelected || reviewGate) notice = { title: 'reviewReport', detail: t(reviewGate ? 'nowLegacyReport' : 'nowReportUnsubmitted'), target: 'report', idle: reviewGate ? undefined : 'nowWaitingReport' };
   else if (decided?.type === 'gate') notice = { title: 'nowGateDecided', detail: decided.decision ?? decided.question, target: `card:${decided.id}` };
   if (work.status === 'paused' && !reportSelected) notice = undefined;
-  const idle: MessageKey | undefined = work.status === 'paused' ? 'paused' : work.status === 'cancelled' ? 'cancelled' : notice?.idle;
+  const idle: MessageKey | undefined = work.status === 'paused' ? 'paused' : work.status === 'cancelled' ? 'cancelled' : notice?.idle ?? (live.length ? 'nowWaitingCards' : undefined);
   const showStructure = work.status !== 'aligning' && (cards.length > 0 || Boolean(rounds.data?.rounds.length) || Boolean(notice));
   const currentSteps = visibleSteps(rounds.data?.currentSteps ?? []);
   const latestStep = currentSteps.at(-1);
@@ -88,6 +96,8 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
   const progress = plan.length ? `${t('nowPlanPosition').replace('{current}', String(position)).replace('{total}', String(plan.length))} · ${current?.content ?? ''}`
     : latestStep ? `${t('conversationFoldedSteps').replace('{count}', String(currentSteps.length))} · ${headline(latestStep, t)}`
     : `${t('nowNoSteps')} · ${t('conversationWaitingFirstOutput')}`;
+  const idleText = idle === 'nowDraftReady' && version ? `v${version} ${t(idle)}` : idle ? t(idle) : undefined;
+  const coordinatorProgress = work.status === 'aligning' && running && version && (!gate || gate.kind === 'work-confirmation') ? t('nowBriefProgress').replace('{version}', String(version)) : progress;
   const driver = (card: CardNode) => agents.data?.find(agent => agent.id === (dispatches.data?.find(dispatch => dispatch.id === card.latestDispatchId)?.agentId ?? card.agentId))?.driver;
   const ordinal = (card: CardNode) => cards.findIndex(item => item.id === card.id) + 1;
   const cardTitle = (card: CardNode) => `#${ordinal(card)} · ${nodeTitle(card)} · ${label(card)}`;
@@ -95,12 +105,12 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     <nav className="now-strip" aria-label={t('nowStrip')}>
       <div className="now-scroll"><button type="button" className="now-cell now-coordinator" aria-pressed={inspection === 'coord'} onClick={() => choose('coord')}>
         <span className="now-avatar" aria-hidden="true">{t('nowCoordinatorMark')}</span><span><b>{t('alignmentCoordinator')}</b>
-          {running ? <small title={progress}>{progress}</small> : idle ? <small title={idle === 'nowDraftReady' && version ? `v${version} · ${t(idle)}` : t(idle)}>{idle === 'nowDraftReady' && version ? `v${version} · ${t(idle)}` : t(idle)}</small>
+          {running && (gate?.kind === 'work-confirmation' || !idle || work.status === 'executing' && !delivery) ? <small title={coordinatorProgress}>{coordinatorProgress}</small> : idleText ? <small title={idleText}>{idleText}</small>
             : latestRound ? <EndedProgress workId={work.id} round={latestRound} fallback={t(live.length ? 'nowWaitingCards' : 'conversationIdle')} />
             : <small>{rounds.data ? t('nowNoRounds') : t('loading')}</small>}
         </span>
       </button>
-      {notice && <button type="button" title={`${t(notice.title)} · ${notice.detail}`} className={`now-cell now-notice ${notice.tone ?? ''}`} aria-label={notice.target === 'delivery' ? t('inspectorDelivery') : undefined} aria-pressed={inspection === notice.target} onClick={() => choose(notice.target)}>
+      {notice && <button type="button" title={`${t(notice.title)} · ${notice.detail}`} className={`now-cell now-notice${notice.target === 'delivery' ? ' now-delivery' : ''} ${notice.tone ?? ''}`} aria-label={notice.target === 'delivery' ? t('inspectorDelivery') : undefined} aria-pressed={inspection === notice.target} onClick={() => choose(notice.target)}>
         <span><b>{t(notice.title)}</b><small>{notice.detail}</small></span>
       </button>}
       {live.length > 4 ? liveCardStatuses.map(group => {

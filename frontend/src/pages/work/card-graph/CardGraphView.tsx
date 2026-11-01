@@ -29,7 +29,9 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
   const now = useClock();
   const files = useWorkFiles(workId);
   const preview = useFilePreview(workId);
-  const tab = structureViews.includes(inspection as StructureView) ? inspection as StructureView : null;
+  const requestedTab = structureViews.includes(inspection as StructureView) ? inspection as StructureView : null;
+  const pausedList = work.status === 'paused' && Boolean(requestedTab);
+  const tab = pausedList ? 'list' : requestedTab;
   const tabId = useId();
   const [roundId, setRoundId] = useState<string>();
   const [roundStep, setRoundStep] = useState<number>();
@@ -63,10 +65,10 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
     <div className="cg-errors">{rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}{dispatches.error && <ErrorNotice error={dispatches.error} retry={dispatches.reload} />}</div>
     {!nodes ? <p className="hint" role="status">{graph.error ? '' : t('loading')}</p> : <>
       <div className="cg-main">
-        {work.status === 'paused' && <p className="structure-paused">{t('structurePausedHint')}</p>}
+        {pausedList && <p className="structure-paused">{t('structurePausedHint')}</p>}
         {filter && <p className="muted group-hint">{t(filter === 'other' ? 'nowOtherCardsHint' : 'nowGroupHint')}</p>}
 
-        {!filter && <div className="cg-bar"><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
+        {!filter && !pausedList && <div className="cg-bar"><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
           {structureViews.map((key, index) => <button key={key} ref={element => { tabButtons.current[index] = element; }} type="button" role="tab"
             id={`${tabId}-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key} tabIndex={tab === key || !tab && index === 0 ? 0 : -1}
             onClick={() => inspect(key)} onKeyDown={event => {
@@ -78,7 +80,7 @@ export function CardGraphView({ work, inspection, inspect, filter }: { work: Wor
           <span><b>{dispatches.data ? summary.retries : '—'}</b> {t('graphSummaryRetries')}</span><span><b>{summary.cancelled}</b> {t('graphSummaryCancelled')}</span>
           {summary.skipped > 0 && <span><b>{summary.skipped}</b> {t('graphSummarySkipped')}</span>}
         </div></div>}
-        <div hidden={!tab} className={`cs-panel ${tab === 'graph' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-label={filter ? t('inspectorList') : undefined} aria-labelledby={tab && !filter ? `${tabId}-${tab}` : undefined}>
+        <div hidden={!tab} className={`cs-panel ${tab === 'graph' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-label={filter || pausedList ? t('inspectorList') : undefined} aria-labelledby={tab && !filter && !pausedList ? `${tabId}-${tab}` : undefined}>
           {tab === 'list' && <CardList nodes={nodes} dispatches={dispatches.data} select={select} filter={filter} />}
           {tab === 'graph' && <GraphCanvas agents={agents.data} nodes={nodes} dispatches={dispatches.data ?? []} selectedId={selectedId} sendBacks={summary.sendBacks} select={select} />}
           {tab === 'rounds' && <CoordinatorView key={roundId} work={work} initialRoundId={roundId} initialStep={roundStep} compact />}

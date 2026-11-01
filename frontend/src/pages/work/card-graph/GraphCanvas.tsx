@@ -1,30 +1,14 @@
 import { AgentMark } from '../../../shared/AgentMark.js';
 import type { AgentEntry } from '../../settings/types.js';
 import { formatUsage } from '../../../shared/token-usage.js';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { graphlib, layout, type Point } from '@dagrejs/dagre';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { arrange, initialGraphView, nodeHeight, nodeWidth } from './graph-layout.js';
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
 import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge, ReadOnlyBadge } from './labels.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
 
-const nodeWidth = 148;
-const nodeHeight = 48;
-function arrange(nodes: Pick<GraphNode, 'id' | 'dependencies'>[]) {
-  const graph = new graphlib.Graph().setGraph({ rankdir: 'TB', nodesep: 20, ranksep: 36, marginx: 24, marginy: 24 });
-  graph.setDefaultEdgeLabel(() => ({}));
-  for (const node of nodes) graph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
-  for (const node of nodes) for (const dependency of node.dependencies) {
-    if (graph.hasNode(dependency.id)) graph.setEdge(dependency.id, node.id);
-  }
-  layout(graph);
-  return {
-    width: Math.max(1, graph.graph().width ?? 1), height: Math.max(1, graph.graph().height ?? 1),
-    nodes: nodes.map(node => ({ id: node.id, x: graph.node(node.id).x - nodeWidth / 2, y: graph.node(node.id).y - nodeHeight / 2 })),
-    edges: graph.edges().map(edge => ({ from: edge.v, to: edge.w, points: graph.edge(edge).points as Point[] })),
-  };
-}
 function relatedNodes(nodes: GraphNode[], focus: string | null) {
   if (!focus) return null;
   const related = new Set([focus]);
@@ -53,19 +37,25 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   const viewport = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [canvasWidth, setCanvasWidth] = useState(500);
   const [hovered, setHovered] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   // Step events change labels, but only topology changes need a new layout.
   const topology = JSON.stringify(displayTopology(nodes));
-  const positions = useMemo(() => arrange(JSON.parse(topology)), [topology]);
+  const positions = useMemo(() => arrange(JSON.parse(topology), canvasWidth), [topology, canvasWidth]);
   const byId = new Map(nodes.map(node => [node.id, node]));
   const related = relatedNodes(nodes.map(node => ({ ...node, dependencies: positions.edges.filter(edge => edge.to === node.id).map(edge => ({ type: byId.get(edge.from)!.type, id: edge.from })) })), hovered ?? focused);
   const reset = useCallback(() => {
     const element = viewport.current;
     if (!element?.clientWidth) return;
-    // Keep names readable; larger graphs scroll in both directions.
-    setZoom(1);
-    element.scrollLeft = Math.max(0, (positions.width - element.clientWidth + 48) / 2); element.scrollTop = 0;
+    const width = Math.max(1, element.clientWidth - 24);
+    setCanvasWidth(width);
+    const view = initialGraphView(positions, width, Math.max(1, element.clientHeight - 24));
+    setZoom(view.zoom);
+    requestAnimationFrame(() => {
+      if (!element.isConnected) return;
+      element.scrollLeft = view.left; element.scrollTop = view.top;
+    });
   }, [positions]);
   useEffect(() => {
     reset();
@@ -78,12 +68,12 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   const fit = () => {
     const element = viewport.current;
     if (!element?.clientWidth) return;
-    setZoom(Math.max(.25, Math.min(1, (element.clientWidth - 48) / positions.width)));
+    setZoom(Math.max(.25, Math.min(1, (element.clientWidth - 24) / positions.width, (element.clientHeight - 24) / positions.height)));
     element.scrollLeft = 0; element.scrollTop = 0;
   };
   const percent = new Intl.NumberFormat(language === 'zh' ? 'zh-CN' : 'en', { style: 'percent', maximumFractionDigits: 0 }).format(zoom);
   return <section className="cg-graph" aria-label={t('graphTitle')}>
-    <div className="cg-canvas-wrap"><div className="cg-viewport" ref={viewport} tabIndex={0} aria-label={t('graphPanHelp')}
+    <div className="cg-canvas-wrap" style={{ '--graph-height': `${positions.height + 24}px` } as CSSProperties}><div className="cg-viewport" ref={viewport} tabIndex={0} aria-label={t('graphPanHelp')}
       onPointerDown={event => {
         if (event.button !== 0 || (event.target as Element).closest('button')) return;
         const element = event.currentTarget;
@@ -105,7 +95,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
                 : from.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(to.status) ? 'flow' : ['completed', 'decided'].includes(from.status) ? '' : 'todo';
               return <path key={`${edge.from}:${edge.to}`} role="img" aria-label={`${t((from.type === 'gate' && from.kind === 'work-confirmation') || (to.type === 'gate' && to.kind === 'review') ? 'graphFlowLink' : 'graphDependency')}：${nodeTitle(from)} → ${nodeTitle(to)}`}
                 className={`cg-edge ${tone} ${related && !(related.has(edge.from) && related.has(edge.to)) ? 'dim' : ''}`}
-                d={edge.points.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ')} markerEnd={`url(#${marker})`} />;
+                d={`M${edge.points[0]!.x},${edge.points[0]!.y} C${edge.points.slice(1).map(point => `${point.x},${point.y}`).join(' ')}`} markerEnd={`url(#${marker})`} />;
             })}
           </svg>
           {positions.nodes.map(({ id, x, y }) => {

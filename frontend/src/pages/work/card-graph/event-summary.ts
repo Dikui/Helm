@@ -1,7 +1,38 @@
 import type { HelmEvent } from '../../../shared/types.js';
+import { systemValueLabel } from '../../../shared/system-labels.js';
 import type { MessageKey } from '../../../shared/i18n.js';
 
-const actions: Record<string, MessageKey> = {
+export const eventActionLabels: Record<string, MessageKey> = {
+  'round-interrupted': 'eventRoundInterrupted',
+  'card-skipped': 'eventCardSkipped',
+  'card-unblocked': 'eventCardUnblocked',
+  'card-waiting': 'eventCardWaiting',
+  'dispatch-git-aborted': 'eventDispatchGitAborted',
+  'dispatch-index-lock-removed': 'eventDispatchIndexLockRemoved',
+  'project-environment-deleted': 'eventProjectEnvironmentDeleted',
+  'project-environment-set': 'eventProjectEnvironmentSet',
+
+  'agent-availability-changed': 'eventAgentAvailabilityChanged',
+  'agent-deleted': 'eventAgentDeleted',
+  'agent-saved': 'eventAgentSaved',
+  'base-merge-aborted': 'eventBaseMergeAborted',
+  'concurrency-set': 'eventConcurrencySet',
+  'conflict-card-merge-started': 'eventConflictCardMergeStarted',
+  'dispatch-watchdog-set': 'eventDispatchWatchdogSet',
+  'library-entry-deleted': 'eventLibraryEntryDeleted',
+  'library-mcp-registered': 'eventLibraryMcpRegistered',
+  'library-skill-installed': 'eventLibrarySkillInstalled',
+  'output-threshold-cleared': 'eventOutputThresholdCleared',
+  'output-threshold-set': 'eventOutputThresholdSet',
+  'project-coordinator-agent-set': 'eventProjectCoordinatorAgentSet',
+  'project-deleted': 'eventProjectDeleted',
+  'project-registered': 'eventProjectRegistered',
+  'prompt-set': 'eventPromptSet',
+  'round-watchdog-set': 'eventRoundWatchdogSet',
+  'tool-install-failed': 'eventToolInstallFailed',
+  'tool-installed': 'eventToolInstalled',
+  'work-deleted': 'eventWorkDeleted',
+
   'work-created': 'eventWorkCreated',
   'work-description-drafted': 'eventWorkDescriptionDrafted',
   'gate-created': 'eventGateCreated',
@@ -61,9 +92,10 @@ const actions: Record<string, MessageKey> = {
   'operation-rejected': 'eventOperationRejected',
 };
 export function eventSummary(event: HelmEvent, t: (key: MessageKey) => string, ordinal?: number) {
-  const details = event.details as { step?: number; summary?: string; reason?: string; conclusion?: string; decision?: string; version?: number } | null;
+  const details = event.details as { step?: number | string; summary?: string; reason?: string; conclusion?: string; decision?: string; version?: number } | null;
   const action = event.action === 'gate-decided' && details?.decision === 'confirm' ? t('eventConfirmed')
-    : event.action === 'dispatch-ended' && details?.conclusion === 'failed' ? t('graphReportedFailed') : t(actions[event.action] ?? 'eventRecorded');
-  return [ordinal ? `${t('graphCard')} ${ordinal}` : '', action, details?.step ? `${t('graphStep')} ${details.step}` : '',
-    details?.version ? `v${details.version}` : '', details?.summary || details?.reason || ''].filter(Boolean).join(' · ');
+    : event.action === 'dispatch-ended' && details?.conclusion === 'failed' ? t('graphReportedFailed') : t(eventActionLabels[event.action] ?? 'eventRecorded');
+  const step = typeof details?.step === 'number' ? `${t('graphStep')} ${details.step}` : typeof details?.step === 'string' ? systemValueLabel(details.step, t) : '';
+  return [ordinal ? `${t('graphCard')} ${ordinal}` : '', action, step,
+    details?.version ? `v${details.version}` : '', systemValueLabel(details?.summary || details?.reason || '', t)].filter(Boolean).join(' · ');
 }

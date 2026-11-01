@@ -197,3 +197,18 @@ test('列表用真实卡片分组，展示等你决定、验收未过、受阻�
   expect(within(english).getByText('Skipped · “cancelled” cancelled')).toBeTruthy();
   expect(screen.getByRole('complementary', { name: 'Inspector' }).textContent).not.toMatch(/[\u3400-\u9fff]/);
 });
+
+
+test('卡片检查器框架显示真实卡号，标题中的状态文字原样保留', async () => {
+  daemon = await uiFixture([[draft], [{ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'literal-title', content: '真实名称 · 执行中', readOnly: true }), check: ok }]]);
+  const work = await create(); await confirm(work.id);
+  window.history.replaceState(null, '', `/works/${work.id}`);
+  render(<App baseUrl={daemon.url} />);
+  fireEvent.click(await screen.findByRole('button', { name: '卡片 1：真实名称 · 执行中' }));
+  const inspector = screen.getByRole('complementary', { name: '检查器' });
+  expect(await within(inspector).findAllByText('卡片 1')).not.toHaveLength(0);
+  expect(within(inspector).getByRole('heading', { name: '真实名称 · 执行中' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(await within(inspector).findAllByText('Card 1')).not.toHaveLength(0);
+  expect(within(inspector).getByRole('heading', { name: '真实名称 · 执行中' })).toBeTruthy();
+});

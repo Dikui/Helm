@@ -396,6 +396,7 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
   await waitFor(() => expect((within(delivery).getByRole('button', { name: '推送' }) as HTMLButtonElement).disabled).toBe(false));
   await waitFor(() => expect(within(top).getByText('已完成 · 已合入')).toBeTruthy());
+  expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText('已结束 · 合入完成')).toBeTruthy();
   await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('工作说明与审核')).toBeTruthy());
   expect(within(screen.getByRole('region', { name: '等你' })).queryByText('工作说明与审核')).toBeNull();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
@@ -463,6 +464,7 @@ test.each(['conflict', 'merge-failed', 'push-failed'])('界面显示 %s 原因�
   } else if (problem === 'conflict') {
     expect(await within(delivery).findByRole('heading', { name: '合入冲突，待合入' })).toBeTruthy();
     expect(await within(screen.getByRole('banner', { name: '工作概况' })).findByText('合入冲突，待合入')).toBeTruthy();
+    expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText('空闲 · 等你选择冲突处理方式')).toBeTruthy();
     expect(within(delivery).getByRole('cell', { name: 'result.txt' })).toBeTruthy();
     expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
     expect(within(delivery).queryByRole('button', { name: '推送' })).toBeNull();
@@ -482,6 +484,7 @@ test.each(['conflict', 'merge-failed', 'push-failed'])('界面显示 %s 原因�
     fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
     expect(await within(delivery).findByRole('heading', { name: '推送失败' })).toBeTruthy();
     expect(await within(screen.getByRole('banner', { name: '工作概况' })).findByText('已完成 · 推送失败')).toBeTruthy();
+    expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText('已结束 · 等你重试推送')).toBeTruthy();
     expect(within(delivery).getByRole('alert').textContent).toContain('ui-push-rejected');
     expect(await within(screen.getByRole('region', { name: '等你' })).findByText('等你：推送失败')).toBeTruthy();
     await rm(hook);

@@ -126,7 +126,7 @@ test.each(['对齐', '执行'])('%s思考输出、步骤区域和窗口尺寸变
   expect(history.scrollTop).toBe(300);
   finish();
   await waitFor(() => expect(within(history).queryByText('调度者正在思考…')).toBeNull());
-  expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText(phase === '对齐' ? '工作说明已起草，等你确认' : '本轮已结束 · 最新：检查邮件模板')).toBeTruthy();
+  expect(await within(screen.getByRole('navigation', { name: '现在条' })).findByText(phase === '对齐' ? '已起草，等你确认' : '本轮已结束 · 最新：检查邮件模板')).toBeTruthy();
   expect(history.scrollTop).toBe(300);
   expect(screen.getByRole('button', { name: '回到最新内容' })).toBeTruthy();
   // Manually scrolling back to the bottom also hides the arrow and resumes following.

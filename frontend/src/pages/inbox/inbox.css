@@ -38,7 +38,7 @@
 .empty-inbox { padding: 25px 14px; color: var(--muted); font-size: 12px; text-align: center; }
 .sb-bottom { display: grid; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .sb-bottom .sb-foot { padding: 0; border-top: 0; }
-.sb-bottom .sb-foot > a { color: inherit; text-decoration: none; }
+.sb-bottom .sb-foot > a { color: var(--running); text-decoration: underline; }
 .sb-bottom .sb-foot > a:hover { text-decoration: underline; }
 .inbox-meter { display: flex; justify-content: space-between; }
 .inbox-usage-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
@@ -50,3 +50,5 @@
 .inbox-cli-alert > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inbox-cli-alert:hover { text-decoration: underline; }
 .inbox-connection { padding: 0 14px; color: var(--muted); font-size: 12px; }
+
+.sb-head .shell-fold, .sb-head .shell-fold:hover { color: var(--running); }
