@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    shellInbox: '工作收件箱', shellAttention: '等你', shellRunning: '在跑', shellCollapseInbox: '收起收件箱', shellExpandInbox: '展开收件箱', shellCloseInbox: '关闭收件箱', shellCloseBackdrop: '关闭收件箱背景',
+    shellInspector: '检查器', shellCollapseInspector: '收起检查器', shellExpandInspector: '展开检查器', shellResizeInspector: '调整检查器宽度',
+    shellWidenInspector: '放宽检查器', shellNarrowInspector: '收窄检查器', shellWiden: '放宽', shellNarrow: '收窄', shellCollapse: '收起', shellCliAlert: 'Agent 不可用，打开 Agent 设置',
     accepted: '已接受，待合入', 'merge-queued': '等待合入', merging: '正在合入',
     deliveryReviewReport: '回看已审核报告', deliveryTitle: '合入与推送', deliveryCompleted: '已完成', deliveryPushed: '已推送 · 工作完成', deliveryContained: '已包含 · 工作完成',
     deliveryConflict: '合入冲突，待合入', deliveryMergeFailed: '合入失败，待重试', deliveryPushFailed: '推送失败',
@@ -220,6 +223,9 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
+    shellInbox: 'Work inbox', shellAttention: 'Needs you', shellRunning: 'Running', shellCollapseInbox: 'Collapse inbox', shellExpandInbox: 'Expand inbox', shellCloseInbox: 'Close inbox', shellCloseBackdrop: 'Close inbox backdrop',
+    shellInspector: 'Inspector', shellCollapseInspector: 'Collapse inspector', shellExpandInspector: 'Expand inspector', shellResizeInspector: 'Resize inspector',
+    shellWidenInspector: 'Widen inspector', shellNarrowInspector: 'Narrow inspector', shellWiden: 'Widen', shellNarrow: 'Narrow', shellCollapse: 'Collapse', shellCliAlert: 'Agent unavailable, open Agent settings',
     accepted: 'Accepted, awaiting merge', 'merge-queued': 'Merge queued', merging: 'Merging',
     deliveryReviewReport: 'View reviewed report', deliveryTitle: 'Merge and push', deliveryCompleted: 'Completed', deliveryPushed: 'Pushed · work completed', deliveryContained: 'Already contained · work completed',
     deliveryConflict: 'Merge conflict, awaiting merge', deliveryMergeFailed: 'Merge failed, retry available', deliveryPushFailed: 'Push failed',

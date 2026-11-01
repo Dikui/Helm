@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ComponentType, type MouseEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type AnchorHTMLAttributes, type ComponentType, type MouseEvent, type ReactNode } from 'react';
 export interface RouteParams { workId?: string; view?: string; section?: string; agentId?: string }
 export interface RouteDefinition {
   pattern: RegExp; params: (match: RegExpMatchArray) => RouteParams; component: ComponentType<{ route: RouteParams }>;
@@ -19,7 +19,7 @@ export function useRouter() {
   if (!value) throw new Error('Router is required');
   return value;
 }
-export function Link({ href, children, ...props }: { href: string; children: ReactNode; className?: string; 'aria-current'?: 'page' | undefined }) {
+export function Link({ href, children, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'onClick'> & { href: string; children: ReactNode }) {
   const { navigate } = useRouter();
   const click = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

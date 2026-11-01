@@ -71,7 +71,7 @@ function ProjectEnvironment({ project, onSaved }: { project: Project; onSaved: (
   const save = useSettingsSave();
   const names = project.environmentNames ?? [];
   return <details className="settings-project-config"><summary>{t('projectEnvironment')}</summary>
-    <form aria-label={`${t('projectEnvironment')} ${project.name}`} aria-busy={save.pending} onSubmit={event => {
+    <form noValidate aria-label={`${t('projectEnvironment')} ${project.name}`} aria-busy={save.pending} onSubmit={event => {
       event.preventDefault();
       void save.run(async () => {
         await api.call('set-project-environment', { projectId: project.id, name, value });

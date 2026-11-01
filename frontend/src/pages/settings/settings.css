@@ -11,7 +11,6 @@
 .settings-agent-row:hover { border-color: var(--border-strong); }
 .settings-agent-row[aria-current='page'] { border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring); }
 .settings-agent-row > span { min-width: 0; overflow-wrap: anywhere; }
-.settings-driver { display: grid; place-items: center; width: 32px; height: 32px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .settings-meta { display: block; color: var(--muted); margin-top: 3px; }
 .settings-agent-status { display: grid; align-content: start; justify-items: end; gap: var(--space-2); color: var(--muted); }
 .settings-reason { display: block; color: var(--danger); overflow-wrap: anywhere; }

@@ -5,6 +5,7 @@ import { useI18n } from '../../shared/i18n.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { AgentEntry } from './types.js';
 import { AgentEditor } from './AgentEditor.js';
+import { AgentMark } from '../../shared/AgentMark.js';
 export function AgentsSection({ agentId, creating = false }: { agentId?: string; creating?: boolean }) {
   const { t } = useI18n();
   const { data, error, reload } = useResource<AgentEntry[]>('list-agents');
@@ -27,7 +28,7 @@ export function AgentsSection({ agentId, creating = false }: { agentId?: string;
         const title = t(role === 'coordinator' ? 'coordinatorRole' : role === 'executor' ? 'executorAgents' : 'unrecognizedAgents');
         return <section key={role ?? 'unknown'} aria-label={title}><h3 className="sect">{title} <span className="count">{entries.length}</span></h3>
           {entries.map(item => <Link key={item.id} href={`/settings/agents/${encodeURIComponent(item.id)}`} className={`settings-agent-row${item.available ? '' : ' off'}`} aria-current={item.id === selected?.id ? 'page' : undefined}>
-            <span className="settings-driver mono">{item.driver ? { 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[item.driver] : '?'}</span>
+            <AgentMark driver={item.driver} />
             <span><b className="mono">{item.id}</b><span className="settings-meta">{item.driver} · {item.model ?? t('driverDefault')}{item.reasoningEffort ? ` · ${item.reasoningEffort}` : ''} <span className="settings-bill">{t(item.billing === 'api' ? 'apiBilling' : 'subscription')}</span></span><span className="settings-meta">{item.description}</span>
               {!item.available && <span className="settings-reason">{item.reason}{item.command && <> <code>{item.command}</code></>}</span>}
               {item.warnings?.map(warning => <span key={warning} className="settings-warning">{warning}</span>)}</span>

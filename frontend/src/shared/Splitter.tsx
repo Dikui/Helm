@@ -3,7 +3,7 @@ import { useState, type KeyboardEvent, type PointerEvent } from 'react';
 // 尺寸只是本机偏好，存不进去（隐私模式等）时退回默认布局
 export function useStoredSize(key: string) {
   const [size, setSize] = useState<number | undefined>(() => {
-    try { const value = Number(localStorage.getItem(key)); return value > 0 ? value : undefined; } catch { return undefined; }
+    try { const value = Number(localStorage.getItem(key)); return Number.isFinite(value) && value > 0 ? value : undefined; } catch { return undefined; }
   });
   const store = (value: number | undefined) => {
     setSize(value);
@@ -13,9 +13,9 @@ export function useStoredSize(key: string) {
 }
 
 /** 拖动或方向键调整相邻区域尺寸；双击恢复默认。grow 为 -1 时向上 / 向左拖动变大。 */
-export function Splitter({ label, orientation, measure, onResize, min, max, grow = 1 }: {
+export function Splitter({ label, orientation, measure, onResize, min, max, grow = 1, value }: {
   label: string; orientation: 'vertical' | 'horizontal'; measure: () => number; onResize: (size: number | undefined) => void;
-  min: number; max: () => number; grow?: 1 | -1;
+  min: number; max: () => number; grow?: 1 | -1; value?: number;
 }) {
   const [now, setNow] = useState<number>();
   const clamp = (value: number) => Math.min(Math.max(value, min), Math.max(min, max()));
@@ -37,6 +37,6 @@ export function Splitter({ label, orientation, measure, onResize, min, max, grow
     const size = clamp(measure() + grow * delta); setNow(size); onResize(size);
   };
   return <div className={`splitter ${orientation}`} role="separator" aria-orientation={orientation} aria-label={label} tabIndex={0}
-    aria-valuemin={min} aria-valuenow={Math.round(now ?? measure())} onPointerDown={down} onKeyDown={key}
+    aria-valuemin={min} aria-valuemax={Math.max(min, max())} aria-valuenow={Math.round(value ?? now ?? measure())} onPointerDown={down} onKeyDown={key}
     onDoubleClick={() => { setNow(undefined); onResize(undefined); }} />;
 }

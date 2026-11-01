@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { AgentMark } from '../../shared/AgentMark.js';
 import { OperationError } from '../../shared/api.js';
 import { useData } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
@@ -96,7 +97,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   }
   return <form className="settings-editor" aria-label={t('agentDetails')} onSubmit={save} noValidate aria-busy={pending}>
     <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} />
-    <div className="settings-detail-head"><span className="settings-driver mono">{{ 'claude-sdk': 'C', codex: 'X', grok: 'G', deepseek: 'D' }[value.config.driver]}</span><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted">{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}</div>
+    <div className="settings-detail-head"><AgentMark driver={value.config.driver} /><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted">{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}</div>
     {!creating && <div className="settings-box">
       {!source!.available && <p className="settings-reason">{source!.reason}{source!.command && <> <code>{source!.command}</code></>}</p>}
       <button type="button" className="btn sm" disabled={pending} aria-busy={pending} onClick={() => void recheck()}>{t('recheck')}</button>

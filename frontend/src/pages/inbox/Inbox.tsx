@@ -39,8 +39,11 @@ function InboxRow({ work, now }: { work: WorkSummary; now: number }) {
     {expanded && <div className="more"><InboxDetails work={work} /></div>}
   </div>;
 }
-export function Inbox() {
+export function Inbox({ folded, drawer, onToggle, onSearch, searchRequest }: {
+  folded: boolean; drawer: boolean; onToggle: () => void; onSearch: () => void; searchRequest: number;
+}) {
   const { t, language, setLanguage } = useI18n();
+  const { path } = useRouter();
   const { connection } = useData();
   const { data: works, error, reload } = useResource<WorkSummary[]>('list-works', {}, affectsWorks);
   const settings = useResource<Settings>('get-settings', {}, affectsSettings);
@@ -48,13 +51,31 @@ export function Inbox() {
   const input = useRef<HTMLInputElement>(null);
   const now = useClock();
   useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); input.current?.focus(); } };
-    window.addEventListener('keydown', shortcut);
-    return () => window.removeEventListener('keydown', shortcut);
-  }, []);
+    if (searchRequest && !folded) input.current?.focus();
+  }, [searchRequest, folded]);
   const filtered = works?.filter(work => work.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  if (folded) return <aside className="sb sb-rail" aria-label="Helm">
+    <button type="button" className="logo" aria-label={t('shellExpandInbox')} title={`${t('shellExpandInbox')} ([)`} aria-controls="inbox-content" aria-expanded={false} onClick={onToggle}>H</button>
+    <Link className="rail-new" href="/new" aria-label={t('newWork')} title={`${t('newWork')} ⌘N`}>＋</Link>
+    <div className="rail-works">
+      <span className="sr" role="status">{t(connection)}</span>
+      {error && <ErrorNotice error={error} retry={reload} />}
+      {!works && !error && <span className="sr" role="status">{t('loading')}</span>}
+      {(['attention', 'running'] as const).map(category => <section key={category} aria-label={t(category === 'attention' ? 'shellAttention' : 'shellRunning')}>
+        <h2>{t(category === 'attention' ? 'shellAttention' : 'shellRunning')}</h2>
+        {works?.filter(work => group(work) === category).map(work => <Link key={work.id} className="rail-work" href={`/works/${encodeURIComponent(work.id)}`}
+          aria-current={path === `/works/${work.id}` || path.startsWith(`/works/${work.id}/`) ? 'page' : undefined}
+          aria-label={`${work.title || t('untitled')} · ${t(work.status)} · ${work.summary}`} title={`${work.title || t('untitled')} — ${t(work.status)} · ${work.summary}`}>
+          <span className={`spark ${category === 'attention' ? 'att' : work.status === 'paused' ? 'idle' : 'run busy'}`} aria-hidden="true" />
+        </Link>)}
+      </section>)}
+    </div>
+    <div className="rail-footer"><AgentNotices compact /><button type="button" className="shell-fold" aria-label={t('search')} title={`${t('search')} ⌘K`} onClick={onSearch}>⌕</button><Link href="/settings" aria-label={t('settings')} title={t('settings')}>⚙</Link></div>
+  </aside>;
   return <aside className="sb" aria-label="Helm">
-    <div className="sb-head"><Link className="logo" href="/" aria-label="Helm">H</Link><b>Helm</b><Link className="btn sm primary" href="/new">＋ {t('newWork')}</Link></div>
+    <div className="sb-head"><Link className="logo" href="/" aria-label="Helm">H</Link><b>Helm</b>
+      <button type="button" className="shell-fold" aria-label={t(drawer ? 'shellCloseInbox' : 'shellCollapseInbox')} title={`${t(drawer ? 'shellCloseInbox' : 'shellCollapseInbox')} ([)`} aria-controls="inbox-content" aria-expanded={true} onClick={onToggle}>⇤</button>
+      <Link className="btn sm primary" href="/new">＋ {t('newWork')} <kbd>⌘N</kbd></Link></div>
     <div className="search"><input ref={input} type="search" aria-label={t('search')} placeholder={t('search')} value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="clear-search" aria-label={t('clearSearch')} onClick={() => { setSearch(''); input.current?.focus(); }}>×</button>}<kbd>⌘K</kbd></div>
     <div className="connection" role="status">{t(connection)}</div>
     <div className="inbox">

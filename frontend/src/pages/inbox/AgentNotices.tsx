@@ -7,12 +7,13 @@ import type { HelmEvent } from '../../shared/types.js';
 interface AgentNotice { kind: string; agentId?: string; reason?: string; command?: string }
 const affectsAgents = (event: HelmEvent) => event.object.type === 'agent';
 
-export function AgentNotices() {
+export function AgentNotices({ compact = false }: { compact?: boolean }) {
   const { t } = useI18n();
   const { data, error, reload } = useResource<AgentNotice[]>('list-pending', {}, affectsAgents);
   const notices = data?.filter(item => item.kind === 'agent-unavailable' && item.agentId) ?? [];
   if (error) return <ErrorNotice error={error} retry={reload} />;
   if (!notices.length) return null;
+  if (compact) return <Link className="rail-alert" href="/settings/agents" aria-label={t('shellCliAlert')} title={notices.map(notice => `${notice.agentId} · ${notice.reason}`).join('\n')}>●</Link>;
   return <section aria-label={t('unavailable')}>
     <h2 className="sect">{t('agents')}<span className="count">{notices.length}</span></h2>
     {notices.map(notice => <div key={notice.agentId} className="error" role="status">

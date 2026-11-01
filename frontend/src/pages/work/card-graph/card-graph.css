@@ -156,3 +156,9 @@
 
 .cg-legend .cg-skip-chip { height: 16px; font-size: 10px; }
 .cg-inspector-head .cg-skip-chip { max-width: 100%; height: auto; min-height: 18px; white-space: normal; overflow-wrap: anywhere; }
+
+@container (max-width: 780px) {
+  .cg-view { display: flex; flex-direction: column; overflow: auto; }
+  .cg-main { min-height: 440px; flex-shrink: 0; }
+  .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; flex-shrink: 0; }
+}
