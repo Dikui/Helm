@@ -59,7 +59,7 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
   assert.ok(artifacts.some((a: any) => a.name === 'browser/grok.png'));
 });
 
-test('startHelmd 默认登记 Grok 驱动和内置 Agent；调度者 Agent 可用（CLI 替身）', async t => {
+test('startHelmd 默认登记 Grok 执行者；调度者不可用并显示只读沙箱原因（CLI 替身）', async t => {
   const acp = await acpFixture(t);
   const bin = join(acp.directory, 'bin');
   await mkdir(bin);
@@ -77,13 +77,15 @@ test('startHelmd 默认登记 Grok 驱动和内置 Agent；调度者 Agent 可�
   await writeFile(configPath, JSON.stringify({ ...JSON.parse(await readFile(configPath, 'utf8')), role: 'coordinator' }));
   const daemon = await startHelmd({ port: 0, dataDir: join(acp.directory, 'data'), agentDir });
   try {
-    assert.equal(new AgentCatalog(agentDir, ['grok']).get('grok-coordinator', 'coordinator').role, 'coordinator');
+    const reason = acp.driver.capabilities.coordinatorUnavailableReason!;
+    assert.throws(() => new AgentCatalog(agentDir, ['grok']).get('grok-coordinator', 'coordinator'), { message: reason });
     const call = async (name: string) => (await (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as any).result;
     const agents = await call('list-agents');
     assert.equal(agents.find((t: any) => t.id === 'grok-executor').available, true);
     const coordinator = agents.find((t: any) => t.id === 'grok-coordinator');
-    assert.equal(coordinator.available, true);
-    assert.equal((await call('list-pending')).some((p: any) => p.agentId === 'grok-coordinator'), false);
+    assert.equal(coordinator.available, false);
+    assert.equal(coordinator.reason, reason);
+    assert.equal((await call('list-pending')).find((p: any) => p.agentId === 'grok-coordinator').reason, reason);
     assert.ok((await acp.requests()).every(r => ['fixture/spawn', 'initialize'].includes(r.method)), '启动检查不建模型会话');
   } finally { await daemon.close(); }
 });

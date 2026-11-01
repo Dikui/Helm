@@ -1,4 +1,5 @@
 // Outside the sandbox only; npm test compiles this file but never executes it.
+// Restore this group to real-smoke-runner after Grok fixes read-only docker.sock symlinks and coordinator support is re-enabled.
 import { test } from 'node:test';
 import { acpCoordinatorSmoke } from './acp-coordinator-smoke.js';
 

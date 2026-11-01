@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { acpAgents } from '../src/acp-agents.js';
 import { roleRules } from '../src/prompts.js';
 import { acpFixture, collect } from './acp-fixture.js';
@@ -15,7 +15,16 @@ const configOptions = [
     options: [{ value: 'low', name: 'Low' }] },
 ];
 
+// Mechanism tests use scripted ACP peers; real CLI support is checked separately.
+function enableCoordinatorForFixture(t: TestContext, kind: 'grok' | 'deepseek') {
+  const capabilities = acpAgents[kind].capabilities;
+  const previous = { ...capabilities };
+  capabilities.coordinator = true;
+  t.after(() => { Object.assign(capabilities, previous); });
+}
+
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者新开和续跑均使用只读沙箱、轮次 MCP 和调度规则，保留计划与结束事件`, async t => {
+  enableCoordinatorForFixture(t, kind);
   const ctx = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions,
     permissions: Array.from({ length: 3 }, () => ['allow_once', 'reject_once'].map(kind => ({ kind, name: kind, optionId: kind }))),
     permissionToolCalls: ['read-only', 'workspace-write', 'danger-full-access'].map(mode => ({
@@ -60,6 +69,7 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者新开�
 });
 
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝可写沙箱与未开放的调度者能力，不启动 CLI`, async t => {
+  enableCoordinatorForFixture(t, kind);
   const ctx = await acpFixture(t, {}, true, kind);
   const agent = { ...ctx.agent, role: 'coordinator' as const };
   for (const sandbox of [ctx.options.sandbox, { mode: 'read-only' as const, writableRoots: [ctx.cwd] }]) {
@@ -79,6 +89,7 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝�
 });
 
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} ACP 调度者仅获得调度工具，不能经客户端写代码，续跑更换且结束后撤销轮次令牌`, async t => {
+  enableCoordinatorForFixture(t, kind);
   const acp = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions } : {}), mcpTools: [
     { name: 'draft-work-description', arguments: { key: 'draft', requirements: '只读检查 README', boundary: '临时项目', criteria: '基线内容保持原样' } },
   ], clientRequests: [{ method: 'fs/write_text_file', params: { path: 'coordinator-write.txt', content: 'forbidden' } }],
@@ -107,4 +118,14 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} ACP 调度者仅
   }
   await assert.rejects(readFile(join(daemon.repo, 'coordinator-write.txt')), { code: 'ENOENT' });
   assert.equal(daemon.git('status', '--porcelain'), '');
+});
+
+test('Grok 调度者因 docker.sock 软链接导致只读沙箱无法启动而不可用，预检和启动均不运行 CLI', async t => {
+  const ctx = await acpFixture(t);
+  const agent = { ...ctx.agent, role: 'coordinator' as const };
+  const reason = 'Grok 1.0.70 的只读沙箱在 /var/run/docker.sock 为软链接的机器上拒绝启动；调度者需要只读沙箱，因此当前不能用作调度者。';
+  assert.equal(ctx.driver.capabilities.coordinator, false);
+  assert.deepEqual(await ctx.driver.checkAvailability(agent), { available: false, reason });
+  await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox: { mode: 'read-only', writableRoots: [] } }), { message: reason });
+  assert.deepEqual(await ctx.requests(), []);
 });

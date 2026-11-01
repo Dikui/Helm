@@ -56,7 +56,7 @@ test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请�
   expect((screen.getByLabelText('需求') as HTMLTextAreaElement).value).toBe('邮箱验证码登录');
   expect((screen.getByLabelText('需求') as HTMLTextAreaElement).disabled).toBe(true);
   // A later availability change must not block replay of an already accepted request.
-  await configureTestAgent(agentDir, 'codex-coordinator', { driver: 'grok', fast: true });
+  await configureTestAgent(agentDir, 'codex-coordinator', { driver: 'grok' });
   await daemon.call('list-agents');
   await within(agent).findByRole('option', { name: /codex-coordinator · / });
   expect((screen.getByRole('button', { name: '重试原请求' }) as HTMLButtonElement).disabled).toBe(false);
@@ -476,13 +476,13 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
 test('项目切换重选默认 Agent，不可用 Agent 显示原因且不能开始；未提交改动提醒来自 git', async () => {
   agentDirectory = await mkdtemp(join(tmpdir(), 'helm-new-work-agents-'));
   const agentDir = await copyAgents(agentDirectory);
-  await configureTestAgent(agentDir, 'claude-coordinator', { driver: 'grok', fast: true });
+  await configureTestAgent(agentDir, 'claude-coordinator', { driver: 'grok' });
   daemon = await uiFixture([], undefined, { agentDir });
   await writeFile(join(daemon.repo, 'pending.md'), 'uncommitted');
   window.history.replaceState(null, '', '/new');
   render(<App baseUrl={daemon.url} />);
   const agents = await screen.findByLabelText('调度者 Agent');
-  const unavailable = await within(agents).findByRole('option', { name: /claude-coordinator.*Grok 不支持 Agent fast/ });
+  const unavailable = await within(agents).findByRole('option', { name: /claude-coordinator.*Grok 1\.0\.70.*只读沙箱/ });
   await waitFor(() => expect((unavailable as HTMLOptionElement).selected).toBe(true));
   await waitFor(() => expect((screen.getByLabelText('基准分支') as HTMLSelectElement).value).toBe('main'));
   expect((await screen.findByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(true);

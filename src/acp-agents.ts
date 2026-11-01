@@ -143,7 +143,9 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       // GROK_CONFIG is an allowlisted deep-merge overlay, not a replacement.
       // https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md
       cleanStart: { supported: false, reason: 'Grok 1.0.70 没有跳过用户与项目配置的 ACP 开关；GROK_CONFIG 仅叠加配置，仍会加载全局规则、MCP、skills 和 hooks。' },
-      resume: true, contextUsage: false, coordinator: true,
+      // Grok 1.0.70's built-in read-only profile refuses symlinked docker.sock endpoints (e.g. OrbStack).
+      resume: true, contextUsage: false, coordinator: false,
+      coordinatorUnavailableReason: 'Grok 1.0.70 的只读沙箱在 /var/run/docker.sock 为软链接的机器上拒绝启动；调度者需要只读沙箱，因此当前不能用作调度者。',
       autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
