@@ -269,4 +269,8 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE cards ADD COLUMN auto_flow TEXT;
   `,
+  `
+  ALTER TABLE dispatches ADD COLUMN read_only_snapshot TEXT;
+  ALTER TABLE dispatches ADD COLUMN read_only_check TEXT;
+  `,
 ];

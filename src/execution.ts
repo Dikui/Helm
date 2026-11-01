@@ -15,6 +15,7 @@ import { checkOutputUsage } from './outputs.js';
 import { outputSummary } from './output-summary.js';
 import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
 import { projectEnvironment, protectDispatchEnvironment, redactEnvironmentEvent } from './project-environment.js';
+import { finishReadOnlyCheck, readOnlySnapshot } from './read-only-check.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -43,7 +44,7 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
     if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }
-  if (card.readOnly) return null;
+  if (card.readOnly) { finishReadOnlyCheck(store, dispatch); return null; }
   const workPath = card.workPath!;
   const conflictMerge = reason === 'completed' && pendingConflictCardMerge(store, dispatch, workPath);
   if (!conflictMerge) abortCardGit(store, dispatch, workPath, card.cardBranch!);
@@ -200,9 +201,10 @@ export class ExecutionRunner {
       if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, dispatch.startCommit ?? verificationCommit(this.store, card));
       else if (!readOnly) prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = readOnly ? null : dispatchGit(workPath, 'rev-parse', 'HEAD');
+      const readOnlyBefore = readOnly ? readOnlySnapshot(workPath, workPath === projectPath(this.store, dispatch.workId)) : null;
       this.store.transaction(() => {
-        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
-          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), dispatch.id);
+        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ?, read_only_snapshot = ? WHERE id = ?`)
+          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), readOnlyBefore ? JSON.stringify(readOnlyBefore) : null, dispatch.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
           this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }
@@ -341,7 +343,7 @@ export class ExecutionRunner {
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        if (!ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+        if (readOnly || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
           getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');

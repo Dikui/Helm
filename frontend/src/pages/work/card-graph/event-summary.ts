@@ -49,6 +49,7 @@ export const eventActionLabels: Record<string, MessageKey> = {
   'dispatch-created': 'eventDispatchCreated',
   'dispatch-started': 'eventDispatchStarted',
   'dispatch-ended': 'eventDispatchEnded',
+  'dispatch-read-only-violated': 'graphReadOnlyViolation',
   'dispatch-step': 'eventDispatchStep',
   'dispatch-revoked': 'eventDispatchRevoked',
   'dispatch-timed-out': 'eventDispatchTimedOut',
