@@ -19,7 +19,7 @@ export function credentialPaths(home = homedir()) {
 }
 
 export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
-// Session size after the turn; a coordinator round resumes only when its driver reports it (ADR 0017).
+// Session size after the turn; drivers reporting it use the coordinator's context threshold (ADR 0017).
 export interface ContextSize { tokens: number; window?: number }
 interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
 export type McpServerConfig = HttpMcpServer | Extract<McpConfig, { type: 'stdio' }>;
