@@ -5,6 +5,8 @@ import { useI18n } from '../../shared/i18n.js';
 import type { Work } from '../../shared/types.js';
 import type { Project, AgentEntry } from './types.js';
 import { SaveFeedback } from './SaveFeedback.js';
+import { ActionDialog } from '../work/ActionDialog.js';
+import '../work/work-actions.css';
 import { useSettingsSave } from './useSettingsSave.js';
 
 export function ProjectsSection() {
@@ -13,13 +15,15 @@ export function ProjectsSection() {
   const projects = useResource<Project[]>('list-projects');
   const agents = useResource<AgentEntry[]>('list-agents');
   const works = useResource<Work[]>('list-works');
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const registerButton = useRef<HTMLButtonElement>(null);
   const [path, setPath] = useState('');
   const [name, setName] = useState('');
   const [invalidPath, setInvalidPath] = useState(false);
   const [deleted, setDeleted] = useState(false);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useRef<HTMLElement>(null);
   const save = useSettingsSave();
-  return <section className="settings-simple settings-projects" aria-label={t('projects')}><div className="settings-heading"><h2 ref={heading} tabIndex={-1}>{t('projects')}</h2><button type="button" className="btn sm" onClick={() => document.getElementById('register-project-path')?.focus()}>＋ {t('newWorkRegisterProject')}</button></div>
+  return <section ref={heading} tabIndex={-1} className="settings-simple settings-projects" aria-label={t('projects')}><div className="settings-heading"><button ref={registerButton} type="button" className="btn sm" onClick={() => setRegisterOpen(true)}>＋ {t('newWorkRegisterProject')}</button></div>
     {[projects, agents, works].map((resource, index) => resource.error && <ErrorNotice key={index} error={resource.error} retry={resource.reload} />)}
     {!projects.data && !projects.error && <p role="status">{t('loading')}</p>}
     {projects.data?.length === 0 && <p>{t('emptyProjects')}</p>}
@@ -27,17 +31,17 @@ export function ProjectsSection() {
     {projects.data?.map(project => <ProjectRow key={project.id} project={project} agents={agents.data ?? []}
       workCount={works.error ? undefined : works.data?.filter(work => work.projectId === project.id).length} onSaved={projects.reload}
       onDeleted={() => { setDeleted(true); heading.current?.focus(); projects.reload(); }} />)}
-    <form className="settings-box" aria-label={t('registerProject')} noValidate aria-busy={save.pending} onSubmit={event => {
+    <ActionDialog className="settings-modal" title={t('registerProject')} open={registerOpen} busy={save.pending} onClose={() => setRegisterOpen(false)} returnFocus={registerButton}><form className="settings-box" aria-label={t('registerProject')} noValidate aria-busy={save.pending} onSubmit={event => {
       event.preventDefault();
       if (!path.trim()) { setInvalidPath(true); document.getElementById('register-project-path')?.focus(); return; }
       setInvalidPath(false);
-      void save.run(async () => { await api.call('register-project', { path, ...(name.trim() ? { name: name.trim() } : {}) }); setPath(''); setName(''); projects.reload(); });
+      void save.run(async () => { await api.call('register-project', { path, ...(name.trim() ? { name: name.trim() } : {}) }); setPath(''); setName(''); setRegisterOpen(false); projects.reload(); });
     }}>
       <h3>{t('registerProject')}</h3><label>{t('projectName')}<input value={name} disabled={save.pending} onChange={event => { setName(event.target.value); save.clear(); }} /></label>
       <label>{t('projectPath')}<input id="register-project-path" value={path} disabled={save.pending} aria-invalid={invalidPath} aria-describedby={invalidPath ? 'register-project-path-error' : undefined} onChange={event => { setPath(event.target.value); save.clear(); setInvalidPath(false); }} /></label>
       {invalidPath && <p className="settings-reason" id="register-project-path-error">{t('requiredField')}</p>}
       <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('registerProject')}</button></div>
-    </form>
+    </form></ActionDialog>
   </section>;
 }
 function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { project: Project; agents: AgentEntry[]; workCount?: number; onSaved: () => void; onDeleted: () => void }) {

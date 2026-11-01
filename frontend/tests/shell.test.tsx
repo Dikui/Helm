@@ -44,7 +44,7 @@ test('两侧可独立收起、恢复；快捷键避开输入和 IME；收起后�
   expect(await screen.findByRole('heading', { name: '新建工作' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '关闭新建工作' }));
   fireEvent.click(screen.getByRole('link', { name: '设置' }));
-  expect(await screen.findByRole('heading', { name: '设置' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Agent' })).toBeTruthy();
 });
 
 test('收起与检查器宽度跨重挂载保留；宽度支持方向键、放宽和恢复默认', async () => {
@@ -93,7 +93,7 @@ test('390px 抽屉可搜索、圈定焦点、Esc 和点背景关闭、导航关�
   expect(screen.queryByRole('separator', { name: '调整检查器宽度' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '展开收件箱' }));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('link', { name: '设置' }));
-  await screen.findByRole('heading', { name: '设置' });
+  await screen.findByRole('heading', { name: 'Agent' });
   expect(screen.queryByRole('dialog')).toBeNull();
   expect({ ...localStorage }).toEqual(saved);
   resize(1440);
@@ -110,7 +110,9 @@ test('英文外壳和驱动标志复用现有设置页；本机存储不可用�
   fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
   expect(screen.getByRole('button', { name: 'Expand inspector' })).toBeTruthy();
   fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
-  expect(await screen.findAllByRole('img', { name: 'Claude' })).toHaveLength(3);
+  const group = await screen.findByRole('group', { name: 'Claude CLI' });
+  expect(within(group).getByRole('img', { name: 'Claude' })).toBeTruthy();
+  expect(within(await screen.findByRole('form', { name: 'Agent details' })).getByRole('img', { name: 'Claude' })).toBeTruthy();
 });
 
 test('新建快捷键沿用设置未保存保护，textarea 与 select 中单字符不收起', async () => {
