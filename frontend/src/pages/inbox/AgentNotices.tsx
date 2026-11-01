@@ -15,6 +15,6 @@ export function AgentNotices({ compact = false }: { compact?: boolean }) {
   if (!notices.length) return null;
   return <Link className={compact ? 'rail-alert' : 'inbox-cli-alert'} href="/settings/environment" aria-label={t('inboxCliAlert')}
     title={notices.map(notice => [notice.agentId, notice.reason, notice.command].filter(Boolean).join(' · ')).join('\n')}>
-    <span aria-hidden="true">●</span>{!compact && <span>{t('inboxCliUnavailable').replace('{count}', String(notices.length))}</span>}
+    <span aria-hidden="true">●</span>{!compact && <span>{notices.map(notice => notice.reason || `${notice.agentId} · ${t('unavailable')}`).join(' · ')}</span>}
   </Link>;
 }

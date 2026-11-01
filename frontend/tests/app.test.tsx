@@ -32,7 +32,7 @@ test('整页读取真实 helmd：收件箱分组、搜索、SSE 更新及语言�
   const attention = await screen.findByRole('region', { name: '等你' });
   expect(await within(attention).findByText('登录页改版')).toBeTruthy();
   expect(screen.queryByRole('article', { name: '整理 README' })).toBeNull();
-  expect(screen.queryByLabelText('执行者并发')).toBeNull();
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 10'));
   fireEvent.click(screen.getByRole('button', { name: /安静/ }));
   expect(within(screen.getByRole('region', { name: '安静' })).getByRole('article', { name: '整理 README' })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox', { name: '搜索工作' }), { target: { value: 'README' } });
@@ -74,6 +74,40 @@ function controlledTransport() {
   return { transport, cursors, disconnect() { online = false; controller?.abort(); }, reconnect() { online = true; } };
 }
 
+test('收件箱底部随真实派单更新运行数、排队数和上限，收起后不显示用量', async () => {
+  const ok = (value: unknown) => expect((value as any).ok).toBe(true);
+  daemon = await uiFixture([[draft('v1')], [
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'first', content: '第一张', readOnly: true }), saveAs: 'first', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'first', cardId: (ctx.results.get('first') as any).result.id, agentId: 'claude-executor' }), check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'second', content: '第二张', readOnly: true }), saveAs: 'second', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'second', cardId: (ctx.results.get('second') as any).result.id, agentId: 'claude-executor' }), check: ok },
+    { type: 'hang' },
+  ]], undefined, { executorScripts: [[{ type: 'hang' }], [{ type: 'hang' }]] });
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '底部用量', key: 'usage' })).result.work;
+  ok(await daemon.call('set-concurrency', { limit: 1 }));
+  render(<App baseUrl={daemon.url} />);
+  const inbox = screen.getByRole('complementary', { name: 'Helm' });
+  await waitFor(() => expect(within(inbox).getByLabelText('执行者并发').textContent).toBe('0 / 1'));
+  expect(within(inbox).getByText('排队 0')).toBeTruthy();
+  await within(inbox).findByText('等你：确认工作说明');
+  expandRow(within(inbox).getByText('底部用量'));
+  const confirm = await within(inbox).findByRole('button', { name: '确认这一版' });
+  await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(within(inbox).getByLabelText('执行者并发').textContent).toBe('1 / 1'));
+  await within(inbox).findByText('排队 1');
+  ok(await daemon.call('set-concurrency', { limit: 2 }));
+  await waitFor(() => expect(within(inbox).getByLabelText('执行者并发').textContent).toBe('2 / 2'));
+  await within(inbox).findByText('排队 0');
+  ok(await daemon.call('pause-work', { workId: work.id }));
+  await waitFor(() => expect(within(inbox).getByLabelText('执行者并发').textContent).toBe('0 / 2'));
+  fireEvent.click(within(inbox).getByRole('button', { name: 'EN' }));
+  expect(within(inbox).getByLabelText('Executor concurrency').textContent).toBe('0 / 2');
+  expect(within(inbox).getByText('Queued 0')).toBeTruthy();
+  fireEvent.click(within(inbox).getByRole('button', { name: 'Collapse inbox' }));
+  expect(within(inbox).queryByLabelText('Executor concurrency')).toBeNull();
+});
+
 test('在跑行直接打开工作；待决定行的快速决定不改变路由', async () => {
   daemon = await uiFixture([[draft('v1')]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '点行打开', key: 'start' })).result.work;
@@ -87,11 +121,10 @@ test('在跑行直接打开工作；待决定行的快速决定不改变路由',
   expect(within(row).getByRole('link', { name: /点行打开 ·/ }).getAttribute('aria-current')).toBe('page');
 });
 
-test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新设置中的并发', async () => {
+test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新收件箱底部的并发', async () => {
   daemon = await uiFixture();
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '断线中的工作', key: 'start' })).result.work;
   const network = controlledTransport();
-  window.history.replaceState(null, '', '/settings/runtime');
   render(<App baseUrl={daemon.url} transport={network.transport} />);
   expect(await screen.findByText('断线中的工作')).toBeTruthy();
   await screen.findByText('实时更新已连接');
@@ -104,7 +137,7 @@ test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新�
   await daemon.call('set-concurrency', { limit: 4 });
   network.reconnect();
   await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('断线中的工作')).toBeTruthy(), { timeout: 5_000 });
-  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('4'));
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 4'));
   expect(network.cursors[0]).toBeNull();
   expect(Number(network.cursors.at(-1))).toBeGreaterThan(0);
 });
@@ -176,7 +209,7 @@ test('运行层暂停归安静并保留原因；工作页计时每秒走，深�
   expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy();
 });
 
-test('事件触发的数据读取失败时由该资源自行重试，恢复后补读而不丢更新，实时连接不中断', async () => {
+test('收件箱用量读取失败时由该资源自行重试，恢复后补读而不丢更新，实时连接不中断', async () => {
   daemon = await uiFixture();
   const realFetch = fetch;
   let failReads = false;
@@ -186,16 +219,15 @@ test('事件触发的数据读取失败时由该资源自行重试，恢复后�
     if (failReads && String(input).endsWith('/api/get-settings')) throw new Error('数据读取暂时失败');
     return realFetch(input, init);
   };
-  window.history.replaceState(null, '', '/settings/runtime');
   render(<App baseUrl={daemon.url} transport={transport} />);
-  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('10'));
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 10'));
   await screen.findByText('实时更新已连接');
   failReads = true;
   // This operation emits exactly one event; no later event can mask a lost cursor.
   await daemon.call('set-concurrency', { limit: 4 });
   expect((await screen.findByRole('alert')).textContent).toContain('数据读取暂时失败');
   failReads = false;
-  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('4'), { timeout: 5_000 });
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 4'), { timeout: 5_000 });
   // The failed read recovered by its own retry; the stream was never torn down or replayed.
   expect(cursors).toHaveLength(1);
   expect(screen.queryByText('连接已断开，正在重连…')).toBeNull();

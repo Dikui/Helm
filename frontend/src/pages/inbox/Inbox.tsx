@@ -3,13 +3,27 @@ import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
 import { Link, useRouter } from '../../shared/router.js';
-import type { HelmEvent, WorkSummary } from '../../shared/types.js';
+import type { HelmEvent, Settings, WorkSummary } from '../../shared/types.js';
 import { InboxDetails } from './GateActions.js';
 import { AgentNotices } from './AgentNotices.js';
 import { cardStatusLabels, cardStatusTones, groupLabels, inboxGroup, workSituation } from './presentation.js';
 import './inbox.css';
 
 const affectsWorks = (event: HelmEvent) => event.workId !== null;
+const affectsSettings = (event: HelmEvent) => Boolean(event.dispatchId) || event.object.type === 'settings';
+function InboxFooter() {
+  const { t, language, setLanguage } = useI18n();
+  const { data, error, reload } = useResource<Settings>('get-settings', {}, affectsSettings);
+  return <div className="sb-bottom">
+    {error && <ErrorNotice error={error} retry={reload} />}
+    <div className="inbox-meter"><span>{t('executors')} <span aria-label={t('concurrency')}>{data ? `${data.runningDispatches} / ${data.concurrencyLimit}` : '—'}</span></span><span>{t('queued')} {data?.queuedDispatches ?? '—'}</span></div>
+    <div className="inbox-usage-bar" aria-hidden="true"><i style={{ width: `${data ? Math.min(100, data.runningDispatches / data.concurrencyLimit * 100) : 0}%` }} /></div>
+    <AgentNotices />
+    <div className="sb-foot"><Link href="/settings">{t('settings')}</Link><div className="inbox-languages" role="group" aria-label={t('language')}>
+      <button aria-pressed={language === 'zh'} onClick={() => setLanguage('zh')}>{t('languageZh')}</button><span aria-hidden="true">·</span><button aria-pressed={language === 'en'} onClick={() => setLanguage('en')}>{t('languageEn')}</button>
+    </div></div>
+  </div>;
+}
 function WorkRing({ work }: { work: WorkSummary }) {
   const category = inboxGroup(work);
   return <span className={`inbox-ring ${category === 'attention' ? 'att' : category === 'running' ? 'run' : work.status === 'completed' ? 'ok' : 'idle'}`} aria-hidden="true" />;
@@ -42,7 +56,7 @@ function InboxRow({ work }: { work: WorkSummary }) {
 export function Inbox({ folded, drawer, onToggle, searchRequest }: {
   folded: boolean; drawer: boolean; onToggle: () => void; searchRequest: number;
 }) {
-  const { t, language, setLanguage } = useI18n();
+  const { t } = useI18n();
   const { path } = useRouter();
   const { connection } = useData();
   const { data: works, error, reload } = useResource<WorkSummary[]>('list-works', {}, affectsWorks);
@@ -95,10 +109,6 @@ export function Inbox({ folded, drawer, onToggle, searchRequest }: {
         <div id="inbox-quiet" hidden={!quietOpen}>{quietOpen && filtered!.filter(work => inboxGroup(work) === 'quiet').map(work => <InboxRow key={work.id} work={work} />)}</div>
       </section>}
     </div>
-    <div className="sb-bottom"><AgentNotices />
-      <div className="sb-foot"><div className="seg" role="group" aria-label={t('language')}>
-        <button aria-pressed={language === 'zh'} onClick={() => setLanguage('zh')}>{t('languageZh')}</button><button aria-pressed={language === 'en'} onClick={() => setLanguage('en')}>{t('languageEn')}</button>
-      </div><Link className="btn ghost sm" href="/settings">{t('settings')}</Link></div>
-    </div>
+    <InboxFooter />
   </aside>;
 }

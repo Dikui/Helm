@@ -18,6 +18,7 @@ test('收件箱显示 Agent 不可用的原因和命令，进入设置重新检�
   render(<App baseUrl={daemon.url} />);
   const inbox = screen.getByRole('complementary', { name: 'Helm' });
   const alert = await within(inbox).findByRole('link', { name: 'CLI 异常，打开环境设置' });
+  expect(within(alert).getByText(reason)).toBeTruthy();
   expect(alert.getAttribute('title')).toContain(reason);
   expect(alert.getAttribute('title')).toContain('dsh web');
   fireEvent.click(within(inbox).getByRole('button', { name: '收起收件箱' }));
