@@ -37,7 +37,7 @@ test('项目变量设置/覆盖/删除只返回名字，校验名字、受管变
   }
   const rejectedNames = ['', '1ABC', 'A-B', 'A=B', '名', 'A\nB', ...runtimeEnvironmentNames,
     'CODEX_HOME', 'CODEX_SQLITE_HOME', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
-    'DSH_HOME', 'DSH_PERMISSION_MODE', 'GROK_HOME', 'GROK_SANDBOX', 'GROK_SUBAGENTS', 'GROK_WORKFLOWS', 'GROK_CONFIG', 'GROK_CONFIG_PATH',
+    'DSH_HOME', 'DSH_PERMISSION_MODE', 'GROK_HOME', 'GROK_SANDBOX', 'GROK_SUBAGENTS', 'GROK_WORKFLOWS', 'GROK_MEMORY', 'GROK_CONFIG', 'GROK_CONFIG_PATH',
     'DEEPSEEK_API_KEY', 'XAI_API_KEY', 'HELM_PORT_START', 'HELM_PORT_END', 'GH_TOKEN', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_KEY_0', 'home'];
   for (const invalid of rejectedNames) {
     const result = await daemon.call('set-project-environment', { projectId, name: invalid, value: original });
