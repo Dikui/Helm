@@ -80,14 +80,14 @@ export function useWorkFiles(workId: string) {
   return useMemo(() => new Set(files.data ?? []), [files.data]);
 }
 
-function FilePreview({ workId, path, onOpen, onClose, returnFocus }: { workId: string; path: string; onOpen: Open; onClose: () => void; returnFocus: RefObject<HTMLElement | null> }) {
+function FilePreview({ workId, path, onOpen, onClose, returnFocus, drawer }: { drawer: boolean; workId: string; path: string; onOpen: Open; onClose: () => void; returnFocus: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const files = useWorkFiles(workId);
   const kind = extension(path);
   const image = imageTypes[kind];
   const file = useResource<{ content: string }>('read-work-file', { workId, path, encoding: image ? 'base64' : 'utf8' }, never);
   const content = file.data?.content;
-  return <ActionDialog title={path} busy={false} onClose={onClose} returnFocus={returnFocus} className="file-preview">
+  return <ActionDialog title={path} busy={false} onClose={onClose} returnFocus={returnFocus} className={drawer ? 'file-preview report-preview' : 'file-preview'}>
     {file.error && <ErrorNotice error={file.error} retry={file.reload} />}
     {content === undefined ? !file.error && <p role="status">{t('loading')}</p>
       : image ? <img src={`data:${image};base64,${content}`} alt={path} />
@@ -98,11 +98,11 @@ function FilePreview({ workId, path, onOpen, onClose, returnFocus }: { workId: s
   </ActionDialog>;
 }
 
-export function useFilePreview(workId: string) {
+export function useFilePreview(workId: string, drawer = false) {
   const [path, setPath] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const open = useCallback<Open>((next, from) => { opener.current = from; setPath(next); }, []);
   const preview = path === null ? null
-    : <FilePreview workId={workId} path={path} onOpen={next => setPath(next)} onClose={() => setPath(null)} returnFocus={opener} />;
+    : <FilePreview drawer={drawer} workId={workId} path={path} onOpen={next => setPath(next)} onClose={() => setPath(null)} returnFocus={opener} />;
   return { open, preview };
 }

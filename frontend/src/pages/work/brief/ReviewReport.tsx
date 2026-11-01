@@ -13,7 +13,7 @@ const statusLabels = { passed: 'reviewPassed', unmet: 'reportUnmet', unverified:
 export function ReviewReport({ report, workId, compact = false }: { report: Report; workId: string; compact?: boolean }) {
   const { t } = useI18n();
   const files = useWorkFiles(workId);
-  const preview = useFilePreview(workId);
+  const preview = useFilePreview(workId, true);
   const [selected, select] = useState<Evidence>();
   const opener = useRef<HTMLElement | null>(null);
   const open = (item: Evidence, from: HTMLElement) => {
@@ -27,11 +27,11 @@ export function ReviewReport({ report, workId, compact = false }: { report: Repo
     && report.exceptions.length === 0;
   const standards = <div className="report-table-wrap" tabIndex={0} role="region" aria-label={t('reportCriteria')}><table>
     <thead><tr><th scope="col">{t('reportCriterion')}</th><th scope="col">{t('reportStatus')}</th><th scope="col">{t('reportEvidence')}</th></tr></thead>
-    <tbody>{report.criteria.map((item, index) => <tr key={index}><td>{item.criterion}</td><td>{t(statusLabels[item.status])}</td><td>{evidence(item.evidence)}</td></tr>)}</tbody>
+    <tbody>{report.criteria.map((item, index) => <tr key={index}><td>{item.criterion}</td><td><span className={`pill ${item.status === 'passed' ? 'ok' : item.status === 'unmet' ? 'bad' : ''}`}>{t(statusLabels[item.status])}</span></td><td>{evidence(item.evidence)}</td></tr>)}</tbody>
   </table></div>;
   return <div className={`structured-report${compact ? ' compact' : ''}`}>
     <div className="report-overview">
-      <section className="report-verdict"><small>{t('reviewReport')}</small><h2>{t(verdictLabels[report.verdict])}</h2>{markdown(report.summary)}</section>
+      <section className="report-verdict"><div><span className={`pill ${report.verdict === 'accept' ? 'ok' : report.verdict === 'return' ? 'bad' : ''}`}>{t(verdictLabels[report.verdict])}</span></div><h2>{t(verdictLabels[report.verdict])}</h2>{markdown(report.summary)}</section>
       {!compact && <>
         <section className="report-section"><h3>{t('reportExceptions')}</h3><div className="report-exceptions" tabIndex={0}>
           {(['unmet', 'unverified', 'truncated'] as const).map(kind => {

@@ -36,9 +36,46 @@ async function executingWork(scripts: FakeScript[]) {
   return work;
 }
 const card: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '实现验证码' }) };
-const gate = (key: string, question: string): FakeStep => ({ type: 'tool', name: 'propose-gate', arguments: ctx => ({
-  workId: JSON.parse(ctx.input).work.id, key, question, options: ['保留一周', '一直保留'],
+const gate = (key: string, question: string, body = ''): Extract<FakeStep, { type: 'tool' }> => ({ type: 'tool', name: 'propose-gate', arguments: ctx => ({
+  workId: JSON.parse(ctx.input).work.id, key, question, body, options: ['保留一周', '一直保留'],
 }) });
+
+test('当前关卡钉在对话记录之外，数字键决定且输入框和组合输入不触发', async () => {
+  const work = await executingWork([[gate('shortcut', '旧密码保留多久？', '需要兼容旧版客户端。'), { type: 'hang' }]]);
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const pin = await within(chat).findByRole('group', { name: '旧密码保留多久？' });
+  expect(within(chat).getByRole('region', { name: '对话记录' }).contains(pin)).toBe(false);
+  const reason = within(pin).getByText('需要兼容旧版客户端。').closest('details')!;
+  expect(reason.open).toBe(false);
+  fireEvent.click(within(pin).getByText('原因'));
+  expect(reason.open).toBe(true);
+  fireEvent.keyDown(within(chat).getByLabelText('消息'), { key: '1' });
+  fireEvent.keyDown(window, { key: '1', isComposing: true });
+  expect((await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.question === '旧密码保留多久？').status).toBe('pending');
+  fireEvent.keyDown(window, { key: '2' });
+  await waitFor(() => expect(within(chat).queryByRole('group', { name: '旧密码保留多久？' })).toBeNull());
+  expect((await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.question === '旧密码保留多久？').decision).toBe('一直保留');
+});
+
+test('关卡撤回后钉栏提供跳过原因入口，原问题和撤回原因留在对话', async () => {
+  const work = await executingWork([[
+    { ...gate('withdraw', '旧方向确认'), saveAs: 'choice' },
+    { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, gateId: (ctx.results.get('choice') as any).result.id, reason: '不再采用旧方向' }) },
+  ]]);
+  await until(() => daemon!.call('get-conversation', { workId: work.id }), value => value.result.some((item: any) => item.status === 'withdrawn'));
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const pin = await within(chat).findByRole('group', { name: '已撤回' });
+  expect(within(pin).getByText('旧方向确认')).toBeTruthy();
+  fireEvent.keyDown(window, { key: '1' });
+  await waitFor(() => expect(window.location.search).toBe('?inspect=list'));
+  fireEvent.click(within(chat).getByText(/撤回关卡 · 旧方向确认/));
+  expect(within(chat).getByText('不再采用旧方向')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  expect(within(chat).getByRole('group', { name: 'Withdrawn' })).toBeTruthy();
+  expect(within(chat).getByRole('button', { name: 'View skip reasons' })).toBeTruthy();
+});
 
 test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考、展开的当前步骤和折叠的历史步骤，重新打开保留已结束步骤', async phase => {
   let output!: () => void;
@@ -124,7 +161,7 @@ test('执行中对话支持三种消息范围；切换检查器时对话、输�
   expect((scope as HTMLSelectElement).value).toBe(`gate:${gateId}`);
 });
 
-test('消息和关卡按时间穿插，选项和自由回答保存决定；已决定关卡退出消息范围', async () => {
+test('待决定关卡在顶部，决定后原文回到对话，选项和自由回答保存且退出消息范围', async () => {
   const work = await executingWork([[
     gate('password', '旧密码保留多久？'),
     { type: 'tool', name: 'send-message', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'between', body: '还有发送频率需要确认。' }) },
@@ -136,7 +173,7 @@ test('消息和关卡按时间穿插，选项和自由回答保存决定；已�
   const frequency = await within(chat).findByRole('group', { name: '验证码发送频率？' });
   const between = within(chat).getByText('还有发送频率需要确认。', { selector: 'article p' });
   expect(password.compareDocumentPosition(between) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(between.compareDocumentPosition(frequency) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(frequency.compareDocumentPosition(between) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const scope = within(chat).getByLabelText('关于');
   const conversation = (await daemon!.call('get-conversation', { workId: work.id })).result;
   const passwordId = conversation.find((item: any) => item.question === '旧密码保留多久？').id;
@@ -147,6 +184,7 @@ test('消息和关卡按时间穿插，选项和自由回答保存决定；已�
   fireEvent.change(within(chat).getByLabelText('消息'), { target: { value: '待发送' } });
   expect((within(chat).getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(scope, { target: { value: 'work' } });
+  fireEvent.click(within(frequency).getByText('回答', { selector: 'summary' }));
   fireEvent.change(within(frequency).getByLabelText('回答'), { target: { value: '每分钟最多一次' } });
   fireEvent.click(within(frequency).getByRole('button', { name: '决定' }));
   await waitFor(() => expect(within(chat).queryByRole('group', { name: '验证码发送频率？' })).toBeNull());
@@ -171,6 +209,7 @@ test('对齐中的多选关卡可勾选多项并补充回答，决定后留在�
   fireEvent.keyDown(question, { key: '3' });
   expect(within(question).getByRole('button', { name: 'macOS' }).getAttribute('aria-pressed')).toBe('true');
   expect(within(question).getByRole('button', { name: 'Windows' }).getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(within(question).getByText('补充（可选）', { selector: 'summary' }));
   fireEvent.change(within(question).getByLabelText('补充（可选）'), { target: { value: '先做 Apple Silicon' } });
   fireEvent.click(within(question).getByRole('button', { name: '决定' }));
   await waitFor(() => expect(screen.queryByRole('group', { name: '要支持哪些平台？' })).toBeNull());

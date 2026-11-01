@@ -2,11 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 const { gitInitializationFixture }: typeof import('../../tests/fixtures/git-initialization.js') = await import('../../dist/tests/fixtures/' + 'git-initialization.js');
 const { until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 
 let fixture: Awaited<ReturnType<typeof gitInitializationFixture>> | undefined;
 afterEach(async () => {
@@ -23,7 +28,9 @@ test('工作对话显示文件概况和建议忽略规则，初始化失败保�
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
-  const gate = await within(chat).findByRole('group', { name: '初始化 git' });
+  const pin = await within(chat).findByRole('group', { name: '初始化 git' });
+  fireEvent.click(within(pin).getByRole('button', { name: '检查提交概况' }));
+  const gate = await screen.findByRole('dialog', { name: '检查提交概况' });
   expect(within(gate).getByText('预计提交文件数')).toBeTruthy();
   expect(within(gate).getByText('预计总大小')).toBeTruthy();
   expect(within(gate).getByText('.env', { selector: 'code' })).toBeTruthy();
@@ -31,7 +38,7 @@ test('工作对话显示文件概况和建议忽略规则，初始化失败保�
   const rules = within(gate).getByLabelText('忽略规则') as HTMLTextAreaElement;
   expect(rules.value).toContain('/.env');
   expect(rules.value).toContain('/node_modules/');
-  expect((within(gate).getByRole('button', { name: '拒绝初始化' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(within(pin).getByRole('button', { name: '拒绝，写明原因' })).toBeTruthy();
   fireEvent.change(rules, { target: { value: '*\n' } });
   fireEvent.click(within(gate).getByRole('button', { name: '同意并初始化' }));
   await within(gate).findByRole('alert');
@@ -77,7 +84,9 @@ test('已有 .gitignore 时两处关卡说明沿用文件，不显示可编辑�
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
-  const gate = await within(chat).findByRole('group', { name: '初始化 git' });
+  const pin = await within(chat).findByRole('group', { name: '初始化 git' });
+  fireEvent.click(within(pin).getByRole('button', { name: '检查提交概况' }));
+  const gate = await screen.findByRole('dialog', { name: '检查提交概况' });
   expect(within(gate).getByText('已有 .gitignore，将按它提交，Helm 不会修改这个文件。')).toBeTruthy();
   expect(within(gate).queryByLabelText('忽略规则')).toBeNull();
   fireEvent.click(within(gate).getByRole('button', { name: '同意并初始化' }));

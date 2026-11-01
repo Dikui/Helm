@@ -4,17 +4,22 @@ import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
 import type { Gate, WorkSummary, WorkStatus } from '../../shared/types.js';
 import { Link } from '../../shared/router.js';
-import { ReviewDetails } from '../work/brief/ReviewDetails.js';
+import { ReviewChanges, ReviewDetails } from '../work/brief/ReviewDetails.js';
 import { ReviewReport } from '../work/brief/ReviewReport.js';
-import { Markdown, useFilePreview } from '../../shared/files.js';
+import { Markdown, useFilePreview, useWorkFiles } from '../../shared/files.js';
 import type { ReviewGate } from '../work/brief/types.js';
+import { GatePin } from '../work/GatePin.js';
+import { ActionDialog } from '../work/ActionDialog.js';
 import { GitInitializationDetails } from './GitInitializationDetails.js';
 
-const noFiles: ReadonlySet<string> = new Set();
-export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, detailedReview = false }: { gate: ReviewGate; workStatus?: WorkStatus; decisionWorkId?: string; detailedReview?: boolean }) {
+export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, detailedReview = false, pinned = false, source }: { pinned?: boolean; source?: string; gate: ReviewGate; workStatus?: WorkStatus; decisionWorkId?: string; detailedReview?: boolean }) {
   const { api } = useData();
   const { t } = useI18n();
-  const preview = useFilePreview(gate.workId);
+  const preview = useFilePreview(gate.workId, detailedReview);
+  const files = useWorkFiles(gate.workId);
+  const [dialog, setDialog] = useState<'return' | 'git' | 'refuse' | 'changes'>();
+  const opener = useRef<HTMLElement | null>(null);
+  const show = (next: 'return' | 'git' | 'refuse' | 'changes', from: HTMLElement) => { opener.current = from; setDialog(next); };
   const [answer, setAnswer] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [comment, setComment] = useState('');
@@ -48,18 +53,52 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
   // 焦点在卡内（不在输入框里）时，按数字键选对应选项
   const shortcut = (event: KeyboardEvent<HTMLElement>) => {
     const index = Number(event.key) - 1;
-    if (event.nativeEvent.isComposing || readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
+    if (pinned || event.nativeEvent.isComposing || readOnly || gate.kind !== 'general' || event.metaKey || event.ctrlKey || event.altKey || !(index >= 0 && index < 9) || !gate.options[index]) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     event.preventDefault();
     if (multi) toggle(gate.options[index]); else void decide(gate.options[index]);
   };
+  const reviewHint = t(gate.review?.noCodeChanges ? 'reviewNoCodeChangesHint' : 'reviewReturnHint');
+  const returnDialog = !readOnly && dialog && <ActionDialog title={t(dialog === 'changes' ? 'pinAllChanges' : dialog === 'return' ? 'pinReturnReview' : dialog === 'git' ? 'pinGitDetails' : 'gitInitReject')} busy={pending} returnFocus={opener} onClose={() => setDialog(undefined)} className={dialog === 'changes' ? 'report-preview' : undefined}>
+    {dialog === 'changes' ? <>{!gate.report && <Markdown text={gate.body} workId={gate.workId} files={files} onOpen={preview.open} />}{gate.review && <ReviewDetails review={gate.review} detailed />}</> : dialog === 'git' ? <>
+      <GitInitializationDetails gate={gate} />
+      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
+      <button className="btn primary" disabled={pending} onClick={() => void decide('initialize')}>{t('gitInitApprove')}</button>
+    </> : <form noValidate onSubmit={event => { event.preventDefault(); void decide(dialog === 'return' ? 'return' : 'refuse'); }}>
+      <label>{t(dialog === 'return' ? 'comment' : 'gitInitReason')}<textarea className="resize-none" rows={4} required disabled={pending} value={comment} onChange={event => setComment(event.target.value)} /></label>
+      <p className="muted">{dialog === 'return' ? reviewHint : t('pinRefuseHint')}</p>
+      <button className="btn primary" disabled={pending || !comment.trim()}>{t(dialog === 'return' ? 'return' : 'gitInitReject')}</button>
+    </form>}
+    {error && <ErrorNotice error={error} />}
+  </ActionDialog>;
   if (decided) return null;
+  if (pinned) return <>
+    <GatePin label={title} source={source ?? t(gate.kind === 'review' ? 'nowAwaitingReview' : 'pinAwaitingDecision')}
+      title={gate.kind === 'review' ? t(gate.report ? gate.report.verdict === 'accept' ? 'pinRecommendAccept' : gate.report.verdict === 'return' ? 'pinRecommendReturn' : 'reportReservations' : 'nowLegacyReport') : gate.kind === 'git-initialization' ? t('pinGitQuestion') : title}
+      reason={gate.kind === 'git-initialization' ? <p>{t('gitInitHint')}</p> : gate.kind !== 'review' && gate.body ? <Markdown text={gate.body} workId={gate.workId} files={files} onOpen={preview.open} /> : undefined} busy={pending}>
+      {gate.kind === 'general' ? <>
+        {gate.options.map((option, index) => <button key={option} disabled={pending} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined} aria-pressed={multi ? selected.includes(option) : undefined} onClick={() => multi ? toggle(option) : void decide(option)}><kbd aria-hidden="true">{index < 9 ? index + 1 : ''}</kbd>{option}</button>)}
+        {multi && <button disabled={pending || !multiAnswer()} onClick={() => void decide(multiAnswer())}>{t('decide')}</button>}
+        <details><summary>{t(multi ? 'answerMore' : 'answer')}</summary><form noValidate onSubmit={event => { event.preventDefault(); const value = multi ? multiAnswer() : answer.trim(); if (value) void decide(value); }}>
+          <label>{t(multi ? 'answerMore' : 'answer')}<input disabled={pending} value={answer} onChange={event => setAnswer(event.target.value)} /></label>
+          {!multi && <button className="btn sm" disabled={pending || !answer.trim()}>{t('decide')}</button>}
+        </form></details>
+      </> : gate.kind === 'git-initialization' ? <>
+        <button aria-keyshortcuts="1" disabled={pending} onClick={event => show('git', event.currentTarget)}><kbd aria-hidden="true">1</kbd>{t('pinGitDetails')}</button>
+        <button aria-keyshortcuts="2" disabled={pending} onClick={event => show('refuse', event.currentTarget)}><kbd aria-hidden="true">2</kbd>{t('pinRefuseGit')}</button>
+      </> : gate.kind === 'review' ? <>
+        <button aria-keyshortcuts="1" disabled={pending || readOnly} onClick={() => void decide('accept')}><kbd aria-hidden="true">1</kbd>{t(gate.review?.noCodeChanges ? 'pinAcceptComplete' : 'pinAccept')}</button>
+        <button aria-keyshortcuts="2" disabled={pending || readOnly} onClick={event => show('return', event.currentTarget)}><kbd aria-hidden="true">2</kbd>{t('pinReturn')}</button>
+      </> : null}
+      {error && !dialog && <ErrorNotice error={error} />}
+    </GatePin>{returnDialog}{preview.preview}
+  </>;
   return <section role="group" aria-busy={pending} className="gate-actions" aria-label={title} onKeyDown={shortcut}>
     <strong>{title}</strong>
     {gate.kind === 'git-initialization' && <GitInitializationDetails gate={gate} />}
     {gate.kind === 'review' && !gate.report && <b>{t('reportLegacy')}</b>}
     {gate.kind === 'review' && gate.report ? <ReviewReport key={gate.id} report={gate.report} workId={gate.workId} compact={!detailedReview} />
-      : gate.body && <Markdown text={gate.body} workId={gate.workId} files={noFiles} onOpen={preview.open} />}
+      : gate.body && <Markdown text={gate.body} workId={gate.workId} files={files} onOpen={preview.open} />}
     {preview.preview}
     {gate.kind === 'review' && gate.review && (gate.report ? <details className="report-fold"><summary>{t('reportAudit')}</summary><ReviewDetails review={gate.review} detailed={detailedReview} /></details> : <ReviewDetails review={gate.review} detailed={detailedReview} />)}
     {gate.kind === 'review' && !detailedReview && <Link href={`/works/${encodeURIComponent(gate.workId)}?inspect=report`}>{t('reviewOpenDetails')}</Link>}
@@ -70,7 +109,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
     </dl>}
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
     {ended && <p className="pill">{t(workStatus)}</p>}
-    {!readOnly && gate.kind === 'review' && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t(gate.review?.noCodeChanges ? 'reviewNoCodeChangesHint' : 'reviewReturnHint')}</p></>}
+    {!readOnly && gate.kind === 'review' && !detailedReview && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t(gate.review?.noCodeChanges ? 'reviewNoCodeChangesHint' : 'reviewReturnHint')}</p></>}
     {!readOnly && gate.kind === 'git-initialization' && <>
       {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
       <label>{t('gitInitReason')}<textarea className="resize-none" disabled={pending} value={comment} onChange={event => setComment(event.target.value)} /></label>
@@ -81,7 +120,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
       {gate.options.map((option, index) => <button className="btn" key={option} disabled={pending} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
         aria-pressed={multi ? selected.includes(option) : undefined} onClick={() => multi ? toggle(option) : void decide(option)}>{option}{index < 9 && <kbd aria-hidden="true">{index + 1}</kbd>}</button>)}
     </div>}
-    {!readOnly && gate.kind !== 'general' && gate.kind !== 'git-initialization' && <div className="acts">
+    {!readOnly && gate.kind !== 'general' && gate.kind !== 'git-initialization' && !(gate.kind === 'review' && detailedReview) && <div className="acts">
       {gate.kind === 'work-confirmation'
         ? <button className="btn sm primary" disabled={pending || !gate.descriptionId} onClick={() => void decide('confirm')}>{t('confirm')}</button>
         : gate.options.map(option => <button className="btn sm" key={option} disabled={pending || (gate.kind === 'review' && option === 'return' && !comment.trim())}
@@ -91,7 +130,14 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
       <label>{t(multi ? 'answerMore' : 'answer')}<input value={answer} onChange={e => setAnswer(e.target.value)} /></label>
       <button className="btn sm" disabled={pending || !(multi ? multiAnswer() : answer.trim())}>{t('decide')}</button>
     </form>}
-    {error && <ErrorNotice error={error} />}
+    {gate.kind === 'review' && detailedReview && gate.review && <ReviewChanges review={gate.review} />}
+    {!readOnly && gate.kind === 'review' && detailedReview && <div className="report-actions"><div className="acts">
+      <button className="btn" disabled={pending} onClick={event => show('changes', event.currentTarget)}>{t(gate.report ? 'pinAllChanges' : 'pinOriginalReport')}</button>
+      <button className="btn" disabled={pending} onClick={event => show('return', event.currentTarget)}>{t('pinReturn')}</button>
+      <button className="btn primary" disabled={pending} onClick={() => void decide('accept')}>{t('accept')}</button>
+    </div><p className="muted">{reviewHint}</p></div>}
+    {error && !dialog && <ErrorNotice error={error} />}
+    {returnDialog}
   </section>;
 }
 export function InboxDetails({ work }: { work: WorkSummary }) {

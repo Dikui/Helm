@@ -85,7 +85,7 @@ function WorkContent({ work, heading }: { work: Work; heading: ReactNode }) {
     : t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
   return <>
     {header && createPortal(<>{heading}<NowStrip work={work} inspection={inspection} filter={filter} choose={choose} chooseCards={chooseCards} pushing={pushing} report={report} /></>, header)}
-    {work.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} workBranch={work.workBranch} showBrief={inspection === 'spec'} inspectorTitle={title} /> : <ConversationView work={work} />}
+    {work.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} title={work.title} workBranch={work.workBranch} showBrief={inspection === 'spec'} inspectorTitle={title} /> : <ConversationView work={work} report={report} />}
     {inspection === 'spec' && work.status !== 'aligning' && <Inspector title={title}><BriefView work={work} /></Inspector>}
     {inspection === 'report' && <Inspector title={title}><WorkReview work={work} report={report} /></Inspector>}
     {inspection === 'delivery' && <Inspector title={title}><WorkDelivery work={work} onPushingChange={setPushing} /></Inspector>}

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -9,6 +9,11 @@ import { App } from '../src/App.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 const { copyAgents, configureTestAgent }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 let agentDirectory: string | undefined;
@@ -56,7 +61,7 @@ test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请�
   await within(agent).findByRole('option', { name: /codex-coordinator · / });
   expect((screen.getByRole('button', { name: '重试发送' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '重试发送' }));
-  expect(await screen.findByRole('heading', { name: '邮箱验证码登录' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { level: 1, name: '邮箱验证码登录' })).toBeTruthy();
   expect(screen.getByRole('region', { name: '对话' })).toBeTruthy();
   const works = (await daemon.call('list-works')).result;
   expect(works).toHaveLength(1);
@@ -78,7 +83,7 @@ test('基准分支默认当前检出分支，可选择其他分支，创建工�
   fireEvent.change(base, { target: { value: 'release/1.0' } });
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '从发布分支开始' } });
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
-  await screen.findByRole('heading', { name: '从发布分支开始' });
+  await screen.findByRole('heading', { level: 1, name: '从发布分支开始' });
   const work = (await daemon.call('list-works')).result[0];
   expect(work.baseRef).toBe('release/1.0');
   expect(work.baseCommit).toBeNull();
@@ -104,7 +109,7 @@ test('引用其他工作：下拉选中后显示标签，可移除，发送时�
   fireEvent.change(screen.getByLabelText('需求'), { target: { value: '按调研实现缓存' } });
   await waitFor(() => expect(screen.getByRole('button', { name: '开始' }).hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
-  await screen.findByRole('heading', { name: '按调研实现缓存' });
+  await screen.findByRole('heading', { level: 1, name: '按调研实现缓存' });
   const work = (await daemon.call('list-works')).result.find((item: any) => item.id !== source.id);
   const message = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.type === 'message');
   expect(message.attachments.map((item: any) => item.name)).toEqual([`引用工作-${source.id.slice(0, 8)}.md`]);
@@ -144,7 +149,7 @@ test('基准加载、失败和空分支时不能开始，重试和刷新后可�
   await waitFor(() => expect((base as HTMLSelectElement).value).toBe('restored'));
   await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
-  await screen.findByRole('heading', { name: '等分支可用' });
+  await screen.findByRole('heading', { level: 1, name: '等分支可用' });
   expect((await daemon.call('list-works')).result[0].baseRef).toBe('restored');
 });
 
@@ -187,8 +192,8 @@ for (const state of ['plain', 'unborn', 'detached'] as const) test(`切换到 ${
   await waitFor(() => expect((screen.getByRole('button', { name: '开始' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '开始' }));
   const brief = await screen.findByRole('complementary', { name: '工作说明' });
-  const confirm = await within(brief).findByRole('button', { name: '确认这一版' });
-  await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  const confirm = await within(screen.getByRole('region', { name: '对话' })).findByRole('button', { name: '确认，开始拆卡片' });
+  await waitFor(() => expect((within(screen.getByRole('region', { name: '对话' })).getByRole('button', { name: '确认，开始拆卡片' }) as HTMLButtonElement).disabled).toBe(false));
   expect(within(brief).getByText(/项目 git 尚未就绪/)).toBeTruthy();
   expect(branchReads).not.toContain(project.id);
   expect(submissions).toHaveLength(1);
@@ -196,7 +201,7 @@ for (const state of ['plain', 'unborn', 'detached'] as const) test(`切换到 ${
   expect('baseRef' in submissions[0]).toBe(false);
   const work = (await daemon.call('list-works')).result[0];
   expect(work.baseRef).toBeNull();
-  fireEvent.click(confirm);
+  fireEvent.click(within(screen.getByRole('region', { name: '对话' })).getByRole('button', { name: '确认，开始拆卡片' }));
   const briefLink = await screen.findByRole('button', { name: '工作说明' });
   fireEvent.click(briefLink);
   expect(await screen.findByText(/项目 git 尚未就绪/)).toBeTruthy();
@@ -255,16 +260,17 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   fireEvent.change(within(chat).getByLabelText('消息'), { target: { value: '验证码十分钟过期' } });
   fireEvent.click(within(chat).getByRole('button', { name: '发送' }));
   expect(await within(chat).findByText('已补充过期时间，请确认。')).toBeTruthy();
-  const added = await within(brief).findByText('验证码十分钟过期');
-  expect(added.closest('mark')).toBeTruthy();
-  expect(within(brief).getByText('邮箱验证码登录').closest('mark')).toBeNull();
+  const added = await within(brief).findByRole('listitem', { name: '验证码十分钟过期 新增' });
+  expect(within(added).getByText('新增')).toBeTruthy();
+  expect(within(brief).getByText('邮箱验证码登录')).toBeTruthy();
+  await waitFor(() => expect((within(chat).getByRole('button', { name: '确认，开始拆卡片' }) as HTMLButtonElement).disabled).toBe(false));
   const versions = within(brief).getByLabelText('版本');
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).queryByText('验证码十分钟过期')).toBeNull();
-  expect((within(brief).getByRole('button', { name: '确认这一版' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(chat).getByRole('button', { name: '确认，开始拆卡片' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(versions, { target: { value: '2' } });
-  await waitFor(() => expect((within(brief).getByRole('button', { name: '确认这一版' }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(within(brief).getByRole('button', { name: '确认这一版' }));
+  await waitFor(() => expect((within(chat).getByRole('button', { name: '确认，开始拆卡片' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(within(chat).getByRole('button', { name: '确认，开始拆卡片' }));
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'executing');
   await waitFor(() => expect(within(screen.getByRole('banner', { name: '工作概况' })).getByText('执行中')).toBeTruthy());
   const descriptions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
@@ -276,13 +282,39 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   expect((await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(2);
 });
 
+test('更新草稿时不可确认，还要改弹窗保留输入并发送修改要求，英文钉栏和新增标记同步', async () => {
+  let finish!: () => void;
+  daemon = await uiFixture([[draft('first', '保留登录')], [draft('second', '保留登录\n增加验证码'), { type: 'hang', until: new Promise<void>(resolve => { finish = resolve; }) }]]);
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐修改', key: 'start' })).result.work;
+  window.history.replaceState(null, '', `/works/${work.id}`);
+  render(<App baseUrl={daemon.url} />);
+  const confirm = await screen.findByRole('button', { name: '确认，开始拆卡片' });
+  await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  fireEvent.keyDown(window, { key: '2' });
+  const dialog = await screen.findByRole('dialog', { name: 'Needs changes' });
+  fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: '增加验证码' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Back' }));
+  fireEvent.keyDown(window, { key: '2' });
+  const reopened = await screen.findByRole('dialog', { name: 'Needs changes' });
+  expect((within(reopened).getByLabelText('Message') as HTMLTextAreaElement).value).toBe('增加验证码');
+  fireEvent.click(within(reopened).getByRole('button', { name: 'Send' }));
+  try {
+    const brief = screen.getByRole('complementary', { name: 'Brief' });
+    expect(await within(brief).findByRole('listitem', { name: '增加验证码 New' })).toBeTruthy();
+    expect(within(brief).getByText(/Draft, updating/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm and start planning cards' })).toBeNull();
+  } finally { finish(); }
+  await screen.findByRole('button', { name: 'Confirm and start planning cards' });
+});
+
 test('对话确认入口确认所查看的草稿版本，运行层只记录一次决定', async () => {
   daemon = await uiFixture([[draft('first', '邮件登录')]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '确认入口', key: 'start' })).result.work;
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
-  const button = await within(chat).findByRole('button', { name: '确认这一版' });
+  const button = await within(chat).findByRole('button', { name: '确认，开始拆卡片' });
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(button);
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'executing');
@@ -421,7 +453,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} transport={transport} />);
   const brief = await screen.findByRole('complementary', { name: '工作说明' });
-  const button = await within(brief).findByRole('button', { name: '确认这一版' });
+  const button = await within(screen.getByRole('region', { name: '对话' })).findByRole('button', { name: '确认，开始拆卡片' });
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   await screen.findByText('实时更新已连接');
   // Wait for replay to finish before dropping the shared stream.

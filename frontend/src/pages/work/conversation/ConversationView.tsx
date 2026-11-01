@@ -13,11 +13,17 @@ import { GateHistory } from './GateHistory.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
-import type { CardReference, ConversationItem, Message, Rounds } from './types.js';
+import type { GraphNode } from '../card-graph/types.js';
+import type { ConversationItem, Message, Rounds } from './types.js';
+import type { useWorkReview } from '../brief/useWorkReview.js';
+import { ReviewPin } from '../brief/WorkReview.js';
+import { GatePin } from '../GatePin.js';
+import { useRouter } from '../../../shared/router.js';
 import './conversation.css';
 
-export function ConversationView({ work }: { work: Work }) {
+export function ConversationView({ work, report }: { work: Work; report: ReturnType<typeof useWorkReview> }) {
   const { api } = useData();
+  const { navigate } = useRouter();
   const { t, language } = useI18n();
   const params = { workId: work.id };
   const conversationAffects = useCallback((event: HelmEvent) => event.workId === work.id
@@ -25,7 +31,7 @@ export function ConversationView({ work }: { work: Work }) {
   const cardsAffects = useCallback((event: HelmEvent) => event.workId === work.id && event.action.startsWith('card-'), [work.id]);
   const conversation = useResource<ConversationItem[]>('get-conversation', params, conversationAffects);
   const events = useResource<HelmEvent[]>('get-events', params);
-  const graph = useResource<CardReference[]>('get-card-graph', params, cardsAffects);
+  const graph = useResource<GraphNode[]>('get-card-graph', params, cardsAffects);
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -89,11 +95,16 @@ export function ConversationView({ work }: { work: Work }) {
   const items = [...(conversation.data ?? []).map(item => ({ time: item.type === 'gate' && item.status !== 'pending' ? events.data?.findLast(event => event.object.id === item.id && ['gate-decided', 'gate-withdrawn'].includes(event.action))?.time ?? item.createdAt : item.createdAt, item, event: undefined as HelmEvent | undefined })),
     ...milestones.map(event => ({ time: event.time, item: undefined, event }))].sort((a, b) => a.time.localeCompare(b.time));
   return <section className="conversation-view" aria-label={t('chat')} ref={view}>
+    {(pendingGates.some(gate => gate.kind !== 'review') && !readOnly || report.conversation.error || report.events.error || report.invalid || report.gate?.status === 'pending' && work.status === 'awaiting-review' || gates.at(-1)?.status === 'withdrawn') && <div className="gate-pins">
+      {!readOnly && pendingGates.filter(gate => gate.kind !== 'review').map(gate => <GateDecision key={gate.id} gate={gate} decisionWorkId={work.id} pinned source={gate.kind === 'git-initialization' ? t('pinProjectShared') : `${t('pinAwaitingDecision')} · ${cards.filter(card => card.dependencies.some(ref => ref.id === gate.id)).map(card => `${t('graphCard')} ${cards.indexOf(card) + 1}`).join(', ') || t('alignmentCoordinator')}`} />)}
+      <ReviewPin work={work} report={report} />
+      {!pendingGates.length && gates.at(-1)?.status === 'withdrawn' && <GatePin label={t('conversationWithdrawn')} source={t('conversationWithdrawn')} title={gates.at(-1)!.question} tone="neutral"><button aria-keyshortcuts="1" onClick={() => navigate(`/works/${encodeURIComponent(work.id)}?inspect=list`)}><kbd aria-hidden="true">1</kbd>{t('pinSkippedReason')}</button></GatePin>}
+    </div>}
     <ConversationScroll key={work.id} className="conversation-thread">
       <h2 className="sr">{t('chat')}</h2>
       {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
       {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
-      {items.map(({ item, event, time }) => event ? <div key={`event:${event.id}`} className={`conversation-event ${event.action === 'dispatch-ended' ? 'bad' : event.action === 'card-completed' ? 'ok' : ''}`}>
+      {items.map(({ item, event, time }) => item?.type === 'gate' && item.status === 'pending' && !readOnly ? null : event ? <div key={`event:${event.id}`} className={`conversation-event ${event.action === 'dispatch-ended' ? 'bad' : event.action === 'card-completed' ? 'ok' : ''}`}>
         <time dateTime={event.time}>{new Date(event.time).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time>
         <span title={eventSummary(event, t, cards.findIndex(card => card.id === event.cardId) + 1)}>{eventSummary(event, t, cards.findIndex(card => card.id === event.cardId) + 1)}</span>
       </div> : !item ? null : item.type === 'gate' && (item.status !== 'pending' || readOnly) ? <GateHistory key={item.id} gate={item} decidedAt={time} />

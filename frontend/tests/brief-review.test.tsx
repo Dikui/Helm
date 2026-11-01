@@ -107,6 +107,14 @@ test('结构化报告先显示结论、三类例外和标准；卡片与建议�
   expect(within(review).getByText('邮箱验证码').tagName).toBe('STRONG');
   expect(review.querySelector('b')?.textContent).not.toBe('不能渲染 HTML');
   expect(within(review).getByRole('heading', { name: '例外' })).toBeTruthy();
+  expect(within(review).getByRole('heading', { name: '改动' })).toBeTruthy();
+  expect(within(review).getByText('+3')).toBeTruthy();
+  expect(within(review).getByText('−0')).toBeTruthy();
+  fireEvent.click(within(review).getByRole('button', { name: '查看全部改动' }));
+  const changes = await screen.findByRole('dialog', { name: '查看全部改动' });
+  fireEvent.click(within(changes).getByRole('button', { name: '查看 diff' }));
+  expect(within(changes).getByLabelText('Diff 内容').textContent).toContain('+审核成果');
+  fireEvent.click(within(changes).getByRole('button', { name: '返回' }));
   expect(within(review).getByText('覆盖截断')).toBeTruthy();
   expect(within(review).getByRole('cell', { name: '密码入口仍可用' })).toBeTruthy();
   const cards = within(review).getByText('卡片表 · 1 张卡片').closest('details')!;
@@ -121,6 +129,40 @@ test('结构化报告先显示结论、三类例外和标准；卡片与建议�
   fireEvent.click(within(cards).getByText('卡片表 · 1 张卡片'));
   expect(within(cards).getByText('登录功能')).toBeTruthy();
   expect(within(cards).getByText('行详情').closest('details')!.open).toBe(false);
+});
+
+test('审核钉栏不重复报告，数字键打开退回原因，失败保留输入且决定后保留审核记录', async () => {
+  const work = await prepareReview();
+  let fail = true;
+  const transport: typeof fetch = (input, init) => {
+    if (fail && String(input).endsWith('/api/decide-gate')) return Promise.reject(new Error('退回暂未送达'));
+    return fetch(input, init);
+  };
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const pin = await within(chat).findByRole('group', { name: '审核' });
+  expect(within(chat).queryByText('汇总报告原文')).toBeNull();
+  expect(within(chat).getByRole('region', { name: '对话记录' }).contains(pin)).toBe(false);
+  fireEvent.keyDown(window, { key: '2' });
+  const dialog = await screen.findByRole('dialog', { name: '退回审核' });
+  const submit = within(dialog).getByRole('button', { name: '退回' }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  fireEvent.keyDown(window, { key: '1' });
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('awaiting-review');
+  fireEvent.change(within(dialog).getByLabelText('意见'), { target: { value: '请补边界情况' } });
+  fireEvent.click(submit);
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('退回暂未送达');
+  expect((within(dialog).getByLabelText('意见') as HTMLTextAreaElement).value).toBe('请补边界情况');
+  fail = false;
+  fireEvent.click(submit);
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '退回审核' })).toBeNull());
+  expect(within(chat).queryByRole('group', { name: '审核' })).toBeNull();
+  await waitFor(() => expect(new URLSearchParams(window.location.search).get('inspect')).toBe('list'));
+  fireEvent.click(await screen.findByRole('button', { name: /审核已退回/ }));
+  const review = await screen.findByRole('region', { name: '审核' });
+  expect(await within(review).findByText('已决定 · 退回')).toBeTruthy();
+  expect(within(review).getByText('请补边界情况')).toBeTruthy();
 });
 
 test('报告成果和验收回答链接打开实际记录，关闭预览后焦点回到证据入口', async () => {
@@ -226,7 +268,7 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     await within(strip).findByRole('button', { name: '汇总报告 正在读取' });
     await reportSequence('正在读取');
     releaseRead();
-    expect(await screen.findByText('汇总报告读取失败')).toBeTruthy();
+    expect(await within(inspector).findByRole('heading', { name: '汇总报告读取失败' })).toBeTruthy();
     await reportSequence('读取失败，等你重试');
     fail = false;
     fireEvent.click(within(within(inspector).getByText('审核读取连接中断').closest('[role="alert"]')!).getByRole('button', { name: '重新读取' }));
@@ -246,6 +288,28 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     ]);
     expect(screen.queryByText('汇总报告尚不能发起审核')).toBeNull();
   } finally { releaseRead(); submitInvalid(); submitValid(); }
+});
+
+test('报告成功读取后重读失败也隐藏旧审核操作，重试恢复当前报告', async () => {
+  const work = await prepareReview();
+  let fail = false;
+  const transport: typeof fetch = (input, init) => {
+    if (fail && String(input).endsWith('/api/get-conversation')) return Promise.reject(new Error('报告重读失败'));
+    return fetch(input, init);
+  };
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  await within(chat).findByRole('button', { name: '接受，进入待合入' });
+  fail = true;
+  await daemon!.call('send-message', { workId: work.id, key: 'refresh', body: '重新读取报告' });
+  const failed = await within(chat).findByRole('group', { name: '汇总报告读取失败' });
+  expect(within(chat).queryByRole('button', { name: '接受，进入待合入' })).toBeNull();
+  expect(within(screen.getByRole('complementary', { name: '检查器' })).queryByRole('button', { name: '接受' })).toBeNull();
+  fail = false;
+  fireEvent.click(within(failed).getByRole('button', { name: '重试读取' }));
+  await within(chat).findByRole('button', { name: '接受，进入待合入' });
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('awaiting-review');
 });
 
 test('已有有效待审核报告时，失败的重复提交不会显示未生成关卡或挡住审核', async () => {
@@ -283,7 +347,7 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 2')).toBeTruthy();
-  expect(within(brief).getByText('生效中')).toBeTruthy();
+  expect(within(brief).getByText('已确认')).toBeTruthy();
   expect(within(brief).getByText('—')).toBeTruthy();
   expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
   const versions = within(brief).getByLabelText('版本');
@@ -335,11 +399,13 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   expect(within(review).getByLabelText('Diff 内容').textContent).toContain('+末尾成果');
   const original = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(fullDiff).toBe(original.review.diff);
-  const sendBack = within(review).getByRole('button', { name: '退回' }) as HTMLButtonElement;
+  fireEvent.click(within(review).getByRole('button', { name: '退回，写明原因' }));
+  const returnDialog = await screen.findByRole('dialog', { name: '退回审核' });
+  const sendBack = within(returnDialog).getByRole('button', { name: '退回' }) as HTMLButtonElement;
   expect(sendBack.disabled).toBe(true);
-  fireEvent.change(within(review).getByLabelText('意见'), { target: { value: '   ' } });
+  fireEvent.change(within(returnDialog).getByLabelText('意见'), { target: { value: '   ' } });
   expect(sendBack.disabled).toBe(true);
-  fireEvent.change(within(review).getByLabelText('意见'), { target: { value: '请补齐边界说明' } });
+  fireEvent.change(within(returnDialog).getByLabelText('意见'), { target: { value: '请补齐边界说明' } });
   fireEvent.click(sendBack);
   await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByText('工作说明与审核')).toBeTruthy());
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
@@ -621,7 +687,9 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
     await waitFor(() => expect(accept.disabled).toBe(false));
     const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
     await within(row).findByRole('group', { name: '审核' });
-    fireEvent.change(within(gate).getByLabelText('意见'), { target: { value: '取消前输入' } });
+    fireEvent.click(within(gate).getByRole('button', { name: '退回，写明原因' }));
+    const returnDialog = await screen.findByRole('dialog', { name: '退回审核' });
+    fireEvent.change(within(returnDialog).getByLabelText('意见'), { target: { value: '取消前输入' } });
     ok(await daemon.call('cancel-work', { workId: work.id }));
   }
   await waitFor(() => expect(within(top).getByText('已取消')).toBeTruthy());

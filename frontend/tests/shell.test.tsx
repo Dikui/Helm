@@ -13,7 +13,7 @@ async function openWork() {
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '外壳中的真实工作', key: 'shell' })).result.work;
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
-  await screen.findByRole('heading', { name: '外壳中的真实工作' });
+  await screen.findByRole('heading', { level: 1, name: '外壳中的真实工作' });
   return work;
 }
 afterEach(async () => {

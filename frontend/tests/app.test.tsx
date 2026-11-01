@@ -193,7 +193,7 @@ test('运行层暂停归安静并保留原因；工作页计时每秒走，深�
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '额度暂停', key: 'start' })).result.work;
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon.url} />);
-  await screen.findByRole('heading', { name: '额度暂停' });
+  await screen.findByRole('heading', { level: 1, name: '额度暂停' });
   expect(screen.queryByRole('article', { name: '额度暂停' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /安静/ }));
   const row = await screen.findByRole('article', { name: '额度暂停' });
@@ -267,7 +267,7 @@ test('在跑与安静行不展开；打开工作后仍可暂停、恢复并查�
   const row = await screen.findByRole('article', { name: '管理进展' });
   expect(within(row).queryByRole('button')).toBeNull();
   fireEvent.click(within(row).getByRole('link'));
-  await screen.findByRole('heading', { name: '管理进展' });
+  await screen.findByRole('heading', { level: 1, name: '管理进展' });
   await within(screen.getByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 检查邮件模板');
   fireEvent.click(screen.getByRole('button', { name: '操作' }));
   fireEvent.click(within(screen.getByRole('group', { name: '工作操作' })).getByRole('button', { name: '暂停工作' }));

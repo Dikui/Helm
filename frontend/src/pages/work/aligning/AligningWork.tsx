@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { useData, useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
+import { GatePin } from '../GatePin.js';
+import { ActionDialog } from '../ActionDialog.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { GateHistory } from '../conversation/GateHistory.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
@@ -15,8 +17,9 @@ import { RoundSteering } from '../conversation/RoundSteering.js';
 import type { CardReference, Message, Rounds } from '../conversation/types.js';
 import { Inspector } from '../../../shared/Inspector.js';
 import './aligning.css';
+import '../brief/brief.css';
 
-export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: { workId: string; projectId: string; workBranch?: string | null; showBrief: boolean; inspectorTitle: string }) {
+export function AligningWork({ workId, title, workBranch, showBrief, inspectorTitle }: { title: string; workId: string; projectId: string; workBranch?: string | null; showBrief: boolean; inspectorTitle: string }) {
   const { api } = useData();
   const { t, language } = useI18n();
   const workFiles = useResource<string[]>('list-work-files', { workId });
@@ -30,11 +33,13 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
   const [confirming, setConfirming] = useState(false);
   const confirmationBusy = useRef(false);
   const [confirmError, setConfirmError] = useState<Error>();
+  const [amending, setAmending] = useState(false);
+  const [amendment, setAmendment] = useState('');
+  const amendOpener = useRef<HTMLElement | null>(null);
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [references, setReferences] = useState<string[]>([]);
   const preview = useFilePreview(workId);
-  const input = useRef<HTMLTextAreaElement>(null);
   const submission = useSendMessage();
   const [scope, setScope] = useState('work');
   const [steering, setSteering] = useState(false);
@@ -62,8 +67,8 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
   const previous = versions.find(item => item.version === (shown?.version ?? 0) - 1);
   const gate = conversation.data?.find(item => item.type === 'gate' && item.kind === 'work-confirmation' && item.status === 'pending');
   const canConfirm = Boolean(shown && gate?.type === 'gate' && gate.descriptionId === shown.id && latest?.id === shown.id
-    && !confirming && !conversation.error && !descriptions.error);
-  // Both visible entry points decide exactly the version currently shown in the brief panel.
+    && rounds.data && !rounds.error && !running && !confirming && !conversation.error && !descriptions.error);
+  // 确认始终对应说明中正在查看的最新草稿。
   const confirm = async () => {
     if (!canConfirm || !shown || !gate || confirmationBusy.current) return;
     confirmationBusy.current = true; setConfirming(true); setConfirmError(undefined);
@@ -81,31 +86,28 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
     } else if (!immediate) return;
     if (immediate) await steer('interrupt-round');
   };
-  const confirmButton = <button className="btn primary" disabled={!canConfirm} onClick={() => void confirm()}>{t('confirm')}</button>;
   const chat = useRef<HTMLElement>(null);
   const composer = useRef<HTMLFormElement>(null);
   const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
   const copyNotice = <p className="warn"><span>!</span><span>{t(shown && !shown.baseRef ? 'projectWithoutGitHint' : workBranch ? 'alignmentCopyReady' : 'alignmentCopyPending')}</span></p>;
   return <div className="aligning-work">
     <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
+      {gates.some(item => item.status === 'pending' && item.kind !== 'work-confirmation') || gate && rounds.data && !running ? <div className="gate-pins">
+        {gates.filter(item => item.status === 'pending' && item.kind !== 'work-confirmation').map(item => <GateDecision key={item.id} gate={item} pinned />)}
+        {!gates.some(item => item.status === 'pending' && item.kind !== 'work-confirmation') && gate && rounds.data && !running && <GatePin label={t('alignmentConfirmBrief')} source={t('nowAwaitingConfirmation')} title={t('pinSpec').replace('{version}', String(shown?.version ?? '—'))}
+          busy={confirming} reason={<p>{t('alignmentBranchFrom')} <span className="ref">{shown?.baseRef}{shown?.baseCommit ? `@${shown.baseCommit.slice(0, 7)}` : ''}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}>
+          <button disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}><kbd aria-hidden="true">1</kbd>{t('pinConfirm')}</button>
+          <button aria-keyshortcuts="2" onClick={event => { amendOpener.current = event.currentTarget; setAmending(true); }}><kbd aria-hidden="true">2</kbd>{t('alignmentNeedsChanges')}</button>
+          {confirmError && <ErrorNotice error={confirmError} />}
+        </GatePin>}
+      </div> : null}
       <ConversationScroll key={workId} className="aligning-thread">
         <h2 className="sr">{t('chat')}</h2>
         {conversation.error && <ErrorNotice error={conversation.error} retry={conversation.reload} />}
         {!conversation.data && !conversation.error && <p role="status">{t('loading')}</p>}
         {conversation.data?.map(item => item.type === 'message'
           ? <article key={item.id} className={item.sender === 'user' ? 'aligning-message me' : 'aligning-message'}><div className="aligning-who"><b>{t(item.sender === 'user' ? 'alignmentYou' : 'alignmentCoordinator')}</b>{item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}<time className={item.sender === 'user' ? 'sr' : undefined} dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></div><Markdown text={item.body} workId={workId} files={linkedFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></article>
-          : item.kind === 'work-confirmation'
-            ? item.status !== 'pending' ? <GateHistory key={item.id} gate={item} /> : <div className="aligning-gate gate-actions" key={item.id} role="group" aria-label={t('alignmentConfirmBrief')} onKeyDown={event => {
-              if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-              if (event.key === '1') { event.preventDefault(); void confirm(); }
-              if (event.key === '2') { event.preventDefault(); input.current?.focus(); }
-            }}>
-              <span className="pill att">{t('alignmentConfirmBrief')}{shown ? ` · v${shown.version}` : ''}</span><p>{shown ? t('alignmentConfirmBriefHint') : t('noDescription')}</p>
-              <div className="opts"><button className="btn" disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}>{t('confirm')}<kbd aria-hidden="true">1</kbd></button><button className="btn" aria-keyshortcuts="2" onClick={() => input.current?.focus()}>{t('alignmentNeedsChanges')}<kbd aria-hidden="true">2</kbd></button></div>
-              {shown?.baseCommit && <p className="hint">{t('alignmentBranchFrom')} <span className="ref">{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}
-            </div>
-            : item.status === 'pending' ? <GateDecision key={item.id} gate={item} /> : <GateHistory key={item.id} gate={item} />)}
-        {confirmError && <ErrorNotice error={confirmError} />}
+          : item.status !== 'pending' ? <GateHistory key={item.id} gate={item} /> : null)}
         {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
         <Thinking round={running} steps={rounds.data?.currentSteps ?? []} />
       </ConversationScroll>
@@ -116,7 +118,7 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
           busy={steering || submission.pending || Boolean(rounds.error)} interrupt={() => void steer('interrupt-round')} withdraw={id => void steer('withdraw-message', id)} />
         {steeringError && <ErrorNotice error={steeringError} />}
         {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
-        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={locked} placeholder={t('alignmentReply')}
+        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(event.metaKey || event.ctrlKey); }
           }} /></label>
@@ -130,10 +132,11 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>
     </section>
-    {showBrief && <Inspector title={inspectorTitle}><aside className="aligning-brief" aria-label={t('brief')} aria-busy={confirming}>
-      <header><h2>{t('brief')}</h2>{shown && <><span className="pill att">{t('alignmentUnconfirmed')}</span><label><span className="sr">{t('alignmentVersion')}</span><select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
-        {[...versions].reverse().map(item => <option key={item.id} value={item.version}>v{item.version}</option>)}
+    {showBrief && <Inspector title={inspectorTitle}><aside className="aligning-brief brief-document" aria-label={t('brief')} aria-busy={confirming}>
+      <header>{shown && <><span className="muted">{t('brief')} · v{shown.version} · {t(latest?.id !== shown.id ? 'alignmentHistory' : running ? 'alignmentUpdating' : 'alignmentDraftStatus')}</span><label><span className="sr">{t('alignmentVersion')}</span><select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
+        {[...versions].reverse().map(item => <option key={item.id} value={item.version}>v{item.version} · {t(item.id === latest?.id ? 'alignmentDraft' : 'alignmentHistory')}</option>)}
       </select></label></>}</header>
+      {shown && <h2>{title}</h2>}
       <div className="aligning-brief-body">
         {descriptions.error && <ErrorNotice error={descriptions.error} retry={descriptions.reload} />}
         {!descriptions.data && !descriptions.error && <p role="status">{t('loading')}</p>}
@@ -143,16 +146,26 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
           {(['requirements', 'boundary', 'criteria'] as const).map(field => {
             const oldLines = previous?.[field].split(/\r?\n/) ?? [];
             return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
-              <li key={index}>{previous && !oldLines.includes(line) ? <mark>{line}</mark> : line}</li>)}</ul></section>;
+              <li key={index} aria-label={previous && !oldLines.includes(line) ? `${line} ${t('alignmentNew')}` : undefined}>{previous && !oldLines.includes(line) ? <mark>{line}<span className="brief-new">{t('alignmentNew')}</span></mark> : line}</li>)}</ul></section>;
           })}
           {shown.baseCommit && <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>}
           {copyNotice}
           <p className="muted">{t('alignmentNewEntriesHint')}</p>
+          {previous && <details><summary>{t('alignmentComparing').replace('{version}', String(previous.version))}</summary>{(['requirements', 'boundary', 'criteria'] as const).map(field => {
+            const added = shown[field].split(/\r?\n/).filter(line => line.trim() && !previous[field].split(/\r?\n/).includes(line));
+            return added.length > 0 ? <section key={field}><h3>{t(field)}</h3><ul>{added.map((line, index) => <li key={index}>{line}</li>)}</ul></section> : null;
+          })}</details>}
           {latest?.id !== shown.id && <p>{t('alignmentHistoricalDraft')}</p>}
         </>}
       </div>
-      <footer>{confirmButton}</footer>
     </aside></Inspector>}
+    {amending && <ActionDialog title={t('alignmentNeedsChanges')} busy={submission.pending} returnFocus={amendOpener} onClose={() => setAmending(false)}>
+      <form noValidate onSubmit={async event => { event.preventDefault(); if (await submission.send({ workId, body: amendment.trim() })) { setAmending(false); setAmendment(''); } }}>
+        <label>{t('alignmentMessage')}<textarea className="resize-none" rows={4} value={amendment} disabled={submission.pending || submission.uncertain} onChange={event => setAmendment(event.target.value)} /></label>
+        <button className="btn primary" disabled={!amendment.trim() || submission.pending}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
+        {submission.error && <ErrorNotice error={submission.error} />}
+      </form>
+    </ActionDialog>}
     {preview.preview}
   </div>;
 }
