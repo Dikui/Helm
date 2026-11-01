@@ -160,6 +160,7 @@ export class ClaudeDriver implements Driver {
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
     const agent = options.agent;
+    const loadGlobalConfig = agent.loadGlobalConfig;
     options.signal?.throwIfAborted();
     const id = options.resumeSessionId ?? randomUUID();
     const controller = new AbortController();
@@ -183,13 +184,12 @@ export class ClaudeDriver implements Driver {
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
-      // The coordinator only uses helm MCP and read tools; the user's global plugins, hooks, CLAUDE.md and connectors would
-      // only grow every round's context (ADR 0014). A dedicated home holds just the API settings, so it still loads.
+      // A dedicated home holds the API settings and always loads its user layer.
       // Read-only executors must not start project/local hooks or discover project MCP servers.
       cwd, env, pathToClaudeCodeExecutable: executable,
-      settingSources: agent.home === 'dedicated' ? ['user'] : coordinator ? [] : readOnly ? ['user'] : ['user', 'project', 'local'],
-      ...(coordinator ? { strictMcpConfig: true } : {}),
-      settings: { autoMemoryEnabled: false, fastMode: false, ...(coordinator ? { disableClaudeAiConnectors: true } : {}),
+      settingSources: agent.home === 'dedicated' ? ['user'] : !loadGlobalConfig ? [] : readOnly && !coordinator ? ['user'] : ['user', 'project', 'local'],
+      ...(!loadGlobalConfig ? { strictMcpConfig: true } : {}),
+      settings: { autoMemoryEnabled: false, fastMode: false, ...(!loadGlobalConfig ? { disableClaudeAiConnectors: true } : {}),
         // Ask rules precede settings allow rules; otherwise they can skip our
         // path and sandbox checks in canUseTool, even in default mode.
         // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
