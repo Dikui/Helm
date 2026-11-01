@@ -43,7 +43,13 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
   const latest = async () => {
     await until(bottom, value => value);
     assert.equal(await arrow.count(), 0);
-    assert.ok(await history.evaluate(element => element.scrollTop > 0), '历史必须足够长以验证实际滚动');
+    const chain = await history.evaluate(element => {
+      const rows: string[] = [];
+      for (let node: Element | null = element; node && rows.length < 8; node = node.parentElement)
+        rows.push(`${node.tagName}.${node.className}: ${node.scrollHeight}/${node.clientHeight} ${getComputedStyle(node).overflowY}`);
+      return rows.join('\n');
+    });
+    assert.ok(await history.evaluate(element => element.scrollTop > 0), `历史必须足够长以验证实际滚动\n${chain}`);
   };
   const screenshot = async (name: string) => {
     await page.getByRole('banner', { name: '工作概况', exact: true }).scrollIntoViewIfNeeded();

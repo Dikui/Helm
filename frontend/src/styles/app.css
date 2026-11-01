@@ -214,7 +214,8 @@ button.ref:hover { border-color: var(--ring); color: var(--text); background: va
 @media (max-width: 1200px) { .shell { --sidebar: 230px; } }
 @media (max-width: 980px) {
   .workspace.with-inspector, .workspace.inspector-folded.with-inspector { display: flex; flex-direction: column; overflow: auto; }
-  .with-inspector .inset { flex: none; min-height: 65dvh; overflow: visible; }
+  /* Stacked: a fixed-height conversation keeps its own history scroll; the workspace scrolls past it to the inspector. */
+  .with-inspector .inset { flex: none; height: 75dvh; min-height: 420px; overflow: hidden; }
   .shell-inspector { flex: none; min-height: 300px; overflow: visible; border-left: 0; border-top: 1px solid var(--border); }
   .inspector-folded .shell-inspector { min-height: 44px; }
   .inspector-rail { flex-direction: row; padding: 12px; }

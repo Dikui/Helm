@@ -1,5 +1,5 @@
-.aligning-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 38%); flex: 1; min-height: 0; }
-.aligning-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.aligning-work { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.aligning-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .aligning-thread { flex: 1; min-height: 100px; overflow: auto; padding: var(--space-5) max(var(--space-5), calc((100% - 720px) / 2)); scrollbar-gutter: stable; }
 .aligning-thread-content { display: grid; align-content: start; gap: var(--space-5); }
 .aligning-work h2 { font-size: var(--text-md); }
@@ -28,7 +28,8 @@
 .aligning-brief > footer { padding: var(--space-4); border-top: 1px solid var(--border); }
 .aligning-brief > footer .btn { width: 100%; }
 .aligning-work .btn:active { transform: translateY(1px); }
-@media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); overflow: auto; } .aligning-chat { height: 70dvh; min-height: 0; } .aligning-brief { min-height: auto; border-left: 0; border-top: 1px solid var(--border); } .aligning-brief-body { overflow: visible; } }
+/* 980px matches the shell's stacked layout, where the inspector moves below the conversation. */
+@media (max-width: 980px) { .aligning-brief { min-height: auto; border-left: 0; border-top: 1px solid var(--border); } .aligning-brief-body { overflow: visible; } }
 .aligning-work { grid-template-columns: minmax(0, 1fr) 360px; }
 .aligning-brief h3 { color: var(--text); font-size: 14px; font-weight: 700; }
 .aligning-base { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; margin: 0; }
@@ -38,14 +39,8 @@
 .aligning-message:not(.me) { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 12px; }
 .aligning-message:not(.me)::before { content: '✦' / ''; grid-row: 1 / span 9; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-soft); color: var(--running); }
 .aligning-message:not(.me) > * { grid-column: 2; }
-@media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); } }
 .aligning-who { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; }
 
-@container (max-width: 780px) {
-  .aligning-work { display: flex; flex-direction: column; overflow: auto; }
-  .aligning-chat { min-height: 480px; flex-shrink: 0; }
-  .aligning-brief { min-height: 320px; flex-shrink: 0; border-left: 0; border-top: 1px solid var(--border); }
-}
 .aligning-composer { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: min(820px, calc(100% - 36px)); padding: 0; min-height: 144px; border-radius: 14px; border-color: var(--border-strong); box-shadow: var(--shadow); }
 .aligning-composer > label { display: block; flex: 1; }
 .aligning-composer textarea { min-height: 64px; padding: 10px 12px 4px; }
