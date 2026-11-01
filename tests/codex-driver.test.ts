@@ -81,7 +81,7 @@ for (const mode of ['executor', 'coordinator', 'models'] as const) test(`Codex $
   assert.deepEqual(JSON.parse(await readFile(evidence, 'utf8')), ['app-server', '-c', 'features.remote_plugin=false']);
 });
 
-test('Codex 新开和续跑均关闭自动记忆生成、加载及后台整理，不改用户设置或已有记忆', async t => {
+for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时新开和续跑保持沙箱、MCP、skills 与记忆约束，不改用户设置`, async t => {
   for (const role of ['coordinator', 'executor'] as const) for (const home of ['shared', 'dedicated'] as const) {
     const ctx = await fixture(t, [completed()], {}, role);
     const codexDir = home === 'shared' ? join(ctx.directory, '.codex') : join(ctx.directory, '.helm', 'agent-homes', ctx.options.agent.id);
@@ -90,11 +90,17 @@ test('Codex 新开和续跑均关闭自动记忆生成、加载及后台整理�
     await writeFile(join(codexDir, 'config.toml'), config);
     await writeFile(join(codexDir, 'memories', 'MEMORY.md'), '用户已有记忆');
     for (const resumeSessionId of [undefined, 'thread-scripted']) {
-      const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, home }, resumeSessionId });
+      const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, home, loadGlobalConfig }, resumeSessionId });
       t.after(() => session.cancel());
       await session.send('处理卡片，不保存个人记忆');
       await collect(session.events);
       const thread = (await ctx.requests()).filter(request => ['thread/start', 'thread/resume'].includes(request.method)).at(-1);
+      assertProfile(thread.params, role === 'executor');
+      assert.equal(thread.params.approvalPolicy, 'never');
+      assert.deepEqual(thread.params.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp',
+        http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
+      assert.deepEqual((await ctx.requests()).find(request => request.method === 'skills/extraRoots/set').params.extraRoots,
+        [ctx.options.agent.skillsPath]);
       assert.deepEqual(thread.params.config.memories, { generate_memories: false, use_memories: false });
       assert.equal(thread.params.config.features.memories, false);
     }
@@ -309,10 +315,12 @@ for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} 中
   });
 });
 
-test('Codex 拒绝错误的沙箱和多个可写根，启动前不创建 app-server', async t => {
+for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时仍拒绝错误沙箱和卡片副本外的可写根`, async t => {
   const ctx = await fixture(t, []);
-  for (const sandbox of [{ mode: 'read-only', writableRoots: [ctx.directory] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] }] as const) {
-    await assert.rejects(ctx.driver.start({ ...ctx.options, sandbox: { ...sandbox, writableRoots: [...sandbox.writableRoots] } }), /executor card copy/);
+  for (const sandbox of [{ mode: 'read-only', writableRoots: [ctx.directory] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] },
+    { mode: 'workspace-write', writableRoots: [tmpdir()] }] as const) {
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, loadGlobalConfig },
+      sandbox: { ...sandbox, writableRoots: [...sandbox.writableRoots] } }), /card copy/);
   }
   assert.deepEqual(await ctx.requests(), []);
 });
@@ -472,10 +480,11 @@ test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近
 });
 
 
-test('Codex 只读卡片在新建和续跑的 thread 与 turn 都使用只读沙箱', async t => {
+for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时只读卡片在新建和续跑的 thread 与 turn 都使用只读沙箱`, async t => {
   const ctx = await fixture(t, [completed()]);
   for (const resumeSessionId of [undefined, 'thread-scripted']) {
-    const session = await ctx.driver.start({ ...ctx.options, resumeSessionId, sandbox: { mode: 'read-only', writableRoots: [] } });
+    const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, loadGlobalConfig },
+      resumeSessionId, sandbox: { mode: 'read-only', writableRoots: [] } });
     await session.send('只读分析');
     await collect(session.events);
     session.cancel();

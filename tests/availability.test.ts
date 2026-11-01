@@ -215,13 +215,14 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
   process.env.PATH = `${bin}:${path}`;
   const command = `mkdir -p '${bin}' && printf '#!/bin/sh\\n' > '${bin}/helm-fake-cli' && chmod +x '${bin}/helm-fake-cli' && echo installed`;
   const codex = Object.assign(new FakeDriver(), { install: { executable: 'helm-fake-cli', command, login: 'helm-fake-cli login' } });
+  codex.capabilities.cleanStart = { supported: false, reason: 'CLI 无法跳过用户 MCP 和 skills。' };
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory),
     drivers: { 'claude-sdk': new FakeDriver(), codex } });
   t.after(async () => { process.env.PATH = path; await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}): Promise<any> =>
     (await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json();
-  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: false, install: command });
-  assert.deepEqual((await call('check-agent', { driver: 'claude-sdk' })).result, { installed: true, install: null });
+  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: false, install: command, capabilities: codex.capabilities });
+  assert.deepEqual((await call('check-agent', { driver: 'claude-sdk' })).result.capabilities.cleanStart, { supported: true });
   const environment = (await call('check-environment')).result;
   assert.deepEqual(environment.find((tool: any) => tool.name === 'codex'),
     { name: 'codex', executable: 'helm-fake-cli', installed: false, version: null, smokeVersion: smokeVersions().codex ?? null, install: command, login: 'helm-fake-cli login' });
@@ -232,7 +233,7 @@ test('check-agent 和 check-environment 只在调用时检查 CLI，install-tool
   const installed = await call('install-tool', { name: 'codex' });
   ok(installed);
   assert.match(installed.result.output, /installed/);
-  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: true, install: null });
+  assert.deepEqual((await call('check-agent', { driver: 'codex' })).result, { installed: true, install: null, capabilities: codex.capabilities });
   assert.equal((await call('check-environment')).result.find((tool: any) => tool.name === 'codex').installed, true);
   assert.ok((await call('get-events')).result.some((event: any) => event.action === 'tool-installed' && event.object.id === 'codex'));
 });

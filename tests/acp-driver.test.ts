@@ -219,10 +219,10 @@ for (const [script, reason] of [
   assert.throws(() => process.kill(requests[0].pid, 0), { code: 'ESRCH' });
 });
 
-test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及卡片沙箱运行，返回最终回答和本轮 token', async t => {
+for (const loadGlobalConfig of [false, true]) test(`Grok 全局配置 ${loadGlobalConfig} 时保持认证、HTTP MCP、提示词、卡片沙箱与凭据禁读`, async t => {
   const ctx = await acpFixture(t);
   const processes: number[] = [];
-  const session = await ctx.driver.start({ ...ctx.options, onProcess: process => { processes.push(process.pid); } });
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, onProcess: process => { processes.push(process.pid); } });
   t.after(() => session.cancel());
   await session.send('实现派单');
   const events = await collect(session.events);
@@ -238,6 +238,7 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   assert.ok(profiles.includes(`deny = ${JSON.stringify(credentialPaths(ctx.home))}`), 'Grok 配置档禁止读写凭据目录');
   assert.equal(spawn.env.GROK_SUBAGENTS, '0');
   assert.equal(spawn.env.GROK_WORKFLOWS, '0');
+  assert.equal(spawn.env.GROK_MEMORY, '0');
   assert.equal(spawn.env.XAI_API_KEY, undefined);
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
   assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
@@ -378,13 +379,13 @@ test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第
   });
 });
 
-test('Grok 沙箱根必须恰为卡片副本，只读沙箱拒绝可写根，可写沙箱拒绝额外根', async t => {
-  const ctx = await acpFixture(t);
+for (const kind of ['grok', 'deepseek'] as const) for (const loadGlobalConfig of [false, true]) test(`${kind} 全局配置 ${loadGlobalConfig} 时可写根仍必须恰为卡片副本`, async t => {
+  const ctx = await acpFixture(t, {}, false, kind);
   for (const sandbox of [
     { mode: 'read-only' as const, writableRoots: [ctx.cwd] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, ctx.home] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.home] },
-  ]) await assert.rejects(ctx.driver.start({ ...ctx.options, sandbox }), /card copy/);
+  ]) await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, sandbox }), /card copy/);
   assert.deepEqual(await ctx.requests(), []);
 });
 
@@ -590,7 +591,7 @@ test('Grok 按字段保留未知用量，明确零用量不丢失', async t => {
 });
 
 
-test('ACP 只读卡片在进程环境中覆盖沙箱；DeepSeek 拒绝扩大为可写沙箱', async t => {
+for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGlobalConfig} 时仍覆盖只读沙箱并拒绝 DeepSeek 扩大权限`, async t => {
   for (const kind of ['grok', 'deepseek'] as const) {
     const permissions = [
       { optionId: 'allow', name: '允许一次', kind: 'allow_once' },
@@ -607,7 +608,7 @@ test('ACP 只读卡片在进程环境中覆盖沙箱；DeepSeek 拒绝扩大为�
         { id: 'reasoning_effort', name: 'Effort', type: 'select', currentValue: 'low', options: [{ value: 'low', name: 'Low' }] },
       ] } : {}),
     }, false, kind);
-    const session = await ctx.driver.start({ ...ctx.options,
+    const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig },
       env: { ...ctx.options.env, GROK_SANDBOX: 'off', DSH_PERMISSION_MODE: 'danger-full-access' },
       sandbox: { mode: 'read-only', writableRoots: [] } });
     await session.send('只读分析');

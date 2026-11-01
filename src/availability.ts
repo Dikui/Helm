@@ -34,10 +34,12 @@ export function pendingAgents(store: TaskStore) {
 
 // Checked only when the user picks a driver, so Helm never prompts for agents nobody chose.
 export async function checkAgent(drivers: DriverRegistry, name: string) {
-  const install = Object.hasOwn(drivers, name) ? drivers[name]!.install : undefined;
-  if (!install) return { installed: true, install: null };
+  const driver = Object.hasOwn(drivers, name) ? drivers[name] : undefined;
+  const install = driver?.install;
+  const capabilities = driver?.capabilities ?? null;
+  if (!install) return { installed: true, install: null, capabilities };
   const installed = Boolean(await findExecutable(install.executable, runtimeEnvironment()));
-  return { installed, install: installed ? null : install.command };
+  return { installed, install: installed ? null : install.command, capabilities };
 }
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
