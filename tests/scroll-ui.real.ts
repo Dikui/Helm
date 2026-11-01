@@ -43,9 +43,16 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
   const latest = async () => {
     await until(bottom, value => value);
     assert.equal(await arrow.count(), 0);
-    assert.ok(await history.evaluate(element => element.scrollTop > 0), '历史必须足够长以验证实际滚动');
+    const chain = await history.evaluate(element => {
+      const rows: string[] = [];
+      for (let node: Element | null = element; node && rows.length < 8; node = node.parentElement)
+        rows.push(`${node.tagName}.${node.className}: ${node.scrollHeight}/${node.clientHeight} ${getComputedStyle(node).overflowY}`);
+      return rows.join('\n');
+    });
+    assert.ok(await history.evaluate(element => element.scrollTop > 0), `历史必须足够长以验证实际滚动\n${chain}`);
   };
   const screenshot = async (name: string) => {
+    await page.getByRole('banner', { name: '工作概况', exact: true }).scrollIntoViewIfNeeded();
     assert.deepEqual(errors, [], '页面不应报错');
     await page.screenshot({ path: join(evidence, `${name}.png`), animations: 'disabled' });
   };
@@ -59,17 +66,20 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
       await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds[0]?.status === 'ended');
       const description = descriptions.result[0];
       assert.equal((await daemon.call('decide-gate', { workId: work.id, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' })).ok, true);
-      await page.locator('.conversation-dock').waitFor();
+      await page.getByRole('banner', { name: '工作概况', exact: true }).getByText('执行中', { exact: true }).waitFor();
       await history.getByText('检查邮件模板', { exact: true }).waitFor();
       await latest();
     }
     for (const width of [1440, 945, 600]) {
       await page.setViewportSize({ width, height: 900 });
       await latest();
-      const summary = page.getByRole('region', { name: '对话', exact: true }).locator('.conversation-round > summary');
-      await summary.click();
+      await page.getByRole('navigation', { name: '现在条', exact: true }).getByRole('button', { name: /^调度者\s/ }).click();
+      const inspector = page.getByRole('complementary', { name: '调度者检查器', exact: true });
+      const step = inspector.getByRole('region', { name: '本轮步骤', exact: true })
+        .getByText(phase === 'aligning' ? '正在整理工作说明' : '检查邮件模板', { exact: true }).first();
+      await step.click();
       await latest();
-      await summary.click();
+      await step.click();
       await latest();
       await history.evaluate(element => { element.scrollTop = 300; });
       await arrow.waitFor();
@@ -89,10 +99,10 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
       assert.equal(geometry.height, 34);
       assert.equal(geometry.radius, '50%');
       assert.ok(geometry.center <= 1 && Math.abs(geometry.bottomGap - 12) <= 1, '箭头须固定在对话区底部并居中');
-      await screenshot(`${phase}-${width}-scrolled`);
+      await screenshot(`conversation-history-${phase}-${width}-scrolled`);
       await arrow.click();
       await latest();
-      await screenshot(`${phase}-${width}-latest`);
+      await screenshot(`conversation-history-${phase}-${width}-latest`);
       const followMessage = `${phase}-${width}：回到最新后继续跟随`;
       await daemon.call('send-message', { workId: work.id, body: followMessage, key: followMessage });
       await history.getByText(followMessage, { exact: true }).waitFor();
@@ -103,7 +113,7 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
   // The follow-up messages queued above wake a new round once this one ends, so wait on the record, not the transient summary.
   await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds.filter((round: { status: string }) => round.status === 'ended').length >= 2);
   await latest();
-  await screenshot('round-ended');
+  await screenshot('conversation-history-round-ended');
   const other = (await daemon.call('send-message', { projectId: daemon.project.id, body: `另一项工作\n\n${body}`, key: 'other' })).result.work;
   await page.goto(`${daemon.url}/works/${other.id}`);
   await history.getByText('历史消息段落 70：用户正在阅读较早的内容。', { exact: true }).waitFor();

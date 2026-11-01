@@ -9,18 +9,18 @@ export function gateDecision(node: Pick<GateNode, 'kind' | 'decision'>, t: (key:
   return node.decision;
 }
 const statuses: Record<string, MessageKey> = {
-  ready: 'graphReady', waiting: 'graphWaiting', executing: 'executing', verifying: 'graphVerifying',
+  'verification-failed': 'inboxVerificationFailed', blocked: 'inboxBlocked', decision: 'inspectorNeedsDecision', ready: 'graphReady', waiting: 'graphWaiting', executing: 'executing', verifying: 'graphVerifying',
   paused: 'paused', completed: 'completed', cancelled: 'cancelled', skipped: 'skipped', pending: 'graphPending', decided: 'graphDecided', withdrawn: 'graphWithdrawn',
 };
-export function NodeStatus({ node }: { node: GraphNode }) {
+export function NodeStatus({ node, status = node.status }: { node: GraphNode; status?: string }) {
   const { t } = useI18n();
   if (node.type === 'card' && node.status === 'skipped') {
     const label = node.skippedBy?.map(cause => t('graphSkippedCause').replace('{name}', cause.title)
       .replace('{reason}', t(cause.status === 'withdrawn' ? 'graphCauseWithdrawn' : 'graphCauseCancelled'))).join('；') || t('skipped');
     return <span className="pill cg-skip-chip" title={label}>{label}</span>;
   }
-  const tone = node.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(node.status) ? 'run' : ['completed', 'decided'].includes(node.status) ? 'ok' : 'idle';
-  return <span className={`pill ${tone}`}>{node.type === 'gate' && node.kind === 'work-confirmation' && node.status === 'decided' ? t('graphConfirmed') : t(statuses[node.status]!)}</span>;
+  const tone = ['pending', 'decision', 'blocked'].includes(status) ? 'att' : status === 'verification-failed' ? 'bad' : ['executing', 'verifying'].includes(status) ? 'run' : ['completed', 'decided'].includes(status) ? 'ok' : 'idle';
+  return <span className={`pill ${tone}`}>{node.type === 'gate' && node.kind === 'work-confirmation' && node.status === 'decided' ? t('graphConfirmed') : t(statuses[status]!)}</span>;
 }
 export const endLabels: Record<NonNullable<Dispatch['endReason']>, MessageKey> = {
   completed: 'graphEndCompleted', error: 'graphEndError', 'quota-exhausted': 'graphEndQuota',

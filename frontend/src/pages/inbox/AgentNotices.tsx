@@ -7,17 +7,14 @@ import type { HelmEvent } from '../../shared/types.js';
 interface AgentNotice { kind: string; agentId?: string; reason?: string; command?: string }
 const affectsAgents = (event: HelmEvent) => event.object.type === 'agent';
 
-export function AgentNotices() {
+export function AgentNotices({ compact = false }: { compact?: boolean }) {
   const { t } = useI18n();
   const { data, error, reload } = useResource<AgentNotice[]>('list-pending', {}, affectsAgents);
   const notices = data?.filter(item => item.kind === 'agent-unavailable' && item.agentId) ?? [];
   if (error) return <ErrorNotice error={error} retry={reload} />;
   if (!notices.length) return null;
-  return <section aria-label={t('unavailable')}>
-    <h2 className="sect">{t('agents')}<span className="count">{notices.length}</span></h2>
-    {notices.map(notice => <div key={notice.agentId} className="error" role="status">
-      <Link href={`/settings/agents/${encodeURIComponent(notice.agentId!)}`}>{notice.agentId} · {t('unavailable')}</Link>
-      <span>{notice.reason}</span>{notice.command && <code>{notice.command}</code>}
-    </div>)}
-  </section>;
+  return <Link className={compact ? 'rail-alert' : 'inbox-cli-alert'} href="/settings/agents" aria-label={t('inboxCliAlert')}
+    title={notices.map(notice => [notice.agentId, notice.reason, notice.command].filter(Boolean).join(' · ')).join('\n')}>
+    <span aria-hidden="true">●</span>{!compact && <span>{notices.map(notice => notice.reason || `${notice.agentId} · ${t('unavailable')}`).join(' · ')}</span>}
+  </Link>;
 }

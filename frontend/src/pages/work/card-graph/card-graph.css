@@ -125,7 +125,7 @@
 .cg-dispatch-fold { min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
 .cg-dispatch-fold > summary { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .cg-copy-warning { display: flex; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); color: var(--muted); }
-.cg-copy-warning::before { content: '!'; font-weight: 700; }
+.cg-copy-warning::before { content: '!' / ''; font-weight: 700; }
 @media (max-width: 1100px) { .cg-view { grid-template-columns: minmax(0, 1fr); overflow: auto; } .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; } .cg-main { min-height: 440px; } }
 
 .cg-canvas-wrap { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
@@ -136,7 +136,7 @@
 .cg-token-table { min-width: 0; overflow-x: auto; }
 .cg-token-table table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .cg-token-table th, .cg-token-table td { padding: 8px 3px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
-/* Six columns must fit the inspector; labels wrap, numbers never do. */
+/* Labels wrap in the inspector; token counts stay on one line. */
 .cg-token-table th { white-space: normal; }
 .cg-token-table thead th { vertical-align: bottom; }
 .cg-token-table th:first-child { text-align: left; font-weight: 500; }
@@ -156,3 +156,26 @@
 
 .cg-legend .cg-skip-chip { height: 16px; font-size: 10px; }
 .cg-inspector-head .cg-skip-chip { max-width: 100%; height: auto; min-height: 18px; white-space: normal; overflow-wrap: anywhere; }
+
+@container (max-width: 780px) {
+  .cg-view { display: flex; flex-direction: column; overflow: auto; }
+  .cg-main { min-height: 440px; flex-shrink: 0; }
+  .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; flex-shrink: 0; }
+}
+.work-structure .cg-viewport { padding: 12px; background: none; border: 1px solid var(--border); border-radius: 10px; }
+.work-structure .cg-node { padding: 6px 8px; gap: 2px; border-radius: 8px; }
+.work-structure .cg-node-name { font-size: 12px; }
+.work-structure .cg-node-state { font-size: 11px; }
+.work-structure .cg-node-state time { display: none; }
+.work-structure .cg-node-state .pill { font-size: 11px; padding: 0; height: auto; }
+.work-structure .cg-legend { gap: 8px 12px; padding: 8px 0; border: 0; }
+.work-structure .cg-legend:empty { display: none; }
+
+.cg-node.verification-failed { border-color: var(--danger); }
+.cg-node.blocked, .cg-node.decision { border-color: var(--attention-line); background: var(--attention-soft); }
+.cg-token-table { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.cg-token-table th, .cg-token-table td { padding: 8px; }
+.cg-token-table tr:last-child > * { border-bottom: 0; }
+.cg-token-table thead { background: var(--surface-soft); }
+.cg-usage > h3 { font-size: 13px; color: var(--text); font-weight: 600; }
+.cg-token-summary .hint { padding: 0; }

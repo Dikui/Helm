@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useI18n } from '../../../shared/i18n.js';
 import type { ReviewData } from './types.js';
 import { DispatchStatus } from '../card-graph/labels.js';
@@ -6,14 +6,14 @@ import './brief.css';
 
 // Bound the rendered text even when the diff contains a single very long line.
 const DIFF_PAGE_SIZE = 20_000;
-function ReviewDiff({ diff }: { diff: string }) {
+export function ReviewDiff({ diff }: { diff: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(diff.length / DIFF_PAGE_SIZE));
   const current = Math.min(page, pages - 1);
   return <div className="review-diff">
-    <button className="btn sm" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t('reviewViewDiff')}</button>
+    <button className="btn sm disclosure" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t('reviewViewDiff')}</button>
     {expanded && (diff ? <>
       <div className="row" role="group" aria-label={t('reviewDiffPaging')}>
         <button className="btn sm" disabled={current === 0} onClick={() => setPage(current - 1)}>{t('reviewPrevious')}</button>
@@ -53,4 +53,24 @@ export function ReviewDetails({ review, detailed = false }: { review: ReviewData
       </section>
     </>}
   </div>;
+}
+
+export function ReviewChanges({ review }: { review: ReviewData }) {
+  const { t } = useI18n();
+  const stats = useMemo(() => {
+    if (review.diff === null) return null;
+    let files = 0, added = 0, removed = 0, hunk = false;
+    for (const line of review.diff.split('\n')) {
+      if (line.startsWith('diff --git ')) { files++; hunk = false; }
+      else if (line.startsWith('@@ ')) hunk = true;
+      else if (hunk && line.startsWith('+')) added++;
+      else if (hunk && line.startsWith('-')) removed++;
+    }
+    return { files, added, removed };
+  }, [review.diff]);
+  if (review.noCodeChanges) return null;
+  return <section className="report-changes"><h3>{t('reviewChanges')}</h3><p>
+    <span className="ref">{review.workBranch || '—'}</span> → <span className="ref">{review.baseRef || '—'}</span>
+    {stats && <> · <span className="report-add">+{stats.added}</span> <span className="report-remove">−{stats.removed}</span> · {t('reviewChangedFiles').replace('{count}', String(stats.files))}</>}
+  </p></section>;
 }

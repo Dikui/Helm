@@ -22,20 +22,26 @@ async function checkUi(url: string, reason: string) {
     await page.goto(url);
     const inbox = page.getByRole('complementary', { name: 'Helm' });
     await inbox.getByText(reason, { exact: true }).waitFor();
-    await page.screenshot({ path: join(evidence, 'inbox-unavailable.png'), fullPage: true });
-    await inbox.getByRole('link', { name: 'deepseek-executor · 不可用', exact: true }).click();
+    await page.screenshot({ path: join(evidence, 'inbox-cli-warning.png'), fullPage: true });
+    await inbox.getByRole('link', { name: 'CLI 异常，打开 Agent 设置', exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, '/settings/agents');
+    const driver = page.getByRole('group', { name: 'DeepSeek CLI', exact: true });
+    await driver.getByRole('link', { name: /^deepseek-executor\s/ }).click();
+    assert.equal(new URL(page.url()).pathname, '/settings/agents/deepseek-executor');
     const editor = page.getByRole('form', { name: 'Agent 详情' });
     await editor.getByText(reason).waitFor();
-    await page.screenshot({ path: join(evidence, 'settings-unavailable.png'), fullPage: true });
+    await page.screenshot({ path: join(evidence, 'settings-agents-deepseek-unavailable.png'), fullPage: true });
     await page.setViewportSize({ width: 945, height: 900 });
-    await page.screenshot({ path: join(evidence, 'settings-narrow.png'), fullPage: true });
+    await page.screenshot({ path: join(evidence, 'settings-agents-deepseek-narrow.png'), fullPage: true });
     await editor.getByLabel('职责说明', { exact: true }).fill('重新检测时保留未保存输入');
     await editor.getByRole('button', { name: '重新检测', exact: true }).focus();
     await page.keyboard.press('Enter');
     await editor.getByText('可用', { exact: true }).waitFor();
     assert.equal(await editor.getByLabel('职责说明', { exact: true }).inputValue(), '重新检测时保留未保存输入');
     await inbox.getByText(reason, { exact: true }).waitFor({ state: 'detached' });
-    await page.screenshot({ path: join(evidence, 'settings-rechecked.png'), fullPage: true });
+    const warning = inbox.getByRole('link', { name: 'CLI 异常，打开 Agent 设置', exact: true });
+    if (await warning.count()) assert.ok(!(await warning.getAttribute('title'))?.includes(reason));
+    await page.screenshot({ path: join(evidence, 'settings-agents-deepseek-rechecked.png'), fullPage: true });
     console.log(`请查看截图并对照 design/INDEX.md：${evidence}`);
   } finally { await browser.close(); }
 }

@@ -98,3 +98,49 @@
 .cs-lane.skipped .cs-lane-label { color: var(--faint); }
 .cs-block.skipped { border-style: dashed; color: var(--muted); text-align: center; }
 .cs-gate-marker.withdrawn { position: absolute; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 20px; padding: 0 4px; border: 1px dashed var(--border-strong); border-radius: 4px; background: var(--clear); color: var(--faint); font-size: 10px; text-decoration: line-through; }
+.work-structure .cs-events, .work-structure .cs-coordinator { padding: 0; }
+.cs-event-filter { display: block; }
+.cs-event-filter select { width: 100%; }
+.work-structure .cs-event-list > li { grid-template-columns: 38px minmax(0, 1fr); padding: 2px 0; gap: 8px; border: 0; }
+.cs-event-line { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.cs-event-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-event-line > a { flex: none; color: var(--running); font-size: 12px; }
+.cs-event-line > details { flex: none; position: relative; }
+.cs-event-line > details[open] { flex: 1; min-width: 0; }
+.cs-event-line > details[open] pre { position: relative; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.cs-rounds.compact { gap: 8px; }
+.cs-rounds.compact > li { padding: 0; border: 0; gap: 6px; }
+.cs-rounds.compact > li > time { margin: 0; }
+.cs-rounds.compact .cs-event-link { padding: 0; font: inherit; color: var(--running); }
+.cs-coordinator:has(.compact) .cs-notes { border: 0; padding-top: 0; }
+.cs-coordinator:has(.compact) .cs-notes label { display: block; font-size: 0; }
+.cs-coordinator:has(.compact) .cs-notes select { display: block; width: 100%; font-size: 12px; }
+.cs-coordinator:has(.compact) .cs-note { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); }
+.work-structure .cs-lanes { min-width: 480px; margin: 0; padding: 28px 0 0; }
+.cs-lane { border: 0; }
+.cs-lane .cs-track { background: var(--surface); border-radius: 4px; margin: 3px 0; }
+.cs-block.execution { border-color: var(--running); background: var(--running); color: var(--on-accent); }
+.cs-block.round, .cs-block.round.running { height: 20px; top: 4px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--text) 80%, var(--surface)); color: var(--surface); }
+.cs-block.verification { background: var(--running-soft); border-color: var(--running); color: var(--running); }
+.cs-block.verification.failed { border-color: var(--danger); background: var(--danger); color: var(--on-accent); }
+.cs-block, .cs-block.verification { top: 4px; }
+.cs-now > div::before { top: 28px; border-color: var(--text); }
+.cs-now time { top: 2px; color: var(--muted); }
+
+.cs-rounds.compact > li { position: relative; padding-left: 18px; min-height: 24px; }
+.cs-rounds.compact > li::before { content: ''; position: absolute; width: 1px; left: 4px; top: -8px; bottom: 0; background: var(--border); }
+.cs-rounds.compact > li:first-child::before { top: 12px; }
+.cs-rounds.compact > li:last-child::before { bottom: 12px; }
+.cs-rounds.compact > li > .spark { position: absolute; left: 0; width: 9px; height: 9px; padding: 0; background: currentColor; border: 0; }
+.cs-rounds.compact > li > .spark::after { display: none; }
+.cs-coordinator .cs-notes select { min-height: 34px; padding: 6px 8px; }
+.work-structure .cs-timeline { padding-top: 0; }
+.work-structure .cs-lanes { padding-top: 0; }
+.cs-now time { top: 0; font-size: 10px; padding: 0 3px; background: var(--surface); }
+.cs-now > div::before { top: 20px; }
+.cs-axis { height: 28px; }
+.cs-lane-label .agent-mark { width: 16px; height: 16px; font-size: 10px; }
+.cs-event-line > details > summary { font-size: 0; }
+.cs-event-line > details > summary::before { font-size: 10px; }
+
+.cs-lane-label .now-avatar { width: 16px; height: 16px; font-size: 10px; }

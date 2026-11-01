@@ -1,8 +1,14 @@
-import { afterEach, expect, test } from 'vitest';
+import { structureTab } from './inspector-navigation.js';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 import type { FakeContext, FakeScript, FakeStep } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 afterEach(async () => {
@@ -46,7 +52,7 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     const panel = screen.getByRole('tabpanel', { name: '时间线' });
     const lanes = await within(panel).findAllByRole('group', { name: /^卡片 \d+：/ });
     expect(lanes).toHaveLength(2);
-    const lane = within(panel).getByRole('group', { name: '卡片 1：验证码登录' });
+    let lane = within(panel).getByRole('group', { name: '卡片 1：验证码登录' });
     expect(within(lane).getByRole('button', { name: '派单 #2 · 验收 ✗' })).toBeTruthy();
     const repair = within(lane).getByRole('button', { name: '派单 #3 · ↺ 执行' });
     expect(within(panel).getByText('验收 ✗ → ↺ 执行')).toBeTruthy();
@@ -57,16 +63,20 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
     expect(await within(inspector).findByText('修复验证码过期检查')).toBeTruthy();
     expect(within(inspector).getByRole('button', { name: '派单 #3 · 执行' }).getAttribute('aria-pressed')).toBe('true');
+    await clickReady(structureTab('时间线'));
+    lane = await within(screen.getByRole('tabpanel', { name: '时间线' })).findByRole('group', { name: '卡片 1：验证码登录' });
     await clickReady(within(lane).getByRole('button', { name: '派单 #2 · 验收 ✗' }));
     expect(await within(inspector).findByText('验证码过期检查缺失')).toBeTruthy();
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
-    await clickReady(screen.getByRole('tab', { name: '事件' }));
+    await clickReady(structureTab('事件'));
     const events = screen.getByRole('tabpanel', { name: '事件' });
     const verification = history.find((dispatch: any) => dispatch.purpose === 'verification');
-    fireEvent.change(within(events).getByLabelText('卡片筛选'), { target: { value: verification.cardId } });
-    fireEvent.change(within(events).getByLabelText('派单筛选'), { target: { value: verification.id } });
-    fireEvent.change(within(events).getByLabelText('执行方筛选'), { target: { value: 'runtime' } });
-    const event = await within(events).findByRole('button', { name: 'dispatch-step · 卡片 1 · 步骤 24' });
+    expect(within(events).getAllByRole('combobox')).toHaveLength(1);
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: `card:${verification.cardId}` } });
+    await waitFor(() => expect(filters.some(filter => filter.cardId === verification.cardId)).toBe(true));
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: `dispatch:${verification.id}` } });
+    fireEvent.change(within(events).getByLabelText('事件筛选'), { target: { value: 'actor:runtime' } });
+    const event = await within(events).findByRole('link', { name: '查看对应步骤：卡片 1 · 派单执行步骤 · 步骤 24 · 验收步骤 24' });
     expect(filters.some(filter => filter.cardId === verification.cardId && filter.dispatchId === verification.id && filter.actorType === 'runtime')).toBe(true);
     expect(within(events).queryByRole('button', { name: /卡片 2/ })).toBeNull();
     await clickReady(event);
@@ -76,20 +86,25 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     expect((within(output).getByLabelText('从步骤') as HTMLInputElement).value).toBe('24');
     expect(pages.some(page => page.dispatchId === verification.id && page.fromStep === 24 && page.toStep === 43)).toBe(true);
     expect(document.activeElement?.textContent).toContain('验收步骤 24');
-    fireEvent.change(within(events).getByLabelText('执行方筛选'), { target: { value: 'user' } });
-    expect(await within(events).findByText('没有符合筛选条件的事件。')).toBeTruthy();
-    await clickReady(within(events).getByRole('button', { name: '清除筛选' }));
-    expect(await within(events).findByRole('button', { name: 'dispatch-step · 卡片 1 · 步骤 24' })).toBeTruthy();
-    await clickReady(screen.getByRole('tab', { name: '图' }));
+    await clickReady(structureTab('事件'));
+    const reopenedEvents = screen.getByRole('tabpanel', { name: '事件' });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `card:${verification.cardId}` } });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `dispatch:${verification.id}` } });
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: 'actor:user' } });
+    await waitFor(() => expect(filters.some(filter => filter.actorType === 'user')).toBe(true));
+    expect(await within(reopenedEvents).findByText('没有符合筛选条件的事件。')).toBeTruthy();
+    fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: '' } });
+    expect(await within(reopenedEvents).findByRole('link', { name: '查看对应步骤：卡片 1 · 派单执行步骤 · 步骤 24 · 验收步骤 24' })).toBeTruthy();
+    await clickReady(structureTab('依赖图'));
+    await clickReady(await screen.findByRole('button', { name: '卡片 1：验证码登录' }));
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
-    await clickReady(screen.getByRole('tab', { name: '时间线' }));
+    await clickReady(structureTab('时间线'));
     const roundBlock = await waitFor(() => {
-      const block = screen.getByRole('tabpanel', { name: '时间线' }).querySelector<HTMLButtonElement>('.cs-round-lane button');
-      expect(block).not.toBeNull(); return block!;
+      return within(screen.getByRole('tabpanel', { name: '时间线' })).getAllByRole('button', { name: /^调度轮次 #/ })[0]!;
     });
     await clickReady(roundBlock);
-    expect(screen.getByRole('tab', { name: '调度者' }).getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '调度者' }));
+    expect(screen.getByRole('tab', { name: '调度轮次' }).getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '调度轮次' }));
   } finally { finish(); }
 });
 const workId = (ctx: FakeContext): string => JSON.parse(ctx.input).work.id;
@@ -106,7 +121,7 @@ async function executeWork() {
   return work;
 }
 async function clickReady(button: HTMLElement) {
-  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((button as HTMLButtonElement).disabled ?? false).toBe(false));
   fireEvent.click(button);
 }
 
@@ -127,14 +142,16 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
       return fetch(input, init);
     };
     render(<App baseUrl={daemon.url} transport={transport} />);
-    const tabs = await screen.findByRole('tablist', { name: '调度结构' });
-    expect(within(tabs).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['图', '时间线', '调度者', '事件']);
-    await clickReady(within(tabs).getByRole('tab', { name: '调度者' }));
-    const panel = screen.getByRole('tabpanel', { name: '调度者' });
+    const tabs = await screen.findByRole('tablist', { name: '结构' });
+    expect(within(tabs).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['列表', '依赖图', '时间线', '调度轮次', '事件']);
+    await clickReady(within(tabs).getByRole('tab', { name: '调度轮次' }));
+    const panel = screen.getByRole('tabpanel', { name: '调度轮次' });
     await waitFor(() => expect(within(panel).getByRole('status').textContent).toBe('运行中'));
     expect(await within(panel).findByText('接口通过后做表单')).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText('调度笔记版本'), { target: { value: '1' } });
     expect(await within(panel).findByText('先做接口')).toBeTruthy();
+    expect(within(panel).queryByRole('region', { name: '调度轮次输出' })).toBeNull();
+    await clickReady(within(panel).getByRole('button', { name: '调度轮次 #2' }));
     const output = await within(panel).findByRole('region', { name: '调度轮次输出' });
     expect(await within(output).findByText('调度输出 1')).toBeTruthy();
     expect(within(output).queryByText('调度输出 24')).toBeNull();
@@ -149,22 +166,40 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     expect(await within(panel).findByText('空闲')).toBeTruthy();
     expect(await within(panel).findByText('87.2万 / 1.23万')).toBeTruthy();
     expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('87.2万 / 1.23万');
-    const inboxTokens = await screen.findByTitle('tokens: 884653');
-    expect(inboxTokens.textContent).toBe('Token 88.5万');
+    const workTokens = await screen.findByText('Token 88.5万');
+    expect(workTokens.textContent).toBe('Token 88.5万');
     await clickReady(screen.getByRole('button', { name: 'EN' }));
     expect(within(panel).getByTitle('872308 / 12345').textContent).toBe('872K / 12.3K');
-    expect(screen.getByTitle('tokens: 884653').textContent).toBe('Token 885K');
-    await clickReady(screen.getByRole('button', { name: '中文' }));
+    expect(screen.getByText('Token 885K').textContent).toBe('Token 885K');
+    await clickReady(screen.getByRole('button', { name: 'Chinese' }));
     // Focus moves without activating a remote panel; Enter/Space activates the focused tab.
-    const coordinatorTab = within(tabs).getByRole('tab', { name: '调度者' });
+    const coordinatorTab = within(tabs).getByRole('tab', { name: '调度轮次' });
     coordinatorTab.focus();
     fireEvent.keyDown(coordinatorTab, { key: 'ArrowLeft' });
     expect(document.activeElement).toBe(within(tabs).getByRole('tab', { name: '时间线' }));
     expect(coordinatorTab.getAttribute('aria-selected')).toBe('true');
     await clickReady(within(tabs).getByRole('tab', { name: '时间线' }));
     expect(screen.getByRole('tabpanel', { name: '时间线' })).toBeTruthy();
+    await clickReady(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
+    const inspector = await screen.findByRole('complementary', { name: '调度者检查器' });
+    expect(await within(inspector).findByRole('heading', { name: /本轮 \d+ 步 · 已结束/ })).toBeTruthy();
+    expect(await within(inspector).findByText('接口通过后做表单')).toBeTruthy();
+    fireEvent.change(within(inspector).getByLabelText('调度笔记版本'), { target: { value: '1' } });
+    expect(within(inspector).getByText('先做接口')).toBeTruthy();
+    await clickReady(within(inspector).getByRole('button', { name: '调度轮次 #1' }));
+    const firstRound = await within(inspector).findByRole('region', { name: '调度轮次 #1' });
+    expect(await within(firstRound).findByText('第一轮对齐决策')).toBeTruthy();
+    await clickReady(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
+    const chooser = screen.getByRole('dialog', { name: '换调度者 Agent' });
+    expect(await within(chooser).findByRole('group', { name: '调度者 Agent' })).toBeTruthy();
+    fireEvent.click(within(chooser).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
+
     await clickReady(screen.getByRole('button', { name: 'EN' }));
-    expect(screen.getByRole('tab', { name: 'Coordinator' })).toBeTruthy();
+    expect(within(inspector).getByRole('region', { name: 'Round tokens' })).toBeTruthy();
+    expect(within(inspector).getByRole('button', { name: 'Change coordinator' })).toBeTruthy();
+    expect(within(inspector).getByLabelText('Notes version')).toBeTruthy();
   } finally { finish(); }
 });
 
@@ -180,15 +215,16 @@ test('无卡片和笔记时显示空态，事件读取错误可重试，轮次�
   render(<App baseUrl={daemon.url} transport={transport} />);
   await clickReady(await screen.findByRole('tab', { name: '时间线' }));
   expect(await screen.findByText('调度者还没有创建卡片。')).toBeTruthy();
-  await clickReady(screen.getByRole('tab', { name: '事件' }));
+  await clickReady(structureTab('事件'));
   const events = screen.getByRole('tabpanel', { name: '事件' });
   expect((await within(events).findByRole('alert')).textContent).toContain('读取事件连接失败');
   fail = false;
   await clickReady(within(events).getByRole('button', { name: '重新读取' }));
-  expect(await within(events).findByText('work-created')).toBeTruthy();
-  await clickReady(screen.getByRole('tab', { name: '调度者' }));
-  const coordinator = screen.getByRole('tabpanel', { name: '调度者' });
+  expect(await within(events).findByText('创建工作')).toBeTruthy();
+  await clickReady(structureTab('调度轮次'));
+  const coordinator = screen.getByRole('tabpanel', { name: '调度轮次' });
   expect(await within(coordinator).findByText('还没有调度笔记。')).toBeTruthy();
+  await clickReady(within(coordinator).getByRole('button', { name: '调度轮次 #2' }));
   ok(await daemon.call('cancel-work', { workId: work.id }));
   ok(await daemon.call('delete-outputs', { workId: work.id, confirm: true }));
   expect(await within(coordinator).findByText('输出已删除')).toBeTruthy();
@@ -199,8 +235,10 @@ test('调度者连续失败后从工作和轮次读取连败暂停与原始原�
   const work = await executeWork();
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.runtimePauseReason === '调度者连续失败 3 次');
   render(<App baseUrl={daemon.url} />);
-  await clickReady(await screen.findByRole('tab', { name: '调度者' }));
-  const coordinator = screen.getByRole('tabpanel', { name: '调度者' });
+  await screen.findByText('工作已暂停。恢复后才继续调度与派单。');
+  expect(screen.queryByRole('tablist', { name: '结构' })).toBeNull();
+  fireEvent.click(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
+  const coordinator = screen.getByRole('complementary', { name: '调度者检查器' });
   expect(await within(coordinator).findByText('连败暂停')).toBeTruthy();
   expect(await within(coordinator).findByText('调度者连续失败 3 次')).toBeTruthy();
   expect(within(coordinator).getAllByText('出错退出')).toHaveLength(3);

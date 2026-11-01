@@ -11,6 +11,7 @@ import { readOutput } from './outputs.js';
 import { redactDispatchContent, redactDispatchText } from './project-environment.js';
 import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
+import { readArtifactDiff } from './artifact-diff.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -273,7 +274,20 @@ export function dispatchOutput(store: TaskStore, params: { workId: string; dispa
 
 export function dispatchArtifacts(store: TaskStore, workId: string, dispatchId: string) {
   getDispatch(store, workId, dispatchId);
-  return store.db.prepare('SELECT id, dispatch_id AS dispatchId, kind, name, path, ref, commit_sha AS commitSha FROM artifacts WHERE dispatch_id = ? ORDER BY rowid').all(dispatchId);
+  return store.db.prepare('SELECT id, dispatch_id AS dispatchId, kind, name, path, ref, commit_sha AS commitSha FROM artifacts WHERE dispatch_id = ? ORDER BY rowid').all(dispatchId)
+    .map(artifact => artifact.kind === 'branch' ? { ...artifact, diff: branchArtifactDiff(store, workId, artifact) } : artifact);
+}
+
+function branchArtifactDiff(store: TaskStore, workId: string, artifact: Record<string, unknown>, path?: string) {
+  const dispatch = getDispatch(store, workId, String(artifact.dispatchId));
+  const card = cardDetails(store, workId, dispatch.cardId);
+  // Card completion rewrites branch artifacts to the work merge commit. Dispatch snapshots keep the original card tree.
+  const headCommit = dispatch.purpose === 'verification' ? dispatch.startCommit : dispatch.endCommit ?? (card.status !== 'completed' ? artifact.commitSha as string | null : null);
+  const first = store.db.prepare(`SELECT start_commit AS startCommit FROM dispatches d
+    WHERE d.card_id = ? AND d.purpose = 'execution' AND d.rowid <= (SELECT rowid FROM dispatches WHERE id = ?)
+      AND EXISTS (SELECT 1 FROM artifacts a WHERE a.dispatch_id = d.id AND a.kind = 'branch') ORDER BY d.rowid LIMIT 1`).get(card.id, dispatch.id);
+  return readArtifactDiff({ project: projectPath(store, workId), baseCommit: first ? first.startCommit as string | null : headCommit,
+    headCommit, branch: card.cardBranch ?? null, copyPath: card.workPath ?? null }, path);
 }
 
 export function saveArtifact(store: TaskStore, dispatch: Dispatch, kind: 'branch' | 'file' | 'test-output', name: string, value: string | Buffer, commit?: string) {
@@ -294,10 +308,12 @@ export function reportedArtifact(workPath: string, path: string) {
   return { name: suffix, content: readFileSync(source, 'utf8') };
 }
 
-export function readArtifact(store: TaskStore, workId: string, artifactId: string, encoding: 'utf8' | 'base64' = 'utf8') {
+export function readArtifact(store: TaskStore, workId: string, artifactId: string, encoding: 'utf8' | 'base64' = 'utf8', path?: string) {
   store.work(workId);
-  const artifact = store.db.prepare(`SELECT a.id, a.kind, a.name, a.path, a.ref, a.commit_sha AS commitSha FROM artifacts a
+  const artifact = store.db.prepare(`SELECT a.id, a.dispatch_id AS dispatchId, a.kind, a.name, a.path, a.ref, a.commit_sha AS commitSha FROM artifacts a
     JOIN dispatches d ON d.id = a.dispatch_id WHERE a.id = ? AND d.work_id = ?`).get(artifactId, workId);
   if (!artifact) throw new RuleError('INVALID_ARTIFACT', '成果必须属于这项工作。', 400);
-  return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path)).toString(encoding) : null };
+  if (artifact.kind === 'branch') return { ...artifact, content: null, diff: branchArtifactDiff(store, workId, artifact, path) };
+  if (path !== undefined) throw new RuleError('INVALID_ARTIFACT_PATH', '只有分支成果可按文件读取 patch。', 400);
+  return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path)).toString(encoding) : null, diff: undefined };
 }

@@ -15,10 +15,11 @@ export interface Delivery {
 }
 export interface Work {
   id: string; projectId: string; title: string; status: WorkStatus; createdAt: string;
-  delivery?: Delivery; runtimePauseReason: string | null; usage: Usage; workBranch?: string | null;
+  delivery?: Delivery; runtimePauseReason: string | null; usage: Usage; workBranch?: string | null; baseRef?: string | null;
 }
 export interface WorkSummary extends Work {
   summary: string; statusSince: string; completedCards: number; totalCards: number;
+  cardStatuses: string[];
   hasPendingGate: boolean; pendingGates: { id: string; kind: string; question: string }[];
 }
 export interface Settings { concurrencyLimit: number; runningDispatches: number; queuedDispatches: number }
@@ -27,7 +28,7 @@ export interface HelmEvent {
   object: { type: string; id: string }; details: unknown;
 }
 export interface Gate {
-  id: string; workId: string; kind: string; status: string; question: string; body: string; options: string[]; multiSelect?: boolean;
+  id: string; workId: string; createdAt?: string; kind: string; status: string; question: string; body: string; options: string[]; multiSelect?: boolean;
   descriptionId: string | null; description?: { id: string; requirements: string; boundary: string; criteria: string };
   report?: import('../../../src/review-report.js').ReviewReport | null;
   gitInitialization?: import('../../../src/git-initialization.js').GitInitialization | null;

@@ -1,12 +1,13 @@
+import { AgentMark } from '../../../shared/AgentMark.js';
+import type { AgentEntry } from '../../settings/types.js';
 import type { CSSProperties } from 'react';
 import { useResource } from '../../../shared/data.js';
 import type { Rounds } from '../conversation/types.js';
-import { timelineScale } from './presentation.js';
+import { cardDisplayStatus, timelineScale } from './presentation.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
-import { nodeRingTone } from './labels.js';
 import { NodeStatus, nodeTitle } from './labels.js';
 import type { CardNode, Dispatch, GraphNode } from './types.js';
 
@@ -17,6 +18,7 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
   const { t, language } = useI18n();
   const now = useClock();
   const cards = nodes.filter((node): node is CardNode => node.type === 'card');
+  const agents = useResource<AgentEntry[]>('list-agents');
   const rounds = useResource<Rounds>('list-rounds', { workId });
   const scale = timelineScale(dispatches ?? [], rounds.data?.rounds ?? [], now);
   const position = (time: number) => `${scale.position(time) * 100}%`;
@@ -29,7 +31,7 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
     {!dispatches ? <p className="hint" role="status">{t('loading')}</p> : !cards.length ? <p className="hint">{t('structureNoCards')}</p> : <>
       <div className="cs-lanes">
         <div className="cs-axis"><span /><div className="cs-track">{[0, .25, .5, .75, 1].map(tick => <span key={tick} style={{ left: `${tick * 100}%` }}>{time(scale.timeAt(tick))}</span>)}</div></div>
-        <div className="cs-lane cs-round-lane"><span className="cs-lane-label"><span className={`spark ${rounds.data?.rounds.some(round => round.status === 'running') ? 'run busy' : ''}`} aria-hidden="true" />{t('structureCoordinator')}</span><div className="cs-track">
+        <div className="cs-lane cs-round-lane"><span className="cs-lane-label"><span className="now-avatar" aria-hidden="true">{t('nowCoordinatorMark')}</span>{t('structureCoordinator')}</span><div className="cs-track">
           {rounds.data?.rounds.map(round => <button key={round.id} className={`cs-block round ${round.status}`} style={{ left: position(Date.parse(round.startedAt)), width: width(Date.parse(round.startedAt), round.endedAt ? Date.parse(round.endedAt) : now) }}
             aria-label={`${t('structureRound')} #${round.number}`} title={`${t('structureRound')} #${round.number} · ${round.agentId ?? ''} · ${elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}`} onClick={() => inspectRound(round.id)}>#{round.number}</button>)}
         </div></div>
@@ -37,7 +39,7 @@ export function TimelineView({ workId, nodes, dispatches, selectedId, select, in
           const history = dispatches.filter(dispatch => dispatch.cardId === card.id);
           const withdrawn = card.status === 'skipped' ? card.skippedBy?.filter(cause => cause.status === 'withdrawn') ?? [] : [];
           return <div key={card.id} className={`cs-lane ${selectedId === card.id ? 'selected' : ''} ${card.status}`} style={withdrawn.length > 1 ? { minHeight: 12 + withdrawn.length * 22 } : undefined} role="group" aria-label={`${t('graphCard')} ${index + 1}：${nodeTitle(card)}`}>
-            <div className="cs-lane-label"><span className={`spark ${nodeRingTone[card.status] ?? ''}`} aria-hidden="true" /><button className="cs-card-label" onClick={() => select(card.id)}>{index + 1} · {nodeTitle(card)}</button><NodeStatus node={card} /></div>
+            <div className="cs-lane-label"><AgentMark driver={agents.data?.find(agent => agent.id === (history.find(dispatch => dispatch.id === card.latestDispatchId)?.agentId ?? card.agentId))?.driver} /><button className="cs-card-label" onClick={() => select(card.id)}>{index + 1} · {nodeTitle(card)}</button><NodeStatus node={card} status={cardDisplayStatus(card, nodes, dispatches)} /></div>
             <div className="cs-track">
               {history.filter(dispatch => dispatch.startedAt).map(dispatch => {
                 const begin = Date.parse(dispatch.startedAt!);

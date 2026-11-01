@@ -1,7 +1,35 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "prototype", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "python3 -m http.server $PORT -d prototype"], "port": 8787, "autoPort": true },
-    { "name": "design", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "python3 -m http.server $PORT -d design"], "port": 8788, "autoPort": true }
+    {
+      "name": "prototype",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "python3 -m http.server $PORT -d prototype"
+      ],
+      "port": 8787,
+      "autoPort": true
+    },
+    {
+      "name": "design",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "python3 -m http.server $PORT -d design"
+      ],
+      "port": 8788,
+      "autoPort": true
+    },
+    {
+      "name": "helm-demo",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "node dist/tests/ui-demo.js"
+      ],
+      "port": 4344,
+      "autoPort": true
+    }
   ]
 }

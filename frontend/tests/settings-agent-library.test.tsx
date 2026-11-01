@@ -96,7 +96,7 @@ test('修复失效库引用后展示全局重名警告，复制提示说明并�
   expect((await within(copySkills).findByRole('checkbox', { name: 'common' }) as HTMLInputElement).checked).toBe(true);
   expect((within(copySkills).getByRole('checkbox', { name: 'extra-skill' }) as HTMLInputElement).checked).toBe(true);
   expect((within(copyMcp).getByRole('checkbox', { name: 'common' }) as HTMLInputElement).checked).toBe(true);
-  fireEvent.change(within(copyEditor).getByLabelText('Agent id'), { target: { value: 'library-copy' } });
+  fireEvent.change(within(copyEditor).getByLabelText('名字'), { target: { value: 'library-copy' } });
   fireEvent.click(within(copyEditor).getByRole('button', { name: '保存' }));
   await waitFor(() => expect(window.location.pathname).toBe('/settings/agents/library-copy'));
   expect(await agent('library-copy')).toMatchObject({ skills: [], prompt: '复制这段附加提示词', available: true,

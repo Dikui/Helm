@@ -5,7 +5,7 @@ import { LibraryField, validLibraryName, type LibraryFormState } from './Library
 import { SaveFeedback } from './SaveFeedback.js';
 import { useSettingsSave } from './useSettingsSave.js';
 
-const empty = { name: '', transport: 'http' as 'http' | 'stdio', url: '', headers: '', command: '', args: '', env: '' };
+const empty = { name: '', transport: 'stdio' as 'http' | 'stdio', url: '', headers: '', command: '', args: '', env: '' };
 type Draft = typeof empty;
 function stringMap(text: string): Record<string, string> | undefined {
   try {
@@ -25,13 +25,13 @@ export function RegisterMcpForm({ onRegistered, onStateChange }: { onRegistered:
   const [draft, setDraft] = useState(empty);
   const [errors, setErrors] = useState<Partial<Record<keyof Draft, MessageKey>>>({});
   const save = useSettingsSave();
-  useEffect(() => { onStateChange({ dirty: Object.entries(draft).some(([key, value]) => key !== 'transport' && !!value), pending: save.pending }); }, [draft, save.pending, onStateChange]);
+  useEffect(() => { onStateChange({ dirty: Object.entries(draft).some(([key, value]) => key !== 'transport' && !!value), pending: save.pending, save: () => submit() }); }, [draft, save.pending, onStateChange]);
   function change<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft(previous => ({ ...previous, [key]: value }));
     setErrors(previous => { const next = { ...previous }; delete next[key]; return next; }); save.clear();
   }
-  async function submit(event: FormEvent) {
-    event.preventDefault(); save.clear();
+  async function submit(event?: FormEvent) {
+    event?.preventDefault(); save.clear();
     const invalid: Partial<Record<keyof Draft, MessageKey>> = {};
     if (!draft.name.trim()) invalid.name = 'requiredField';
     else if (!validLibraryName(draft.name.trim())) invalid.name = 'invalidAgentId';
@@ -52,8 +52,8 @@ export function RegisterMcpForm({ onRegistered, onStateChange }: { onRegistered:
     }
     setErrors(invalid);
     const first = Object.keys(invalid)[0];
-    if (first) { document.getElementById(`library-mcp-${first}`)?.focus(); return; }
-    await save.run(async () => {
+    if (first) { document.getElementById(`library-mcp-${first}`)?.focus(); return false; }
+    return await save.run(async () => {
       await api.call('register-mcp', { name: draft.name.trim(), config });
       setDraft({ ...empty, transport: draft.transport }); onRegistered();
     });
@@ -70,11 +70,10 @@ export function RegisterMcpForm({ onRegistered, onStateChange }: { onRegistered:
   ];
   return <form className="settings-box" aria-label={t('libraryRegisterMcp')} noValidate aria-busy={save.pending} onSubmit={submit}>
     <h3>{t('libraryRegisterMcp')}</h3><p className="muted">{t('libraryMcpHelp')}</p>
-    <label>{t('libraryMcpTransport')}{/* Native select follows the settings page's platform-owned popup convention. */}
-      <select value={draft.transport} disabled={save.pending} onChange={event => { change('transport', event.target.value as Draft['transport']); setErrors({}); }}>
-        <option value="http">HTTP</option><option value="stdio">stdio</option>
-      </select></label>
-    {fields.map(field => <LibraryField key={field.key} id={`library-mcp-${field.key}`} label={field.label} type={field.type} reveal={field.reveal}
+    {fields.slice(0, 1).map(field => <LibraryField key={field.key} id={`library-mcp-${field.key}`} label={field.label} type={field.type} reveal={field.reveal}
+      value={draft[field.key]} error={errors[field.key]} disabled={save.pending} onChange={value => change(field.key, value)} />)}
+    <fieldset className="settings-mcp-transport"><legend>{t('libraryMcpTransport')}</legend><div className="settings-effort-options">{(['stdio', 'http'] as const).map(transport => <label key={transport}><input type="radio" name="mcp-transport" value={transport} checked={draft.transport === transport} disabled={save.pending} onChange={() => { change('transport', transport); setErrors({}); }} />{transport === 'stdio' ? 'stdio' : 'URL'}</label>)}</div></fieldset>
+    {fields.slice(1).map(field => <LibraryField key={field.key} id={`library-mcp-${field.key}`} label={field.label} type={field.type} reveal={field.reveal}
       value={draft[field.key]} error={errors[field.key]} disabled={save.pending} onChange={value => change(field.key, value)} />)}
     <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('libraryRegisterMcp')}</button></div>
   </form>;

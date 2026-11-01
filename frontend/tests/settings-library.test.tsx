@@ -6,7 +6,7 @@ import { App } from '../src/App.js';
 const { uiFixture }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; localStorage.clear(); });
-const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label, { selector: 'input,select,textarea' }), { target: { value } });
+const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label, { selector: 'input:not([type=radio]),select,textarea' }), { target: { value } });
 
 test('库分区列出类型和引用 Agent，只显示密钥键名，删除被引用条目时展示结构化错误', async () => {
   daemon = await uiFixture();
@@ -18,9 +18,11 @@ test('库分区列出类型和引用 Agent，只显示密钥键名，删除被�
   render(<App baseUrl={daemon.url} />);
   fireEvent.click(within(screen.getByRole('navigation', { name: '设置' })).getByRole('link', { name: '库' }));
   const remote = await screen.findByRole('article', { name: 'MCP · HTTP remote' });
+  fireEvent.click(within(remote).getByRole('button', { name: '查看' }));
   expect(within(remote).getByRole('link', { name: 'claude-executor' }).getAttribute('href')).toBe('/settings/agents/claude-executor');
   expect(within(remote).getByText('Authorization')).toBeTruthy();
   const local = screen.getByRole('article', { name: 'MCP · stdio local' });
+  fireEvent.click(within(local).getByRole('button', { name: '查看' }));
   expect(within(local).getByText('TOKEN')).toBeTruthy();
   expect(screen.queryByText(/hidden-http|hidden-env|hidden-arg/)).toBeNull();
   fireEvent.click(within(remote).getByRole('button', { name: '删除' }));
@@ -40,7 +42,8 @@ test('从本地目录安装 skill，可省略或指定名字，同名和无效�
   await writeFile(join(source, 'SKILL.md'), '本地技能');
   window.history.replaceState(null, '', '/settings/library');
   render(<App baseUrl={daemon.url} />);
-  await screen.findByText('库里还没有条目。安装一个 skill 或登记一个 MCP 开始使用。');
+  await screen.findByText('还没有 skill');
+  fireEvent.click(within(screen.getByRole('region', { name: 'Skills' })).getByRole('button', { name: '安装 skill' }));
   const form = screen.getByRole('form', { name: '安装 skill' });
   const submit = () => fireEvent.click(within(form).getByRole('button', { name: '安装 skill' }));
   submit();
@@ -78,6 +81,7 @@ test('勾选覆盖同名 skill 时请求带 replace: true，成功后重置勾�
   window.history.replaceState(null, '', '/settings/library');
   render(<App baseUrl={daemon.url} transport={transport} />);
   await screen.findByRole('article', { name: 'skill shared' });
+  fireEvent.click(within(screen.getByRole('region', { name: 'Skills' })).getByRole('button', { name: '安装 skill' }));
   const form = screen.getByRole('form', { name: '安装 skill' });
   change('本地目录路径', source);
   fireEvent.click(within(form).getByRole('button', { name: '安装 skill' }));
@@ -100,11 +104,14 @@ test('登记 HTTP 和 stdio MCP，校验 JSON 输入、遮罩密钥并在失败�
   daemon = await uiFixture();
   window.history.replaceState(null, '', '/settings/library');
   render(<App baseUrl={daemon.url} />);
-  const form = await screen.findByRole('form', { name: '登记 MCP' });
-  const submit = () => fireEvent.click(within(form).getByRole('button', { name: '登记 MCP' }));
+  fireEvent.click(within(await screen.findByRole('region', { name: 'MCP' })).getByRole('button', { name: '注册 MCP' }));
+  const form = screen.getByRole('form', { name: '注册 MCP' });
+  expect(within(form).getByRole('radio', { name: 'stdio' }).getAttribute('checked')).not.toBeNull();
+  fireEvent.click(within(form).getByRole('radio', { name: 'URL' }));
+  const submit = () => fireEvent.click(within(form).getByRole('button', { name: '注册 MCP' }));
   change('MCP 名字', 'remote'); change('URL', 'not-a-url'); submit();
-  expect(screen.getByLabelText('URL').getAttribute('aria-invalid')).toBe('true');
-  expect(document.activeElement).toBe(screen.getByLabelText('URL'));
+  expect(screen.getByRole('textbox', { name: 'URL' }).getAttribute('aria-invalid')).toBe('true');
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'URL' }));
   change('URL', 'https://tools.example.invalid/mcp');
   const headers = screen.getByLabelText('请求头（JSON 对象，可选）') as HTMLInputElement;
   expect(headers.type).toBe('password');
@@ -119,11 +126,12 @@ test('登记 HTTP 和 stdio MCP，校验 JSON 输入、遮罩密钥并在失败�
   expect(headers.type).toBe('password');
   submit();
   expect(form.getAttribute('aria-busy')).toBe('true');
-  expect((within(form).getByRole('button', { name: '登记 MCP' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(form).getByRole('button', { name: '注册 MCP' }) as HTMLButtonElement).disabled).toBe(true);
   const remote = await screen.findByRole('article', { name: 'MCP · HTTP remote' });
+  fireEvent.click(within(remote).getByRole('button', { name: '查看' }));
   expect(within(remote).getByText('Authorization')).toBeTruthy();
   expect(remote.textContent).not.toContain('hidden-http');
-  change('MCP 名字', 'local'); change('传输方式', 'stdio'); change('命令', 'probe');
+  change('MCP 名字', 'local'); fireEvent.click(within(form).getByRole('radio', { name: 'stdio' })); change('命令', 'probe');
   change('参数（JSON 字符串数组，可选）', '[42]'); submit();
   expect(screen.getByLabelText('参数（JSON 字符串数组，可选）').getAttribute('aria-invalid')).toBe('true');
   change('参数（JSON 字符串数组，可选）', '["--label","two words",""]');
@@ -133,6 +141,7 @@ test('登记 HTTP 和 stdio MCP，校验 JSON 输入、遮罩密钥并在失败�
   expect(env.getAttribute('aria-invalid')).toBe('true');
   change('环境变量（JSON 对象，可选）', '{"TOKEN":"hidden-env"}'); submit();
   const local = await screen.findByRole('article', { name: 'MCP · stdio local' });
+  fireEvent.click(within(local).getByRole('button', { name: '查看' }));
   expect(within(local).getByText('TOKEN')).toBeTruthy();
   expect(local.textContent).not.toContain('hidden-env');
   expect(JSON.parse(await readFile(join(daemon.directory, 'data', 'library', 'mcp', 'local.json'), 'utf8'))).toEqual({
@@ -143,16 +152,20 @@ test('登记 HTTP 和 stdio MCP，校验 JSON 输入、遮罩密钥并在失败�
   expect((screen.getByLabelText('命令') as HTMLInputElement).value).toBe('other-probe');
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByRole('region', { name: 'Library' })).toBeTruthy();
-  expect(screen.getByRole('form', { name: 'Install skill' })).toBeTruthy();
+  expect(screen.getByRole('form', { name: 'Install skill', hidden: true })).toBeTruthy();
   expect(screen.getByRole('form', { name: 'Register MCP' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Show environment variables' })).toBeTruthy();
   change('Environment variables (JSON object, optional)', 'null');
   fireEvent.click(within(form).getByRole('button', { name: 'Register MCP' }));
   expect(screen.getByText('Enter a JSON object with string values, such as {"KEY":"value"}.')).toBeTruthy();
   // Both forms share one navigation guard, so editing both never shows two prompts.
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Register MCP' })).getByRole('button', { name: 'Close' }));
+  fireEvent.click(within(screen.getByRole('region', { name: 'Skills' })).getByRole('button', { name: 'Install skill' }));
   change('Local directory path', '/unfinished');
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Install skill' })).getByRole('button', { name: 'Close' }));
   fireEvent.click(within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('link', { name: 'Projects' }));
   expect(window.location.pathname).toBe('/settings/library');
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+  fireEvent.click(within(screen.getByRole('region', { name: 'MCP' })).getByRole('button', { name: 'Register MCP' }));
   expect((screen.getByLabelText('Command') as HTMLInputElement).value).toBe('other-probe');
 });

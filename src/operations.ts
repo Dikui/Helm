@@ -235,14 +235,14 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, params) => dispatchOutput(store, params),
   }),
   operation({
-    name: 'get-dispatch-artifacts', description: '读取派单成果：分支、文件和测试输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'get-dispatch-artifacts', description: '读取派单成果：分支的单卡文件增删摘要、文件和测试输出', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), dispatchId: z.string().min(1) }).strict(),
     execute: ({ store }, { workId, dispatchId }) => dispatchArtifacts(store, workId, dispatchId),
   }),
   operation({
-    name: 'read-artifact', description: '读取成果内容，二进制文件用 encoding: base64', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
-    schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional() }).strict(),
-    execute: ({ store }, { workId, artifactId, encoding }) => readArtifact(store, workId, artifactId, encoding),
+    name: 'read-artifact', description: '读取成果内容；分支成果可用 path 读取单文件 patch，二进制文件用 encoding: base64', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional(), path: z.string().min(1).max(4096).optional() }).strict(),
+    execute: ({ store }, { workId, artifactId, encoding, path }) => readArtifact(store, workId, artifactId, encoding, path),
   }),
   operation({
     name: 'list-work-files', description: '列出工作分支上的文件路径；创建工作副本后即可读取', callers: ['user'], keyed: false, mutates: false,

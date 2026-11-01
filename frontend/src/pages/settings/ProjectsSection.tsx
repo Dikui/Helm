@@ -5,6 +5,8 @@ import { useI18n } from '../../shared/i18n.js';
 import type { Work } from '../../shared/types.js';
 import type { Project, AgentEntry } from './types.js';
 import { SaveFeedback } from './SaveFeedback.js';
+import { ActionDialog } from '../work/ActionDialog.js';
+import '../work/work-actions.css';
 import { useSettingsSave } from './useSettingsSave.js';
 
 export function ProjectsSection() {
@@ -13,31 +15,33 @@ export function ProjectsSection() {
   const projects = useResource<Project[]>('list-projects');
   const agents = useResource<AgentEntry[]>('list-agents');
   const works = useResource<Work[]>('list-works');
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const registerButton = useRef<HTMLButtonElement>(null);
   const [path, setPath] = useState('');
   const [name, setName] = useState('');
   const [invalidPath, setInvalidPath] = useState(false);
   const [deleted, setDeleted] = useState(false);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useRef<HTMLElement>(null);
   const save = useSettingsSave();
-  return <section className="settings-simple settings-projects" aria-label={t('projects')}><div className="settings-heading"><h2 ref={heading} tabIndex={-1}>{t('projects')}</h2><button type="button" className="btn sm" onClick={() => document.getElementById('register-project-path')?.focus()}>＋ {t('newWorkRegisterProject')}</button></div>
+  return <section ref={heading} tabIndex={-1} className="settings-simple settings-projects" aria-label={t('projects')}><div className="settings-heading"><h3>{t('projects')}</h3><button ref={registerButton} type="button" className="btn sm" onClick={() => setRegisterOpen(true)}>＋ {t('newWorkRegisterProject')}</button></div>
     {[projects, agents, works].map((resource, index) => resource.error && <ErrorNotice key={index} error={resource.error} retry={resource.reload} />)}
     {!projects.data && !projects.error && <p role="status">{t('loading')}</p>}
     {projects.data?.length === 0 && <p>{t('emptyProjects')}</p>}
     <span role="status">{deleted ? t('projectDeleted') : ''}</span>
-    {projects.data?.map(project => <ProjectRow key={project.id} project={project} agents={agents.data ?? []}
+    <div className="settings-project-group">{projects.data?.map(project => <ProjectRow key={project.id} project={project} agents={agents.data ?? []}
       workCount={works.error ? undefined : works.data?.filter(work => work.projectId === project.id).length} onSaved={projects.reload}
-      onDeleted={() => { setDeleted(true); heading.current?.focus(); projects.reload(); }} />)}
-    <form className="settings-box" aria-label={t('registerProject')} noValidate aria-busy={save.pending} onSubmit={event => {
+      onDeleted={() => { setDeleted(true); heading.current?.focus(); projects.reload(); }} />)}</div>
+    <ActionDialog className="settings-modal" title={t('registerProject')} open={registerOpen} busy={save.pending} onClose={() => setRegisterOpen(false)} returnFocus={registerButton}><form className="settings-box" aria-label={t('registerProject')} noValidate aria-busy={save.pending} onSubmit={event => {
       event.preventDefault();
       if (!path.trim()) { setInvalidPath(true); document.getElementById('register-project-path')?.focus(); return; }
       setInvalidPath(false);
-      void save.run(async () => { await api.call('register-project', { path, ...(name.trim() ? { name: name.trim() } : {}) }); setPath(''); setName(''); projects.reload(); });
+      void save.run(async () => { await api.call('register-project', { path, ...(name.trim() ? { name: name.trim() } : {}) }); setPath(''); setName(''); setRegisterOpen(false); projects.reload(); });
     }}>
-      <h3>{t('registerProject')}</h3><label>{t('projectName')}<input value={name} disabled={save.pending} onChange={event => { setName(event.target.value); save.clear(); }} /></label>
-      <label>{t('projectPath')}<input id="register-project-path" value={path} disabled={save.pending} aria-invalid={invalidPath} aria-describedby={invalidPath ? 'register-project-path-error' : undefined} onChange={event => { setPath(event.target.value); save.clear(); setInvalidPath(false); }} /></label>
+      <h3>{t('registerProject')}</h3><p className="muted">{t('projectRegisterHint')}</p><label>{t('projectPath')}<input id="register-project-path" value={path} disabled={save.pending} aria-invalid={invalidPath} aria-describedby={invalidPath ? 'register-project-path-error' : undefined} onChange={event => { setPath(event.target.value); save.clear(); setInvalidPath(false); }} /></label>
+      <details><summary>{t('projectName')}</summary><label>{t('projectName')}<input value={name} disabled={save.pending} onChange={event => { setName(event.target.value); save.clear(); }} /></label></details>
       {invalidPath && <p className="settings-reason" id="register-project-path-error">{t('requiredField')}</p>}
       <SaveFeedback {...save} /><div className="row"><button className="btn primary" disabled={save.pending}>{t('registerProject')}</button></div>
-    </form>
+    </form></ActionDialog>
   </section>;
 }
 function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { project: Project; agents: AgentEntry[]; workCount?: number; onSaved: () => void; onDeleted: () => void }) {
@@ -46,10 +50,10 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
   const [selected, setSelected] = useState<string>();
   const save = useSettingsSave();
   const coordinators = agents.filter(agent => agent.role === 'coordinator');
-  return <div className="settings-box"><form aria-label={`${t('projects')} ${project.name}`} noValidate aria-busy={save.pending} onSubmit={event => {
-    event.preventDefault(); void save.run(async () => { await api.call('set-project-coordinator-agent', { projectId: project.id, agentId: selected ?? project.defaultCoordinatorAgentId }); onSaved(); });
-  }}><div className="settings-project-summary"><div><h3>{project.name}</h3><code>{project.path}</code></div><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="muted">{workCount === undefined ? t('loading') : `${workCount} ${t('projectWorkCount')}`}</span></div>
-    <details className="settings-project-config"><summary>{t('projectSettings')}</summary><div>
+  return <article className="settings-box settings-project-row" aria-label={`${t('projects')} ${project.name}`}><div className="settings-project-summary"><div><h3>{project.name}</h3><code>{project.path}</code></div><span className="ref">{project.currentBranch ?? (project.headCommit ? 'HEAD' : '—')}</span><span className="muted">{workCount === undefined ? t('loading') : `${workCount} ${t('projectWorkCount')}`}</span></div>
+    <details className="settings-project-config"><summary>{t('projectSettings')} · {t('defaultCoordinator')} {project.defaultCoordinatorAgentId}</summary><div><form aria-label={`${t('projects')} ${project.name}`} noValidate aria-busy={save.pending} onSubmit={event => {
+      event.preventDefault(); void save.run(async () => { await api.call('set-project-coordinator-agent', { projectId: project.id, agentId: selected ?? project.defaultCoordinatorAgentId }); onSaved(); });
+    }}>
     <label>{t('defaultCoordinator')}<select aria-label={t('defaultCoordinator')} disabled={save.pending || !coordinators.length} value={selected ?? project.defaultCoordinatorAgentId} onChange={event => { setSelected(event.target.value); save.clear(); }}>
       {!coordinators.some(agent => agent.id === project.defaultCoordinatorAgentId) && <option>{project.defaultCoordinatorAgentId}</option>}
       {coordinators.map(agent => <option key={agent.id} value={agent.id} disabled={!agent.available}>{agent.id}{agent.available ? '' : ` · ${t('unavailable')}: ${agent.reason}`}</option>)}
@@ -58,8 +62,7 @@ function ProjectRow({ project, agents, workCount, onSaved, onDeleted }: { projec
     <SaveFeedback {...save} /><div className="row"><button className="btn" disabled={save.pending || !coordinators.length}>{t('save')}</button>
       <button type="button" className="btn work-danger" disabled={save.pending || workCount !== 0} aria-describedby={`project-delete-${project.id}`} onClick={() => void save.run(async () => {
         await api.call('delete-project', { projectId: project.id }); onDeleted();
-      })}>{t('deleteProject')}</button></div></div></details>
-  </form><ProjectEnvironment project={project} onSaved={onSaved} /></div>;
+      })}>{t('deleteProject')}</button></div></form><ProjectEnvironment project={project} onSaved={onSaved} /></div></details></article>;
 }
 
 function ProjectEnvironment({ project, onSaved }: { project: Project; onSaved: () => void }) {
@@ -70,8 +73,8 @@ function ProjectEnvironment({ project, onSaved }: { project: Project; onSaved: (
   const nameInput = useRef<HTMLInputElement>(null);
   const save = useSettingsSave();
   const names = project.environmentNames ?? [];
-  return <details className="settings-project-config"><summary>{t('projectEnvironment')}</summary>
-    <form aria-label={`${t('projectEnvironment')} ${project.name}`} aria-busy={save.pending} onSubmit={event => {
+  return <fieldset className="settings-project-environment"><legend>{t('projectEnvironment')}</legend>
+    <form noValidate aria-label={`${t('projectEnvironment')} ${project.name}`} aria-busy={save.pending} onSubmit={event => {
       event.preventDefault();
       void save.run(async () => {
         await api.call('set-project-environment', { projectId: project.id, name, value });
@@ -86,9 +89,9 @@ function ProjectEnvironment({ project, onSaved }: { project: Project; onSaved: (
         if (name === variable) { setName(''); setValue(''); }
         onSaved();
       })}>{t('deleteEnvironment')}</button></li>)}</ul> : <p>{t('emptyEnvironment')}</p>}
-      <label>{t('environmentName')}<input ref={nameInput} required pattern="[A-Za-z_][A-Za-z0-9_]*" value={name} disabled={save.pending} autoComplete="off" spellCheck={false} onChange={event => { setName(event.target.value); save.clear(); }} /></label>
-      <label>{t('environmentValue')}<input type="password" value={value} disabled={save.pending} autoComplete="new-password" onChange={event => { setValue(event.target.value); save.clear(); }} /></label>
+      <div className="settings-two"><label>{t('environmentName')}<input ref={nameInput} required pattern="[A-Za-z_][A-Za-z0-9_]*" value={name} disabled={save.pending} autoComplete="off" spellCheck={false} onChange={event => { setName(event.target.value); save.clear(); }} /></label>
+      <label>{t('environmentValue')}<input type="password" value={value} disabled={save.pending} autoComplete="new-password" onChange={event => { setValue(event.target.value); save.clear(); }} /></label></div>
       <SaveFeedback {...save} /><button className="btn" disabled={save.pending || !name}>{t(names.includes(name) ? 'overwriteEnvironment' : 'addEnvironment')}</button>
     </form>
-  </details>;
+  </fieldset>;
 }

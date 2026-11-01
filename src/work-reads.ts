@@ -87,10 +87,16 @@ export function listWorks(store: TaskStore, projectId?: string) {
       const pendingGates = ended ? [] : store.gates(work.id).filter(gate => gate.status === 'pending')
         .map(({ id, kind, question }) => ({ id, kind, question }));
       const counts = store.db.prepare(`SELECT count(*) AS totalCards,
-        COALESCE(SUM(status = 'completed'), 0) AS completedCards FROM cards WHERE work_id = ?`).get(work.id)!;
+        COALESCE(SUM(status = 'completed'), 0) AS completedCards FROM cards WHERE work_id = ?`).get(work.id) as { totalCards: number; completedCards: number };
+      // Failed verification and blocked execution are conclusions, not stored card states.
+      const cardStatuses = store.db.prepare(`SELECT CASE
+        WHEN c.status IN ('executing', 'verifying') AND d.status = 'ended' AND d.conclusion = 'failed' THEN 'verification-failed'
+        WHEN c.status IN ('executing', 'verifying') AND d.status = 'ended' AND d.conclusion = 'blocked' THEN 'blocked'
+        ELSE c.status END AS status FROM cards c LEFT JOIN dispatches d ON d.id = c.latest_dispatch_id
+        WHERE c.work_id = ? ORDER BY c.created_at, c.id`).all(work.id).map(card => String(card.status));
       const latest = store.db.prepare(`SELECT id FROM events WHERE work_id = ? ORDER BY id DESC LIMIT 1`).get(work.id);
       const event = latest ? store.events({ workId: work.id, after: Number(latest.id) - 1 })[0] : undefined;
       return { ...work, summary: eventSummary(event), statusSince: statusSince(store, work),
-        ...counts, hasPendingGate: pendingGates.length > 0, pendingGates };
+        ...counts, cardStatuses, hasPendingGate: pendingGates.length > 0, pendingGates };
     });
 }

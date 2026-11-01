@@ -15,7 +15,7 @@ export function encodeFiles(files: File[]): Promise<AttachmentUpload[]> {
   })));
 }
 
-export function AttachmentPicker({ files, onChange, disabled, references, onReferencesChange, workId }: { files: File[]; onChange: (files: File[]) => void; disabled?: boolean;
+export function AttachmentPicker({ files, onChange, disabled, references, onReferencesChange, workId, fileLabel }: { files: File[]; onChange: (files: File[]) => void; disabled?: boolean; fileLabel?: string;
   references: string[]; onReferencesChange: (ids: string[]) => void; workId?: string }) {
   const { t } = useI18n();
   const input = useRef<HTMLInputElement>(null);
@@ -24,8 +24,8 @@ export function AttachmentPicker({ files, onChange, disabled, references, onRefe
   const choices = works.data?.filter(work => work.id !== workId && !references.includes(work.id)) ?? [];
   // A button rather than a label, so composer label styles never apply to it.
   return <div className="attachments">
-    <button type="button" className="btn sm" disabled={disabled} onClick={() => input.current?.click()}>{t('attachFiles')}</button>
-    <input ref={input} type="file" multiple hidden onChange={event => {
+    {!fileLabel && <button type="button" className="btn sm" disabled={disabled} onClick={() => input.current?.click()}>{t('attachFiles')}</button>}
+    <input ref={input} type="file" multiple hidden={!fileLabel} aria-label={fileLabel} disabled={disabled} onChange={event => {
       // A same-name file replaces the earlier pick, matching the server's one-name-per-message rule.
       const added = [...event.target.files ?? []];
       onChange([...files.filter(file => !added.some(item => item.name === file.name)), ...added]);

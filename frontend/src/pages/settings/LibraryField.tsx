@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 
 export const validLibraryName = (name: string) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
-export interface LibraryFormState { dirty: boolean; pending: boolean }
+export interface LibraryFormState { dirty: boolean; pending: boolean; save?: () => Promise<boolean> }
 
 export function LibraryField({ id, label, value, onChange, disabled, error, type = 'text', reveal }: {
   id: string; label: MessageKey; value: string; onChange: (value: string) => void; disabled: boolean;
