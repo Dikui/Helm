@@ -12,9 +12,10 @@ import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
 import { RoundSteps, Thinking } from '../conversation/RoundProgress.js';
 import { ConversationScroll } from '../conversation/ConversationScroll.js';
 import type { Rounds } from '../conversation/types.js';
+import { Inspector } from '../../../shared/Inspector.js';
 import './aligning.css';
 
-export function AligningWork({ workId, workBranch }: { workId: string; projectId: string; workBranch?: string | null }) {
+export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: { workId: string; projectId: string; workBranch?: string | null; showBrief: boolean; inspectorTitle: string }) {
   const { api } = useData();
   const { t, language } = useI18n();
   const workFiles = useResource<string[]>('list-work-files', { workId });
@@ -95,7 +96,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
       </form>
     </section>
-    <aside className="aligning-brief" aria-label={t('brief')} aria-busy={confirming}>
+    {showBrief && <Inspector title={inspectorTitle}><aside className="aligning-brief" aria-label={t('brief')} aria-busy={confirming}>
       <header><h2>{t('brief')}</h2>{shown && <><span className="pill att">{t('alignmentUnconfirmed')}</span><label><span className="sr">{t('alignmentVersion')}</span><select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
         {[...versions].reverse().map(item => <option key={item.id} value={item.version}>v{item.version}</option>)}
       </select></label></>}</header>
@@ -117,7 +118,7 @@ export function AligningWork({ workId, workBranch }: { workId: string; projectId
         </>}
       </div>
       <footer>{confirmButton}</footer>
-    </aside>
+    </aside></Inspector>}
     {preview.preview}
   </div>;
 }

@@ -99,7 +99,7 @@ test('结构化报告先显示结论、三类例外和标准；卡片与建议�
     suggestions: ['后续可补充**投递耗时**观测。'],
   };
   const work = await prepareReview(report);
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByRole('heading', { name: '有保留' })).toBeTruthy();
@@ -132,7 +132,7 @@ test('报告成果和验收回答链接打开实际记录，关闭预览后焦�
       { label: '验收回答', kind: 'dispatch', ref: (ctx.results.get('verify') as any).result.id },
     ] }] };
   });
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
   fireEvent.click(await within(review).findByText('1 条标准均有验收证据'));
@@ -155,7 +155,7 @@ test.each(['accept', 'return'] as const)('%s 结论按固定布局显示，全�
     report.exceptions = [{ kind: 'unmet', what: '验证码未拒绝', why: '不符合安全标准。', evidence: report.criteria[0]!.evidence }];
   }
   const work = await prepareReview(report);
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByRole('heading', { name: verdict === 'accept' ? '建议接受' : '建议退回' })).toBeTruthy();
@@ -179,7 +179,7 @@ test('旧版纯文本审核在工作页和收件箱继续显示 Markdown，接�
     for (const item of body.result) if (item.kind === 'review') { item.report = null; item.body = '## 历史报告\n\n**原始结论**'; }
     return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   };
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} transport={transport} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByText('历史汇总报告 · 旧版文本')).toBeTruthy();
@@ -210,14 +210,15 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     if (String(input).endsWith('/api/get-conversation') && fail) { await readReady; throw new Error('审核读取连接中断'); }
     return fetch(input, init);
   };
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon.url} transport={transport} />);
   try {
+    const inspector = screen.getByRole('complementary', { name: '检查器' });
     expect(await screen.findByText('正在读取汇总报告…')).toBeTruthy();
     releaseRead();
     expect(await screen.findByText('汇总报告读取失败')).toBeTruthy();
     fail = false;
-    fireEvent.click(within(screen.getByText('审核读取连接中断').closest('[role="alert"]')!).getByRole('button', { name: '重新读取' }));
+    fireEvent.click(within(within(inspector).getByText('审核读取连接中断').closest('[role="alert"]')!).getByRole('button', { name: '重新读取' }));
     expect(await screen.findByText('尚无汇总报告')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitInvalid();
@@ -226,7 +227,7 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     expect(within(invalid).getByText(/report.summary: 缺少结论说明/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitValid();
-    expect(await screen.findByRole('button', { name: '接受' })).toBeTruthy();
+    expect(await within(inspector).findByRole('button', { name: '接受' })).toBeTruthy();
     expect(screen.queryByText('汇总报告尚不能发起审核')).toBeNull();
   } finally { releaseRead(); submitInvalid(); submitValid(); }
 });
@@ -239,7 +240,7 @@ test('已有有效待审核报告时，失败的重复提交不会显示未生�
   const work = await createWork();
   await confirmVersion(work.id, 1);
   await until(() => daemon!.call('get-events', { workId: work.id }), value => value.result.some((item: any) => item.action === 'operation-rejected'));
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByText('已有有效报告')).toBeTruthy();
@@ -262,7 +263,7 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
   await confirmVersion(work.id, 1);
   await confirmVersion(work.id, 2);
   await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 3);
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=spec`);
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 2')).toBeTruthy();
@@ -287,7 +288,7 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
 
 test('审核显示真实汇总、计数和整体验收；长 diff 按需分段，退回须附意见并恢复进行中', async () => {
   const work = await prepareReview(undefined, true);
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByText(/汇总报告原文/)).toBeTruthy();
@@ -337,20 +338,21 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   const remote = join(daemon!.directory, 'remote.git');
   execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
   execFileSync('git', ['-C', daemon!.repo, 'remote', 'add', 'origin', remote], { stdio: 'ignore' });
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
   fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
-  const review = await screen.findByRole('region', { name: '审核' });
+  let review = await screen.findByRole('region', { name: '审核' });
   const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
   const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
   const inboxAccept = await within(row).findByRole('button', { name: '接受' });
   expect(within(row).queryByRole('button', { name: '查看 diff' })).toBeNull();
-  expect(within(row).getByRole('link', { name: '查看审核详情' }).getAttribute('href')).toBe(`/works/${work.id}/brief`);
+  expect(within(row).getByRole('link', { name: '查看审核详情' }).getAttribute('href')).toBe(`/works/${work.id}?inspect=report`);
   fireEvent.click(source === '工作页' ? within(review).getByRole('button', { name: '接受' }) : inboxAccept);
   let delivery = await screen.findByRole('region', { name: '合入与推送' });
   expect(await within(delivery).findByRole('heading', { name: '已接受，待合入' })).toBeTruthy();
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
   fireEvent.click(within(delivery).getByRole('button', { name: '撤回接受' }));
+  review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByRole('button', { name: '接受' })).toBeTruthy();
   fireEvent.click(within(review).getByRole('button', { name: '接受' }));
   delivery = await screen.findByRole('region', { name: '合入与推送' });
@@ -363,11 +365,6 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   await waitFor(() => expect(within(top).getByText('已完成')).toBeTruthy());
   await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('工作说明与审核')).toBeTruthy());
   expect(within(screen.getByRole('region', { name: '等你' })).queryByText('工作说明与审核')).toBeNull();
-  await waitFor(() => expect(within(review).getByText('已决定 · 接受')).toBeTruthy());
-  expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
-  expect(within(review).queryByRole('button', { name: '退回' })).toBeNull();
-  expect(within(review).queryByLabelText('意见')).toBeNull();
-  expect(within(review).getByText('已完成')).toBeTruthy();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('accept');
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
@@ -376,6 +373,13 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
   await within(delivery).findByRole('heading', { name: '已推送 · 工作完成' });
   expect(execFileSync('git', ['-C', remote, 'show', 'main:result.txt'], { encoding: 'utf8' })).toContain('末尾成果');
+  fireEvent.click(screen.getByRole('button', { name: '汇总报告' }));
+  review = await screen.findByRole('region', { name: '审核' });
+  expect(await within(review).findByText('已决定 · 接受')).toBeTruthy();
+  expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
+  expect(within(review).queryByRole('button', { name: '退回' })).toBeNull();
+  expect(within(review).queryByLabelText('意见')).toBeNull();
+  expect(within(review).getByText('已完成')).toBeTruthy();
   await checkGraphDecision(gate.question, '已接受', 'Accepted');
 });
 
@@ -409,7 +413,7 @@ test.each(['conflict', 'merge-failed', 'push-failed'])('界面显示 %s 原因�
   if (problem === 'merge-failed') await writeFile(join(daemon!.repo, 'result.txt'), 'Untracked file blocks delivery');
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   ok(await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=delivery`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
   const delivery = await screen.findByRole('region', { name: '合入与推送' });
   fireEvent.click(within(delivery).getByRole('button', { name: '合入' }));
@@ -449,15 +453,18 @@ test.each(['conflict', 'merge-failed', 'push-failed'])('界面显示 %s 原因�
 });
 
 async function checkGraphDecision(question: string, zh: string, en: string) {
-  const header = screen.getByRole('heading', { level: 1 }).closest('header')!;
-  fireEvent.click(within(header).getByRole('link', { name: '调度结构' }));
+  fireEvent.click(screen.getByRole('button', { name: '结构' }));
+  fireEvent.click(await screen.findByRole('tab', { name: '依赖图' }));
   const graph = await screen.findByRole('region', { name: '卡片图' });
   const node = await within(graph).findByRole('button', { name: `关卡：${question}` });
   expect(node.title).toContain(zh);
   fireEvent.click(node);
   expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText(zh)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(node.title).toContain(en);
+  fireEvent.click(screen.getByRole('tab', { name: 'Dependency graph' }));
+  const englishNode = await within(await screen.findByRole('region', { name: 'Card graph' })).findByRole('button', { name: `Gate：${question}` });
+  expect(englishNode.title).toContain(en);
+  fireEvent.click(englishNode);
   expect(within(screen.getByRole('complementary', { name: 'Gate inspector' })).getByText(en)).toBeTruthy();
 }
 
@@ -469,7 +476,7 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
     if (failDecision && String(input).endsWith('/api/decide-gate')) throw new Error('意见暂未送达');
     return realFetch(input, init);
   };
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} transport={transport} />);
   const review = await screen.findByRole('region', { name: '审核' });
   const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
@@ -498,7 +505,7 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
   const work = await createWork();
   existingWorkCopy(join(daemon.directory, 'data'), work.id);
   await confirmVersion(work.id, 1);
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=spec`);
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 1')).toBeTruthy();
@@ -529,7 +536,7 @@ test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接�
     release();
     await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
     localStorage.setItem('helm.language', language);
-    window.history.replaceState(null, '', `/works/${work.id}/brief`);
+    window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
     render(<App baseUrl={daemon.url} transport={trackDecisions} />);
     const review = await screen.findByRole('region', { name: language === 'zh' ? '审核' : 'Review' });
     expect(await within(review).findByText(language === 'zh' ? '退回必须附意见。这项工作没有代码改动，接受后将直接完成。'
@@ -558,7 +565,7 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   await confirmVersion(work.id, 1);
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds.at(-1)?.status === 'ended' && value.result.rounds.length === 2);
   if (timing === '打开时已取消') ok(await daemon.call('cancel-work', { workId: work.id }));
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon.url} />);
   fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   const review = await screen.findByRole('region', { name: '审核' });
@@ -583,7 +590,7 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   const terminal = within(ended).getByRole('article', { name: '工作说明与审核' });
   expect(within(terminal).queryByRole('button')).toBeNull();
   fireEvent.click(within(terminal).getByRole('link'));
-  fireEvent.click(screen.getByRole('link', { name: '工作说明' }));
+  fireEvent.click(screen.getByRole('button', { name: '汇总报告' }));
   const readOnlyReview = await screen.findByRole('region', { name: '审核' });
   expect(within(readOnlyReview).getByText('终态仍可读取的汇总报告')).toBeTruthy();
   expect(within(readOnlyReview).getByText('已取消')).toBeTruthy();
@@ -604,7 +611,7 @@ test('审核接受后确认结束（不合入）即移到已结束，完成后�
   const work = await prepareReview();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   ok(await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
-  window.history.replaceState(null, '', `/works/${work.id}/brief`);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=delivery`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
   fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   const delivery = await screen.findByRole('region', { name: '合入与推送' });

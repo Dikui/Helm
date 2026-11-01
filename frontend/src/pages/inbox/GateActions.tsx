@@ -62,7 +62,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
       : gate.body && <Markdown text={gate.body} workId={gate.workId} files={noFiles} onOpen={preview.open} />}
     {preview.preview}
     {gate.kind === 'review' && gate.review && (gate.report ? <details className="report-fold"><summary>{t('reportAudit')}</summary><ReviewDetails review={gate.review} detailed={detailedReview} /></details> : <ReviewDetails review={gate.review} detailed={detailedReview} />)}
-    {gate.kind === 'review' && !detailedReview && <Link href={`/works/${encodeURIComponent(gate.workId)}/brief`}>{t('reviewOpenDetails')}</Link>}
+    {gate.kind === 'review' && !detailedReview && <Link href={`/works/${encodeURIComponent(gate.workId)}?inspect=report`}>{t('reviewOpenDetails')}</Link>}
     {gate.description && <dl className="brief-preview">
       <dt>{t('requirements')}</dt><dd>{gate.description.requirements}</dd>
       <dt>{t('boundary')}</dt><dd>{gate.description.boundary}</dd>
@@ -100,6 +100,6 @@ export function InboxDetails({ work }: { work: WorkSummary }) {
   return <>{error && <ErrorNotice error={error} retry={reload} />}
     {!data && !error && <p role="status">{t('loading')}</p>}
     {data?.filter(item => item.type === 'gate' && item.status === 'pending').map(gate => <GateDecision key={gate.id} gate={gate} workStatus={work.status} decisionWorkId={work.id} />)}
-    <div className="acts"><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}${work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? '/brief' : ''}`}>{t(work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? 'deliveryTitle' : 'inboxOpen')}</Link></div>
+    <div className="acts"><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}${work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? '?inspect=delivery' : ''}`}>{t(work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? 'deliveryTitle' : 'inboxOpen')}</Link></div>
   </>;
 }

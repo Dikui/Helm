@@ -3,16 +3,19 @@ export interface RouteParams { workId?: string; view?: string; section?: string;
 export interface RouteDefinition {
   pattern: RegExp; params: (match: RegExpMatchArray) => RouteParams; component: ComponentType<{ route: RouteParams }>;
 }
-const Context = createContext<{ path: string; navigate: (path: string) => void } | null>(null);
+const Context = createContext<{ path: string; search: string; navigate: (path: string, replace?: boolean) => void } | null>(null);
 export function Router({ children }: { children: ReactNode }) {
-  const [path, setPath] = useState(window.location.pathname);
+  const [location, setLocation] = useState(() => ({ path: window.location.pathname, search: window.location.search }));
   useEffect(() => {
-    const pop = () => setPath(window.location.pathname);
+    const pop = () => setLocation({ path: window.location.pathname, search: window.location.search });
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
   }, []);
-  const navigate = (next: string) => { window.history.pushState(null, '', next); setPath(window.location.pathname); };
-  return <Context value={{ path, navigate }}>{children}</Context>;
+  const navigate = (next: string, replace = false) => {
+    window.history[replace ? 'replaceState' : 'pushState'](null, '', next);
+    setLocation({ path: window.location.pathname, search: window.location.search });
+  };
+  return <Context value={{ ...location, navigate }}>{children}</Context>;
 }
 export function useRouter() {
   const value = useContext(Context);

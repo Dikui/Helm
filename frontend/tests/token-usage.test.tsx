@@ -49,12 +49,14 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   expect(within(inspector).getByText('Token 合计 47')).toBeTruthy();
   const table = within(inspector).getByRole('table', { name: '派单 Token' });
   expect(within(table).getAllByRole('row').map(row => row.textContent)).toEqual(['派单总输入未缓存缓存读取缓存写入输出', '#1 · 执行30———5', '#2 · 验收10———2']);
-  fireEvent.click(within(graph).getByRole('button', { name: '调度者 Token 明细' }));
+  fireEvent.click(screen.getByRole('tab', { name: '依赖图' }));
+  fireEvent.click(within(await screen.findByRole('region', { name: '卡片图' })).getByRole('button', { name: '调度者 Token 明细' }));
   const coordinator = screen.getByRole('complementary', { name: '调度者 Token 明细' });
-  expect(within(coordinator).getByText('Token 合计 180')).toBeTruthy();
+  expect(within(coordinator).getAllByText('Token 合计 180').length).toBeGreaterThan(0);
   const rounds = within(coordinator).getByRole('table', { name: '调度轮次 Token' });
   expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['#1100———20', '#250———10']);
-  fireEvent.click(card);
+  fireEvent.click(screen.getByRole('tab', { name: '依赖图' }));
+  fireEvent.click(await screen.findByRole('button', { name: '卡片 1：用量卡片' }));
   expect(screen.getByRole('complementary', { name: '卡片检查器' })).toBeTruthy();
   await waitFor(() => expect(within(screen.getByRole('main')).getByText('Token 227')).toBeTruthy());
 });

@@ -202,7 +202,8 @@ test('运行层暂停归安静并保留原因；工作页计时每秒走，深�
   const header = screen.getByRole('main');
   const first = header.textContent;
   await waitFor(() => expect(header.textContent).not.toBe(first), { timeout: 2_500 });
-  expect(window.location.pathname).toBe(`/works/${work.id}/brief`);
+  expect(window.location.pathname).toBe(`/works/${work.id}`);
+  expect(window.location.search).toBe('?inspect=spec');
   cleanup();
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);

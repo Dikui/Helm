@@ -58,7 +58,7 @@ test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考和折叠
   const view = render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
   const thinking = await within(chat).findByText('调度者正在思考…');
-  expect(thinking.closest('[role="status"]')!.parentElement!.className).toMatch(/thread/);
+  expect(within(chat).getByRole('region', { name: '对话记录' }).contains(thinking)).toBe(true);
   expect(await within(chat).findByText('本轮 0 步 · 等待首次输出')).toBeTruthy();
   output();
   const folded = (await within(chat).findByText('本轮 1 步 · 最新：正在检查邮件模板')).closest('details')!;
@@ -80,7 +80,7 @@ test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考和折叠
   expect(within(reopened.closest('details')!).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
 });
 
-test('执行中对话支持三种消息范围和顶栏视图切换，消息经 HTTP 保存并显示引用', async () => {
+test('执行中对话支持三种消息范围；切换检查器时对话、输入和范围常驻', async () => {
   const work = await executingWork([[card, gate('password', '旧密码保留多久？'), { type: 'hang' }]]);
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
@@ -106,16 +106,16 @@ test('执行中对话支持三种消息范围和顶栏视图切换，消息经 H
   expect(conversation.find((item: any) => item.body === '先解释迁移成本').gateId).toBe(gateId);
   const cardMessage = within(chat).getByText('验证码十分钟过期', { selector: 'article p' }).closest('article')!;
   expect(within(cardMessage).getByText('卡片 · 实现验证码')).toBeTruthy();
-  const header = screen.getByRole('heading', { level: 1 }).closest('header')!;
-  fireEvent.click(within(header).getByRole('link', { name: '调度结构' }));
-  expect(window.location.pathname).toBe(`/works/${work.id}/structure`);
-  expect(await screen.findByRole('region', { name: '调度结构' })).toBeTruthy();
-  fireEvent.click(within(header).getByRole('link', { name: '工作说明' }));
-  expect(window.location.pathname).toBe(`/works/${work.id}/brief`);
-  expect(await screen.findByRole('heading', { name: '工作说明' })).toBeTruthy();
-  fireEvent.click(within(header).getByRole('link', { name: '对话' }));
-  expect(window.location.pathname).toBe(`/works/${work.id}/chat`);
-  expect(await screen.findByRole('region', { name: '对话' })).toBeTruthy();
+  fireEvent.change(input, { target: { value: '切换期间保留的草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '结构' }));
+  expect(window.location.pathname).toBe(`/works/${work.id}`);
+  expect(await screen.findByRole('region', { name: '结构' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '工作说明' }));
+  expect(window.location.search).toBe('?inspect=spec');
+  expect(await screen.findByRole('region', { name: '工作说明' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '对话' })).toBe(chat);
+  expect((input as HTMLTextAreaElement).value).toBe('切换期间保留的草稿');
+  expect((scope as HTMLSelectElement).value).toBe(`gate:${gateId}`);
 });
 
 test('消息和关卡按时间穿插，选项和自由回答保存决定；已决定关卡退出消息范围', async () => {
@@ -426,7 +426,8 @@ test('本轮计划显示真实总数和三种状态，更新至全部完成，�
   expect(within(plan).getAllByRole('listitem')).toHaveLength(3);
   expect(within(plan).getByText('已完成')).toBeTruthy();
   expect(within(plan).getByText('进行中').closest('li')?.getAttribute('aria-current')).toBe('step');
-  expect(within(plan).getByText('待做').closest('li')?.className).toBe('plan-pending');
+  expect(within(plan).getByText('待做')).toBeTruthy();
+  expect(within(plan).getByText('核对标准')).toBeTruthy();
   const heading = within(chat).getByText(/本轮 \d+ 步 · 最新：原始执行步骤/);
   fireEvent.click(heading.closest('summary')!);
   const raw = within(chat).getByText(/执行步骤 · \d+/, { selector: 'summary' });

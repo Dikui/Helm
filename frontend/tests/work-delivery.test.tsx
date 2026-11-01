@@ -50,7 +50,7 @@ test('调度者解决中只显示进展，不能重复合入或撤回接受', ()
   expect(screen.getByRole('heading', { name: '调度者正在解决冲突' })).toBeTruthy();
   expect((screen.getByRole('button', { name: '解决与验收中…' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole('button', { name: '撤回接受' })).toBeNull();
-  expect(screen.getByRole('link', { name: '查看调度者进展' }).getAttribute('href')).toBe('/works/work/chat');
+  expect(screen.getByRole('link', { name: '查看调度者进展' }).getAttribute('href')).toBe('/works/work?inspect=coord');
 });
 
 test('解决后展示改动与再次合入入口，diff 文本不执行 HTML', async () => {

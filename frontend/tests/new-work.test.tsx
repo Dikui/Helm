@@ -6,9 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
-import { DataProvider } from '../src/shared/data.js';
-import { I18nProvider } from '../src/shared/i18n.js';
-import { AligningWork } from '../src/pages/work/aligning/AligningWork.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 const { copyAgents, configureTestAgent }: typeof import('../../tests/helmd-fixture.js') = await import('../../dist/tests/' + 'helmd-fixture.js');
 const { FakeDriver }: typeof import('../../src/driver.js') = await import('../../dist/src/' + 'driver.js');
@@ -200,7 +197,7 @@ for (const state of ['plain', 'unborn', 'detached'] as const) test(`切换到 ${
   const work = (await daemon.call('list-works')).result[0];
   expect(work.baseRef).toBeNull();
   fireEvent.click(confirm);
-  const briefLink = await screen.findByRole('link', { name: '工作说明' });
+  const briefLink = await screen.findByRole('button', { name: '工作说明' });
   fireEvent.click(briefLink);
   expect(await screen.findByText(/项目 git 尚未就绪/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
@@ -214,9 +211,15 @@ for (const language of ['zh', 'en'] as const) for (const hasCopy of [false, true
     const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '核对提示', key: 'start' })).result.work;
     await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 1);
     localStorage.setItem('helm.language', language);
-    // Render the branch prop directly to cover old aligning works that already have a copy.
-    render(<I18nProvider><DataProvider baseUrl={daemon.url}><AligningWork workId={work.id} projectId={work.projectId}
-      workBranch={hasCopy ? `helm/${work.id}` : null} /></DataProvider></I18nProvider>);
+    const transport: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (!String(input).endsWith('/api/get-work')) return response;
+      const body = await response.json();
+      body.result.workBranch = hasCopy ? `helm/${work.id}` : null;
+      return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+    };
+    window.history.replaceState(null, '', `/works/${work.id}`);
+    render(<App baseUrl={daemon.url} transport={transport} />);
     const brief = await screen.findByRole('complementary', { name: language === 'zh' ? '工作说明' : 'Brief' });
     expect(await within(brief).findByText('核对副本提示')).toBeTruthy();
     const pending = language === 'zh'

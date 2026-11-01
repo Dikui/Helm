@@ -76,7 +76,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
     </>}
     {resolved && !withoutMerge && <div>
       <button className="btn sm" disabled={inFlight} onClick={() => void run('get-conflict-resolution')}>{t('deliveryChanges')}</button>
-      <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}/structure`}>{t('deliveryVerification')}</Link>
+      <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}?inspect=graph`}>{t('deliveryVerification')}</Link>
       {changes && changes.toCommit === resolution.toCommit && <section aria-label={t('deliveryChanges')}>
         <p className="agent-text">{resolution.fromCommit} → {resolution.toCommit}</p>
         <pre className="conflict-diff">{changes.diff || t('deliveryNoChanges')}</pre>
@@ -96,7 +96,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
     <div className="acts">
       {solving && <>
         <button className="btn sm" disabled>{t('deliverySolvingBusy')}</button>
-        <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}/chat`}>{t('deliveryProgress')}</Link>
+        <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}?inspect=coord`}>{t('deliveryProgress')}</Link>
       </>}
       {conflict && !resolved && <>
         {manual && <button className="btn sm primary" disabled={inFlight} onClick={() => void run('recheck-work-merge')}>{t('deliveryRecheck')}</button>}
@@ -111,7 +111,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
       {['merge-queued', 'merging'].includes(work.status) && <button className="btn sm" disabled>{t(work.status)}</button>}
       {canPush && preview && !preview.reason && (preview.newBranch || preview.commits.length > 0) && <button className="btn sm primary" disabled={inFlight} onClick={() => void run('push-work')}>{t(failedPush ? 'retryPush' : 'pushWork')}</button>}
     </div>
-    <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}/brief`}>{t('deliveryReviewReport')}</Link>
+    <Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}?inspect=report`}>{t('deliveryReviewReport')}</Link>
     {error && !finishConfirm && <ErrorNotice error={error} />}
     {finishConfirm && <ActionDialog title={t('deliveryFinish')} description={t('deliveryFinishHint')} busy={inFlight} onClose={() => setFinishConfirm(false)} returnFocus={finishTrigger}>
       {error && <ErrorNotice error={error} />}

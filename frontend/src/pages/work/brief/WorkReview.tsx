@@ -1,4 +1,3 @@
-import { WorkDelivery } from '../WorkDelivery.js';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
@@ -20,7 +19,6 @@ export function WorkReview({ work }: { work: Pick<Work, 'id' | 'status' | 'deliv
   const invalid = events.data?.findLast(event => event.action === 'operation-rejected' && event.object.id === 'request-review'
     && (event.details as { code?: string })?.code === 'INVALID_PARAMS' && gate?.status !== 'pending' && event.id > (gate?.sequence ?? 0));
   return <>
-    <WorkDelivery work={work} />
     {conversation.error && <><h3>{t('reportReadFailed')}</h3><ErrorNotice error={conversation.error} retry={conversation.reload} /></>}
     {events.error && <ErrorNotice error={events.error} retry={events.reload} />}
     {!conversation.data && !conversation.error && <p role="status">{t('reportLoading')}</p>}

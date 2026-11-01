@@ -5,6 +5,7 @@ import { routes } from '../routes.js';
 import { useI18n } from './i18n.js';
 import { RouteOutlet, useRouter } from './router.js';
 import { Splitter, useStoredSize } from './Splitter.js';
+import { InspectorContext } from './Inspector.js';
 
 function useStoredFold(key: string) {
   const [folded, setFolded] = useState(() => {
@@ -42,6 +43,9 @@ export function Shell() {
   const shell = useRef<HTMLDivElement>(null);
   const inbox = useRef<HTMLDivElement>(null);
   const inspector = useRef<HTMLElement>(null);
+  const [inspectorContent, setInspectorContent] = useState<HTMLDivElement | null>(null);
+  const [inspectorHeading, setInspectorHeading] = useState<HTMLElement | null>(null);
+  const [inspectorRail, setInspectorRail] = useState<HTMLElement | null>(null);
   const hasInspector = /^\/works\/[^/]+/.test(path);
   const folded = narrow ? !drawerOpen : leftFolded;
   const inspectFolded = stacked ? mobileRightFolded : rightFolded;
@@ -107,18 +111,22 @@ export function Shell() {
     </div>
     {!folded && !narrow && <Splitter label={t('resizeSidebar')} orientation="vertical" min={220} max={sidebarMax} onResize={setSidebar} value={sidebarSize}
       measure={() => inbox.current?.getBoundingClientRect().width || sidebarSize} />}
+    <InspectorContext value={{ content: inspectorContent, heading: inspectorHeading, rail: inspectorRail, wide, width: inspectorWidth,
+      reveal: () => stacked ? setMobileRightFolded(false) : setRightFolded(false) }}>
     <div className={`workspace${hasInspector ? ' with-inspector' : ''}${inspectFolded ? ' inspector-folded' : ''}`} inert={narrow && drawerOpen ? true : undefined}>
       <main className="inset"><OutputWarning /><RouteOutlet routes={routes} /></main>
       {hasInspector && <>
         {!inspectFolded && !stacked && <Splitter label={t('shellResizeInspector')} orientation="vertical" grow={-1} min={330} max={inspectorMax} measure={measuredInspector} onResize={setInspectorWidth} value={inspectorSize} />}
         <aside className="shell-inspector" ref={inspector} aria-label={t('shellInspector')}>
-          {inspectFolded ? <button type="button" className="inspector-rail" aria-label={t('shellExpandInspector')} title={`${t('shellExpandInspector')} (\\)`} onClick={toggleInspector}><span>⇤ {t('structure')}</span></button>
-            : <><div className="inspector-heading"><b>{t('structure')}</b>
+          {inspectFolded && <button type="button" className="inspector-rail" aria-label={t('shellExpandInspector')} title={`${t('shellExpandInspector')} (\\)`} onClick={toggleInspector}><span ref={setInspectorRail} /></button>}
+          <div hidden={inspectFolded}>
+            <div className="inspector-heading"><b ref={setInspectorHeading} />
               {!stacked && <button type="button" className="shell-fold" aria-label={t(wide ? 'shellNarrowInspector' : 'shellWidenInspector')} onClick={() => setInspectorWidth(wide ? undefined : inspectorMax())}>{wide ? '⇥' : '⇤'} {t(wide ? 'shellNarrow' : 'shellWiden')}</button>}
               <button type="button" className="shell-fold" aria-label={t('shellCollapseInspector')} title={`${t('shellCollapseInspector')} (\\)`} onClick={toggleInspector}>{t('shellCollapse')} ⇥</button>
-            </div><div className="inspector-content" /></>}
+            </div><div className="inspector-content" ref={setInspectorContent} /></div>
         </aside>
       </>}
     </div>
+    </InspectorContext>
   </div>;
 }

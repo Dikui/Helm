@@ -5,7 +5,6 @@ import { useI18n } from '../../../shared/i18n.js';
 import { Link } from '../../../shared/router.js';
 import type { HelmEvent, Work } from '../../../shared/types.js';
 import type { WorkDescription } from '../aligning/types.js';
-import { WorkReview } from './WorkReview.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import './brief.css';
 
@@ -21,7 +20,6 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
   const shown = version === undefined ? active : versions.find(item => item.version === version);
   const confirmed = events.data?.find(event => event.action === 'gate-decided' && (event.details as { descriptionId?: string })?.descriptionId === shown?.id);
   return <div className="page-body brief-view">
-    <WorkReview work={work} />
     <section className="brief-document" aria-label={t('brief')}>
       <header className="row"><h2>{t('brief')}</h2>{shown && <>
         <span className={`pill ${shown.status === 'active' ? 'ok' : ''}`}><span>{t(shown.status === 'active' ? 'briefActive' : shown.status === 'draft' ? 'alignmentUnconfirmed' : 'briefHistorical')}</span>{confirmed && <> · <time dateTime={confirmed.time}>{new Date(confirmed.time).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></>}</span>
