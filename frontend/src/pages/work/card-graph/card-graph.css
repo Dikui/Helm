@@ -170,3 +170,12 @@
 .work-structure .cg-node-state .pill { font-size: 11px; padding: 0; height: auto; }
 .work-structure .cg-legend { gap: 8px 12px; padding: 8px 0; border: 0; }
 .work-structure .cg-legend:empty { display: none; }
+
+.cg-node.verification-failed { border-color: var(--danger); }
+.cg-node.blocked, .cg-node.decision { border-color: var(--attention-line); background: var(--attention-soft); }
+.cg-token-table { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.cg-token-table th, .cg-token-table td { padding: 8px; }
+.cg-token-table tr:last-child > * { border-bottom: 0; }
+.cg-token-table thead { background: var(--surface-soft); }
+.cg-usage > h3 { font-size: 13px; color: var(--text); font-weight: 600; }
+.cg-token-summary .hint { padding: 0; }

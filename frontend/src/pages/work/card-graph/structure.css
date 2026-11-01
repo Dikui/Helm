@@ -126,3 +126,21 @@
 .cs-block, .cs-block.verification { top: 4px; }
 .cs-now > div::before { top: 28px; border-color: var(--text); }
 .cs-now time { top: 2px; color: var(--muted); }
+
+.cs-rounds.compact > li { position: relative; padding-left: 18px; min-height: 24px; }
+.cs-rounds.compact > li::before { content: ''; position: absolute; width: 1px; left: 4px; top: -8px; bottom: 0; background: var(--border); }
+.cs-rounds.compact > li:first-child::before { top: 12px; }
+.cs-rounds.compact > li:last-child::before { bottom: 12px; }
+.cs-rounds.compact > li > .spark { position: absolute; left: 0; width: 9px; height: 9px; padding: 0; background: currentColor; border: 0; }
+.cs-rounds.compact > li > .spark::after { display: none; }
+.cs-coordinator .cs-notes select { min-height: 34px; padding: 6px 8px; }
+.work-structure .cs-timeline { padding-top: 0; }
+.work-structure .cs-lanes { padding-top: 0; }
+.cs-now time { top: 0; font-size: 10px; padding: 0 3px; background: var(--surface); }
+.cs-now > div::before { top: 20px; }
+.cs-axis { height: 28px; }
+.cs-lane-label .agent-mark { width: 16px; height: 16px; font-size: 10px; }
+.cs-event-line > details > summary { font-size: 0; }
+.cs-event-line > details > summary::before { font-size: 10px; }
+
+.cs-lane-label .now-avatar { width: 16px; height: 16px; font-size: 10px; }

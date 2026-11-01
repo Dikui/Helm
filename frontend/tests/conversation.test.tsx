@@ -109,7 +109,7 @@ test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考、展开
   finish();
   await waitFor(() => expect(within(chat).queryByText('调度者正在思考…')).toBeNull());
   expect(await within(strip).findByText(phase === '对齐' ? '已起草，等你确认' : '本轮已结束 · 最新：正在检查邮件模板')).toBeTruthy();
-  await within(inspector).findByRole('heading', { name: '最近调度轮次已结束' });
+  await within(inspector).findByRole('heading', { name: /本轮 \d+ 步 · 已结束/ });
   const ended = await within(inspector).findByText(/调度轮次 #\d+ · 已结束 · 最近步骤/, { selector: 'summary' });
   expect(ended.closest('details')!.open).toBe(false);
   const duration = within(inspector).getByLabelText('本轮用时').textContent;
@@ -391,7 +391,7 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   const frame = await within(await screen.findByRole('dialog', { name: 'outputs/page.html' })).findByTitle('outputs/page.html');
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
   expect(frame.getAttribute('srcdoc')).toContain('<h1>交互页</h1>');
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
   fireEvent.click(within(message).getByRole('link', { name: 'notes.txt' }));

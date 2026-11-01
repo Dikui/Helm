@@ -4,10 +4,10 @@ export function useSettingsSave() {
   const [error, setError] = useState<Error>();
   const [saved, setSaved] = useState(false);
   async function run(task: () => Promise<void>) {
-    if (pending) return;
+    if (pending) return false;
     setPending(true); setError(undefined); setSaved(false);
-    try { await task(); setSaved(true); }
-    catch (failure) { setError(failure as Error); }
+    try { await task(); setSaved(true); return true; }
+    catch (failure) { setError(failure as Error); return false; }
     finally { setPending(false); }
   }
   return { pending, error, saved, run, clear: () => { setSaved(false); setError(undefined); } };

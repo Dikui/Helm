@@ -209,7 +209,7 @@ test.each(['accepted', 'conflict', 'manual', 'solving'] as const)('%s 结束不�
   fireEvent.click(trigger);
   let dialog = screen.getByRole('dialog', { name: '结束（不合入）' });
   expect(within(dialog).getByText(/删除工作副本，保留工作分支/)).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(requests).not.toContain('finish-work-without-merge'); expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger); dialog = screen.getByRole('dialog', { name: '结束（不合入）' });
   fireEvent.click(within(dialog).getByRole('button', { name: '确认结束（不合入）' }));
@@ -242,6 +242,10 @@ test('完成摘要默认不展示提交，推送弹窗含其他本地提交，�
     expect(within(dialog).getByRole('cell', { name: commit.subject })).toBeTruthy();
   }
   expect(within(dialog).getByRole('cell', { name: 'unrelated local commit' })).toBeTruthy();
+  expect(within(dialog).getByRole('columnheader', { name: '来源' })).toBeTruthy();
+  const unknown = within(dialog).getByRole('row', { name: /unrelated local commit/ });
+  expect(within(unknown).getByRole('cell', { name: '来源无法判定（本地提交）' })).toBeTruthy();
+  await within(dialog).findByRole('cell', { name: 'Delivery work' });
   expect(within(dialog).getByText('将新建远端分支：')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: /^推送这 \d+ 个提交$/ }));
   try {
@@ -283,7 +287,7 @@ test('推送失败用钉栏先预览再重试，原始 fatal 和路径在详情�
   const dialog = await screen.findByRole('dialog', { name: '推送 main 到 origin/main' });
   await within(dialog).findByRole('table', { name: '将推出的提交' });
   expect(requests).not.toContain('push-work');
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByRole('region', { name: 'Merge and push' }).textContent).not.toMatch(/[\u3400-\u9fff]/);
   expect(within(screen.getByRole('region', { name: 'Chat' })).getByRole('group', { name: 'Merge and push' }).textContent).not.toMatch(/[\u3400-\u9fff]/);
@@ -311,7 +315,7 @@ test.each(['no-remote', 'no-commits', 'preview-failed'] as const)('%s 预览不�
   } else await within(dialog).findByText('暂时无法推送，请查看详情并配置远端。');
   expect((within(dialog).getByRole('button', { name: '推送这 0 个提交' }) as HTMLButtonElement).disabled).toBe(true);
   expect(requests).not.toContain('push-work');
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
@@ -322,10 +326,10 @@ test('只读完成显示真实成果和导出删除入口，不读取推送预�
   fireEvent.click(await within(delivery()).findByRole('button', { name: 'README.md' }));
   const artifact = await screen.findByRole('dialog', { name: 'README.md' });
   expect(await within(artifact).findByText('baseline')).toBeTruthy();
-  fireEvent.click(within(artifact).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(artifact).getByRole('button', { name: '关闭' }));
   fireEvent.click(within(delivery()).getByRole('button', { name: '导出' }));
   expect(await screen.findByRole('dialog', { name: '导出输出' })).toBeTruthy();
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   expect(within(delivery()).getByRole('button', { name: '删除输出' })).toBeTruthy();
   expect(requests).not.toContain('get-work-push-preview');
   expect(within(delivery()).queryByRole('button', { name: /合入|推送/ })).toBeNull();
@@ -385,11 +389,11 @@ test('冲突卡片验收后不重新审核，钉栏查看固定提交新增改�
     fireEvent.click(await within(dialog).findByRole('button', { name: '查看 diff' }));
     expect(within(dialog).getByLabelText('Diff 内容').textContent).toContain('+work and base resolved');
     expect(within(dialog).queryByRole('img')).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
     fireEvent.click(within(delivery()).getByRole('button', { name: '验收回答与解决冲突的提交' }));
     const verification = await screen.findByRole('dialog', { name: '验收回答与解决冲突的提交' });
     expect(await within(verification).findByText('Both sides verified')).toBeTruthy();
-    fireEvent.click(within(verification).getByRole('button', { name: '返回' }));
+    fireEvent.click(within(verification).getByRole('button', { name: '关闭' }));
     pressPin('再次合入', '2');
     await within(delivery()).findByRole('heading', { name: '已完成 · 已合入' });
     const gates = (await daemon!.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.kind === 'review');
@@ -405,6 +409,7 @@ test('清理失败保留完成结果，原始路径收进详情，不声称副�
     const body = await response.json(); body.result.delivery.cleanup = { reason: 'fatal: cannot remove /private/tmp/work-copy' }; return Response.json(body);
   };
   show(custom); await screen.findByRole('region', { name: '合入与推送' });
+  fireEvent.click(within(delivery()).getByText('清理结果'));
   const cleanup = within(delivery()).getByRole('region', { name: '清理结果' });
   expect(within(cleanup).getByRole('status').textContent).toBe('清理未完成，详情中可查看原因。');
   expect(within(cleanup).queryByText('工作副本与工作分支已删除，输出已压缩。')).toBeNull();

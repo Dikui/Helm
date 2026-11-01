@@ -12,7 +12,7 @@ import { GatePin } from '../work/GatePin.js';
 import { ActionDialog } from '../work/ActionDialog.js';
 import { GitInitializationDetails } from './GitInitializationDetails.js';
 
-export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, detailedReview = false, pinned = false, source }: { pinned?: boolean; source?: string; gate: ReviewGate; workStatus?: WorkStatus; decisionWorkId?: string; detailedReview?: boolean }) {
+export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, detailedReview = false, pinned = false, source, overview = false }: { overview?: boolean; pinned?: boolean; source?: string; gate: ReviewGate; workStatus?: WorkStatus; decisionWorkId?: string; detailedReview?: boolean }) {
   const { api } = useData();
   const { t } = useI18n();
   const preview = useFilePreview(gate.workId, detailedReview);
@@ -62,8 +62,8 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
   const returnDialog = !readOnly && dialog && <ActionDialog title={t(dialog === 'changes' ? 'pinAllChanges' : dialog === 'return' ? 'pinReturnReview' : dialog === 'git' ? 'pinGitDetails' : 'gitInitReject')} busy={pending} returnFocus={opener} onClose={() => setDialog(undefined)} className={dialog === 'changes' ? 'report-preview' : undefined}>
     {dialog === 'changes' ? <>{!gate.report && <Markdown text={gate.body} workId={gate.workId} files={files} onOpen={preview.open} />}{gate.review && <ReviewDetails review={gate.review} detailed />}</> : dialog === 'git' ? <>
       <GitInitializationDetails gate={gate} />
-      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
-      <button className="btn primary" disabled={pending} onClick={() => void decide('initialize')}>{t('gitInitApprove')}</button>
+      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={4} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
+      <div className="row"><button className="btn" disabled={pending} onClick={() => setDialog(undefined)}>{t('gitInitKeepBlocked')}</button><button className="btn primary" disabled={pending} onClick={() => void decide('initialize')}>{t('gitInitApprove')}</button></div>
     </> : <form noValidate onSubmit={event => { event.preventDefault(); void decide(dialog === 'return' ? 'return' : 'refuse'); }}>
       <label>{t(dialog === 'return' ? 'comment' : 'gitInitReason')}<textarea className="resize-none" rows={4} required disabled={pending} value={comment} onChange={event => setComment(event.target.value)} /></label>
       <p className="muted">{dialog === 'return' ? reviewHint : t('pinRefuseHint')}</p>
@@ -72,6 +72,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
     {error && <ErrorNotice error={error} />}
   </ActionDialog>;
   if (decided) return null;
+  if (overview) return <><button className="btn primary" disabled={pending || readOnly} onClick={event => show('git', event.currentTarget)}>{t('gitInitInspectRules')}</button>{returnDialog}</>;
   if (pinned) return <>
     <GatePin label={title} source={source ?? t(gate.kind === 'review' ? 'nowAwaitingReview' : 'pinAwaitingDecision')}
       title={gate.kind === 'review' ? t(gate.report ? gate.report.verdict === 'accept' ? 'pinRecommendAccept' : gate.report.verdict === 'return' ? 'pinRecommendReturn' : 'reportReservations' : 'nowLegacyReport') : gate.kind === 'git-initialization' ? t('pinGitQuestion') : title}
@@ -111,7 +112,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
     {ended && <p className="pill">{t(workStatus)}</p>}
     {!readOnly && gate.kind === 'review' && !detailedReview && <><label>{t('comment')}<textarea className="resize-none" disabled={pending} value={comment} onChange={e => setComment(e.target.value)} /></label><p className="muted">{t(gate.review?.noCodeChanges ? 'reviewNoCodeChangesHint' : 'reviewReturnHint')}</p></>}
     {!readOnly && gate.kind === 'git-initialization' && <>
-      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={8} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
+      {!gate.gitInitialization?.hasGitignore && <><label htmlFor={rulesId}>{t('gitInitIgnoreRules')}</label><textarea id={rulesId} className="resize-none git-ignore-rules" rows={4} disabled={pending} value={ignoreRules} onChange={event => setIgnoreRules(event.target.value)} /></>}
       <label>{t('gitInitReason')}<textarea className="resize-none" disabled={pending} value={comment} onChange={event => setComment(event.target.value)} /></label>
       <div className="acts"><button className="btn sm primary" disabled={pending} onClick={() => void decide('initialize')}>{t('gitInitApprove')}</button>
         <button className="btn sm" disabled={pending || !comment.trim()} onClick={() => void decide('refuse')}>{t('gitInitReject')}</button></div>

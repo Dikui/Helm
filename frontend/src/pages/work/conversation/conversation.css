@@ -98,8 +98,8 @@ kbd { display: inline-flex; align-items: center; padding: 0 4px; border: 1px sol
 .conversation-composer textarea, .aligning-composer textarea { min-height: 64px; padding: 10px 12px 4px; }
 .conversation-hints { display: flex; flex-wrap: wrap; flex: none; align-items: center; gap: 4px 8px; min-width: 0; padding: 4px 8px 8px 12px; color: var(--faint); font-size: 11px; }
 .conversation-hints > span { font-size: 11px; }
-.conversation-hints label { display: flex; flex: 0 1 auto; align-self: center; min-width: 0; max-width: min(110px, 100%); margin: 0; }
-.conversation-hints select { field-sizing: content; width: auto; min-width: 70px; max-width: 110px; padding: 2px 6px; font-size: 11px; text-overflow: ellipsis; }
+.conversation-hints label { display: flex; flex: 0 1 auto; align-self: center; min-width: 0; max-width: min(120px, 100%); margin: 0; }
+.conversation-hints select { field-sizing: content; width: auto; min-width: 70px; max-width: 120px; padding: 2px 6px; font-size: 11px; text-overflow: ellipsis; }
 .conversation-hints .send { flex: none; align-self: flex-end; width: 28px; height: 28px; min-height: 28px; margin-left: auto; padding: 0; border-radius: 50%; font-size: 14px; }
 .composer-attachments { min-width: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; }
 .composer-attachments > summary::before { content: '▸ '; }
@@ -134,3 +134,6 @@ kbd { display: inline-flex; align-items: center; padding: 0 4px; border: 1px sol
   .conversation-hints label { max-width: calc(100% - 40px); }
   .conversation-event { padding-left: 0; }
 }
+
+.conversation-hints select { width: 120px; min-width: 0; }
+@media (max-width: 680px) { .conversation-hints { flex-wrap: nowrap; gap: 5px; } .conversation-hints > span { flex: 1; font-size: 10px; } .conversation-hints select { width: 88px; } }

@@ -239,7 +239,7 @@ for (const language of ['zh', 'en'] as const) for (const hasCopy of [false, true
     expect(within(brief).getByText(hasCopy ? ready : pending)).toBeTruthy();
     expect(within(brief).queryByText(hasCopy ? pending : ready)).toBeNull();
     const branchPending = language === 'zh' ? '第一张写代码卡片执行派单前创建' : 'Created before the first code-writing execution dispatch';
-    expect(Boolean(within(brief).queryByText(`· ${branchPending}`))).toBe(!hasCopy);
+    expect(Boolean(within(brief).queryByText(branchPending))).toBe(!hasCopy);
     const chat = screen.getByRole('region', { name: language === 'zh' ? '对话' : 'Chat' });
     expect(within(chat).getByText(language === 'zh'
       ? hasCopy ? '确认时，工作分支没有提交则跟上基准分支的最新提交；已有提交则保持。' : '首次派出写代码的执行派单前取基准分支的最新提交，确认时不建副本。'
@@ -258,7 +258,7 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('complementary', { name: '工作说明' });
   expect(await within(brief).findByText('邮箱验证码登录')).toBeTruthy();
-  expect(within(brief).getByText('· 第一张写代码卡片执行派单前创建')).toBeTruthy();
+  expect(within(brief).getByText('第一张写代码卡片执行派单前创建')).toBeTruthy();
   const chat = screen.getByRole('region', { name: '对话' });
   fireEvent.change(within(chat).getByLabelText('消息'), { target: { value: '验证码十分钟过期' } });
   fireEvent.click(within(chat).getByRole('button', { name: '发送' }));
@@ -297,7 +297,7 @@ test('更新草稿时不可确认，还要改弹窗保留输入并发送修改�
   fireEvent.keyDown(window, { key: '2' });
   const dialog = await screen.findByRole('dialog', { name: 'Needs changes' });
   fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: '增加验证码' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Back' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
   fireEvent.keyDown(window, { key: '2' });
   const reopened = await screen.findByRole('dialog', { name: 'Needs changes' });
   expect((within(reopened).getByLabelText('Message') as HTMLTextAreaElement).value).toBe('增加验证码');

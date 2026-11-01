@@ -19,10 +19,10 @@ export function ActionDialog({ title, description, busy, onClose, returnFocus, c
     back.current?.focus();
     return () => { element.close(); document.documentElement.style.overflow = previousOverflow; returnFocus.current?.focus(); };
   }, [returnFocus, open]);
-  return createPortal(<dialog ref={dialog} className={className ? `work-action-dialog ${className}` : 'work-action-dialog'} aria-labelledby={id} aria-describedby={description ? `${id}-description` : undefined}
+  return createPortal(<dialog ref={dialog} className={className ? `work-action-dialog ${className}` : 'work-action-dialog'} aria-modal={open ? true : undefined} aria-labelledby={id} aria-describedby={description ? `${id}-description` : undefined}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <div className="work-action-content" aria-busy={busy}>
-      <div className="row"><h2 id={id}>{title}</h2><button ref={back} className="btn sm" disabled={busy} onClick={onClose}>{t('actionBack')}</button></div>
+      <div className="row"><h2 id={id}>{title}</h2><button ref={back} type="button" className="btn sm" disabled={busy} onClick={onClose}>{t('dialogClose')}</button></div>
       {description && <p id={`${id}-description`}>{description}</p>}
       {children}
     </div>

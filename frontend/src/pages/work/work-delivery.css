@@ -6,8 +6,8 @@
 .delivery-view .hint { font-size: 12px; color: var(--muted); }
 .delivery-branches { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .delivery-branches .ref { overflow-wrap: anywhere; }
-.delivery-actions { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
-.delivery-view .delivery-report { margin-top: 18px; }
+.delivery-actions { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.delivery-view .delivery-report { margin-top: 16px; }
 .delivery-report a { color: var(--running); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .delivery-view .delivery-persist { color: var(--muted); font-size: 12px; }
 .delivery-table { max-width: 100%; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
@@ -22,3 +22,10 @@
 .delivery-notice { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); font-size: 12px; }
 .delivery-dialog .delivery-actions { margin-top: 0; }
 .delivery-artifacts { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.delivery-table .delivery-hash { white-space: nowrap; width: 1%; overflow-wrap: normal; }
+.delivery-actions > .btn:not(.primary):not(.work-danger):not(:disabled) { color: var(--running); }
+.delivery-cleanup { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.delivery-cleanup p { margin-top: 8px; }
+
+.delivery-cleanup-warning { color: var(--danger); }

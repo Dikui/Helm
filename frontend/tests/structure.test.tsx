@@ -182,7 +182,7 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     expect(screen.getByRole('tabpanel', { name: '时间线' })).toBeTruthy();
     await clickReady(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
     const inspector = await screen.findByRole('complementary', { name: '调度者检查器' });
-    expect(await within(inspector).findByRole('heading', { name: '最近调度轮次已结束' })).toBeTruthy();
+    expect(await within(inspector).findByRole('heading', { name: /本轮 \d+ 步 · 已结束/ })).toBeTruthy();
     expect(await within(inspector).findByText('接口通过后做表单')).toBeTruthy();
     fireEvent.change(within(inspector).getByLabelText('调度笔记版本'), { target: { value: '1' } });
     expect(within(inspector).getByText('先做接口')).toBeTruthy();
@@ -192,7 +192,7 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     await clickReady(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
     const chooser = screen.getByRole('dialog', { name: '换调度者 Agent' });
     expect(await within(chooser).findByRole('group', { name: '调度者 Agent' })).toBeTruthy();
-    fireEvent.click(within(chooser).getByRole('button', { name: '返回' }));
+    fireEvent.click(within(chooser).getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
 

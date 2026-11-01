@@ -13,24 +13,24 @@ export function InstallSkillForm({ onInstalled, onStateChange }: { onInstalled: 
   const [replace, setReplace] = useState(false);
   const [errors, setErrors] = useState<Record<string, MessageKey>>({});
   const save = useSettingsSave();
-  useEffect(() => { onStateChange({ dirty: !!(path || name || replace), pending: save.pending }); }, [path, name, replace, save.pending, onStateChange]);
-  async function submit(event: FormEvent) {
-    event.preventDefault(); save.clear();
+  useEffect(() => { onStateChange({ dirty: !!(path || name || replace), pending: save.pending, save: () => submit() }); }, [path, name, replace, save.pending, onStateChange]);
+  async function submit(event?: FormEvent) {
+    event?.preventDefault(); save.clear();
     const invalid: Record<string, MessageKey> = {};
     if (!path.trim()) invalid.path = 'requiredField';
     if (name.trim() && !validLibraryName(name.trim())) invalid.name = 'invalidAgentId';
     setErrors(invalid);
     const first = Object.keys(invalid)[0];
-    if (first) { document.getElementById(`library-skill-${first}`)?.focus(); return; }
-    await save.run(async () => {
+    if (first) { document.getElementById(`library-skill-${first}`)?.focus(); return false; }
+    return await save.run(async () => {
       await api.call('install-skill', { path, ...(name.trim() ? { name: name.trim() } : {}), ...(replace ? { replace: true } : {}) });
       setPath(''); setName(''); setReplace(false); onInstalled();
     });
   }
   return <form className="settings-box" aria-label={t('libraryInstallSkill')} noValidate aria-busy={save.pending} onSubmit={submit}>
       <h3>{t('libraryInstallSkill')}</h3><p className="muted">{t('librarySkillHelp')}</p>
-      {([{ key: 'path', label: 'librarySkillPath', value: path, change: setPath },
-        { key: 'name', label: 'librarySkillName', value: name, change: setName }] as const).map(field => <LibraryField key={field.key}
+      {([{ key: 'name', label: 'librarySkillName', value: name, change: setName },
+        { key: 'path', label: 'librarySkillPath', value: path, change: setPath }] as const).map(field => <LibraryField key={field.key}
         id={`library-skill-${field.key}`} label={field.label} disabled={save.pending} value={field.value} error={errors[field.key]} onChange={value => {
           field.change(value); setErrors(previous => { const next = { ...previous }; delete next[field.key]; return next; }); save.clear();
         }} />)}

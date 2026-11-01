@@ -53,7 +53,7 @@ test('页头直接暂停和恢复经 HTTP 生效，暂停仍可留言；取消�
   let dialog = await screen.findByRole('dialog', { name: '取消工作' });
   expect(dialog.textContent).toContain('管理输出的工作');
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('aligning');
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '操作' }));
   fireEvent.click(within(actions()).getByRole('button', { name: '取消工作' }));
@@ -109,7 +109,7 @@ test('已结束工作导出到本机路径，错误保留输入；已导出后�
   fireEvent.click(within(actions()).getByRole('button', { name: '删除输出' }));
   dialog = await screen.findByRole('dialog', { name: '删除输出' });
   expect((await daemon!.call('get-work', { workId: work.id })).result.outputsDeletedAt).toBeNull();
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   fireEvent.click(within(actions()).getByRole('button', { name: '删除输出' }));
   dialog = await screen.findByRole('dialog', { name: '删除输出' });
   fireEvent.click(within(dialog).getByRole('button', { name: '确认删除输出' }));
@@ -137,7 +137,7 @@ test('未导出的删除沿用运行层 confirm 提示，可先导出或明确�
   expect((await daemon!.call('get-work', { workId: work.id })).result.outputsDeletedAt).toBeNull();
   fireEvent.click(within(dialog).getByRole('button', { name: '先导出' }));
   dialog = await screen.findByRole('dialog', { name: '导出输出' });
-  fireEvent.click(within(dialog).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   fireEvent.click(within(actions()).getByRole('button', { name: '删除输出' }));
   dialog = await screen.findByRole('dialog', { name: '删除输出' });
   fireEvent.click(within(dialog).getByRole('button', { name: '确认删除输出' }));
@@ -196,11 +196,18 @@ test('操作菜单和确认框可用 Escape 退出，焦点返回操作按钮，
   fireEvent.keyDown(menu, { key: 'Escape' });
   expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '操作' }));
+  fireEvent.click(screen.getByRole('button', { name: '操作' }));
+  fireEvent.click(screen.getByRole('button', { name: '专注对话 · 两侧收起' }));
+  expect(screen.getByRole('button', { name: '展开收件箱' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '展开检查器' })).toBeTruthy();
+  expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '展开收件箱' }));
+  fireEvent.click(screen.getByRole('button', { name: '展开检查器' }));
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
   fireEvent.click(screen.getByRole('button', { name: 'Cancel work' }));
   const dialog = await screen.findByRole('dialog', { name: 'Cancel work' });
-  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Back' }));
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close' }));
   fireEvent(dialog, new Event('cancel', { cancelable: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Actions' }));
@@ -254,6 +261,6 @@ test('删除工作后逐项显示保留的工作及卡片分支和原因，返�
   expect(within(dialog).getByText(card.cardBranch)).toBeTruthy();
   expect(within(dialog).getAllByText(/尚未合入基准分支 main/)).toHaveLength(2);
   expect(within(dialog).queryByRole('button', { name: '仍然删除' })).toBeNull();
-  fireEvent.click(within(dialog).getAllByRole('button', { name: '返回' })[0]!);
+  fireEvent.click(within(dialog).getAllByRole('button', { name: '关闭' })[0]!);
   await waitFor(() => expect(window.location.pathname).toBe('/'));
 });

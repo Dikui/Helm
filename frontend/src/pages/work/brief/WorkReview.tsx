@@ -23,9 +23,9 @@ export function WorkReview({ work, report }: { work: Pick<Work, 'id' | 'status' 
   return <>
     {conversation.error && <><h3>{t('reportReadFailed')}</h3><ErrorNotice error={conversation.error} retry={conversation.reload} /></>}
     {events.error && <ErrorNotice error={events.error} retry={events.reload} />}
-    {(!conversation.data || !events.data) && !conversation.error && !events.error && <section className="report-empty" role="status"><h3>{t('reportLoading')}</h3><p>{t('reportLoadingHint')}</p></section>}
+    {(!conversation.data || !events.data) && !conversation.error && !events.error && <section className="report-empty" role="status"><small>{t('reviewReport')}</small><h3>{t('reportLoading')}</h3><p>{t('reportLoadingHint')}</p></section>}
     {conversation.data && events.data && invalid && <section className="report-empty" role="alert"><h3>{t('reportInvalid')}</h3><p>{(invalid.details as { reason: string }).reason}</p><p>{t('reportInvalidHint')}</p><button className="btn" onClick={() => { conversation.reload(); events.reload(); }}>{t('pinRetryRead')}</button></section>}
-    {conversation.data && events.data && !gate && !invalid && <section className="report-empty" role="status"><h3>{t('reportEmpty')}</h3><p className="muted">{t('reportEmptyHint')}</p><button className="btn" onClick={() => { conversation.reload(); events.reload(); }}>{t('pinRetryRead')}</button></section>}
+    {conversation.data && events.data && !gate && !invalid && <section className="report-empty" role="status"><small>{t('reviewReport')}</small><h3>{t('reportEmpty')}</h3><p className="muted">{t('reportEmptyHint')}</p><button className="btn" onClick={() => { conversation.reload(); events.reload(); }}>{t('pinRetryRead')}</button></section>}
     {gate && events.data && !conversation.error && !events.error && <section className="work-review" aria-label={t('reviewTitle')}>
       {gate.report && <p className="report-meta">{t('reviewReport')}{confirmedVersion ? ` · ${t('brief')} v${confirmedVersion}` : ''}{gate.createdAt && <> · {t('alignmentCoordinator')} <time dateTime={gate.createdAt}>{new Date(gate.createdAt).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en', { hour: '2-digit', minute: '2-digit' })}</time></>}</p>}
       {gate.status === 'pending' && !invalid ? <GateDecision key={gate.id} gate={gate} workStatus={work.status} detailedReview /> : <>

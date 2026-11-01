@@ -114,7 +114,7 @@ test('结构化报告先显示结论、三类例外和标准；卡片与建议�
   const changes = await screen.findByRole('dialog', { name: '查看全部改动' });
   fireEvent.click(within(changes).getByRole('button', { name: '查看 diff' }));
   expect(within(changes).getByLabelText('Diff 内容').textContent).toContain('+审核成果');
-  fireEvent.click(within(changes).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(changes).getByRole('button', { name: '关闭' }));
   expect(within(review).getByText('覆盖截断')).toBeTruthy();
   expect(within(review).getByRole('cell', { name: '密码入口仍可用' })).toBeTruthy();
   const cards = within(review).getByText('卡片表 · 1 张卡片').closest('details')!;
@@ -125,7 +125,7 @@ test('结构化报告先显示结论、三类例外和标准；卡片与建议�
   fireEvent.click(within(review).getAllByRole('button', { name: '复现证据' })[0]!);
   const preview = await screen.findByRole('dialog', { name: 'result.txt' });
   expect(await within(preview).findByText(/末尾成果/)).toBeTruthy();
-  fireEvent.click(within(preview).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(preview).getByRole('button', { name: '关闭' }));
   fireEvent.click(within(cards).getByText('卡片表 · 1 张卡片'));
   expect(within(cards).getByText('登录功能')).toBeTruthy();
   expect(within(cards).getByText('行详情').closest('details')!.open).toBe(false);
@@ -181,14 +181,28 @@ test('报告成果和验收回答链接打开实际记录，关闭预览后焦�
   fireEvent.click(await within(review).findByText('1 条标准均有验收证据'));
   const branch = within(review).getByRole('button', { name: '分支成果' });
   fireEvent.click(branch);
-  const artifact = await screen.findByRole('dialog', { name: '分支成果' });
+  const artifact = await screen.findByRole('dialog', { name: '成果预览 · 分支成果' });
   expect(await within(artifact).findByText(branchRef)).toBeTruthy();
-  fireEvent.click(within(artifact).getByRole('button', { name: '返回' }));
+  fireEvent.click(within(artifact).getByRole('button', { name: '关闭' }));
   expect(document.activeElement).toBe(branch);
   fireEvent.click(within(review).getByRole('button', { name: '验收回答' }));
-  const dispatch = await screen.findByRole('dialog', { name: '验收回答' });
+  const dispatch = await screen.findByRole('dialog', { name: '成果预览 · 验收回答' });
+  expect(within(dispatch).getByRole('tab', { name: '文件改动' }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(within(dispatch).getByRole('tab', { name: '验收回答' }));
+  expect(await within(dispatch).findByText('全部标准通过，原文保留')).toBeTruthy();
+  const verification = (await daemon!.call('list-dispatches', { workId: work.id })).result.find((item: any) => item.purpose === 'verification');
+  const answer = (await daemon!.call('get-dispatch', { workId: work.id, dispatchId: verification.id })).result.finalAnswer;
+  expect(await within(dispatch).findByText(answer || '此派单没有最终回答。')).toBeTruthy();
+  fireEvent.click(within(dispatch).getByRole('tab', { name: '派单记录' }));
   expect(await within(dispatch).findByText('全部标准通过，原文保留')).toBeTruthy();
   expect(within(dispatch).getByRole('region', { name: '最终回答' })).toBeTruthy();
+  const output = within(dispatch).getByRole('region', { name: '派单输出' });
+  expect((await within(output).findAllByText('提交结论')).length).toBeGreaterThan(0);
+  const rawToggle = within(output).getAllByText('原始步骤')[0]!;
+  expect(rawToggle.closest('details')!.open).toBe(false);
+  fireEvent.click(rawToggle);
+  expect(rawToggle.closest('details')!.open).toBe(true);
+  expect(within(output).getByText(/submit-conclusion/)).toBeTruthy();
 });
 
 test.each(['accept', 'return'] as const)('%s 结论按固定布局显示，全通过时标准收为一行，空建议不显示，语言可切换', async verdict => {

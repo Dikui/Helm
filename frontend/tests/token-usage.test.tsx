@@ -61,7 +61,7 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   expect(await within(coordinator).findByText('Token 合计 180')).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
   const rounds = within(coordinator).getByRole('table', { name: '调度轮次 Token' });
-  expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['#110020', '#25010']);
+  expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['第 1 轮10020', '第 2 轮5010']);
   fireEvent.click(structureTab('依赖图'));
   fireEvent.click(await screen.findByRole('button', { name: '卡片 1：用量卡片' }));
   expect(screen.getByRole('complementary', { name: '卡片检查器' })).toBeTruthy();
@@ -96,10 +96,10 @@ test('调度者未知计数及含未知项的合计显示 —，缓存明细和�
   expect(await within(usage).findByText('总输入 — · 输出 20')).toBeTruthy();
   expect(within(usage).getByText('驱动未报告的用量和含未知项的合计显示 —，不记为 0。')).toBeTruthy();
   const rows = within(within(usage).getByRole('table', { name: '调度轮次 Token' })).getAllByRole('row');
-  expect(rows.map(row => row.textContent)).toEqual(['调度轮次总输入输出', '#110020', '#2—0']);
+  expect(rows.map(row => row.textContent)).toEqual(['调度轮次总输入输出', '第 1 轮10020', '第 2 轮—0']);
   fireEvent.click(within(usage).getByText('缓存明细', { selector: 'summary' }));
   const cache = within(usage).getByRole('table', { name: '缓存明细' });
-  expect(within(cache).getAllByRole('row').map(row => row.textContent)).toEqual(['调度轮次未缓存缓存读取缓存写入', '#158015', '#2———']);
+  expect(within(cache).getAllByRole('row').map(row => row.textContent)).toEqual(['调度轮次未缓存缓存读取缓存写入', '第 1 轮58015', '第 2 轮———']);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(usage).getByText('Token total —')).toBeTruthy();
   expect(within(usage).getByText('Usage not reported by the driver and totals containing unknown counts show —, never 0.')).toBeTruthy();

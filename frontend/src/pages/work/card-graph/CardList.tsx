@@ -1,3 +1,4 @@
+import { systemValueLabel } from '../../../shared/system-labels.js';
 import { AgentMark } from '../../../shared/AgentMark.js';
 import { useResource } from '../../../shared/data.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
@@ -33,7 +34,7 @@ export function CardList({ nodes, dispatches, select, filter }: { nodes: GraphNo
           const latest = history?.find(dispatch => dispatch.id === card.latestDispatchId);
           const driver = agents.data?.find(agent => agent.id === (latest?.agentId ?? card.agentId))?.driver;
           const pending = card.dependencies.map(ref => nodes.find(node => node.id === ref.id)).find(node => node?.type === 'gate' && node.status === 'pending');
-          const detail = pending ? nodeTitle(pending) : latest?.conclusionReason || card.latestStepSummary;
+          const detail = pending ? nodeTitle(pending) : latest?.conclusionReason || (card.latestStepSummary ? systemValueLabel(card.latestStepSummary, t) : null);
           const label = `${t(labels[group]!)}${detail ? ` · ${detail}` : ''}`;
           const ordinal = cards.findIndex(item => item.id === card.id) + 1;
           return <button type="button" key={card.id} className={`work-card-row ${group === 'decision' ? 'blocked' : cardStatusTones[group] ?? ''}`} aria-label={`${t('graphCard')} ${ordinal}：${nodeTitle(card)}`} title={`${nodeTitle(card)} · ${label}`} onClick={() => select(card.id)}>

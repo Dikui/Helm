@@ -23,7 +23,7 @@ const fields = {
 export function RuntimeSection() {
   const { t } = useI18n();
   const { data, error, reload } = useResource<RuntimeSettings & Settings>('get-settings');
-  return <section className="settings-simple" aria-label={t('runtime')}><h2>{t('runtime')}</h2><p className="muted">{t('runtimeHelp')}</p>
+  return <section className="settings-simple settings-runtime" aria-label={t('runtime')}><h2>{t('runtime')}</h2><p className="muted">{t('runtimeHelp')}</p>
     {error && <ErrorNotice error={error} retry={reload} />}{!data && !error && <p role="status">{t('loading')}</p>}
     <p className="settings-runtime-usage">{t('runtimeUsage')}: {data ? `${data.runningDispatches} / ${data.concurrencyLimit} · ${t('queued')} ${data.queuedDispatches}` : '—'}</p>
     {data && <>
@@ -57,11 +57,11 @@ function RuntimeForm({ title, hint, fields, settings, operation, params }: {
     if (invalid.length) { document.getElementById(`runtime-${invalid[0]}`)?.focus(); return; }
     await save.run(async () => { await api.call(operation, params(values)); });
   }
-  return <form className="settings-box settings-runtime-group" aria-label={t(title)} onSubmit={submit} noValidate aria-busy={save.pending}><h3>{t(title)}</h3>{hint && <p className="muted">{t(hint)}</p>}
+  return <form className="settings-box settings-runtime-group" aria-label={t(title)} onSubmit={submit} noValidate aria-busy={save.pending}><h3>{t('runtime')} · {t(title)}</h3>{hint && <p className="muted">{t(hint)}</p>}
     {fields.map(field => <div key={field.name}><div className="settings-numeric"><label htmlFor={`runtime-${field.name}`}>{t(field.label)}</label><span className="settings-unit"><input id={`runtime-${field.name}`} type="number" step="any" min={field.min / field.factor} max={field.max / field.factor}
       disabled={save.pending} value={draft[field.name] ?? String(settings[field.name] / field.factor)} aria-invalid={errors.includes(field.name)} aria-describedby={errors.includes(field.name) ? `runtime-${field.name}-error` : undefined}
       onChange={event => { setDraft({ ...draft, [field.name]: event.target.value }); setErrors(errors.filter(name => name !== field.name)); save.clear(); }} />{field.unit && <span>{field.unit === 'GB' ? 'GB' : t(field.unit)}</span>}</span></div>
       {errors.includes(field.name) && <small className="settings-reason" id={`runtime-${field.name}-error`}>{t('invalidNumber')}</small>}</div>)}
-    <SaveFeedback {...save} /><div className="row settings-group-save"><span className="muted">{t('independentSave')}</span><button className="btn primary" disabled={save.pending}>{t('save')}</button></div>
+    <div className="row settings-group-save"><SaveFeedback {...save} /><span className="muted">{t('independentSave')}</span><button className="btn" disabled={save.pending}>{t('save')}</button></div>
   </form>;
 }

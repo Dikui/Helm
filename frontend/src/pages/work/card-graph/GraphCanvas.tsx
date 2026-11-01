@@ -6,7 +6,7 @@ import { arrange, initialGraphView, nodeHeight, nodeWidth } from './graph-layout
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
 import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge, ReadOnlyBadge } from './labels.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
-import { displayTopology, dispatchDuration } from './presentation.js';
+import { cardDisplayStatus, displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
 
 function relatedNodes(nodes: GraphNode[], focus: string | null) {
@@ -44,6 +44,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
   const topology = JSON.stringify(displayTopology(nodes));
   const positions = useMemo(() => arrange(JSON.parse(topology), canvasWidth), [topology, canvasWidth]);
   const byId = new Map(nodes.map(node => [node.id, node]));
+  const statusOf = (node: GraphNode) => node.type === 'card' ? cardDisplayStatus(node, nodes, dispatches) : node.status;
   const related = relatedNodes(nodes.map(node => ({ ...node, dependencies: positions.edges.filter(edge => edge.to === node.id).map(edge => ({ type: byId.get(edge.from)!.type, id: edge.from })) })), hovered ?? focused);
   const reset = useCallback(() => {
     const element = viewport.current;
@@ -91,8 +92,8 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
             <defs><marker id={marker} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="context-stroke" /></marker></defs>
             {positions.edges.map(edge => {
               const from = byId.get(edge.from)!; const to = byId.get(edge.to)!;
-              const tone = [from.status, to.status].some(status => ['cancelled', 'withdrawn', 'skipped'].includes(status)) ? 'cut'
-                : from.status === 'pending' ? 'att' : ['executing', 'verifying'].includes(to.status) ? 'flow' : ['completed', 'decided'].includes(from.status) ? '' : 'todo';
+              const tone = [statusOf(from), statusOf(to)].some(status => ['cancelled', 'withdrawn', 'skipped'].includes(status)) ? 'cut'
+                : statusOf(from) === 'pending' ? 'att' : ['executing', 'verifying'].includes(statusOf(to)) ? 'flow' : ['completed', 'decided'].includes(statusOf(from)) ? '' : 'todo';
               return <path key={`${edge.from}:${edge.to}`} role="img" aria-label={`${t((from.type === 'gate' && from.kind === 'work-confirmation') || (to.type === 'gate' && to.kind === 'review') ? 'graphFlowLink' : 'graphDependency')}：${nodeTitle(from)} → ${nodeTitle(to)}`}
                 className={`cg-edge ${tone} ${related && !(related.has(edge.from) && related.has(edge.to)) ? 'dim' : ''}`}
                 d={`M${edge.points[0]!.x},${edge.points[0]!.y} C${edge.points.slice(1).map(point => `${point.x},${point.y}`).join(' ')}`} markerEnd={`url(#${marker})`} />;
@@ -102,12 +103,12 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
             const node = byId.get(id)!;
             const ordinal = nodes.filter(item => item.type === 'card').findIndex(item => item.id === node.id) + 1;
             const name = node.type === 'card' ? `${t('graphCard')} ${ordinal}：${nodeTitle(node)}` : `${t('graphGate')}：${nodeTitle(node)}`;
-            return <button key={node.id} className={`cg-node ${node.type} ${node.status} ${selectedId === node.id ? 'selected' : ''} ${related && !related.has(node.id) ? 'dim' : ''}`}
+            return <button key={node.id} className={`cg-node ${node.type} ${statusOf(node)} ${selectedId === node.id ? 'selected' : ''} ${related && !related.has(node.id) ? 'dim' : ''}`}
               style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }} aria-label={name} title={[name, node.type === 'card' ? `${node.agentId ?? t('graphNoAgent')} · ${t('graphStep')} ${node.currentStep}\n${node.latestStepSummary ?? t('graphNoSteps')} · Token ${formatUsage(node.usage, language)}` : gateDecision(node, t) || node.body].join('\n')} aria-pressed={selectedId === node.id}
               aria-describedby={`${marker}-${node.id}-state`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
               <span className="cg-node-name">{node.type === 'card' ? <AgentMark driver={agents.find(agent => agent.id === (dispatches.find(dispatch => dispatch.id === node.latestDispatchId)?.agentId ?? node.agentId))?.driver} /> : <span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span>}<span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
-              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} />{node.type === 'card' && node.readOnly && <ReadOnlyBadge />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
+              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} status={statusOf(node)} />{node.type === 'card' && node.readOnly && <ReadOnlyBadge />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
                 {node.type === 'gate' && node.status === 'pending' && <time dateTime={node.createdAt}>{elapsed(node.createdAt, now)}</time>}
                 {node.type === 'card' && node.status !== 'skipped' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}

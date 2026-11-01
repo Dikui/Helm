@@ -74,10 +74,10 @@ test('超过四张按状态合并，分别只列执行、验收、验收未过�
   await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result.filter((item: any) => item.status === 'ended').length === 2);
   const view = render(<App baseUrl={daemon.url} />);
   const strip = await screen.findByRole('navigation', { name: '现在条' });
-  await within(strip).findByRole('button', { name: /执行中 × 2/ });
+  await within(strip).findByRole('button', { name: /执行中 2/ });
   for (const [label, status, names] of [
-    ['执行中 × 2', 'executing', ['卡片 1：Run one', '卡片 2：Run two']], ['验收中 × 1', 'verifying', ['卡片 3：Verify']],
-    ['验收未过 × 1', 'verification-failed', ['卡片 4：Failed']], ['受阻 × 1', 'blocked', ['卡片 5：Blocked']],
+    ['执行中 2', 'executing', ['卡片 1：Run one', '卡片 2：Run two']], ['验收中 1', 'verifying', ['卡片 3：Verify']],
+    ['验收未过 1', 'verification-failed', ['卡片 4：Failed']], ['受阻 1', 'blocked', ['卡片 5：Blocked']],
   ] as const) {
     fireEvent.click(within(strip).getByRole('button', { name: new RegExp(label) }));
     const list = await screen.findByRole('tabpanel', { name: '列表' });
@@ -243,4 +243,45 @@ test('对齐的多选提问优先固定说明确认，回答后回到说明确�
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: general.id, decision: '桌面\n窄屏' }));
   expect(await within(strip).findByRole('button', { name: '等你确认 工作说明 v1' })).toBeTruthy();
   expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('aligning');
+});
+
+test('派单结论经 SSE 同时更新依赖图、现在条、列表和卡片详情，最近步骤使用显示名称', async () => {
+  let finish!: () => void;
+  const completed = new Promise<void>(resolve => { finish = resolve; });
+  daemon = await uiFixture([[draft], [card('Failed verification'), dispatch('Failed verification', 'verification'), card('Blocked execution'), dispatch('Blocked execution'), { type: 'hang' }]], undefined, { executorScripts: [
+    [{ type: 'hang', until: completed }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'failed', reason: 'Expiry unchecked' }, check: ok }],
+    [{ type: 'hang', until: completed }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'blocked', reason: 'Credentials needed' }, check: ok }],
+  ] });
+  const work = await create();
+  await until(() => daemon!.call('list-dispatches', { workId: work.id }), value => value.result.length === 2);
+  window.history.replaceState(null, '', `/works/${work.id}?inspect=graph`);
+  render(<App baseUrl={daemon.url} />);
+  const graph = await screen.findByRole('region', { name: '卡片图' });
+  const failed = await within(graph).findByRole('button', { name: '卡片 1：Failed verification' });
+  const blocked = within(graph).getByRole('button', { name: '卡片 2：Blocked execution' });
+  expect(within(failed).getByText('验收中')).toBeTruthy();
+  expect(within(blocked).getByText('执行中')).toBeTruthy();
+  finish();
+  await within(failed).findByText('验收未过');
+  await within(blocked).findByText('受阻');
+  expect(within(failed).queryByText('验收中')).toBeNull();
+  const strip = screen.getByRole('navigation', { name: '现在条' });
+  await within(strip).findByRole('button', { name: /#1 验收未过/ });
+  await within(strip).findByRole('button', { name: /#2 受阻/ });
+  fireEvent.click(failed);
+  const inspector = screen.getByRole('complementary', { name: '检查器' });
+  await within(inspector).findByRole('heading', { name: 'Failed verification' });
+  expect(within(inspector).getByText('验收未过')).toBeTruthy();
+  const recent = within(inspector).getByRole('region', { name: '最近步骤' });
+  expect((await within(recent).findAllByText('提交结论')).length).toBeGreaterThan(0);
+  expect(recent.textContent).not.toContain('submit-conclusion');
+  fireEvent.click(within(strip).getByRole('button', { name: '结构' }));
+  const list = await screen.findByRole('tabpanel', { name: '列表' });
+  expect(await within(list).findByRole('region', { name: '验收未过' })).toBeTruthy();
+  expect(within(list).getByRole('region', { name: '受阻' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Dependency graph' }));
+  const english = await screen.findByRole('region', { name: 'Card graph' });
+  expect(await within(english).findByText('Verification failed')).toBeTruthy();
+  expect(within(english).getByText('Blocked')).toBeTruthy();
 });

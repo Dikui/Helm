@@ -22,7 +22,10 @@ const fieldValue = (label: string) => {
   const field = screen.getByLabelText(label) as HTMLInputElement;
   return field.tagName === 'FIELDSET' ? (field.querySelector('input:checked') as HTMLInputElement)?.value : field.value;
 };
-const expandProject = (project: HTMLElement) => { fireEvent.click(within(project).getByText('项目设置', { selector: 'summary' })); return project; };
+const expandProject = (project: HTMLElement) => {
+  const row = screen.getByRole('article', { name: project.getAttribute('aria-label')!, hidden: true });
+  fireEvent.click(within(row).getByText(/^项目设置/, { selector: 'summary' })); return project;
+};
 const agent = async (id: string) => (await daemon!.call('list-agents')).result.find((item: any) => item.id === id);
 
 test('项目环境变量用密码框添加、覆盖和删除，保存和重新载入都只显示名字', async () => {
@@ -31,7 +34,7 @@ test('项目环境变量用密码框添加、覆盖和删除，保存和重新�
   const view = render(<App baseUrl={daemon.url} />);
   const formName = `项目环境变量 ${daemon.project.name}`;
   const form = await screen.findByRole('form', { name: formName, hidden: true });
-  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  fireEvent.click(screen.getByText(/^项目设置/, { selector: 'summary' }));
   const secret = within(form).getByLabelText('变量值') as HTMLInputElement;
   expect(secret.type).toBe('password');
   fireEvent.change(within(form).getByLabelText('变量名'), { target: { value: 'PROJECT_RUNTIME_KEY' } });
@@ -51,7 +54,7 @@ test('项目环境变量用密码框添加、覆盖和删除，保存和重新�
   view.unmount();
   render(<App baseUrl={daemon.url} />);
   const reloaded = await screen.findByRole('form', { name: formName, hidden: true });
-  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  fireEvent.click(screen.getByText(/^项目设置/, { selector: 'summary' }));
   expect((within(reloaded).getByLabelText('变量值') as HTMLInputElement).value).toBe('');
   expect(within(reloaded).getByText('PROJECT_RUNTIME_KEY')).toBeTruthy();
   fireEvent.click(within(reloaded).getByRole('button', { name: '删除变量 PROJECT_RUNTIME_KEY' }));
@@ -64,7 +67,7 @@ test('项目环境变量拒绝受管名字，显示服务端原因且不会把�
   window.history.replaceState(null, '', '/settings/projects');
   render(<App baseUrl={daemon.url} />);
   const form = await screen.findByRole('form', { name: `项目环境变量 ${daemon.project.name}`, hidden: true });
-  fireEvent.click(screen.getByText('项目环境变量', { selector: 'summary' }));
+  fireEvent.click(screen.getByText(/^项目设置/, { selector: 'summary' }));
   fireEvent.change(within(form).getByLabelText('变量名'), { target: { value: 'HOME' } });
   fireEvent.change(within(form).getByLabelText('变量值'), { target: { value: 'ui-project-env-rejected-72513' } });
   fireEvent.click(within(form).getByRole('button', { name: '添加变量' }));
@@ -243,7 +246,7 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   window.history.replaceState(null, '', '/settings/projects');
   render(<App baseUrl={daemon.url} />);
   const project = expandProject(await screen.findByRole('form', { name: `项目 ${daemon.project.name}` }));
-  expect(await within(project).findByText('1 项工作')).toBeTruthy();
+  expect(await within(screen.getByRole('article', { name: `项目 ${daemon.project.name}` })).findByText('1 项工作')).toBeTruthy();
   expect((within(project).getByRole('button', { name: '删除项目' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(project).getByText('请先删除此项目下的所有工作，再删除项目登记。')).toBeTruthy();
   const config = await agent('claude-coordinator');
@@ -262,10 +265,10 @@ test('项目登记显示工作数，修改默认调度者 Agent 经 HTTP 生效'
   change('项目名称（可选）', '新项目');
   change('项目路径', repo);
   fireEvent.click(screen.getByRole('button', { name: '登记项目' }));
-  expect(await screen.findByRole('form', { name: '项目 新项目' })).toBeTruthy();
+  expect(await screen.findByRole('form', { name: '项目 新项目', hidden: true })).toBeTruthy();
   const projects = (await daemon.call('list-projects')).result;
   expect(projects.find((item: any) => item.name === '新项目').path).toBe(repo);
-  const emptyProject = expandProject(screen.getByRole('form', { name: '项目 新项目' }));
+  const emptyProject = expandProject(screen.getByRole('form', { name: '项目 新项目', hidden: true }));
   const remove = within(emptyProject).getByRole('button', { name: '删除项目' }) as HTMLButtonElement;
   await waitFor(() => expect(remove.disabled).toBe(false));
   expect(within(emptyProject).getByText('只删除项目登记，磁盘上的仓库和文件会保留。')).toBeTruthy();

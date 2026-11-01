@@ -99,7 +99,7 @@ export function RegisterProjectDialog({ onRegistered, onClose }: { onRegistered:
     }}>
       <h2 id="register-project-title">{t('newWorkRegisterProject')}</h2>
       <RegisterProjectForm onRegistered={onRegistered} onCancel={onClose} onPendingChange={setPending} />
-      <button type="button" className="btn sm ghost register-close" disabled={pending} aria-label={t('close')} onClick={onClose}>×</button>
+      <button type="button" className="btn sm ghost register-close" disabled={pending} aria-label={t('close')} onClick={onClose}>{t('dialogClose')}</button>
     </div>
   </div>, document.body);
 }

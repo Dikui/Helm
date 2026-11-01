@@ -10,6 +10,7 @@ import { RegisterMcpForm } from './RegisterMcpForm.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
 import { ActionDialog } from '../work/ActionDialog.js';
 import '../work/work-actions.css';
+import type { LibraryFormState } from './LibraryField.js';
 import type { LibraryEntry } from './types.js';
 export function LibrarySection() {
   const { t } = useI18n();
@@ -19,17 +20,22 @@ export function LibrarySection() {
   const installButton = useRef<HTMLButtonElement>(null);
   const mcpButton = useRef<HTMLButtonElement>(null);
   const [deleted, setDeleted] = useState(false);
-  const [skillForm, setSkillForm] = useState({ dirty: false, pending: false });
-  const [mcpForm, setMcpForm] = useState({ dirty: false, pending: false });
+  const [skillForm, setSkillForm] = useState<LibraryFormState>({ dirty: false, pending: false });
+  const [mcpForm, setMcpForm] = useState<LibraryFormState>({ dirty: false, pending: false });
   const heading = useRef<HTMLElement>(null);
   return <section ref={heading} tabIndex={-1} className="settings-simple" aria-label={t('library')}><p className="muted">{t('libraryHelp')}</p>
-    <UnsavedChanges dirty={skillForm.dirty || mcpForm.dirty} pending={skillForm.pending || mcpForm.pending} />
+    <UnsavedChanges dirty={skillForm.dirty || mcpForm.dirty} pending={skillForm.pending || mcpForm.pending} onSave={async () => {
+      if (skillForm.dirty && !await skillForm.save?.()) return false;
+      if (mcpForm.dirty && !await mcpForm.save?.()) return false;
+      return true;
+    }} />
     {library.error && <ErrorNotice error={library.error} retry={library.reload} />}
     {!library.data && !library.error && <p role="status">{t('loading')}</p>}
-    {library.data?.length === 0 && <p>{t('emptyLibrary')}</p>}
+
     <span role="status">{deleted ? t('libraryEntryDeleted') : ''}</span>
     {(['skill', 'mcp'] as const).map(type => <section key={type} className="settings-box settings-library-group" aria-label={type === 'skill' ? 'Skills' : 'MCP'}>
       <div className="settings-heading"><h3>{type === 'skill' ? 'Skills' : 'MCP'}</h3><button ref={type === 'skill' ? installButton : mcpButton} type="button" className="btn sm" onClick={() => type === 'skill' ? setInstallOpen(true) : setMcpOpen(true)}>{t(type === 'skill' ? 'libraryInstallSkill' : 'libraryRegisterMcp')}</button></div>
+      {library.data && !library.data.some(entry => entry.type === type) && <p className="settings-library-empty">{t(type === 'skill' ? 'libraryEmptySkills' : 'libraryEmptyMcp')}</p>}
       {library.data?.filter(entry => entry.type === type).map(entry => <LibraryRow key={`${entry.type}:${entry.name}`} entry={entry} onDeleted={() => { setDeleted(true); heading.current?.focus(); library.reload(); }} />)}
     </section>)}
     <ActionDialog className="settings-modal" title={t('libraryInstallSkill')} open={installOpen} busy={skillForm.pending} onClose={() => setInstallOpen(false)} returnFocus={installButton}>

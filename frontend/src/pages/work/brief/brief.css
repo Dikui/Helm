@@ -1,12 +1,12 @@
 .brief-view { display: grid; align-content: start; }
 .brief-document, .work-review { width: 100%; max-width: 620px; min-width: 0; margin: 0 auto; display: grid; }
 .brief-document { font-size: 13px; }
-.brief-document > header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 16px; font-size: 12px; }
+.brief-document > header { display: grid; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 12px; }
 .brief-document > h2, .aligning-brief.brief-document > h2 { font: 600 18px/1.4 var(--title); margin-bottom: 10px; }
 .brief-document > section, .brief-document .aligning-brief-body > section { margin-top: 16px; }
 .brief-document h3, .aligning-brief.brief-document h3 { margin: 0 0 6px; font: 400 12px var(--font); color: var(--muted); }
-.brief-document label, .aligning-brief.brief-document label { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
-.brief-document select, .aligning-brief.brief-document select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; }
+.brief-document label, .aligning-brief.brief-document label { display: flex; align-items: center; gap: var(--space-2); margin-left: 0; width: 100%; }
+.brief-document select, .aligning-brief.brief-document select { width: 100%; min-height: 34px; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; }
 .brief-document ul, .aligning-brief.brief-document ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; }
 .brief-document li, .aligning-brief.brief-document li { padding: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .brief-document > .muted { margin-top: 16px; }
@@ -49,3 +49,11 @@
 .report-changes p { color: var(--muted); }
 .report-add { color: var(--success); }
 .report-remove { color: var(--danger); }
+
+.brief-document li:has(mark) { background: var(--success-soft); border-radius: 5px; padding: 3px 6px; }
+.brief-document mark, .aligning-brief.brief-document mark { padding: 0; margin: 0; background: transparent; }
+.brief-document .brief-branches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); }
+.brief-document > a { color: var(--running); }
+.report-empty { padding-top: 44px; }
+.report-empty > small { color: var(--muted); font-size: 12px; }
+.report-empty > .btn { color: var(--running); }

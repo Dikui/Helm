@@ -83,3 +83,46 @@ test('保存中锁定 Agent 表单和重复保存，失败保留输入，重试�
   await within(editor).findByText('已保存');
   expect((await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'claude-executor').description).toBe('draft after failure');
 });
+
+test('未保存离开使用模态三选项，保存失败保留草稿与目的地，成功才离开', async () => {
+  daemon = await uiFixture();
+  window.history.replaceState(null, '', '/settings/agents/claude-executor');
+  let attempts = 0;
+  let release!: () => void;
+  const transport: typeof fetch = async (url, options) => {
+    if (String(url).endsWith('/api/save-agent') && ++attempts === 1) {
+      await new Promise<void>(resolve => { release = resolve; });
+      return new Response(JSON.stringify({ ok: false, error: { code: 'SAVE_FAILED', reason: 'Disk unavailable' } }), { status: 500 });
+    }
+    return fetch(url, options);
+  };
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  const editor = await screen.findByRole('form', { name: 'Agent 详情' });
+  const description = within(editor).getByRole('textbox', { name: '职责说明' }) as HTMLTextAreaElement;
+  fireEvent.change(description, { target: { value: 'Draft kept until saved' } });
+  const library = within(screen.getByRole('navigation', { name: '设置' })).getByRole('link', { name: '库' });
+  fireEvent.click(library);
+  let dialog = await screen.findByRole('dialog', { name: '有未保存的修改' });
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '关闭' }));
+  for (const name of ['继续编辑', '丢弃并继续', '保存并离开']) expect(within(dialog).getByRole('button', { name })).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }));
+  expect(document.activeElement).toBe(library);
+  expect(description.value).toBe('Draft kept until saved');
+  fireEvent.click(library);
+  dialog = await screen.findByRole('dialog', { name: '有未保存的修改' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存并离开' }));
+  const saving = await within(dialog).findByRole('button', { name: '保存中…' }) as HTMLButtonElement;
+  expect(saving.disabled).toBe(true);
+  fireEvent.click(saving);
+  expect(attempts).toBe(1);
+  release();
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('Disk unavailable');
+  expect(window.location.pathname).toBe('/settings/agents/claude-executor');
+  expect(description.value).toBe('Draft kept until saved');
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存并离开' }));
+  await screen.findByRole('region', { name: 'Skills' });
+  expect(window.location.pathname).toBe('/settings/library');
+  expect(attempts).toBe(2);
+  expect((await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'claude-executor').description).toBe('Draft kept until saved');
+});

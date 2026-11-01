@@ -50,6 +50,10 @@ body { background: var(--bg); }
 .stats .stat + .stat { padding-left: var(--space-2); border-left: 1px solid var(--border); }
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
+/* One disclosure marker for native details and authored disclosure buttons. */
+details > summary::before, button.disclosure::before { content: '▶'; display: inline-block; width: 12px; margin-right: 4px; color: var(--faint); font: 10px/1 var(--font); }
+details[open] > summary::before, button.disclosure[aria-expanded='true']::before { content: '▾'; }
+
 .chev { color: var(--faint); font-size: 12px; transition: transform .2s; display: inline-block; }
 details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(180deg); }
 
@@ -94,7 +98,6 @@ details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(1
 .page-body h2 { font-size: var(--text-lg); margin-bottom: var(--space-3); }
 .empty-main { display: grid; align-content: center; justify-items: center; gap: 12px; height: 100%; padding: 30px; text-align: center; color: var(--muted); }
 .empty-main h1 { color: var(--text); font: 600 26px/1.4 var(--title); }
-.settings-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-5); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 /* All application scroll regions inherit a visible, theme-aware scrollbar. */
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) var(--surface-soft); }
@@ -172,7 +175,7 @@ button.ref:hover { border-color: var(--ring); color: var(--text); background: va
 .shell-fold:hover { color: var(--text); background: var(--hover); }
 .sb-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
 .sb-rail { align-items: center; padding: 12px 0 10px; gap: 6px; }
-.sb-rail .logo { width: 26px; height: 26px; border-radius: 7px; }
+.sb-rail .logo { font-size: 0; width: 26px; height: 26px; border-radius: 7px; }
 .rail-new { display: grid; place-items: center; width: 30px; height: 30px; margin: 4px 0 6px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 16px; text-decoration: none; }
 .rail-new:hover { background: var(--accent-hover); }
 .rail-works { flex: 1; min-height: 0; width: 100%; overflow: auto; }
@@ -263,3 +266,5 @@ button.ref:hover { border-color: var(--ring); color: var(--text); background: va
   .work-header .work-actions { margin-left: 0; }
 }
 [hidden] { display: none !important; }
+
+.git-ignore-rules { min-height: 88px; max-height: 180px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-soft); color: var(--text); resize: none; }

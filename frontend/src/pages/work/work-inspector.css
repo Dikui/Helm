@@ -9,7 +9,7 @@
 .work-structure .cs-tabs button { padding: 3px 8px; min-height: 28px; font-size: 12px; }
 .work-structure .cs-tabs button[aria-selected='true'] { background: var(--selected); box-shadow: none; }
 .work-structure .cs-summary { width: 100%; justify-content: flex-start; font-size: 12px; }
-.work-structure .cs-panel { margin-top: 14px; padding: 0; overflow: visible; }
+.work-structure .cs-panel { margin-top: 7px; padding: 0; overflow: visible; }
 .work-structure .cs-panel:has(.cs-timeline) { overflow-x: auto; }
 .work-structure .cs-graph-panel { min-height: 480px; height: auto; flex: none; }
 .work-structure .cg-canvas-wrap { min-height: var(--graph-height, 360px); }
@@ -79,7 +79,7 @@
 .coordinator-current, .coordinator-ended { margin-top: 14px; }
 .coordinator-current .plan-steps, .coordinator-ended .plan-steps { padding: 0; gap: 10px; }
 .coordinator-progress .plan-steps li { grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; font-size: 12.5px; }
-.coordinator-progress .plan-icon { width: 10px; height: 10px; margin-top: 4px; font-size: 0; }
+.coordinator-progress .plan-icon { width: 10px; height: 10px; margin-top: 4px; font-size: 8px; }
 .coordinator-progress .plan-pending .plan-icon { border: 1.5px solid var(--border-strong); }
 .coordinator-progress .plan-icon .spin { width: 10px; height: 10px; }
 .coordinator-progress .conversation-raw-steps { margin-top: 18px; }

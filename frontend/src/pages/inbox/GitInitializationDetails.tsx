@@ -13,7 +13,7 @@ export function GitInitializationDetails({ gate }: { gate: Gate }) {
       <dt>{t('gitInitSize')}</dt><dd>{number(details.totalBytes)} B</dd></dl>
     <p className="hint">{t(details.hasGitignore ? 'gitInitExistingIgnore' : 'gitInitEstimate')}</p>
     {details.suspiciousPaths.length > 0 && <details open><summary>{t('gitInitSuspicious')}</summary>
-      <ul>{details.suspiciousPaths.map(item => <li key={item.path}><code>{item.path}</code> · {t(item.reason === 'secret' ? 'gitInitSecret' : item.reason === 'dependency' ? 'gitInitDependency' : 'gitInitLarge')} · {number(item.bytes)} B</li>)}</ul>
+      <div className="delivery-table"><table><thead><tr><th scope="col">{t('graphFile')}</th><th scope="col">{t('graphReason')}</th></tr></thead><tbody>{details.suspiciousPaths.map(item => <tr key={item.path}><td><code>{item.path}</code></td><td>{t(item.reason === 'secret' ? 'gitInitSecret' : item.reason === 'dependency' ? 'gitInitDependency' : 'gitInitLarge')} · {number(item.bytes)} B</td></tr>)}</tbody></table></div>
     </details>}
     {gate.status !== 'pending' && <><p>{t(details.initialized ? details.existingRepository ? 'gitInitAlreadyInitialized' : 'gitInitCompleted' : 'gitInitRefused')}</p>
       {gate.comment && <p>{gate.comment}</p>}</>}

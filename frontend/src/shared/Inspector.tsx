@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 export const InspectorContext = createContext<{
   content: HTMLDivElement | null; heading: HTMLElement | null; rail: HTMLElement | null; header: HTMLDivElement | null;
-  wide: boolean; width: number | undefined; reveal: () => void;
+  wide: boolean; width: number | undefined; reveal: () => void; focusConversation: () => void;
 } | null>(null);
 
 export function useInspector() {

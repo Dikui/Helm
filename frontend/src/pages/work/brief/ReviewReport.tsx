@@ -3,7 +3,7 @@ import type { ReviewReport as Report } from '../../../../../src/review-report.js
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { ActionDialog } from '../ActionDialog.js';
-import { DispatchDetails, ReadArtifact } from '../card-graph/DispatchDetails.js';
+import { DispatchEvidence, ReadArtifact } from '../card-graph/DispatchDetails.js';
 import './review-report.css';
 
 type Evidence = Report['criteria'][number]['evidence'][number];
@@ -15,12 +15,13 @@ export function ReviewReport({ report, workId, compact = false }: { report: Repo
   const files = useWorkFiles(workId);
   const preview = useFilePreview(workId, true);
   const [selected, select] = useState<Evidence>();
+  const [choices, setChoices] = useState<Evidence[]>([]);
   const opener = useRef<HTMLElement | null>(null);
   const open = (item: Evidence, from: HTMLElement) => {
     if (item.kind === 'file') preview.open(item.ref, from);
-    else { opener.current = from; select(item); }
+    else { opener.current = from; setChoices([]); select(item); }
   };
-  const evidence = (items: Evidence[]) => <span className="report-evidence">{items.map((item, index) =>
+  const evidence = (items: Evidence[], concise = false) => concise && items.length ? <button className="report-link" onClick={event => { if (items.length === 1) open(items[0]!, event.currentTarget); else { opener.current = event.currentTarget; setChoices(items); select(items[0]); } }}>{t('evidenceView')}</button> : <span className="report-evidence">{items.map((item, index) =>
     <button className="report-link" key={index} onClick={event => open(item, event.currentTarget)}>{item.label}</button>)}</span>;
   const markdown = (text: string) => <Markdown inline text={text} workId={workId} files={files} onOpen={preview.open} />;
   const allPassed = report.criteria.length > 0 && report.criteria.every(item => item.status === 'passed')
@@ -38,7 +39,7 @@ export function ReviewReport({ report, workId, compact = false }: { report: Repo
             const items = report.exceptions.filter(item => item.kind === kind);
             return items.length ? items.map((item, index) => <div className="report-exception" key={`${kind}-${index}`}>
               <strong>{t(kind === 'truncated' ? 'reportTruncated' : statusLabels[kind])}</strong>
-              <div><span>{item.what}</span>{markdown(item.why)}</div>{evidence(item.evidence)}
+              <div><span>{item.what}</span>{markdown(item.why)}</div>{evidence(item.evidence, true)}
             </div>) : <div className="report-exception" key={kind}><strong>{t(kind === 'truncated' ? 'reportCoverage' : statusLabels[kind])}</strong><span>{t(kind === 'truncated' ? 'reportFullCoverage' : 'reportNone')}</span></div>;
           })}
         </div></section>
@@ -60,8 +61,9 @@ export function ReviewReport({ report, workId, compact = false }: { report: Repo
       {report.suggestions.length > 0 && <details className="report-fold"><summary>{t('reportSuggestions')}</summary><ul>{report.suggestions.map((item, index) => <li key={index}>{markdown(item)}</li>)}</ul></details>}
     </>}
     {preview.preview}
-    {selected && <ActionDialog title={selected.label} busy={false} returnFocus={opener} onClose={() => select(undefined)} className="report-preview">
-      {selected.kind === 'dispatch' ? <DispatchDetails key={selected.ref} workId={workId} dispatchId={selected.ref} /> : <ReadArtifact key={selected.ref} workId={workId} artifactId={selected.ref} />}
+    {selected && <ActionDialog title={`${t('evidencePreview')} · ${selected.label}`} busy={false} returnFocus={opener} onClose={() => select(undefined)} className="report-preview">
+      {choices.length > 1 && <div className="row" role="group" aria-label={t('reportEvidence')}>{choices.map((item, index) => <button className="report-link" aria-pressed={selected === item} key={index} onClick={event => item.kind === 'file' ? preview.open(item.ref, event.currentTarget) : select(item)}>{item.label}</button>)}</div>}
+      {selected.kind === 'file' ? <button className="report-link" onClick={event => preview.open(selected.ref, event.currentTarget)}>{t('evidenceFiles')} · {selected.label}</button> : selected.kind === 'dispatch' ? <DispatchEvidence key={selected.ref} workId={workId} dispatchId={selected.ref} /> : <ReadArtifact key={selected.ref} workId={workId} artifactId={selected.ref} />}
     </ActionDialog>}
   </div>;
 }

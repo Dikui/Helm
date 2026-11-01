@@ -117,7 +117,7 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
         const members = live.filter(card => status(card) === group);
         return members.length > 0 && <button type="button" key={group} className={`now-cell now-group ${cardStatusTones[group]}`} aria-pressed={filter === group} title={members.map(cardTitle).join('\n')} onClick={() => chooseCards(group)}>
           <span className="now-agent-stack">{members.map(card => <AgentMark key={card.id} driver={driver(card)} />)}</span>
-          <span><b>{t(cardStatusLabels[group]!)} × {members.length}</b><small>{members.map(card => `#${ordinal(card)}`).join(' ')}</small></span>
+          <span><b>{t(cardStatusLabels[group]!)} {members.length}</b><small>{members.map(card => `#${ordinal(card)}`).join(' ')}</small></span>
         </button>;
       }) : live.map(card => <button type="button" key={card.id} className={`now-cell ${cardStatusTones[status(card)]}`} aria-pressed={inspection === `card:${card.id}`} title={cardTitle(card)} onClick={() => choose(`card:${card.id}`)}>
         <AgentMark driver={driver(card)} /><span><b>#{ordinal(card)}</b><small>{label(card)}</small></span>

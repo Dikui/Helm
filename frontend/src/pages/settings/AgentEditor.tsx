@@ -41,14 +41,14 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const fieldProps = (name: string) => ({ 'aria-label': t(labels[name]!), id: `agent-${name}`, 'aria-invalid': Boolean(errors[name]), 'aria-describedby': errors[name] ? `agent-${name}-error` : undefined });
   const fieldError = (name: string) => errors[name] && <small className="settings-reason" id={`agent-${name}-error`}>{errors[name]}</small>;
   const focusError = (issues: Record<string, string>) => { setErrors(issues); requestAnimationFrame(() => document.getElementById(`agent-${Object.keys(issues)[0]}`)?.focus()); };
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (pending) return;
+  async function save(event?: FormEvent) {
+    event?.preventDefault();
+    if (pending) return false;
     setSaved(false); setError(undefined);
     const issues: Record<string, string> = {};
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(value.id)) issues.id = t('invalidAgentId');
     if (!value.config.description.trim()) issues.description = t('requiredField');
-    if (Object.keys(issues).length) { focusError(issues); return; }
+    if (Object.keys(issues).length) { focusError(issues); return false; }
     setErrors({}); setPending(true);
     try {
       const result = await api.call<AgentEntry>('save-agent', { ...value,
@@ -56,6 +56,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
         mode: creating ? 'create' : 'update', ...(creating ? {} : { baseRevision: revision }) });
       setValue(draft(result)); setBaseline(JSON.stringify(draft(result))); setRevision(result.revision); setSaved(true); onSaved(result);
       if (creating) navigate(`/settings/agents/${encodeURIComponent(result.id)}`);
+      return true;
     } catch (failure) {
       setError(failure as Error);
       if (failure instanceof OperationError) {
@@ -67,6 +68,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
         }
         if (Object.keys(fields).length) focusError(fields);
       }
+      return false;
     } finally { setPending(false); }
   }
   async function reload() {
@@ -98,12 +100,9 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
     finally { setPending(false); }
   }
   return <form className="settings-editor" aria-label={t('agentDetails')} onSubmit={save} noValidate aria-busy={pending}>
-    <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} />
-    <div className="settings-detail-head"><AgentMark driver={value.config.driver} /><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted">{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}</div>
-    {!creating && <div className="settings-box">
-      {!source!.available && <p className="settings-reason">{source!.reason}{source!.command && <> <code>{source!.command}</code></>}</p>}
-      <button type="button" className="btn sm" disabled={pending} aria-busy={pending} onClick={() => void recheck()}>{t('recheck')}</button>
-    </div>}
+    <UnsavedChanges dirty={JSON.stringify(value) !== baseline} pending={pending} onSave={() => save()} error={error} />
+    <div className="settings-detail-head"><AgentMark driver={value.config.driver} /><div><h2>{creating ? t('newAgent') : source!.id}</h2><small className="mono muted" title={source?.directory}>{source?.directory ?? `~/.helm/agents/${value.id || '<id>'}/`}</small></div>{!creating && <span className={`pill ${source!.available ? 'ok' : 'bad'}`}>{t(source!.available ? 'available' : 'unavailable')}</span>}{!creating && <button type="button" className="settings-recheck" disabled={pending} aria-busy={pending} onClick={() => void recheck()}>{t('recheck')}</button>}</div>
+    {!creating && !source!.available && <p className="settings-reason">{source!.reason}{source!.command && <> <code>{source!.command}</code></>}</p>}
     <fieldset disabled={pending} className="settings-fields">
       <label htmlFor="agent-id">{t('agentId')}<input {...fieldProps('id')} value={value.id} disabled={!creating} onChange={event => { setSaved(false); setValue({ ...value, id: event.target.value }); }} />{fieldError('id')}</label>
       <div className="settings-two">
@@ -129,7 +128,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       </div>}
     </fieldset>
     <div className="settings-feedback">{error && !deleting && <ErrorNotice error={error} />}{conflict && <><p>{t('conflictHint')}</p><button type="button" className="btn" disabled={pending} onClick={() => void reload()}>{t('reloadAgent')}</button></>}<span role="status">{saved ? t('saved') : ''}</span></div>
-    {retainedDraft && <label className="settings-retained">{t('retainedDraft')}<textarea readOnly rows={6} value={retainedDraft} /></label>}
+    {retainedDraft && <label className="settings-retained">{t('retainedDraft')}<textarea className="resize-none" readOnly rows={6} value={retainedDraft} /></label>}
     {(!creating || source) && <p className="settings-duplicate-hint muted" id="agent-duplicate-hint">{t('duplicateAgentHint')}</p>}
     <div className="settings-actions"><span className="muted">{t('nextDispatch')}</span>{!creating && <button type="button" className="btn" aria-describedby="agent-duplicate-hint" disabled={pending} onClick={() => onDuplicate?.({ ...source!, ...value.config, config: value.config, id: value.id, prompt: value.prompt, revision: revision ?? null })}>{t('duplicateAgent')}</button>}
       {!creating && <button ref={deleteButton} type="button" className="btn work-danger" disabled={pending} onClick={() => { setError(undefined); setDeleting(true); }}>{t('deleteAgent')}</button>}

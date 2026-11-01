@@ -3,7 +3,7 @@
 .new-card { width: min(680px, 100%); max-height: calc(100dvh - 100px); overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: var(--shadow); }
 .new-head { padding: 12px 16px 0; display: flex; align-items: center; gap: 10px; }
 .new-head h1 { font: 600 20px/1.4 var(--title); }
-.new-head > button { margin-left: auto; color: var(--muted); }
+.new-head > button { margin-left: auto; color: var(--muted); border: 0; background: transparent; min-height: 24px; padding: 0 4px; }
 .new-request { display: block; }
 .new-card textarea { display: block; width: 100%; border: 0; padding: 14px 18px 8px; min-height: 112px; max-height: 40dvh; resize: none; overflow: auto; background: transparent; color: var(--text); font-size: 15px; box-shadow: none; }
 .new-tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 14px 12px; }
@@ -11,7 +11,7 @@
 .new-label { color: var(--faint); }
 .new-pill select { border: 0; background: transparent; color: var(--text); padding: 0 2px; min-width: 0; min-height: 20px; width: auto; max-width: 210px; font-size: 12px; }
 .new-pill .agent-mark { width: 16px; height: 16px; font-size: 10px; }
-.new-send { border-radius: 999px; margin-left: auto; }
+.new-card .new-send { border-radius: 999px; margin-left: auto; }
 .new-context { padding: 0 16px 10px; font-size: 12px; color: var(--muted); }
 .new-context > p, .new-context > .error, .new-context > .row { margin-bottom: 8px; }
 .new-notice { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; color: var(--muted); }
@@ -47,3 +47,14 @@
   .register-overlay { padding: 12px; }
   .register-dialog { padding: 16px; }
 }
+
+.new-card textarea:focus-visible { outline: none; }
+.new-card:focus-within { border-color: var(--border-strong); }
+.new-tools > .new-base-pill { max-width: 176px; }
+.new-tools > .new-pill:has(.agent-mark) { flex: 0 1 243px; }
+.new-tools > .new-pill select { width: 100%; }
+.new-card .new-send { flex: none; }
+@media (max-width: 680px) { .new-tools > .new-pill:has(.agent-mark) { flex-basis: 210px; } }
+
+.project-registration .acts { justify-content: flex-start; }
+.register-dialog h2 { padding-right: 64px; }

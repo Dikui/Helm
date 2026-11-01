@@ -146,9 +146,9 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
           {(['requirements', 'boundary', 'criteria'] as const).map(field => {
             const oldLines = previous?.[field].split(/\r?\n/) ?? [];
             return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
-              <li key={index} aria-label={previous && !oldLines.includes(line) ? `${line} ${t('alignmentNew')}` : undefined}>{previous && !oldLines.includes(line) ? <mark>{line}<span className="brief-new">{t('alignmentNew')}</span></mark> : line}</li>)}</ul></section>;
+              <li key={index} aria-label={previous && !oldLines.includes(line) ? `${line} ${t('alignmentNew')}` : undefined}>{previous && !oldLines.includes(line) ? <mark>{line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')}<span className="brief-new">{t('alignmentNew')}</span></mark> : line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')}</li>)}</ul></section>;
           })}
-          {shown.baseCommit && <dl className="aligning-base"><dt>{t('newWorkBase')}</dt><dd><span className="ref">{shown.baseRef}</span> <span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span></dd><dt>{t('briefWorkBranch')}</dt><dd><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted"> · {t('alignmentBranchPending')}</small>}</dd></dl>}
+          {shown.baseCommit && <div className="brief-branches" aria-label={t('deliveryBranchFlow')}><span className="ref" title={shown.baseCommit}>{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span><span aria-hidden="true">→</span><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted">{t('alignmentBranchPending')}</small>}</div>}
           {copyNotice}
           <p className="muted">{t('alignmentNewEntriesHint')}</p>
           {previous && <details><summary>{t('alignmentComparing').replace('{version}', String(previous.version))}</summary>{(['requirements', 'boundary', 'criteria'] as const).map(field => {

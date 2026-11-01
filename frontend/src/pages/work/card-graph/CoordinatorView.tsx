@@ -1,6 +1,6 @@
 import { inspectorUsage, UsageSummary, UsageTable } from './TokenDetails.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
@@ -17,6 +17,7 @@ import { RoundSteps } from '../conversation/RoundProgress.js';
 interface Notes { body: string; version: number; versions: { body: string; version: number; time: string }[] }
 
 export function CoordinatorView({ work, initialRoundId, initialStep, compact = false, agents }: { work: Work; initialRoundId?: string; initialStep?: number; compact?: boolean; agents?: AgentEntry[] }) {
+  const usageSection = useRef<HTMLElement>(null);
   const { t, language } = useI18n();
   const now = useClock();
   const files = useWorkFiles(work.id);
@@ -54,7 +55,7 @@ export function CoordinatorView({ work, initialRoundId, initialStep, compact = f
     {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : !rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds compact">
       {rounds.data.rounds.map(round => <li key={round.id}>
         <span className={`spark ${round.status === 'running' ? 'run busy' : round.reason === 'completed' ? 'ok' : 'bad'}`} aria-hidden="true" />
-        <span>{t('structureRound')} #{round.number} · <span>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span></span>
+        <span>{t('roundOrdinal').replace('{number}', String(round.number))} · <span>{round.status === 'running' ? t('structureRunning') : round.reason === 'completed' ? t('conversationEnded') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span></span>
         <time>{elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}</time>
         <button className="cs-event-link" aria-label={`${t('structureRound')} #${round.number}`} aria-pressed={roundId === round.id} onClick={() => selectRound(round.id)}>{t('roundView')}</button>
       </li>)}
@@ -65,11 +66,12 @@ export function CoordinatorView({ work, initialRoundId, initialStep, compact = f
     {work.runtimePauseReason && <p className="pause-reason">{paused ? t('inspectorFailureReason') : work.runtimePauseReason}</p>}
     {rounds.data && <span className={compact || !paused ? 'sr' : 'pill bad'} role="status">{t(current ? 'structureRunning' : paused ? 'structureFailurePause' : 'conversationIdle')}</span>}
     {!compact && latest && <RoundSteps key={latest.id} inspector workId={work.id} round={latest} steps={rounds.data?.currentSteps ?? []} plan={rounds.data?.currentPlan ?? []} />}
+    {!compact && latest && <p className="cg-coordinator-tokens">{t('inspectorRoundTokens')} {formatTokens(latest.usage.inputTokens == null || latest.usage.outputTokens == null ? null : latest.usage.inputTokens + latest.usage.outputTokens, language)} · <button className="cg-text-link" onClick={() => { usageSection.current?.scrollIntoView?.({ block: 'start' }); usageSection.current?.focus(); }}>{t('tokenRounds')}</button></p>}
     <section aria-label={t('structureRounds')}>{!compact && <h3 className="sect">{t('structureRounds')}</h3>}{roundList}</section>
     {notesSection}
     {roundId && roundDetails}
-    {!compact && <section className="cg-usage" aria-label={t('tokenRounds')}><h3 className="sect">{t('tokenRounds')}</h3>
-      {!rounds.data ? !rounds.error && <p role="status">{t('loading')}</p> : <><UsageSummary usage={inspectorUsage(rounds.data.rounds)} /><UsageTable kind="round" select={selectRound} rows={rounds.data.rounds.map(round => ({ ...round, label: `#${round.number}${round.status === 'running' ? ` · ${t('structureRunning')}` : round.reason && round.reason !== 'completed' ? ` · ${t(endLabels[round.reason as NonNullable<Dispatch['endReason']>])}` : ''}` }))} /></>}
+    {!compact && <section ref={usageSection} tabIndex={-1} className="cg-usage" aria-label={t('tokenRounds')}><h3 className="sect">{t('inspectorRoundTokenDetails')}</h3>
+      {!rounds.data ? !rounds.error && <p role="status">{t('loading')}</p> : <><UsageSummary usage={inspectorUsage(rounds.data.rounds)} /><UsageTable kind="round" select={selectRound} rows={rounds.data.rounds.map(round => ({ ...round, label: `${t('roundOrdinal').replace('{number}', String(round.number))}${round.status === 'running' ? ` · ${t('structureRunning')}` : round.reason && round.reason !== 'completed' ? ` · ${t(endLabels[round.reason as NonNullable<Dispatch['endReason']>])}` : ''}` }))} /></>}
     </section>}
     {!compact && <WorkActions work={work} reload={rounds.reload} coordinatorOnly />}
     {preview.preview}

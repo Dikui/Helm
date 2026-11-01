@@ -13,7 +13,7 @@ export function ReviewDiff({ diff }: { diff: string }) {
   const pages = Math.max(1, Math.ceil(diff.length / DIFF_PAGE_SIZE));
   const current = Math.min(page, pages - 1);
   return <div className="review-diff">
-    <button className="btn sm" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t('reviewViewDiff')}</button>
+    <button className="btn sm disclosure" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t('reviewViewDiff')}</button>
     {expanded && (diff ? <>
       <div className="row" role="group" aria-label={t('reviewDiffPaging')}>
         <button className="btn sm" disabled={current === 0} onClick={() => setPage(current - 1)}>{t('reviewPrevious')}</button>

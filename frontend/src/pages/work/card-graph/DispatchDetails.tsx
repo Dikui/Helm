@@ -1,3 +1,4 @@
+import { stepSummary } from '../../../shared/step-summary.js';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
@@ -70,7 +71,7 @@ export function OutputSteps({ workId, dispatchId, roundId, lastStep, initialStep
     {!output.data ? <p role="status">{output.error ? '' : t('loading')}</p> : !Array.isArray(output.data) ? <p>{t('graphDeleted')}</p> : output.data.length === 0 ? <p className="muted">{t('graphEmptySteps')}</p> : <ol className="cg-steps">
       {output.data.map(step => <li key={step.step} ref={step.step === initialStep ? target : undefined} tabIndex={step.step === initialStep ? -1 : undefined} aria-current={step.step === initialStep ? 'step' : undefined}>
         <span className="cg-step-number">{t('graphStep')} {step.step}</span>
-        {step.type === 'output' ? <pre>{step.text}</pre> : step.type === 'artifact' ? <p className="cg-prose">{t('graphArtifact')} · {step.path}</p> : step.type === 'plan' ? <PlanSteps entries={step.entries} /> : step.type === 'compaction' ? <p>{t('graphCompaction')}</p> : <p>{t('graphEnd')} · {t(endLabels[step.reason])}</p>}
+        {step.type === 'output' ? <p className="cg-prose">{stepSummary(step.text, t)}</p> : step.type === 'artifact' ? <p className="cg-prose">{t('graphArtifact')} · {step.path}</p> : step.type === 'plan' ? <PlanSteps entries={step.entries} /> : step.type === 'compaction' ? <p>{t('graphCompaction')}</p> : <p>{t('graphEnd')} · {t(endLabels[step.reason])}</p>}
         <details><summary>{t('graphRawStep')}</summary><pre>{JSON.stringify(step, null, 2)}</pre></details>
       </li>)}
     </ol>}
@@ -124,5 +125,26 @@ function BranchDiff({ workId, artifact, retry }: { workId: string; artifact: Art
       <div className="row"><button className="btn sm" onClick={() => selectPath(diff.files[0]!.path)}>{t('reviewViewDiff')}</button></div>
     </>}
     {path && <ReadArtifact key={path} workId={workId} artifactId={artifact.id} path={path} />}
+  </div>;
+}
+
+export function DispatchEvidence({ workId, dispatchId }: { workId: string; dispatchId: string }) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState(0);
+  const id = useId();
+  const detail = useResource<Dispatch>('get-dispatch', { workId, dispatchId });
+  const affects = useCallback((event: HelmEvent) => event.workId === workId && (!event.dispatchId || event.dispatchId === dispatchId), [workId, dispatchId]);
+  const labels = ['evidenceFiles', 'evidenceAnswer', 'evidenceRecord'] as const;
+  return <div className="dispatch-evidence">
+    <div className="cs-tabs" role="tablist" aria-label={t('evidencePreview')}>{labels.map((label, index) => <button key={label} id={`${id}-tab-${index}`} role="tab" aria-selected={tab === index} aria-controls={`${id}-panel`} tabIndex={tab === index ? 0 : -1} onClick={() => setTab(index)} onKeyDown={event => {
+      const next = event.key === 'ArrowRight' ? (index + 1) % labels.length : event.key === 'ArrowLeft' ? (index + labels.length - 1) % labels.length : event.key === 'Home' ? 0 : event.key === 'End' ? labels.length - 1 : undefined;
+      if (next !== undefined) { event.preventDefault(); setTab(next); document.getElementById(`${id}-tab-${next}`)?.focus(); }
+    }}>{t(label)}</button>)}</div>
+    <section id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab-${tab}`}>
+      {tab === 0 ? <DispatchArtifacts workId={workId} dispatchId={dispatchId} affects={affects} /> : tab === 1 ? <>
+        {detail.error && <ErrorNotice error={detail.error} retry={detail.reload} />}
+        {!detail.data ? <p role="status">{t('loading')}</p> : <><dl className="cg-kv"><dt>{t('graphConclusion')}</dt><dd>{detail.data.status === 'ended' ? t(conclusionLabels[detail.data.conclusion]) : '—'}</dd>{detail.data.conclusionReason && <><dt>{t('graphReason')}</dt><dd>{detail.data.conclusionReason}</dd></>}</dl><h3>{t('graphFinalAnswer')}</h3><p className="cg-prose">{detail.data.finalAnswer || t('graphNoFinalAnswer')}</p></>}
+      </> : <><dl className="cg-kv"><dt>Agent id</dt><dd>{detail.data?.agentId ?? '—'}</dd><dt>{t('graphDispatch')}</dt><dd>{dispatchId}</dd></dl><DispatchDetails workId={workId} dispatchId={dispatchId} showArtifacts={false} /></>}
+    </section>
   </div>;
 }

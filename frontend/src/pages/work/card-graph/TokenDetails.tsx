@@ -19,7 +19,6 @@ export function UsageSummary({ usage }: { usage: Usage }) {
   return <div className="cg-token-summary"><p>{t('tokenTotal')} {formatInspectorUsage(usage, language)}</p>
     <p className="muted">{t('tokenInput')} {formatTokens(usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(usage.outputTokens, language)}</p>
     {(usage.cacheReadTokens != null || usage.cacheWriteTokens != null) && <p className="muted">{t('tokenUncached')} {formatTokens(uncachedTokens(usage), language)} · {t('tokenCacheRead')} {formatTokens(usage.cacheReadTokens, language)} · {t('tokenCacheWrite')} {formatTokens(usage.cacheWriteTokens, language)}</p>}
-    {(usage.incomplete || usage.inputTokens == null || usage.outputTokens == null) && <p className="hint">{t('inspectorTokenUnknown')}</p>}
   </div>;
 }
 
@@ -31,6 +30,7 @@ export function UsageTable({ kind, rows, select }: { kind: 'dispatch' | 'round';
     <thead><tr><th scope="col">{t(kind === 'dispatch' ? 'graphDispatch' : 'structureRound')}</th><th scope="col">{t('tokenInput')}</th><th scope="col">{t('tokenOutput')}</th></tr></thead>
     <tbody>{rows.map(row => <tr key={row.id}><th scope="row">{select ? <button className="cg-text-link" onClick={() => select(row.id)}>{row.label}</button> : row.label}</th><td>{formatTokens(row.usage.inputTokens, language)}</td><td>{formatTokens(row.usage.outputTokens, language)}</td></tr>)}</tbody>
   </table></div>
+    {rows.some(row => row.usage.incomplete || row.usage.inputTokens == null || row.usage.outputTokens == null) && <p className="hint">{t('inspectorTokenUnknown')}</p>}
     {hasCache && <details className="cg-cache-details"><summary>{t('inspectorCacheDetails')}</summary><div className="cg-token-table"><table aria-label={t('inspectorCacheDetails')}>
       <thead><tr><th scope="col">{t(kind === 'dispatch' ? 'graphDispatch' : 'structureRound')}</th><th scope="col">{t('tokenUncached')}</th><th scope="col">{t('tokenCacheRead')}</th><th scope="col">{t('tokenCacheWrite')}</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.id}><th scope="row">{row.label}</th><td>{formatTokens(uncachedTokens(row.usage), language)}</td><td>{formatTokens(row.usage.cacheReadTokens, language)}</td><td>{formatTokens(row.usage.cacheWriteTokens, language)}</td></tr>)}</tbody>

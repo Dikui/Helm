@@ -21,6 +21,7 @@ import { Inspector, useInspector } from '../../shared/Inspector.js';
 import { WorkReview } from './brief/WorkReview.js';
 import { useWorkInspector } from './useWorkInspector.js';
 import { NowStrip } from './NowStrip.js';
+import { GateDecision } from '../inbox/GateActions.js';
 import { cardStatusLabels } from '../inbox/presentation.js';
 import { useWorkReview } from './brief/useWorkReview.js';
 import './work-inspector.css';
@@ -57,7 +58,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
     : work.delivery?.push?.status === 'pushed' ? 'nowPushed' : work.delivery?.merge?.status === 'already-contained' ? 'nowContained'
     : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowReadOnly'
     : work?.status === 'accepted' ? 'nowAwaitingMerge' : work?.status;
-  const tone = work?.delivery?.push?.status === 'failed' || work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'bad'
+  const tone = work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'bad'
     : work?.status === 'executing' || work?.status === 'merging' || solving ? 'run'
     : work?.status === 'completed' ? 'ok' : work && ['awaiting-review', 'accepted', 'merge-queued'].includes(work.status) ? 'att' : '';
   const heading = (pushing: boolean) => <header className="top work-header" aria-label={t('workHeader')}>
@@ -85,7 +86,9 @@ function WorkContent({ work, heading, reload }: { work: Work; heading: (pushing:
   const { inspection, choose, filter, chooseCards } = useWorkInspector(work.id, delivery.solving ? 'accepted' : work.status);
   const graph = useResource<GraphNode[]>('get-card-graph', { workId: work.id });
   const selectedCard = graph.data?.filter(node => node.type === 'card').findIndex(node => inspection === `card:${node.id}`);
-  const structure = !['spec', 'report', 'delivery'].includes(inspection);
+  const projectGate = graph.data?.find(node => node.type === 'gate' && node.kind === 'git-initialization' && node.status === 'pending');
+  const sharedGateDefault = inspection === 'list' && projectGate?.type === 'gate' && !filter;
+  const structure = !['spec', 'report', 'delivery'].includes(inspection) && !sharedGateDefault;
   const title = selectedCard !== undefined && selectedCard >= 0 ? `${t('graphCard')} ${selectedCard + 1}` : filter ? filter === 'other' ? t('nowInactiveCards') : t('nowFilteredCards').replace('{status}', t(cardStatusLabels[filter]!))
     : t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
   return <>
@@ -95,6 +98,7 @@ function WorkContent({ work, heading, reload }: { work: Work; heading: (pushing:
     {inspection === 'spec' && work.status !== 'aligning' && <Inspector title={title}><BriefView work={work} /></Inspector>}
     {inspection === 'report' && <Inspector title={title}><WorkReview work={work} report={report} /></Inspector>}
     {inspection === 'delivery' && <Inspector title={title}><WorkDelivery delivery={delivery} reload={reload} /></Inspector>}
+    {sharedGateDefault && <Inspector title={t('projectSharedGate')}><section className="delivery-view"><small className="muted">{t('projectSharedGate')}</small><h2>{t('gitInitInspectorTitle')}</h2><p>{t('gitInitInspectorHint')}</p><GateDecision gate={projectGate} overview /><p className="hint">{t('gitInitInspectorRefusal')}</p></section></Inspector>}
     {structure && <Inspector title={title}><CardGraphView work={work} inspection={inspection} filter={filter} inspect={choose} /></Inspector>}
     <DeliveryDialogs delivery={delivery} report={report} />
   </>;
@@ -104,6 +108,6 @@ function EmptyWork() {
   const { t } = useI18n();
   const works = useResource<WorkSummary[]>('list-works');
   return <div className="empty-main">
-    {works.error ? <ErrorNotice error={works.error} retry={works.reload} /> : !works.data ? <p role="status">{t('loading')}</p> : <><h1>{t(works.data.length ? 'choose' : 'emptyTitle')}</h1><p>{t(works.data.length ? 'inboxHelp' : 'emptyHelp')}</p><Link className="btn primary" href="/new">{t('newWork')}</Link></>}
+    {works.error ? <ErrorNotice error={works.error} retry={works.reload} /> : !works.data ? <p role="status">{t('loading')}</p> : <><h1>{t(works.data.length ? 'choose' : 'emptyTitle')}</h1><p>{t(works.data.length ? 'inboxHelp' : 'emptyHelp')}</p><Link className="btn primary" href="/new">＋ {t('newWork')}</Link></>}
   </div>;
 }

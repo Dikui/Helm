@@ -10,7 +10,7 @@ type PromptName = typeof names[number];
 export function PromptsSection() {
   const { t } = useI18n();
   const { data, error, reload } = useResource<Record<PromptName, string>>('get-prompts');
-  return <section className="settings-simple" aria-label={t('prompts')}><h2>{t('prompts')}</h2><p className="muted">{t('promptsHelp')}</p>
+  return <section className="settings-simple settings-prompts" aria-label={t('prompts')}><h2>{t('prompts')}</h2><p className="muted">{t('promptsHelp')}</p>
     {error && <ErrorNotice error={error} retry={reload} />}{!data && !error && <p role="status">{t('loading')}</p>}
     {data && names.map(name => <PromptForm key={name} name={name} text={data[name]} />)}
   </section>;

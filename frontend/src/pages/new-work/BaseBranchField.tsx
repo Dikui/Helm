@@ -25,7 +25,7 @@ export function BaseBranchField({ project, selection, preferred, onSelect, onRem
     });
   }, [project.id, data, resource.error, defaultBranch, onSelect]);
   return <>
-    <label className="new-pill"><span className="new-label">{t('newWorkBase')}</span>
+    <label className="new-pill new-base-pill"><span className="new-label">{t('newWorkBase')}</span>
       <select aria-label={t('newWorkBaseBranch')} value={selected} disabled={locked || !selected} onChange={event => {
         onSelect({ projectId: project.id, baseRef: event.target.value, ready }); onRemember(event.target.value);
       }}>

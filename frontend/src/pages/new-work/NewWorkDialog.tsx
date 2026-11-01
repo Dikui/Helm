@@ -128,7 +128,7 @@ export function NewWorkDialog({ open, onClose }: { open: boolean; onClose: () =>
       {!projects.data && !projects.error && <p className="new-context" role="status">{t('loading')}</p>}
       {projects.data?.length === 0 && <div className="new-registration"><RegisterProjectForm onRegistered={registered} /></div>}
       {project && <form noValidate aria-busy={pending} onSubmit={event => { event.preventDefault(); void send(); }}>
-        <label className="new-request"><span className="sr">{t('requirements')}</span><textarea value={body} disabled={locked} placeholder={t('newWorkPlaceholder')}
+        <label className="new-request"><span className="sr">{t('requirements')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('newWorkPlaceholder')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>

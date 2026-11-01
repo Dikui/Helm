@@ -20,3 +20,5 @@
 .now-agent-stack { display: inline-flex; flex-direction: column; gap: 12px; max-height: 100px; overflow: hidden; }
 .now-agent-stack .agent-mark { width: 16px; height: 16px; }
 @media (max-width: 680px) { .now-strip { padding: 0 12px 10px; overflow-x: auto; } .now-scroll, .now-fixed { display: contents; } .now-fixed .now-cell { padding-inline: 6px; font-size: 11px; } }
+
+.now-agent-stack:has(> :last-child:nth-child(2)) { gap: 4px; }

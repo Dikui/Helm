@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useData } from '../../shared/data.js';
+import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
 import { Link, useRouter } from '../../shared/router.js';
@@ -9,6 +9,7 @@ import { ReviewChanges, ReviewDiff } from './brief/ReviewDetails.js';
 import type { useWorkReview } from './brief/useWorkReview.js';
 import { DispatchDetails, ReadArtifact } from './card-graph/DispatchDetails.js';
 import type { Artifact } from './card-graph/types.js';
+import type { PushPreview, Work } from '../../shared/types.js';
 import type { WorkDeliveryState } from './useWorkDelivery.js';
 import './work-delivery.css';
 
@@ -47,11 +48,10 @@ export function WorkDelivery({ delivery: d, reload }: { delivery: WorkDeliverySt
     </>}
     {d.solving && d.resolution && <p className="hint">{t('deliveryFixedBase')} <code>{d.resolution.baseCommit}</code></p>}
     {d.notContained && d.manual && <p role="status">{t('deliveryNotContained')}</p>}
-    {work.status === 'completed' && <section aria-label={t('deliveryCleanup')}>
-      <h3>{t('deliveryCleanup')}</h3><p className="hint" role={work.delivery?.cleanup?.reason ? 'status' : undefined}>{t(work.delivery?.cleanup?.reason ? 'deliveryCleanupFailedHint'
+    {work.status === 'completed' && <details className="delivery-cleanup"><summary>{t('deliveryCleanup')}{work.delivery?.cleanup?.reason && <span className="delivery-cleanup-warning"> · {t('deliveryCleanupFailedHint')}</span>}</summary><section aria-label={t('deliveryCleanup')}><p className="hint" role={work.delivery?.cleanup?.reason ? 'status' : undefined}>{t(work.delivery?.cleanup?.reason ? 'deliveryCleanupFailedHint'
         : work.delivery?.cleanup ? d.noCodeChanges ? 'deliveryReadonlyCleanup' : d.withoutMerge || !['merged', 'already-contained'].includes(d.merge?.status ?? '') ? 'deliveryCleanupKeptBranch' : 'deliveryCleanupDone' : 'deliveryCleanupPending')}</p>
-      {work.delivery?.cleanup?.reason && <details className="delivery-details"><summary>{t('deliveryRawReason')}</summary><pre>{work.delivery.cleanup.reason}</pre></details>}
-    </section>}
+      {work.delivery?.cleanup?.reason && <details className="delivery-details"><summary>{t('deliveryRawReason')}</summary><pre>{work.delivery.cleanup.reason}</pre></details>}</section>
+    </details>}
     {d.noCodeChanges && <DeliveryArtifacts workId={work.id} />}
     <div className="delivery-actions">
       {d.solving && <><button className="btn sm" disabled aria-busy="true">{t('deliverySolvingBusy')}</button><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}?inspect=coord`}>{t('deliveryProgress')}</Link></>}
@@ -103,9 +103,7 @@ export function DeliveryDialogs({ delivery: d, report }: { delivery: WorkDeliver
         {d.preview?.reason && <><p role="status">{t('deliveryPushUnavailable')}</p><details className="delivery-details"><summary>{t('deliveryRawReason')}</summary><pre>{d.preview.reason}</pre></details></>}
         {d.preview && !d.preview.reason && <>
           {d.preview.newBranch && <p>{t('deliveryPushNewBranch')} <span className="ref">{branch(d.preview.remoteBranch)}</span></p>}
-          {d.preview.commits.length ? <div className="delivery-table"><table aria-label={t('deliveryPushPreview')}><thead><tr><th scope="col">{t('deliveryCommit')}</th><th scope="col">{t('deliveryCommitTitle')}</th></tr></thead><tbody>
-            {d.preview.commits.map(commit => <tr key={commit.hash}><td><code>{commit.hash}</code></td><td>{commit.subject}</td></tr>)}
-          </tbody></table></div> : <p>{t('deliveryPushNoCommits')}</p>}
+          {d.preview.commits.length ? <PushCommits preview={d.preview} work={d.work} /> : <p>{t('deliveryPushNoCommits')}</p>}
           <p className="delivery-notice">{t('deliveryPushPreviewHint')}</p>
         </>}
         <div className="delivery-actions"><button className="btn sm" disabled={d.inFlight} onClick={d.close}>{t('newWorkCancel')}</button>
@@ -147,4 +145,16 @@ function DeliveryArtifacts({ workId }: { workId: string }) {
     {!artifacts && !error ? <p role="status">{t('loading')}</p> : artifacts?.length ? <ul className="delivery-artifacts">{artifacts.map(artifact => <li key={artifact.id}><button className="report-link" onClick={event => { opener.current = event.currentTarget; select(artifact); }}>{artifact.name}</button></li>)}</ul> : !error && <p className="hint">{t('graphNoArtifacts')}</p>}
     {selected && <ActionDialog title={selected.name} busy={false} returnFocus={opener} onClose={() => select(undefined)} className="report-preview"><ReadArtifact workId={workId} artifactId={selected.id} /></ActionDialog>}
   </section>;
+}
+
+function PushCommits({ preview, work }: { preview: PushPreview; work: Work }) {
+  const { t } = useI18n();
+  const works = useResource<Work[]>('list-works');
+  return <div className="delivery-table"><table aria-label={t('deliveryPushPreview')}><thead><tr>
+    <th scope="col">{t('deliveryCommit')}</th><th scope="col">{t('deliveryCommitTitle')}</th><th scope="col">{t('deliveryCommitSource')}</th>
+  </tr></thead><tbody>{preview.commits.map(commit => {
+    // Only a recorded merge commit establishes ownership; commit messages are not evidence.
+    const candidates = (works.data ?? [work]).filter(item => item.projectId === work.projectId && item.delivery?.merge?.status === 'merged' && item.delivery.merge.commit?.startsWith(commit.hash));
+    return <tr key={commit.hash}><td className="delivery-hash"><code>{commit.hash}</code></td><td>{commit.subject}</td><td>{candidates.length === 1 ? candidates[0]!.title : t('deliverySourceUnknown')}</td></tr>;
+  })}</tbody></table></div>;
 }

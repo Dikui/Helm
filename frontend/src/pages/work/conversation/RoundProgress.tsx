@@ -86,7 +86,7 @@ function RoundStepsContent({ round, steps, plan = [], action, inspector, notice 
       {!plan.length && hidden.length > 0 && !meaningful.length && <details className="conversation-raw-steps"><summary>{t('conversationHiddenSteps')} · {hidden.length}</summary>{stepList(hidden)}</details>}
     </>;
     return <section className="coordinator-progress" aria-label={t('conversationSteps')}>
-      <h2>{active ? plan.length ? t('inspectorPlanHeadline').replace('{current}', String(position)).replace('{total}', String(plan.length)) : progress : t('inspectorRoundEnded')}</h2>
+      <h2>{active ? plan.length ? t('inspectorPlanHeadline').replace('{current}', String(position)).replace('{total}', String(plan.length)) : progress : t('inspectorEndedSteps').replace('{count}', String(meaningful.length))}</h2>
       <p className="muted">{t('structureRound')} #{round.number} · <time aria-label={t('conversationRoundElapsed')}>{elapsed(round.startedAt, until)}</time> · {t(active ? 'structureRunning' : 'conversationEnded')}</p>
       {active ? <div className="coordinator-current">{content}</div> : <details className="coordinator-ended"><summary>{t('structureRound')} #{round.number} · {t('conversationEnded')} · {t('inspectorRecentSteps')}</summary>{notice ?? content}</details>}
       {action}
@@ -97,7 +97,7 @@ function RoundStepsContent({ round, steps, plan = [], action, inspector, notice 
       <span className={`spark ${active ? 'run busy' : 'ok'}`} aria-hidden="true">✦</span>
       <span className="conversation-round-title" title={title}>{truncate(title)}</span>
       <span className={`pill ${active ? 'run' : 'ok'}`}><time>{elapsed(round.startedAt, until)}</time></span>
-      {action}<span className="chev" aria-hidden="true">⌄</span>
+      {action}
     </summary>
     <div className="conversation-round-body">
       <p className="hint">{t('alignmentCoordinator')} · {t('conversationRound')} {round.number} · {round.agentId}</p>

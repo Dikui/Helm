@@ -121,7 +121,8 @@ export function Shell() {
     {!folded && !narrow && <Splitter label={t('resizeSidebar')} orientation="vertical" min={220} max={sidebarMax} onResize={setSidebar} value={sidebarSize}
       measure={() => inbox.current?.getBoundingClientRect().width || sidebarSize} />}
     <InspectorContext value={{ content: inspectorContent, heading: inspectorHeading, rail: inspectorRail, header: workHeader, wide, width: inspectorWidth,
-      reveal: () => stacked ? setMobileRightFolded(false) : setRightFolded(false) }}>
+      reveal: () => stacked ? setMobileRightFolded(false) : setRightFolded(false),
+      focusConversation: () => { if (narrow) setDrawerOpen(false); else setLeftFolded(true); if (stacked) setMobileRightFolded(true); else setRightFolded(true); } }}>
     <div className={`workspace${hasInspector ? ' with-inspector' : ''}${inspectFolded ? ' inspector-folded' : inspectorWide ? ' inspector-wide' : ''}`} inert={narrow && drawerOpen ? true : undefined}>
       {hasInspector && <div className="workspace-header" ref={setWorkHeader} />}
       <main className="inset" aria-hidden={inspectorWide ? true : undefined} inert={inspectorWide ? true : undefined}><OutputWarning /><RouteOutlet routes={routes} /></main>
