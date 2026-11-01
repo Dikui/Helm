@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { AgentMark } from '../../shared/AgentMark.js';
 import { OperationError } from '../../shared/api.js';
-import { useData } from '../../shared/data.js';
+import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n, type MessageKey } from '../../shared/i18n.js';
 import { UnsavedChanges } from './UnsavedChanges.js';
@@ -35,6 +35,11 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
   const [saved, setSaved] = useState(initialSaved);
   const [deleting, setDeleting] = useState(false);
   const [retainedDraft, setRetainedDraft] = useState<string>();
+  const { data: driverStatus, error: driverError } = useResource<{ capabilities: {
+    cleanStart: { supported: true } | { supported: false; reason: string };
+  } | null }>('check-agent', { driver: value.config.driver });
+  const cleanStart = driverStatus?.capabilities?.cleanStart;
+  const configReason = cleanStart?.supported === false ? cleanStart.reason : driverError?.message ?? (!cleanStart ? t('loading') : undefined);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const config = <K extends keyof AgentSettings>(key: K, next: AgentSettings[K]) => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, [key]: next, ...(key === 'role' ? { loadGlobalConfig: next === 'executor' } : {}) } })); };
   const conflict = error instanceof OperationError && error.failure.code === 'AGENT_CONFLICT';
@@ -116,7 +121,7 @@ export function AgentEditor({ source, creating = false, initialSaved = false, on
       <ModelFields settings={value.config} agentId={value.id} fieldProps={fieldProps} fieldError={fieldError}
         change={next => { setSaved(false); setValue(current => ({ ...current, config: { ...current.config, ...next } })); }} />
       <label className="settings-fast" htmlFor="agent-fast"><span>{t('fastMode')}<small className="muted">{t('fastModeHint')}</small></span><input className="settings-toggle" {...fieldProps('fast')} type="checkbox" checked={value.config.fast} onChange={event => config('fast', event.target.checked)} />{fieldError('fast')}</label>
-      <label className="settings-fast" htmlFor="agent-loadGlobalConfig"><span>{t('loadGlobalConfig')}<small className="muted" id="agent-loadGlobalConfig-hint">{t(value.config.home === 'dedicated' ? 'dedicatedConfigHint' : 'loadGlobalConfigHint')}</small></span><input className="settings-toggle" {...fieldProps('loadGlobalConfig')} aria-describedby={errors.loadGlobalConfig ? 'agent-loadGlobalConfig-hint agent-loadGlobalConfig-error' : 'agent-loadGlobalConfig-hint'} type="checkbox" checked={value.config.loadGlobalConfig} onChange={event => config('loadGlobalConfig', event.target.checked)} />{fieldError('loadGlobalConfig')}</label>
+      <label className="settings-fast" htmlFor="agent-loadGlobalConfig"><span>{t('loadGlobalConfig')}<small className="muted" id="agent-loadGlobalConfig-hint">{t(value.config.home === 'dedicated' ? 'dedicatedConfigHint' : 'loadGlobalConfigHint')}</small>{configReason && <small className={cleanStart || driverError ? 'settings-reason' : 'muted'} id="agent-loadGlobalConfig-reason">{configReason}</small>}</span><input className="settings-toggle" {...fieldProps('loadGlobalConfig')} aria-describedby={['agent-loadGlobalConfig-hint', ...(configReason ? ['agent-loadGlobalConfig-reason'] : []), ...(errors.loadGlobalConfig ? ['agent-loadGlobalConfig-error'] : [])].join(' ')} type="checkbox" disabled={!cleanStart?.supported} checked={cleanStart?.supported === false || value.config.loadGlobalConfig} onChange={event => config('loadGlobalConfig', event.target.checked)} />{fieldError('loadGlobalConfig')}</label>
       <fieldset className="settings-billing" {...fieldProps('home')} tabIndex={-1}><legend>{t('billing')}</legend>
         <label className="settings-billing-option"><input type="radio" name="agent-home" value="shared" checked={value.config.home === 'shared'} onChange={() => config('home', 'shared')} /><span><b>{t('subscription')}</b><small>{t('sharedHomeHint')}</small></span></label>
         <label className="settings-billing-option"><input type="radio" name="agent-home" value="dedicated" checked={value.config.home === 'dedicated'} onChange={() => config('home', 'dedicated')} /><span><b>{t('apiBilling')}</b><small>{t('apiHomeHint')} <code>~/.helm/agent-homes/{value.id || '<id>'}/</code></small></span></label>

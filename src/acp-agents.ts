@@ -56,7 +56,9 @@ function deepseekRoute(value: string): [string, string] | undefined {
 export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   deepseek: {
     capabilities: {
-      cleanStart: { supported: false, reason: '当前 DeepSeek 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
+      // Boot always includes user layers; --patch only overlays them.
+      // https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/src/profile-boot.ts
+      cleanStart: { supported: false, reason: 'dsh 0.2.1-rc.2 启动 ACP 时始终加载用户 profile 和主目录配置；--patch 不能跳过这些配置及其规则、MCP、skills 和 hooks。' },
       resume: true, contextUsage: false, coordinator: false,
       autoMemory: { status: 'unsupported', reason: 'dsh 0.2.1-rc.2 默认 ACP 栈无内置自动记忆；用户另装的记忆插件或 MCP 没有统一的按会话关闭开关，启用后仍可能读写个人记忆。' },
     },
@@ -138,7 +140,9 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   },
   grok: {
     capabilities: {
-      cleanStart: { supported: false, reason: '当前 Grok 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
+      // GROK_CONFIG is an allowlisted deep-merge overlay, not a replacement.
+      // https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md
+      cleanStart: { supported: false, reason: 'Grok 1.0.70 没有跳过用户与项目配置的 ACP 开关；GROK_CONFIG 仅叠加配置，仍会加载全局规则、MCP、skills 和 hooks。' },
       resume: true, contextUsage: false, coordinator: false,
       autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },

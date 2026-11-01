@@ -213,12 +213,12 @@ test('DeepSeek 续跑保持 id，仅计本次新增用量，使用新进程和�
   assert.equal(requests.filter(r => r.method === 'session/set_config_option').length, 2);
 });
 
-test('DeepSeek 账号执行者经 ACP 设置并核对模型路线和强度，强制卡片沙箱及禁止推送', async t => {
+for (const loadGlobalConfig of [false, true]) test(`DeepSeek 全局配置 ${loadGlobalConfig} 时核对模型路线、强度并保持卡片沙箱及禁止推送`, async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   ctx.options.env.DSH_HOME = '/must-not-inherit';
   ctx.options.env.DSH_PERMISSION_MODE = 'danger-full-access';
   ctx.options.env.DEEPSEEK_API_KEY = 'must-not-inherit';
-  const session = await ctx.driver.start(ctx.options);
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig } });
   await session.send('执行派单');
   const events = await collect(session.events);
   const end = events.at(-1)!;

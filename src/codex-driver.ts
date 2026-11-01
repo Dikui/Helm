@@ -31,7 +31,9 @@ function quotaExhausted(error: any) {
 
 export class CodexDriver implements Driver {
   capabilities: DriverCapabilities = {
-    cleanStart: { supported: false, reason: '当前 Codex 驱动仍加载用户和项目配置，尚未实现干净启动。' },
+    // --ignore-user-config is exec-only; app-server starts with default LoaderOverrides.
+    // https://github.com/openai/codex/blob/rust-v0.165.0/codex-rs/cli/src/main.rs
+    cleanStart: { supported: false, reason: 'Codex 0.165.0 的 app-server 无法跳过用户与项目配置，仍会加载全局规则、MCP、skills 和 hooks。' },
     resume: true, contextUsage: true, coordinator: true,
     autoMemory: { status: 'disabled', mechanism: '会话配置 features.memories=false、memories.generate_memories=false、memories.use_memories=false，关闭后台整理、生成与加载。' },
   };
