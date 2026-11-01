@@ -2,15 +2,11 @@ import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useData, useResource } from '../../shared/data.js';
 import { ErrorNotice } from '../../shared/feedback.js';
 import { useI18n } from '../../shared/i18n.js';
-import type { Gate, HelmEvent, WorkSummary, WorkStatus } from '../../shared/types.js';
+import type { Gate, WorkSummary, WorkStatus } from '../../shared/types.js';
 import { Link } from '../../shared/router.js';
 import { ReviewDetails } from '../work/brief/ReviewDetails.js';
 import { ReviewReport } from '../work/brief/ReviewReport.js';
-import { WorkActions } from '../work/WorkActions.js';
-import { ago, useClock } from '../../shared/clock.js';
 import { Markdown, useFilePreview } from '../../shared/files.js';
-import { recentProgress, progressLabels } from './recent-progress.js';
-import type { GraphNode } from '../work/card-graph/types.js';
 import type { ReviewGate } from '../work/brief/types.js';
 import { GitInitializationDetails } from './GitInitializationDetails.js';
 
@@ -99,22 +95,11 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
   </section>;
 }
 export function InboxDetails({ work }: { work: WorkSummary }) {
-  const { t, language } = useI18n();
-  const now = useClock();
+  const { t } = useI18n();
   const { data, error, reload } = useResource<(Gate & { type: string })[]>('get-conversation', { workId: work.id });
-  const events = useResource<HelmEvent[]>('get-events', { workId: work.id });
-  const graph = useResource<GraphNode[]>('get-card-graph', { workId: work.id });
-  const cards = graph.data?.filter(node => node.type === 'card') ?? [];
-  const recent = recentProgress(events.data ?? []);
-  return <><hr />{error && <ErrorNotice error={error} retry={reload} />}{events.error && <ErrorNotice error={events.error} retry={events.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
-    {['accepted', 'merge-queued', 'merging'].includes(work.status) && <Link href={`/works/${encodeURIComponent(work.id)}/brief`}>{t('deliveryTitle')}</Link>}
-    {(!data || !events.data) && !error && !events.error && <p role="status">{t('loading')}</p>}
-    {recent.length > 0 && <ol className="tl" aria-label={t('inboxRecentSteps')}>{recent.map(event => {
-      const details = event.details as { summary?: string; step?: number; question?: string; reason?: string } | null;
-      const card = cards.findIndex(card => card.id === event.cardId);
-      return <li key={event.id}><span>{card >= 0 && `${t('graphCard')} ${card + 1} · `}{details?.summary || details?.question || t(progressLabels[event.action]!)}{details?.step ? ` · ${details.step}` : ''}</span><time dateTime={event.time} title={new Date(event.time).toLocaleString(language === 'zh' ? 'zh-CN' : 'en')}>{ago(event.time, now, language)}</time></li>;
-    })}</ol>}
+  return <>{error && <ErrorNotice error={error} retry={reload} />}
+    {!data && !error && <p role="status">{t('loading')}</p>}
     {data?.filter(item => item.type === 'gate' && item.status === 'pending').map(gate => <GateDecision key={gate.id} gate={gate} workStatus={work.status} decisionWorkId={work.id} />)}
-    <div className="acts inbox-work-actions"><WorkActions work={work} reload={() => { reload(); events.reload(); graph.reload(); }} inline /><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}`}>{t('inboxOpen')}</Link></div>
+    <div className="acts"><Link className="btn sm" href={`/works/${encodeURIComponent(work.id)}${work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? '/brief' : ''}`}>{t(work.status === 'accepted' || work.delivery?.push?.status === 'failed' ? 'deliveryTitle' : 'inboxOpen')}</Link></div>
   </>;
 }

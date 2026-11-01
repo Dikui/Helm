@@ -103,7 +103,7 @@ export function Shell() {
     {narrow && drawerOpen && <button className="inbox-backdrop" aria-label={t('shellCloseBackdrop')} onClick={() => setDrawerOpen(false)} tabIndex={-1} />}
     <div id="inbox-content" className="inbox-pane" ref={inbox} role={narrow && drawerOpen ? 'dialog' : undefined} aria-modal={narrow && drawerOpen ? true : undefined} aria-label={narrow && drawerOpen ? t('shellInbox') : undefined}
       onClick={event => { if (narrow && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && (event.target as Element).closest('a[href]')) setDrawerOpen(false); }}>
-      <Inbox folded={folded} drawer={narrow && drawerOpen} onToggle={toggleInbox} onSearch={search} searchRequest={searchRequest} />
+      <Inbox folded={folded} drawer={narrow && drawerOpen} onToggle={toggleInbox} searchRequest={searchRequest} />
     </div>
     {!folded && !narrow && <Splitter label={t('resizeSidebar')} orientation="vertical" min={220} max={sidebarMax} onResize={setSidebar} value={sidebarSize}
       measure={() => inbox.current?.getBoundingClientRect().width || sidebarSize} />}

@@ -8,8 +8,8 @@ import { App } from '../src/App.js';
 
 // 收件箱行点击会打开工作页，详情要用右侧按钮展开
 function expandRow(text: HTMLElement) {
-  const row = text.closest('.irow') as HTMLElement;
-  const toggle = within(row).getByRole('button', { name: '展开详情' });
+  const row = screen.getByRole('article', { name: text.textContent! });
+  const toggle = within(row).getByRole('button', { name: `快速决定：${text.textContent}` });
   if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
   return row;
 }
@@ -185,7 +185,7 @@ test('旧版纯文本审核在工作页和收件箱继续显示 Markdown，接�
   expect(await within(review).findByText('历史汇总报告 · 旧版文本')).toBeTruthy();
   expect(within(review).getByRole('heading', { name: '历史报告' })).toBeTruthy();
   expect(within(review).getByText('原始结论').tagName).toBe('STRONG');
-  const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
+  const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
   expect(await within(row).findByText('原始结论')).toBeTruthy();
   expect(within(review).getByRole('button', { name: '接受' })).toBeTruthy();
 });
@@ -324,7 +324,7 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   expect(sendBack.disabled).toBe(true);
   fireEvent.change(within(review).getByLabelText('意见'), { target: { value: '请补齐边界说明' } });
   fireEvent.click(sendBack);
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('工作说明与审核')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByText('工作说明与审核')).toBeTruthy());
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('return');
   expect(gate.comment).toBe('请补齐边界说明');
@@ -339,9 +339,10 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   execFileSync('git', ['-C', daemon!.repo, 'remote', 'add', 'origin', remote], { stdio: 'ignore' });
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
+  fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   const review = await screen.findByRole('region', { name: '审核' });
   const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
-  const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
+  const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
   const inboxAccept = await within(row).findByRole('button', { name: '接受' });
   expect(within(row).queryByRole('button', { name: '查看 diff' })).toBeNull();
   expect(within(row).getByRole('link', { name: '查看审核详情' }).getAttribute('href')).toBe(`/works/${work.id}/brief`);
@@ -360,8 +361,8 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
   await waitFor(() => expect((within(delivery).getByRole('button', { name: '推送' }) as HTMLButtonElement).disabled).toBe(false));
   await waitFor(() => expect(within(top).getByText('已完成')).toBeTruthy());
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('工作说明与审核')).toBeTruthy());
-  expect(within(screen.getByRole('region', { name: '等你处理' })).queryByText('工作说明与审核')).toBeNull();
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('工作说明与审核')).toBeTruthy());
+  expect(within(screen.getByRole('region', { name: '等你' })).queryByText('工作说明与审核')).toBeNull();
   await waitFor(() => expect(within(review).getByText('已决定 · 接受')).toBeTruthy());
   expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
   expect(within(review).queryByRole('button', { name: '退回' })).toBeNull();
@@ -393,7 +394,7 @@ test('待合入时对话和执行操作只读，撤回接受后恢复输入', as
   await waitFor(() => expect((within(conversation).getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).disabled).toBe(false));
 });
 
-test.each(['conflict', 'push-failed'])('界面显示 %s 原因并保留继续操作入口', async problem => {
+test.each(['conflict', 'merge-failed', 'push-failed'])('界面显示 %s 原因并保留继续操作入口', async problem => {
   const work = await prepareReview();
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const remote = join(daemon!.directory, 'remote.git');
@@ -405,18 +406,30 @@ test.each(['conflict', 'push-failed'])('界面显示 %s 原因并保留继续操
     git('add', 'result.txt');
     git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'base updated');
   }
+  if (problem === 'merge-failed') await writeFile(join(daemon!.repo, 'result.txt'), 'Untracked file blocks delivery');
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   ok(await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
   const delivery = await screen.findByRole('region', { name: '合入与推送' });
   fireEvent.click(within(delivery).getByRole('button', { name: '合入' }));
-  if (problem === 'conflict') {
+  if (problem === 'merge-failed') {
+    await within(delivery).findByRole('heading', { name: '合入失败，待重试' });
+    expect(within(delivery).getByRole('button', { name: '重试合入' })).toBeTruthy();
+    expect(await within(screen.getByRole('region', { name: '等你' })).findByRole('article', { name: '工作说明与审核' })).toBeTruthy();
+  } else if (problem === 'conflict') {
     expect(await within(delivery).findByRole('heading', { name: '合入冲突，待合入' })).toBeTruthy();
     expect(within(delivery).getByRole('cell', { name: 'result.txt' })).toBeTruthy();
     expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
     expect(within(delivery).queryByRole('button', { name: '推送' })).toBeNull();
     expect(within(delivery).getByRole('button', { name: '撤回接受' })).toBeTruthy();
+    expect(await within(screen.getByRole('region', { name: '等你' })).findByText('等你：合入冲突，待合入')).toBeTruthy();
+    fireEvent.click(within(delivery).getByRole('button', { name: '我自己处理' }));
+    await within(delivery).findByRole('heading', { name: '等待你处理冲突' });
+    expect(await within(screen.getByRole('region', { name: '等你' })).findByText('等你：等待你处理冲突')).toBeTruthy();
+    fireEvent.click(within(delivery).getByRole('button', { name: '改交给调度者' }));
+    await within(delivery).findByRole('heading', { name: '调度者正在解决冲突' });
+    expect(await within(screen.getByRole('region', { name: '在跑' })).findByRole('article', { name: '工作说明与审核' })).toBeTruthy();
   } else {
     await within(delivery).findByRole('heading', { name: '已完成' });
     const hook = join(remote, 'hooks', 'pre-receive');
@@ -425,10 +438,13 @@ test.each(['conflict', 'push-failed'])('界面显示 %s 原因并保留继续操
     fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
     expect(await within(delivery).findByRole('heading', { name: '推送失败' })).toBeTruthy();
     expect(within(delivery).getByRole('alert').textContent).toContain('ui-push-rejected');
+    expect(await within(screen.getByRole('region', { name: '等你' })).findByText('等你：推送失败')).toBeTruthy();
     await rm(hook);
     await waitFor(() => expect((within(delivery).getByRole('button', { name: '重试推送' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(within(delivery).getByRole('button', { name: '重试推送' }));
     expect(await within(delivery).findByRole('heading', { name: '已推送 · 工作完成' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /安静/ }));
+    expect(await within(screen.getByRole('region', { name: '安静' })).findByRole('article', { name: '工作说明与审核' })).toBeTruthy();
   }
 });
 
@@ -456,7 +472,7 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} transport={transport} />);
   const review = await screen.findByRole('region', { name: '审核' });
-  const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
+  const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
   const sendBack = await within(row).findByRole('button', { name: '退回' }) as HTMLButtonElement;
   expect(sendBack.disabled).toBe(true);
   fireEvent.change(within(row).getByLabelText('意见'), { target: { value: '请补边界情况' } });
@@ -468,8 +484,8 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
   fireEvent.click(sendBack);
   await waitFor(() => expect(within(review).getByText('已决定 · 退回')).toBeTruthy());
   expect(within(review).getByText('请补边界情况')).toBeTruthy();
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '等你处理' })).queryByText('工作说明与审核')).toBeNull());
-  expect(within(screen.getByRole('region', { name: '进行中' })).getByText('工作说明与审核')).toBeTruthy();
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '等你' })).queryByText('工作说明与审核')).toBeNull());
+  expect(within(screen.getByRole('region', { name: '在跑' })).getByText('工作说明与审核')).toBeTruthy();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('return');
   expect(gate.comment).toBe('请补边界情况');
@@ -544,13 +560,14 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   if (timing === '打开时已取消') ok(await daemon.call('cancel-work', { workId: work.id }));
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon.url} />);
+  fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   const review = await screen.findByRole('region', { name: '审核' });
   const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
   if (timing === '打开后取消') {
     const gate = await within(review).findByRole('group', { name: '审核' });
     const accept = within(gate).getByRole('button', { name: '接受' }) as HTMLButtonElement;
     await waitFor(() => expect(accept.disabled).toBe(false));
-    const row = expandRow(within(screen.getByRole('region', { name: '等你处理' })).getByText('工作说明与审核'));
+    const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
     await within(row).findByRole('group', { name: '审核' });
     fireEvent.change(within(gate).getByLabelText('意见'), { target: { value: '取消前输入' } });
     ok(await daemon.call('cancel-work', { workId: work.id }));
@@ -562,15 +579,17 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   expect(within(review).queryByText('已决定 · 退回')).toBeNull();
   expect(within(review).getByText('已取消')).toBeTruthy();
   expect(within(review).getByText('终态仍可读取的汇总报告')).toBeTruthy();
-  const ended = await screen.findByRole('region', { name: '已结束' });
-  const row = await within(ended).findByText('工作说明与审核');
-  const details = expandRow(row);
-  const gate = await within(details).findByRole('group', { name: '审核' });
-  expect(within(gate).getByText('终态仍可读取的汇总报告')).toBeTruthy();
-  expect(within(gate).getByText('已取消')).toBeTruthy();
-  expect(within(gate).queryByRole('button', { name: '接受' })).toBeNull();
-  expect(within(gate).queryByRole('button', { name: '退回' })).toBeNull();
-  expect(within(gate).queryByLabelText('意见')).toBeNull();
+  const ended = await screen.findByRole('region', { name: '安静' });
+  const terminal = within(ended).getByRole('article', { name: '工作说明与审核' });
+  expect(within(terminal).queryByRole('button')).toBeNull();
+  fireEvent.click(within(terminal).getByRole('link'));
+  fireEvent.click(screen.getByRole('link', { name: '工作说明' }));
+  const readOnlyReview = await screen.findByRole('region', { name: '审核' });
+  expect(within(readOnlyReview).getByText('终态仍可读取的汇总报告')).toBeTruthy();
+  expect(within(readOnlyReview).getByText('已取消')).toBeTruthy();
+  expect(within(readOnlyReview).queryByRole('button', { name: '接受' })).toBeNull();
+  expect(within(readOnlyReview).queryByRole('button', { name: '退回' })).toBeNull();
+  expect(within(readOnlyReview).queryByLabelText('意见')).toBeNull();
   const saved = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(saved.status).toBe('pending');
   expect(saved.decision).toBeNull();
@@ -587,13 +606,14 @@ test('审核接受后确认结束（不合入）即移到已结束，完成后�
   ok(await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
+  fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   const delivery = await screen.findByRole('region', { name: '合入与推送' });
   fireEvent.click(within(delivery).getByRole('button', { name: '结束（不合入）' }));
   const dialog = await screen.findByRole('dialog', { name: '结束（不合入）' });
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
   fireEvent.click(within(dialog).getByRole('button', { name: '确认结束（不合入）' }));
   await within(delivery).findByText(/工作已完成，未合入/);
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('工作说明与审核')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('工作说明与审核')).toBeTruthy());
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('completed');
   expect(within(delivery).queryByRole('button', { name: '推送' })).toBeNull();
 });

@@ -56,16 +56,17 @@ test('卡片节点与明细显示全部派单用量，独立调度者节点按�
   expect(within(rounds).getAllByRole('row').slice(1, 3).map(row => row.textContent)).toEqual(['#1100———20', '#250———10']);
   fireEvent.click(card);
   expect(screen.getByRole('complementary', { name: '卡片检查器' })).toBeTruthy();
-  await waitFor(() => expect(screen.getAllByText('Token 227')).toHaveLength(2));
+  await waitFor(() => expect(within(screen.getByRole('main')).getByText('Token 227')).toBeTruthy());
 });
 
-test('对齐阶段的顶部和收件箱始终显示 Token 标签，未报告用量显示 —', async () => {
+test('对齐阶段顶部显示 Token，未报告用量显示 —；收件箱只显示进展', async () => {
   daemon = await uiFixture([[{ type: 'end', reason: 'completed' }]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '对齐用量' })).result.work;
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[0]?.status === 'ended');
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
-  await waitFor(() => expect(screen.getAllByText('Token —')).toHaveLength(2));
+  await waitFor(() => expect(within(screen.getByRole('main')).getByText('Token —')).toBeTruthy());
+  expect(within(screen.getByRole('complementary', { name: 'Helm' })).queryByText(/Token/)).toBeNull();
 });
 
 test('调度者的合计计入已知部分并标出缺项，明细保留已知输入和真实零输出', () => {

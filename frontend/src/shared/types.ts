@@ -19,6 +19,7 @@ export interface Work {
 }
 export interface WorkSummary extends Work {
   summary: string; statusSince: string; completedCards: number; totalCards: number;
+  cardStatuses: string[];
   hasPendingGate: boolean; pendingGates: { id: string; kind: string; question: string }[];
 }
 export interface Settings { concurrencyLimit: number; runningDispatches: number; queuedDispatches: number }

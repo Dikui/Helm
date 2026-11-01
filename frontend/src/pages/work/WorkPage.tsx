@@ -49,7 +49,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
 function EmptyWork() {
   const { t } = useI18n();
   const works = useResource<WorkSummary[]>('list-works');
-  return <div className="empty-main"><span className="spark" aria-hidden="true">✦</span>
+  return <div className="empty-main">
     {works.error ? <ErrorNotice error={works.error} retry={works.reload} /> : !works.data ? <p role="status">{t('loading')}</p> : <><h1>{t(works.data.length ? 'choose' : 'emptyTitle')}</h1><p>{t(works.data.length ? 'inboxHelp' : 'emptyHelp')}</p><Link className="btn primary" href="/new">{t('newWork')}</Link></>}
   </div>;
 }

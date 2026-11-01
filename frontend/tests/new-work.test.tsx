@@ -67,7 +67,7 @@ test('选项目默认 Agent 创建工作：响应丢失后重试沿用完整请�
   expect(submissions[0].key).toBeTruthy();
   expect(submissions[1]).toEqual(submissions[0]);
   expect(window.location.pathname).toBe(`/works/${works[0].id}`);
-  expect(within(screen.getByRole('complementary', { name: 'Helm' })).getByText('对齐中')).toBeTruthy();
+  expect(within(screen.getByRole('complementary', { name: 'Helm' })).getByText('等你：确认工作说明')).toBeTruthy();
 });
 
 test('基准分支默认当前检出分支，可选择其他分支，创建工作不建副本', async () => {
@@ -422,7 +422,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   await screen.findByText('实时更新已连接');
   // Wait for replay to finish before dropping the shared stream.
-  await screen.findByText('调度轮次结束');
+  await screen.findByText(/本轮.*已结束/);
   offline = true; controller?.abort();
   await screen.findByText('连接已断开，正在重连…');
   await daemon.call('send-message', { workId: work.id, body: '请更新草稿', key: 'update' });

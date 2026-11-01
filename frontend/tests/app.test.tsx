@@ -5,8 +5,8 @@ import { App } from '../src/App.js';
 
 // 收件箱行点击会打开工作页，详情要用右侧按钮展开
 function expandRow(text: HTMLElement) {
-  const row = text.closest('.irow') as HTMLElement;
-  const toggle = within(row).getByRole('button', { name: '展开详情' });
+  const row = screen.getByRole('article', { name: text.textContent! });
+  const toggle = within(row).getByRole('button', { name: `快速决定：${text.textContent}` });
   if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
   return row;
 }
@@ -23,28 +23,31 @@ afterEach(async () => {
 });
 
 test('整页读取真实 helmd：收件箱分组、搜索、SSE 更新及语言持久化', async () => {
-  daemon = await uiFixture();
+  daemon = await uiFixture([[{ type: 'hang' }]]);
   const create = async (body: string, key: string) => (await daemon!.call('send-message', { projectId: daemon!.project.id, body, key })).result.work;
   const active = await create('登录页改版\n第二行不显示在标题', 'active');
   const ended = await create('整理 README', 'ended');
   await daemon.call('cancel-work', { workId: ended.id });
   render(<App baseUrl={daemon.url} />);
-  const attention = await screen.findByRole('region', { name: '等你处理' });
+  const attention = await screen.findByRole('region', { name: '等你' });
   expect(await within(attention).findByText('登录页改版')).toBeTruthy();
-  expect(within(screen.getByRole('region', { name: '已结束' })).getByText('整理 README')).toBeTruthy();
-  expect(screen.getByLabelText('执行者并发')).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '整理 README' })).toBeNull();
+  expect(screen.queryByLabelText('执行者并发')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /安静/ }));
+  expect(within(screen.getByRole('region', { name: '安静' })).getByRole('article', { name: '整理 README' })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox', { name: '搜索工作' }), { target: { value: 'README' } });
   expect(screen.queryByText('登录页改版')).toBeNull();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
   await daemon.call('cancel-work', { workId: active.id });
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('登录页改版')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('登录页改版')).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(screen.getByRole('region', { name: 'Ended' })).toBeTruthy();
-  expect(screen.getByText('登录页改版')).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Quiet' })).toBeTruthy();
+  expect(screen.getByRole('article', { name: '登录页改版' })).toBeTruthy();
   expect(localStorage.getItem('helm.language')).toBe('en');
   cleanup();
   render(<App baseUrl={daemon.url} />);
-  expect(await screen.findByRole('region', { name: 'Ended' })).toBeTruthy();
+  expect(await screen.findByRole('region', { name: 'Quiet' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '登录页改版' })).toBeNull();
 });
 
 // These scripts use the same MCP boundary as real coordinators.
@@ -71,35 +74,37 @@ function controlledTransport() {
   return { transport, cursors, disconnect() { online = false; controller?.abort(); }, reconnect() { online = true; } };
 }
 
-test('点收件箱行打开工作页，右侧按钮只在列表里展开详情', async () => {
-  daemon = await uiFixture();
+test('在跑行直接打开工作；待决定行的快速决定不改变路由', async () => {
+  daemon = await uiFixture([[draft('v1')]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '点行打开', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
-  const title = await screen.findByText('点行打开');
-  const row = expandRow(title);
+  await screen.findByText('等你：确认工作说明');
+  const row = expandRow(screen.getByText('点行打开'));
   expect(window.location.pathname).toBe('/');
-  expect(within(row).getByRole('button', { name: '展开详情' }).getAttribute('aria-expanded')).toBe('true');
-  fireEvent.click(title.closest('a')!);
+  await within(row).findByRole('button', { name: '确认这一版' });
+  fireEvent.click(within(row).getByRole('link', { name: /点行打开 ·/ }));
   expect(window.location.pathname).toBe(`/works/${work.id}`);
-  await waitFor(() => expect(row.classList.contains('current')).toBe(true));
+  expect(within(row).getByRole('link', { name: /点行打开 ·/ }).getAttribute('aria-current')).toBe('page');
 });
 
-test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新全局并发', async () => {
+test('断线后用 Last-Event-ID 补齐真实 helmd 的状态变化，并更新设置中的并发', async () => {
   daemon = await uiFixture();
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '断线中的工作', key: 'start' })).result.work;
   const network = controlledTransport();
+  window.history.replaceState(null, '', '/settings/runtime');
   render(<App baseUrl={daemon.url} transport={network.transport} />);
   expect(await screen.findByText('断线中的工作')).toBeTruthy();
   await screen.findByText('实时更新已连接');
   // The initial event replay is consumed before we cut its actual HTTP stream.
-  await waitFor(() => expect(screen.queryByText('调度轮次结束')).toBeTruthy());
+  await waitFor(() => expect(screen.queryByText('等你：确认工作说明')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: /安静/ }));
   network.disconnect();
   await screen.findByText('连接已断开，正在重连…');
   await daemon.call('cancel-work', { workId: work.id });
   await daemon.call('set-concurrency', { limit: 4 });
   network.reconnect();
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '已结束' })).getByText('断线中的工作')).toBeTruthy(), { timeout: 5_000 });
-  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 4'));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '安静' })).getByText('断线中的工作')).toBeTruthy(), { timeout: 5_000 });
+  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('4'));
   expect(network.cursors[0]).toBeNull();
   expect(Number(network.cursors.at(-1))).toBeGreaterThan(0);
 });
@@ -114,19 +119,20 @@ test('行内确认和一般关卡决定经 HTTP 生效，工作在等你处理�
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '关卡工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
-  expandRow(await screen.findByText('关卡工作'));
+  await screen.findByText('等你：确认工作说明');
+  expandRow(screen.getByText('关卡工作'));
   const confirm = await screen.findByRole('button', { name: '确认这一版' });
   await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(confirm);
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('关卡工作')).toBeTruthy());
-  await waitFor(() => expect(screen.getByText('▦ 0/1')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByText('关卡工作')).toBeTruthy());
+  expect(await screen.findByRole('img', { name: '卡片状态：1 待开始' })).toBeTruthy();
   release();
   await until(() => daemon!.call('list-pending'), value => value.result.some((gate: any) => gate.question === '保留多久？'));
   expandRow(await screen.findByText('关卡工作'));
   const gate = await screen.findByRole('group', { name: '保留多久？' });
   expect(within(gate).getByRole('button', { name: '一周' }).getAttribute('aria-keyshortcuts')).toBe('1');
   fireEvent.keyDown(gate, { key: '1' });
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('关卡工作')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByText('关卡工作')).toBeTruthy());
   const conversation = (await daemon.call('get-conversation', { workId: work.id })).result;
   expect(conversation.find((item: any) => item.question === '保留多久？').decision).toBe('一周');
 });
@@ -136,7 +142,8 @@ test('断线期间工作说明更新，行内操作显示运行层拒绝的原�
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '过期确认', key: 'start' })).result.work;
   const network = controlledTransport();
   render(<App baseUrl={daemon.url} transport={network.transport} />);
-  expandRow(await screen.findByText('过期确认'));
+  await screen.findByText('等你：确认工作说明');
+  expandRow(screen.getByText('过期确认'));
   await screen.findByText('用户需求 v1');
   const button = await screen.findByRole('button', { name: '确认这一版' });
   network.disconnect();
@@ -148,19 +155,22 @@ test('断线期间工作说明更新，行内操作显示运行层拒绝的原�
   expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('aligning');
 });
 
-test('运行层暂停带原因归等你处理，计时来自时间戳并每秒走，深链接保持位置', async () => {
+test('运行层暂停归安静并保留原因；工作页计时每秒走，深链接保持位置', async () => {
   daemon = await uiFixture([[{ type: 'end', reason: 'quota-exhausted' }]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '额度暂停', key: 'start' })).result.work;
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
-  const view = render(<App baseUrl={daemon.url} />);
-  expect(await screen.findByRole('heading', { name: '额度暂停' })).toBeTruthy();
-  const region = screen.getByRole('region', { name: '等你处理' });
-  await waitFor(() => expect(within(region).getByText('调度者额度用完')).toBeTruthy());
-  const timer = within(region).getByLabelText('状态计时');
-  const first = timer.textContent;
-  await waitFor(() => expect(timer.textContent).not.toBe(first), { timeout: 2_500 });
+  render(<App baseUrl={daemon.url} />);
+  await screen.findByRole('heading', { name: '额度暂停' });
+  expect(screen.queryByRole('article', { name: '额度暂停' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /安静/ }));
+  const row = await screen.findByRole('article', { name: '额度暂停' });
+  expect(within(row).getByText('已暂停 · 调度者额度用完')).toBeTruthy();
+  expect(within(row).queryByRole('button')).toBeNull();
+  const header = screen.getByRole('main');
+  const first = header.textContent;
+  await waitFor(() => expect(header.textContent).not.toBe(first), { timeout: 2_500 });
   expect(window.location.pathname).toBe(`/works/${work.id}/brief`);
-  view.unmount();
+  cleanup();
   window.history.replaceState(null, '', '/settings/agents/claude-executor');
   render(<App baseUrl={daemon.url} />);
   expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy();
@@ -176,15 +186,16 @@ test('事件触发的数据读取失败时由该资源自行重试，恢复后�
     if (failReads && String(input).endsWith('/api/get-settings')) throw new Error('数据读取暂时失败');
     return realFetch(input, init);
   };
+  window.history.replaceState(null, '', '/settings/runtime');
   render(<App baseUrl={daemon.url} transport={transport} />);
-  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 10'));
+  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('10'));
   await screen.findByText('实时更新已连接');
   failReads = true;
   // This operation emits exactly one event; no later event can mask a lost cursor.
   await daemon.call('set-concurrency', { limit: 4 });
   expect((await screen.findByRole('alert')).textContent).toContain('数据读取暂时失败');
   failReads = false;
-  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 4'), { timeout: 5_000 });
+  await waitFor(() => expect((screen.getByRole('spinbutton', { name: '执行者并发上限' }) as HTMLInputElement).value).toBe('4'), { timeout: 5_000 });
   // The failed read recovered by its own retry; the stream was never torn down or replayed.
   expect(cursors).toHaveLength(1);
   expect(screen.queryByText('连接已断开，正在重连…')).toBeNull();
@@ -197,35 +208,43 @@ test('审核归等你处理，行内退回附意见后恢复进行中', async ()
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '等待审核的工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);
-  expandRow(await screen.findByText('等待审核的工作'));
+  await screen.findByText('等你：确认工作说明');
+  expandRow(screen.getByText('等待审核的工作'));
   const confirm = await screen.findByRole('button', { name: '确认这一版' }) as HTMLButtonElement;
   await waitFor(() => expect(confirm.disabled).toBe(false));
   fireEvent.click(confirm);
   await until(() => daemon!.call('list-pending'), value => value.result.some((item: any) => item.kind === 'review'));
-  await screen.findByText('待你审核');
+  await screen.findByText('等你：审核汇总报告');
   expandRow(screen.getByText('等待审核的工作'));
   expect(await screen.findByText('汇总报告原文')).toBeTruthy();
   fireEvent.change(screen.getByLabelText('意见'), { target: { value: '请补齐边界说明' } });
   fireEvent.click(screen.getByRole('button', { name: '退回' }));
-  await waitFor(() => expect(within(screen.getByRole('region', { name: '进行中' })).getByText('等待审核的工作')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByText('等待审核的工作')).toBeTruthy());
   const review = (await daemon.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(review.decision).toBe('return');
   expect(review.comment).toBe('请补齐边界说明');
 });
 
-test('v2 收件箱展开显示最近进展和行内工作操作，暂停恢复后仍可直接打开', async () => {
-  daemon = await uiFixture();
-  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '行内管理进展', key: 'inline' })).result.work;
+test('在跑与安静行不展开；打开工作后仍可暂停、恢复并查看进展', async () => {
+  daemon = await uiFixture([[draft('v1')], [{ type: 'output', text: '检查邮件模板' }, { type: 'hang' }], [{ type: 'hang' }]]);
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '管理进展', key: 'inline' })).result.work;
+  const description = (await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length > 0)).result[0];
+  await daemon.call('decide-gate', { workId: work.id, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' });
   render(<App baseUrl={daemon.url} />);
-  const row = expandRow(await screen.findByText('行内管理进展'));
-  const recent = await within(row).findByRole('list', { name: '最近步骤' });
-  expect(within(recent).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
-  fireEvent.click(within(row).getByRole('button', { name: '暂停工作' }));
-  const resume = await within(row).findByRole('button', { name: '恢复工作' });
-  await waitFor(() => expect((resume as HTMLButtonElement).disabled).toBe(false));
-  expect((await daemon.call('get-work', { workId: work.id })).result.status).toBe('paused');
-  fireEvent.click(resume);
-  await within(row).findByRole('button', { name: '暂停工作' });
-  fireEvent.click(within(row).getByRole('link', { name: '打开' }));
+  const row = await screen.findByRole('article', { name: '管理进展' });
+  expect(within(row).queryByRole('button')).toBeNull();
+  fireEvent.click(within(row).getByRole('link'));
+  await screen.findByRole('heading', { name: '管理进展' });
+  await within(screen.getByRole('region', { name: '对话' })).findByText('本轮 1 步 · 最新：检查邮件模板');
+  fireEvent.click(screen.getByRole('button', { name: '操作' }));
+  fireEvent.click(screen.getByRole('button', { name: '暂停工作' }));
+  await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'paused');
+  fireEvent.click(screen.getByRole('button', { name: /安静/ }));
+  const paused = await screen.findByRole('article', { name: '管理进展' });
+  expect(within(paused).queryByRole('button')).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('group', { name: '工作操作' })).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: '操作' }));
+  fireEvent.click(await screen.findByRole('button', { name: '恢复工作' }));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '在跑' })).getByRole('article', { name: '管理进展' })).toBeTruthy());
   expect(window.location.pathname).toBe(`/works/${work.id}`);
 });

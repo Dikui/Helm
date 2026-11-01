@@ -13,12 +13,8 @@ export function AgentNotices({ compact = false }: { compact?: boolean }) {
   const notices = data?.filter(item => item.kind === 'agent-unavailable' && item.agentId) ?? [];
   if (error) return <ErrorNotice error={error} retry={reload} />;
   if (!notices.length) return null;
-  if (compact) return <Link className="rail-alert" href="/settings/agents" aria-label={t('shellCliAlert')} title={notices.map(notice => `${notice.agentId} · ${notice.reason}`).join('\n')}>●</Link>;
-  return <section aria-label={t('unavailable')}>
-    <h2 className="sect">{t('agents')}<span className="count">{notices.length}</span></h2>
-    {notices.map(notice => <div key={notice.agentId} className="error" role="status">
-      <Link href={`/settings/agents/${encodeURIComponent(notice.agentId!)}`}>{notice.agentId} · {t('unavailable')}</Link>
-      <span>{notice.reason}</span>{notice.command && <code>{notice.command}</code>}
-    </div>)}
-  </section>;
+  return <Link className={compact ? 'rail-alert' : 'inbox-cli-alert'} href="/settings/environment" aria-label={t('inboxCliAlert')}
+    title={notices.map(notice => [notice.agentId, notice.reason, notice.command].filter(Boolean).join(' · ')).join('\n')}>
+    <span aria-hidden="true">●</span>{!compact && <span>{t('inboxCliUnavailable').replace('{count}', String(notices.length))}</span>}
+  </Link>;
 }

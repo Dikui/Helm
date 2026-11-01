@@ -53,7 +53,7 @@ test('收件箱中英文同步，拒绝须有原因且卡片保持阻塞，工�
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);
   const sidebar = screen.getByRole('complementary', { name: 'Helm' });
-  const toggle = await within(sidebar).findByRole('button', { name: '展开详情' });
+  const toggle = await within(sidebar).findByRole('button', { name: /^快速决定：/  });
   fireEvent.click(toggle);
   await within(sidebar).findByRole('group', { name: '初始化 git' });
   fireEvent.click(within(sidebar).getByRole('button', { name: /^EN$/ }));

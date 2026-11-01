@@ -136,7 +136,9 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
     assert.equal(card.latestStepSummary, expected, `步骤 ${index + 1}: ${raw[index]}`);
     const event = (await daemon.call('get-events', params)).result.findLast((event: any) => event.action === 'dispatch-step');
     assert.equal(event.details.summary, expected);
-    assert.equal((await daemon.call('list-works')).result[0].summary, expected.slice(0, 160));
+    const summary = (await daemon.call('list-works')).result[0];
+    assert.equal(summary.summary, expected.slice(0, 160));
+    assert.deepEqual(summary.cardStatuses, ['executing']);
     releases[index]!();
   }
   const dispatch = (await until(() => daemon.call('list-dispatches', params), value => value.result[0]?.status === 'ended')).result[0];

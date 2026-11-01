@@ -238,7 +238,7 @@ test('排队和运行中的派单结论显示占位符，结束后才显示未�
     finish();
     expect(await within(detail).findByText('Undeclared')).toBeTruthy();
     expect(await within(inspector).findByText('claude-executor · Undeclared')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '中文' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Chinese' }));
     expect(within(detail).getByText('未声明')).toBeTruthy();
     expect(within(inspector).getByText('claude-executor · 未声明')).toBeTruthy();
   } finally { finish(); }
