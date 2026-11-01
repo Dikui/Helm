@@ -91,16 +91,23 @@ for (const role of ['coordinator', 'executor'] as const) for (const home of ['sh
   });
 }
 
-for (const loadGlobalConfig of [false, true]) test(`Claude 只读执行者加载全局配置 ${loadGlobalConfig}，暂时保留用户层专用分支`, async t => {
+for (const home of ['shared', 'dedicated'] as const) for (const loadGlobalConfig of [false, true]) test(`Claude 只读执行者/${home} 加载全局配置 ${loadGlobalConfig} 时按开关选择来源并保持硬约束`, async t => {
   const base = await fixture(t);
   let sdk!: Options;
   await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
     query: fakeQuery([result()], args => { sdk = args.options!; }) }), {
-    ...base, agent: { ...base.agent, loadGlobalConfig }, sandbox: { mode: 'read-only', writableRoots: [] },
+    ...base, agent: { ...base.agent, home, loadGlobalConfig }, sandbox: { mode: 'read-only', writableRoots: [] },
   });
-  assert.deepEqual(sdk.settingSources, loadGlobalConfig ? ['user'] : []);
+  assert.deepEqual(sdk.settingSources, home === 'dedicated' ? ['user'] : loadGlobalConfig ? ['user', 'project', 'local'] : []);
   assert.equal(sdk.strictMcpConfig, loadGlobalConfig ? undefined : true);
+  const settings = sdk.settings as Exclude<NonNullable<Options['settings']>, string>;
+  assert.equal(settings.disableClaudeAiConnectors, loadGlobalConfig ? undefined : true);
+  assert.deepEqual(settings.permissions?.deny, credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]));
+  assert.equal(sdk.sandbox?.enabled, true);
+  assert.equal(sdk.sandbox?.failIfUnavailable, true);
+  assert.equal(sdk.sandbox?.allowUnsandboxedCommands, false);
   assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [base.cwd], denyRead: credentialPaths() });
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) assert.ok(!(sdk.tools as string[]).includes(tool));
 });
 
 test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参数及环境变量和省略项', async t => {
@@ -834,7 +841,7 @@ test('Claude 只读卡片沿用只读沙箱并拒绝写工具和 Bash 越界', a
   const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
-      assert.deepEqual(sdk.settingSources, ['user'], '只读执行者不加载项目和本地 hooks 或项目 MCP');
+      assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
       assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd], denyRead: credentialPaths() });
       assert.ok(!(sdk.tools as string[]).includes('Write'));
       assert.ok(!(sdk.tools as string[]).includes('Edit'));

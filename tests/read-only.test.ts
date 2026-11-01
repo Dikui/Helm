@@ -6,8 +6,10 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { AgentCatalog } from '../src/agents.js';
 import { ensureWorkCopy } from '../src/alignment.js';
+import { ClaudeExecutorDriver } from '../src/claude-driver.js';
 import { completeCard } from '../src/completion.js';
 import { createDispatch, getDispatch, verificationCommit } from '../src/dispatch.js';
 import { ExecutionRunner, finishDispatchCopy } from '../src/execution.js';
@@ -24,7 +26,7 @@ const actor = { type: 'runtime', id: 'test' } as const;
 const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const code = (expected: string) => (error: unknown) => error instanceof RuleError && error.code === expected;
 
-async function fixture(t: TestContext, copy: boolean, repository = true, execute = (_options: SessionOptions) => {}) {
+async function fixture(t: TestContext, copy: boolean, repository = true, execute = (_options: SessionOptions) => {}, executorDriver?: Driver) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-read-only-')));
   const project = join(directory, 'project');
   await mkdir(project);
@@ -50,7 +52,7 @@ async function fixture(t: TestContext, copy: boolean, repository = true, execute
       })() };
     },
   };
-  const runner = new ExecutionRunner(store, { 'claude-sdk': driver, codex: driver, grok: driver, deepseek: driver }, 'http://unused.invalid/mcp');
+  const runner = new ExecutionRunner(store, { 'claude-sdk': executorDriver ?? driver, codex: driver, grok: driver, deepseek: driver }, 'http://unused.invalid/mcp');
   t.after(async () => { await runner.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
   const run = async (cardId: string, purpose: 'execution' | 'verification' = 'execution', agentId = 'claude-executor') => {
     const dispatch = await createDispatch(store, actor, { workId: 'work', cardId, key: `dispatch-${store.events({}).length}`, agentId, purpose });
@@ -77,6 +79,37 @@ test('只读派单记录新增和修改的路径及违规事件，仍可完成�
   assert.deepEqual(violations[0]!.details, dispatch.readOnlyCheck);
   assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
   assert.equal(await readFile(join(ctx.options().cwd, 'new file.txt'), 'utf8'), 'new\n');
+});
+
+test('只读派单加载会写文件的项目 hook，事后检查记录违规路径和事件并保留改动', async t => {
+  const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: ({ options }) => ({
+    close() {},
+    async *[Symbol.asyncIterator]() {
+      // The SDK substitute runs project hooks outside the tool sandbox, as the CLI does.
+      if (options!.settingSources?.includes('project')) {
+        const settings = JSON.parse(await readFile(join(options!.cwd!, '.claude', 'settings.json'), 'utf8'));
+        for (const matcher of settings.hooks.SessionStart) for (const hook of matcher.hooks) {
+          execFileSync('/bin/sh', ['-c', hook.command], { cwd: options!.cwd, stdio: 'pipe' });
+        }
+      }
+      yield { type: 'result', subtype: 'success', is_error: false, result: '调研完成', modelUsage: {} } as SDKMessage;
+    },
+  }) });
+  const ctx = await fixture(t, true, true, undefined, driver);
+  const path = ctx.store.work('work').workPath!;
+  await mkdir(join(path, '.claude'));
+  writeFileSync(join(path, '.claude', 'settings.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: "printf 'project hook\\n' > hook-output.txt" }] }] },
+  }));
+  const card = createCard(ctx.store, actor, { workId: 'work', key: 'research', content: '分析', readOnly: true });
+  const dispatch = await ctx.run(card.id);
+  assert.deepEqual(dispatch.readOnlyCheck, { status: 'violated', paths: ['hook-output.txt'], projectDirectory: false });
+  const violations = ctx.store.events({ workId: 'work' }).filter(event => event.action === 'dispatch-read-only-violated');
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0]!.dispatchId, dispatch.id);
+  assert.deepEqual(violations[0]!.details, dispatch.readOnlyCheck);
+  assert.equal(await readFile(join(path, 'hook-output.txt'), 'utf8'), 'project hook\n');
+  assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
 });
 
 for (const agentId of ['claude-executor', 'codex-executor', 'grok-executor', 'deepseek-executor']) test(`${agentId} 的只读派单提交后即使目录干净也记录违规路径`, async t => {
