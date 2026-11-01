@@ -141,11 +141,11 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
           {!validScope && <option value={scope} disabled>{t('conversationScopeUnavailable')}</option>}
           {scopes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select></label>
+        <button type="button" className="conversation-now" disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()}>{t('conversationInterrupt')}</button>
         <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
       </div>
       <details className="composer-attachments"><summary>{t('attachFiles')}</summary>
         <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
-        <button type="button" className="conversation-now" disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()}>{t('conversationInterrupt')}</button>
       </details>
       {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}
       {submission.error && <ErrorNotice error={submission.error} />}

@@ -125,7 +125,7 @@
 .cg-dispatch-fold { min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
 .cg-dispatch-fold > summary { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .cg-copy-warning { display: flex; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); color: var(--muted); }
-.cg-copy-warning::before { content: '!'; font-weight: 700; }
+.cg-copy-warning::before { content: '!' / ''; font-weight: 700; }
 @media (max-width: 1100px) { .cg-view { grid-template-columns: minmax(0, 1fr); overflow: auto; } .cg-inspector { border-left: 0; border-top: 1px solid var(--border); overflow: visible; } .cg-main { min-height: 440px; } }
 
 .cg-canvas-wrap { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }

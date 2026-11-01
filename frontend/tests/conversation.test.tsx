@@ -347,9 +347,19 @@ test('范围失效时空消息 Ctrl+Enter 仍能打断，打断按钮可终止�
   fireEvent.keyDown(within(chat).getByLabelText('消息'), { key: 'Enter', ctrlKey: true });
   expect(await within(await screen.findByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 正在处理关卡决定')).toBeTruthy();
   const interrupt = within(chat).getByRole('button', { name: '打断本轮' });
+  const attachments = within(chat).getByText('添加附件', { selector: 'summary' }).closest('details')!;
+  expect(attachments.open).toBe(false);
+  // jsdom does not reliably hide closed details from role queries; verify the button is outside them.
+  expect(interrupt.closest('details')).toBeNull();
+  expect(interrupt.closest('.conversation-hints')).not.toBeNull();
+  expect(interrupt.nextElementSibling).toBe(within(chat).getByRole('button', { name: '发送' }));
+  expect((within(chat).getByLabelText('消息') as HTMLTextAreaElement).value).toBe('');
+  expect((within(chat).getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true);
   await waitFor(() => expect((interrupt as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(interrupt);
   await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[2]?.reason === 'aborted');
+  await waitFor(() => expect((within(chat).getByRole('button', { name: '打断本轮' }) as HTMLButtonElement).disabled).toBe(true));
+  expect(attachments.open).toBe(false);
   const conversation = (await daemon!.call('get-conversation', { workId: work.id })).result;
   expect(conversation.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(1);
 });

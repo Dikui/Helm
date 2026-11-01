@@ -124,6 +124,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
           }} /></label>
         <div className="conversation-hints"><span>{t('composerShortcuts')}</span>
           <label><span className="sr">{t('conversationAbout')}</span><select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>{!validScope && <option value={scope} disabled>{t('conversationScopeUnavailable')}</option>}{scopes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <button type="button" className="conversation-now" disabled={!running || steering || submission.pending || Boolean(rounds.error)} onClick={() => void steer('interrupt-round')}>{t('conversationInterrupt')}</button>
           <button className="btn primary send" disabled={submission.pending || steering || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
         </div>
         <details className="composer-attachments"><summary>{t('attachFiles')}</summary><AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={workId} /></details>

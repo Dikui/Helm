@@ -570,4 +570,18 @@ test('对齐输入卡保留排队、撤回、关于关卡和快捷键打断', as
   const messages = (await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.body === '立即提问');
   expect(messages).toHaveLength(1);
   expect(messages[0].gateId).toBe((gateOption as HTMLOptionElement).value.slice(5));
+  const attachments = within(chat).getByText('添加附件', { selector: 'summary' }).closest('details')!;
+  expect(attachments.open).toBe(false);
+  const interrupt = within(chat).getByRole('button', { name: '打断本轮' });
+  expect(interrupt.closest('details')).toBeNull();
+  expect(interrupt.closest('.conversation-hints')).not.toBeNull();
+  expect(interrupt.nextElementSibling).toBe(within(chat).getByRole('button', { name: '发送' }));
+  expect((input as HTMLTextAreaElement).value).toBe('');
+  expect((within(chat).getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect((interrupt as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(interrupt);
+  await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds[1]?.reason === 'aborted');
+  await waitFor(() => expect((within(chat).getByRole('button', { name: '打断本轮' }) as HTMLButtonElement).disabled).toBe(true));
+  expect(attachments.open).toBe(false);
+  expect((await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(3);
 });

@@ -8,7 +8,7 @@
 .new-card textarea { display: block; width: 100%; border: 0; padding: 14px 18px 8px; min-height: 112px; max-height: 40dvh; resize: none; overflow: auto; background: transparent; color: var(--text); font-size: 15px; box-shadow: none; }
 .new-tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 14px 12px; }
 .new-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-soft); color: var(--text); font-size: 12px; }
-.new-label { color: var(--faint); }
+.new-label { flex: none; white-space: nowrap; color: var(--faint); }
 .new-pill select { border: 0; background: transparent; color: var(--text); padding: 0 2px; min-width: 0; min-height: 20px; width: auto; max-width: 210px; font-size: 12px; }
 .new-pill .agent-mark { width: 16px; height: 16px; font-size: 10px; }
 .new-card .new-send { border-radius: 999px; margin-left: auto; }

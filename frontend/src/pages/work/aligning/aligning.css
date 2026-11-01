@@ -36,7 +36,7 @@
 .aligning-base dd { margin: 0; overflow-wrap: anywhere; }
 .aligning-gate .hint { padding: 0; font-size: 12px; }
 .aligning-message:not(.me) { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 12px; }
-.aligning-message:not(.me)::before { content: '✦'; grid-row: 1 / span 9; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-soft); color: var(--running); }
+.aligning-message:not(.me)::before { content: '✦' / ''; grid-row: 1 / span 9; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-soft); color: var(--running); }
 .aligning-message:not(.me) > * { grid-column: 2; }
 @media (max-width: 1100px) { .aligning-work { grid-template-columns: minmax(0, 1fr); } }
 .aligning-who { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; }
@@ -52,8 +52,8 @@
 .aligning-composer .conversation-hints label { display: flex; align-self: center; }
 .aligning-composer .send { width: 28px; height: 28px; min-height: 28px; border-radius: 50%; }
 .aligning-thread { padding: 16px max(22px, calc((100% - 820px) / 2)) 8px; }
-.aligning-message:not(.me)::before { content: '调'; width: 22px; height: 22px; border-radius: 50%; background: var(--text); color: var(--bg); font-size: 11px; font-weight: 600; }
-:lang(en) .aligning-message:not(.me)::before { content: 'C'; }
+.aligning-message:not(.me)::before { content: '调' / ''; width: 22px; height: 22px; border-radius: 50%; background: var(--text); color: var(--bg); font-size: 11px; font-weight: 600; }
+:lang(en) .aligning-message:not(.me)::before { content: 'C' / ''; }
 .aligning-message:not(.me) { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; }
 .aligning-who b { color: var(--text); font-weight: 600; }
 .aligning-message.me { display: block; max-width: 90%; padding: 0; border-radius: 0; background: none; }

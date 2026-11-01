@@ -51,8 +51,8 @@ body { background: var(--bg); }
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
 /* One disclosure marker for native details and authored disclosure buttons. */
-details > summary::before, button.disclosure::before { content: '▶'; display: inline-block; width: 12px; margin-right: 4px; color: var(--faint); font: 10px/1 var(--font); }
-details[open] > summary::before, button.disclosure[aria-expanded='true']::before { content: '▾'; }
+details > summary::before, button.disclosure::before { content: '▶' / ''; display: inline-block; width: 12px; margin-right: 4px; color: var(--faint); font: 10px/1 var(--font); }
+details[open] > summary::before, button.disclosure[aria-expanded='true']::before { content: '▾' / ''; }
 
 .chev { color: var(--faint); font-size: 12px; transition: transform .2s; display: inline-block; }
 details[open] > summary .chev, .chev[aria-expanded='true'] { transform: rotate(180deg); }
