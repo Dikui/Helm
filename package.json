@@ -25,7 +25,8 @@
     "test:coordinator-resume": "npm run build && HELM_COORDINATOR_RESUME_REAL=1 node --test dist/tests/coordinator-resume.real.js",
     "start": "node dist/src/cli.js",
     "test:ui": "tsc && vitest run --config frontend/vitest.config.ts --maxWorkers=2",
-    "dev:ui": "vite --config frontend/vite.config.ts"
+    "dev:ui": "vite --config frontend/vite.config.ts",
+    "demo:ui": "npm run build && node dist/tests/ui-demo.js"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.0.2",
