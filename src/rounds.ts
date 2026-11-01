@@ -75,6 +75,8 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 // ADR 0017: past this size rereading the session each request costs more than a fresh brief.
 const resumeContextLimit = 150_000;
+// Initial limit for drivers without context usage; tune after measuring real sessions.
+const resumeRoundLimit = 10;
 
 export class RoundScheduler {
   private tokens = new Map<string, Actor>();
@@ -146,21 +148,24 @@ export class RoundScheduler {
         AND (w.status <> 'paused' OR (e.action = 'message-sent' AND e.actor_type = 'user'
           AND e.id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE work_id = w.id AND action = 'work-paused')))
         ORDER BY q.event_id`).all(workId).map(row => Number(row.event_id));
-      // Failed, interrupted, compacted or large sessions start fresh; the agent is compared once loaded.
-      const previous = this.store.db.prepare(`SELECT id, session_id AS sessionId, agent_snapshot AS agent, context FROM coordinator_rounds
+      // Failed, interrupted or compacted sessions start fresh; limits and agent are checked once loaded.
+      const previous = this.store.db.prepare(`SELECT id, session_id AS sessionId, agent_snapshot AS agent, context, reason,
+        EXISTS (SELECT 1 FROM events WHERE work_id = coordinator_rounds.work_id AND object_type = 'coordinator-round'
+          AND object_id = coordinator_rounds.id AND action = 'context-compacted') AS compacted FROM coordinator_rounds
         WHERE work_id = ? ORDER BY rowid DESC LIMIT 1`).get(workId);
       const context = previous?.context ? JSON.parse(String(previous.context)) as ContextSize : undefined;
       const previousCwd = previous ? this.store.db.prepare(`SELECT json_extract(details, '$.cwd') AS cwd FROM events
         WHERE object_type = 'coordinator-round' AND object_id = ? AND action IN ('round-started', 'process-started')
           AND json_extract(details, '$.cwd') IS NOT NULL ORDER BY id DESC LIMIT 1`).get(String(previous.id))?.cwd : undefined;
-      const resume = previous?.sessionId && previous.agent && context && context.tokens < Math.min(resumeContextLimit, (context.window ?? Infinity) / 2)
-        ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig, cwd: previousCwd } : undefined;
-      const brief = startupBrief(this.store, workId, ids, resume?.roundId);
+      const resume = previous?.sessionId && previous.agent && previous.reason === 'completed' && !previous.compacted
+        ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig, cwd: previousCwd, context } : undefined;
+      const fullBrief = startupBrief(this.store, workId, ids);
+      const brief = resume ? startupBrief(this.store, workId, ids, resume.roundId) : fullBrief;
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
       this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started',
         { eventIds: ids, outputPath, cwd: brief.work.workPath ?? projectPath(this.store, workId), executingRules: Boolean(brief.work.activeDescriptionId) }, { workId });
-      return { ids, brief, resume };
+      return { ids, brief, resume, fullBrief };
     });
     const ids = started.ids;
     let { brief, resume } = started;
@@ -229,7 +234,7 @@ export class RoundScheduler {
       if (reason === 'timed-out') failure = [failure, '调度轮次超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       let failures = 0;
       this.store.transaction(() => {
-        // Only a completed, uncompacted round leaves a session the next round may resume.
+        // Context usage is usable only after a completed, uncompacted round.
         this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ?, context = ? WHERE id = ?`)
           .run(new Date().toISOString(), reason, JSON.stringify(usage), reason === 'completed' && context && !compacted ? JSON.stringify(context) : null, id);
         if (reason === 'completed') {
@@ -268,10 +273,16 @@ export class RoundScheduler {
       // shortcut: edited skill files under unchanged names still resume; compare their contents if that bites.
       const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null });
       const driver = this.drivers[agent.driver]!;
-      if (resume && (!driver.capabilities.resume || !driver.capabilities.contextUsage
-        || resume.cwd !== cwd || comparable(resume.agent) !== comparable(agent))) {
-        resume = undefined;
-        brief = this.store.transaction(() => startupBrief(this.store, workId, ids));
+      if (resume) {
+        // The first round creates the session and does not count as a resume.
+        const withinLimit = driver.capabilities.contextUsage
+          ? resume.context && resume.context.tokens < Math.min(resumeContextLimit, (resume.context.window ?? Infinity) / 2)
+          : Number(this.store.db.prepare(`SELECT COUNT(*) AS count FROM coordinator_rounds WHERE work_id = ? AND session_id = ?`)
+            .get(workId, resume.sessionId)!.count) - 1 < resumeRoundLimit;
+        if (!driver.capabilities.resume || !withinLimit || resume.cwd !== cwd || comparable(resume.agent) !== comparable(agent)) {
+          resume = undefined;
+          brief = started.fullBrief;
+        }
       }
       this.store.transaction(() => {
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
