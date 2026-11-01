@@ -59,7 +59,16 @@ export interface AgentAvailability { available: boolean; reason?: string; comman
 export type ModelContext = Pick<AgentConfig, 'id' | 'home'>;
 // A model the CLI offers and its native effort values; id null is the CLI's default model.
 export interface ModelOption { id: string | null; label: string; efforts: string[]; defaultEffort: string | null; unavailableReason?: string }
+// Describe the current Helm integration, including CLI features not yet verified.
+export interface DriverCapabilities {
+  cleanStart: { supported: true } | { supported: false; reason: string };
+  resume: boolean;
+  contextUsage: boolean;
+  coordinator: boolean;
+  autoMemory: { status: 'absent' } | { status: 'disabled'; mechanism: string } | { status: 'unverified' | 'unsupported'; reason: string };
+}
 export interface Driver {
+  capabilities: DriverCapabilities;
   // The official install and login commands for the CLI; the user runs install from the UI and login in a terminal.
   install?: { executable: string; command: string; login: string };
   checkAvailability(agent: AgentConfig): Promise<AgentAvailability>;
@@ -87,6 +96,9 @@ export type FakeScript = FakeStep[] | ((context: FakeContext) => FakeStep[]);
 
 // Uses the same HTTP MCP transport as a real agent; scripts never access the task store.
 export class FakeDriver implements Driver {
+  capabilities: DriverCapabilities = {
+    cleanStart: { supported: true }, resume: true, contextUsage: true, coordinator: true, autoMemory: { status: 'absent' },
+  };
   constructor(private scripts: FakeScript[] = [],
     private availability: (agent: AgentConfig) => AgentAvailability | Promise<AgentAvailability> = () => ({ available: true })) {}
 

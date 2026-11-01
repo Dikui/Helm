@@ -26,6 +26,7 @@ function observedDriver() {
   const base = new CodexCoordinatorDriver();
   const rounds: Observation[] = [];
   const driver: Driver = {
+    capabilities: base.capabilities,
     checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
       assert.deepEqual(options.sandbox, { mode: 'read-only', writableRoots: [] });

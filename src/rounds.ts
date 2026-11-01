@@ -267,7 +267,9 @@ export class RoundScheduler {
       // Model, prompt, rules, skill names or MCP changes need a fresh session.
       // shortcut: edited skill files under unchanged names still resume; compare their contents if that bites.
       const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null });
-      if (resume && (resume.cwd !== cwd || comparable(resume.agent) !== comparable(agent))) {
+      const driver = this.drivers[agent.driver]!;
+      if (resume && (!driver.capabilities.resume || !driver.capabilities.contextUsage
+        || resume.cwd !== cwd || comparable(resume.agent) !== comparable(agent))) {
         resume = undefined;
         brief = this.store.transaction(() => startupBrief(this.store, workId, ids));
       }
@@ -275,7 +277,7 @@ export class RoundScheduler {
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent, resumed: Boolean(resume) }, { workId });
       });
-      const session = await this.drivers[agent.driver]!.start({
+      const session = await driver.start({
         agent,
         cwd,
         env: agentEnvironment(agent),

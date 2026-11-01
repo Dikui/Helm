@@ -67,6 +67,7 @@ test('真实 Codex 调度者第二轮用 thread/resume 续跑第一轮的线程�
   const rounds: Round[] = [];
   const base = new CodexCoordinatorDriver();
   const driver: Driver = {
+    capabilities: base.capabilities,
     checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
       const session = await base.start(options);

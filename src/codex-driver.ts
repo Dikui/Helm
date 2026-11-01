@@ -4,12 +4,12 @@ import { mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { credentialPaths, type Driver, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
+import { credentialPaths, type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
 
 interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
   supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
 import { CodexRpc, type CodexCommand } from './codex-rpc.js';
-import { runtimeEnvironment } from './environment.js';
+import { driverEnvironment, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import type { AgentConfig } from './agents.js';
 import { helmVersion } from './version.js';
@@ -58,6 +58,11 @@ function quotaExhausted(error: any) {
 }
 
 export class CodexDriver implements Driver {
+  capabilities: DriverCapabilities = {
+    cleanStart: { supported: false, reason: '当前 Codex 驱动仍加载用户和项目配置，尚未实现干净启动。' },
+    resume: true, contextUsage: true, coordinator: true,
+    autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+  };
   install = { executable: 'codex', command: 'npm install -g @openai/codex', login: 'codex login' };
   constructor(private config: { command?: CodexCommand } = {}, private role?: 'coordinator' | 'executor') {}
 
@@ -119,12 +124,11 @@ export class CodexDriver implements Driver {
     if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
-    const env: Record<string, string> = { ...options.env, CODEX_SQLITE_HOME: sqlitePath };
-    delete env.CODEX_HOME;
-    if (agent.home === 'dedicated') {
-      env.CODEX_HOME = codexHome(agent, options.env.HOME);
-      await mkdir(env.CODEX_HOME, { recursive: true, mode: 0o700 });
-    }
+    const env = driverEnvironment(options.env, { unset: ['CODEX_HOME'], set: {
+      CODEX_SQLITE_HOME: sqlitePath,
+      ...(agent.home === 'dedicated' ? { CODEX_HOME: codexHome(agent, options.env.HOME) } : {}),
+    } });
+    if (env.CODEX_HOME) await mkdir(env.CODEX_HOME, { recursive: true, mode: 0o700 });
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     options.signal?.throwIfAborted();

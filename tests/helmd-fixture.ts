@@ -39,6 +39,7 @@ export function startTestHelmd(options: Omit<NonNullable<Parameters<typeof start
 } = {}) {
   const { driver = new FakeDriver(), executorDriver = new FakeDriver(), codexDriver = new FakeDriver(), ...runtime } = options;
   return startHelmd({ agentDir: fixtureAgentDir, ...runtime, drivers: { 'claude-sdk': {
+    capabilities: driver.capabilities ?? new FakeDriver().capabilities,
     // These fixtures exercise sessions; availability scenarios register their own driver.
     checkAvailability: async () => ({ available: true }),
     start: session => (session.agent?.role === 'coordinator' ? driver : executorDriver).start(session),

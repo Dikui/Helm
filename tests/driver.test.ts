@@ -4,6 +4,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type DriverEvent, type EndReason, type SessionOptions } from '../src/driver.js';
+import { ClaudeDriver } from '../src/claude-driver.js';
+import { CodexDriver } from '../src/codex-driver.js';
+import { AcpDriver } from '../src/acp-driver.js';
+
+test('驱动契约声明当前接入的能力，未隔离配置和未核实记忆时给出原因', () => {
+  for (const [driver, expected] of [
+    [new ClaudeDriver(), [true, true, true, true, 'disabled']],
+    [new CodexDriver(), [false, true, true, true, 'unverified']],
+    [new AcpDriver('grok'), [false, true, false, false, 'unverified']],
+    [new AcpDriver('deepseek'), [false, true, false, false, 'unverified']],
+    [new FakeDriver(), [true, true, true, true, 'absent']],
+  ] as const) {
+    const capabilities = driver.capabilities;
+    assert.deepEqual([capabilities.cleanStart.supported, capabilities.resume, capabilities.contextUsage,
+      capabilities.coordinator, capabilities.autoMemory.status], expected);
+    if (!capabilities.cleanStart.supported) assert.ok(capabilities.cleanStart.reason.trim());
+    if (capabilities.autoMemory.status === 'disabled') assert.ok(capabilities.autoMemory.mechanism.trim());
+    if (capabilities.autoMemory.status === 'unverified') assert.ok(capabilities.autoMemory.reason.trim());
+  }
+});
 
 async function fixture(t: TestContext): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-driver-')));

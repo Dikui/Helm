@@ -7,6 +7,34 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
 import { fixture as executorFixture } from './browser-fixture.js';
 import { fixture as coordinatorFixture, until } from './claude-coordinator-fixture.js';
+import { agentEnvironment, type AgentConfig } from '../src/agents.js';
+
+test('运行层对四家驱动和两种角色统一筛选宿主环境，只添加角色所需的防推送变量', t => {
+  const injected = {
+    PATH: '/host/bin', HOME: '/host/home', LANG: 'zh_CN.UTF-8',
+    CLAUDE_CONFIG_DIR: '/parent/claude', CODEX_HOME: '/parent/codex', GROK_HOME: '/parent/grok', DSH_HOME: '/parent/deepseek',
+    ANTHROPIC_API_KEY: 'credential-sentinel', OPENAI_API_KEY: 'credential-sentinel', XAI_API_KEY: 'credential-sentinel', DEEPSEEK_API_KEY: 'credential-sentinel',
+    NODE_OPTIONS: '--no-warnings', HELM_TEST_ARBITRARY: 'arbitrary-sentinel',
+  };
+  const previous = Object.keys(injected).map(key => process.env[key]);
+  Object.assign(process.env, injected);
+  t.after(() => Object.keys(injected).forEach((key, index) => {
+    if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+  }));
+  for (const driver of ['claude-sdk', 'codex', 'grok', 'deepseek'] as const) for (const role of ['coordinator', 'executor'] as const) {
+    const agent: AgentConfig = { id: 'environment-probe', driver, role, model: null, reasoningEffort: null, fast: false, home: 'shared',
+      description: '', prompt: '', rules: { role: '', runtime: '' }, directory: '/agent', skillsPath: null };
+    const env = agentEnvironment(agent);
+    assert.equal(env.PATH, '/host/bin');
+    assert.equal(env.HOME, '/host/home');
+    assert.equal(env.LANG, 'zh_CN.UTF-8');
+    for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GROK_HOME', 'DSH_HOME', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY', 'DEEPSEEK_API_KEY', 'NODE_OPTIONS', 'HELM_TEST_ARBITRARY']) {
+      assert.equal(env[key], undefined, `${driver} ${role}: ${key}`);
+    }
+    assert.equal(env.GH_TOKEN, role === 'executor' ? 'helm-push-disabled' : undefined);
+    assert.equal(Boolean(env.GIT_CONFIG_PARAMETERS), role === 'executor');
+  }
+});
 
 for (const { role, purpose } of [{ role: 'coordinator', purpose: undefined }, { role: 'executor', purpose: 'execution' }, { role: 'executor', purpose: 'verification' }] as const) {
   test(`${role} ${purpose ?? ''}: 子进程只传运行必需项和执行者项目变量，无桌面会话变量且关闭自动记忆`, async t => {

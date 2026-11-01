@@ -11,6 +11,7 @@ import { agentPrompt } from './prompts.js';
 import { agentEnvironment, type AgentConfig } from './agents.js';
 import { RuleError } from './store.js';
 import { helmVersion } from './version.js';
+import { driverEnvironment } from './environment.js';
 
 type EventContent<Event = DriverEvent> = Event extends DriverEvent ? Omit<Event, 'step'> : never;
 const extensionUpdate = z.object({ sessionId: z.string(), update: z.object({ sessionUpdate: z.string() }) });
@@ -20,15 +21,18 @@ export class AcpDriver implements Driver {
   private profile;
   constructor(private agent: keyof typeof acpAgents, private config: { command?: AcpCommand; timeoutMs?: number } = {}) {
     this.profile = acpAgents[agent];
+    this.capabilities = this.profile.capabilities;
     this.install = { executable: this.profile.command, command: this.profile.installCommand, login: this.profile.loginCommand };
   }
   install;
+  capabilities;
 
   private environment(base: Record<string, string>, agent: AgentConfig) {
-    const env = { ...base, ...this.profile.environment.set };
-    for (const key of this.profile.environment.unset) delete env[key];
-    if (this.profile.homeVariable && agent.home === 'dedicated') env[this.profile.homeVariable] = join(base.HOME ?? homedir(), '.helm', 'agent-homes', agent.id);
-    return env;
+    return driverEnvironment(base, { unset: this.profile.environment.unset, set: {
+      ...this.profile.environment.set,
+      ...(this.profile.homeVariable && agent.home === 'dedicated'
+        ? { [this.profile.homeVariable]: join(base.HOME ?? homedir(), '.helm', 'agent-homes', agent.id) } : {}),
+    } });
   }
 
   private async launch(agent: AgentConfig, options: Pick<SessionOptions, 'cwd' | 'onProcess' | 'projectEnvironmentNames'>,

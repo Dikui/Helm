@@ -85,7 +85,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
     return typeof action === 'function' ? action(ctx) : action;
   }));
   const fallback = new FakeDriver([[{ type: 'write', path: 'replacement.txt', content: '由另一家完成\n' }]]);
-  const claude: Driver = { checkAvailability: async () => ({ available: true }),
+  const claude: Driver = { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }),
     start: options => (options.agent?.role === 'coordinator' ? coordinator : fallback).start(options) };
   const dataDir = join(directory, 'data');
   daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: { 'claude-sdk': claude, codex: executor } });

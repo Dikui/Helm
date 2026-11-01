@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { AgentCatalog } from '../src/agents.js';
-import type { Driver, EndReason } from '../src/driver.js';
+import { FakeDriver, type Driver, type EndReason } from '../src/driver.js';
 import { processStartTime } from '../src/processes.js';
 import { reconcileStartup } from '../src/reconcile.js';
 import { RoundScheduler } from '../src/rounds.js';
@@ -59,6 +59,7 @@ for (const outcome of ['completed', 'quota-exhausted', 'error', 'timed-out', 'ab
     const outside = await ctx.child();
     let managed: ChildProcess | undefined;
     const driver: Driver = {
+      capabilities: new FakeDriver().capabilities,
       async checkAvailability() { return { available: true }; },
       async start(options) {
         assert.equal(options.cwd, ctx.project);

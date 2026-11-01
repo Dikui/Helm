@@ -23,6 +23,15 @@ export function runtimeEnvironment(parent: NodeJS.ProcessEnv = process.env): Rec
   return env;
 }
 
+export interface EnvironmentOverrides { set: Record<string, string>; unset: string[] }
+
+// Apply CLI-specific changes after the runtime has selected the host allowlist.
+export function driverEnvironment(base: Record<string, string>, overrides: EnvironmentOverrides): Record<string, string> {
+  const env = { ...base };
+  for (const key of overrides.unset) delete env[key];
+  return { ...env, ...overrides.set };
+}
+
 export async function findExecutable(name: string, env: Record<string, string>) {
   for (const directory of (env.PATH ?? '').split(':').filter(Boolean)) {
     const path = resolve(directory, name);

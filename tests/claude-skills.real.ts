@@ -152,6 +152,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
     ]]);
     const claude = new ClaudeDriver();
     daemon = await startHelmd({ port: 0, dataDir: join(root, 'data'), drivers: { 'claude-sdk': {
+      capabilities: claude.capabilities,
       checkAvailability: agent => agent.role === 'coordinator' ? coordinator.checkAvailability(agent) : claude.checkAvailability(agent),
       start: options => (options.agent.role === 'coordinator' ? coordinator : claude).start(options),
     } } });

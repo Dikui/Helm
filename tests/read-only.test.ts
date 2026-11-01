@@ -15,7 +15,7 @@ import { cardDetails, cardGraph, createCard, updateCard } from '../src/graph.js'
 import { reconcileStartup } from '../src/reconcile.js';
 import { processStartTime } from '../src/processes.js';
 import { RuleError, TaskStore } from '../src/store.js';
-import type { Driver, SessionOptions } from '../src/driver.js';
+import { FakeDriver, type Driver, type SessionOptions } from '../src/driver.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 import { testProcessWatchdog } from './fixtures/test-process.js';
 
@@ -40,6 +40,7 @@ async function fixture(t: TestContext, copy: boolean, repository = true) {
   if (copy) ensureWorkCopy(store, 'work');
   let options: SessionOptions | undefined;
   const driver: Driver = {
+    capabilities: new FakeDriver().capabilities,
     async checkAvailability() { return { available: true }; },
     async start(value) {
       options = value;

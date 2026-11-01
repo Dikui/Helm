@@ -527,7 +527,7 @@ test('Agent 的 MCP 引用默认空，保存和复制保留选择，缺失或保
 
 test('用户经 HTTP、CLI 和 MCP 保存 Agent，写入文件、检查可用性并记录事件', async t => {
   const checked: string[] = [];
-  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async agent => {
+  const daemon = await fixture(t, { 'claude-sdk': { capabilities: new FakeDriver().capabilities, checkAvailability: async agent => {
     checked.push(agent.id);
     return agent.home === 'dedicated' ? { available: false, reason: '请配置 API 主目录' } : { available: true };
   }, start: options => new FakeDriver().start(options) } });
@@ -803,7 +803,7 @@ test('换调度者 Agent 只影响下一轮，当前运行或启动中的轮次�
       return [];
     };
     const replacements = new FakeDriver([record, record]);
-    const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), async start(options) {
+    const daemon = await fixture(t, { 'claude-sdk': { capabilities: original.capabilities, checkAvailability: async () => ({ available: true }), async start(options) {
       firstOptions = options;
       if (phase === 'starting') await starting;
       return original.start(options);
@@ -883,7 +883,7 @@ test('有全局重名警告的 Agent 仍可进入调度轮次并接受派单', a
       cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', agentId: 'executor' }), check: ok },
   ]]);
   const executor = new FakeDriver([ctx => { seen.push(ctx.options); return []; }]);
-  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }),
+  const daemon = await fixture(t, { 'claude-sdk': { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }),
     start: options => (options.agent.role === 'coordinator' ? rounds : executor).start(options) } });
   const source = join(daemon.directory, 'shared');
   await mkdir(source);
@@ -927,7 +927,7 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
       { type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get(key) as any).result.id, key, agentId: 'file-executor' }), check: ok },
     ]);
   }]);
-  const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }),
+  const daemon = await fixture(t, { 'claude-sdk': { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }),
     start: options => (options.agent.role === 'coordinator' ? rounds : executors).start(options) } });
   const source = join(daemon.directory, 'shared');
   await mkdir(source);
@@ -1006,7 +1006,7 @@ test('派单及调度轮次合并所选 HTTP 或 stdio MCP，排队在启动时�
           cardId: (ctx.results.get(key) as any).result.id, key, agentId: 'executor' }), check: ok },
       ]);
     }]);
-    const router: Driver = { checkAvailability: async () => ({ available: true }),
+    const router: Driver = { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }),
       start: options => (options.agent.role === 'coordinator' ? rounds : executor).start(options) };
     const daemon = await fixture(t, { 'claude-sdk': router, [driver]: router });
     ok(await daemon.call('register-mcp', { name: 'remote', config: { type: transport, ...remoteV1 } }));
@@ -1123,8 +1123,8 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
       ]),
     ]]);
     const routed: string[] = [];
-    const daemon = await fixture(t, { 'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => options.agent?.role === 'coordinator' ? rounds.start(options) : executors.start(options) },
-      codex: { checkAvailability: async () => ({ available: true }), start: options => { routed.push(options.agent!.model!); return new FakeDriver().start(options); } },
+    const daemon = await fixture(t, { 'claude-sdk': { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), start: options => options.agent?.role === 'coordinator' ? rounds.start(options) : executors.start(options) },
+      codex: { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), start: options => { routed.push(options.agent!.model!); return new FakeDriver().start(options); } },
     });
     await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
     await daemon.writeAgent('file-executor', { model: 'before-queue' });
@@ -1205,9 +1205,9 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'clashing-skill', agentId: 'clashing-skill' }), check: ok },
   ]]);
   const daemon = await fixture(t, {
-    'claude-sdk': { checkAvailability: async () => ({ available: true }), start: options => (options.agent?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) },
-    grok: { checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 Grok Agent 不得启动'); } },
-    deepseek: { checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 DeepSeek Agent 不得启动'); } },
+    'claude-sdk': { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), start: options => (options.agent?.role === 'coordinator' ? rounds : new FakeDriver()).start(options) },
+    grok: { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 Grok Agent 不得启动'); } },
+    deepseek: { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), start: async () => { assert.fail('不可用的 DeepSeek Agent 不得启动'); } },
   });
   await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
   await daemon.writeAgent('fast', { fast: true });

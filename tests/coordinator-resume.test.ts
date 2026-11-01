@@ -8,6 +8,40 @@ import { FakeDriver, type FakeContext, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { configureTestAgent, copyAgents, startTestHelmd } from './helmd-fixture.js';
 
+for (const capabilities of [
+  { resume: false, contextUsage: true },
+  { resume: true, contextUsage: false },
+]) test(`调度者驱动声明 ${JSON.stringify(capabilities)} 时，即使收到较小的上下文也每轮新开`, async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-no-resume-')));
+  const rounds: { resumeSessionId?: string; brief: StartupBrief }[] = [];
+  const round = (context: FakeContext): FakeStep[] => {
+    rounds.push({ resumeSessionId: context.options.resumeSessionId, brief: JSON.parse(context.input) });
+    return [{ type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } }];
+  };
+  const driver = Object.assign(new FakeDriver([round, round]), { capabilities: {
+    cleanStart: { supported: true }, ...capabilities, coordinator: true, autoMemory: { status: 'absent' },
+  } as const });
+  const daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), driver });
+  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  const call = async (name: string, params: object = {}) => (await (await fetch(`${daemon.url}/api/${name}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) })).json() as any).result;
+  const project = await call('register-project', { path: directory });
+  const work = (await call('send-message', { projectId: project.id, body: '开始', key: 'start' })).work;
+  const ended = async (count: number) => {
+    const deadline = Date.now() + 5_000;
+    while ((await call('get-events', { workId: work.id }) as any[]).filter(event => event.action === 'round-ended').length < count) {
+      assert.ok(Date.now() < deadline, '等待轮次结束超时');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  await ended(1);
+  await call('send-message', { workId: work.id, body: '继续', key: 'next' });
+  await ended(2);
+  assert.deepEqual(rounds.map(round => round.resumeSessionId), [undefined, undefined]);
+  assert.deepEqual(rounds.map(round => round.brief.resumed), [undefined, undefined]);
+  assert.deepEqual(rounds.map(round => round.brief.coordinatorNotes), ['', '']);
+});
+
 test('调度者上下文小时续跑上一轮会话并只收变化；压缩、Agent 改动或占用过大时新开', async t => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-resume-')));
   const repo = join(directory, 'project');

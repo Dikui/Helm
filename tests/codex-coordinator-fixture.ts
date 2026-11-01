@@ -48,7 +48,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   const dataDir = join(directory, 'data');
   daemon = await startHelmd({ port: 0, dataDir, agentDir, drivers: {
     'claude-sdk': new FakeDriver([[{ type: 'hang' }]]),
-    codex: { checkAvailability: agent => driver.checkAvailability(agent), start(options) {
+    codex: { capabilities: driver.capabilities, checkAvailability: agent => driver.checkAvailability(agent), start(options) {
       const round = starts++;
       return (config.realFirstRound ? (round < (config.rounds ?? 1) ? driver : drain)
         : (round === 0 ? setup : round <= (config.rounds ?? 1) ? driver : drain)).start(options);

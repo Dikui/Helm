@@ -45,7 +45,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
   const agentDir = await copyAgents(directory);
   await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
   const daemon = await startHelmd({ agentDir, port: 0, dataDir: join(directory, 'data'),
-    driver: { start(options) {
+    driver: { capabilities: driver.capabilities, start(options) {
       const round = started++;
       return (config.realFirstRound ? (round < rounds ? driver : drain)
         : (round === 0 ? setup : round <= rounds ? driver : drain)).start(options);

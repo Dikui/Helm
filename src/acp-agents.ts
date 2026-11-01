@@ -5,20 +5,22 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { deepseekUsage } from './deepseek-usage.js';
-import { credentialPaths, type ModelOption, type TokenUsage, type SessionOptions } from './driver.js';
+import { credentialPaths, type DriverCapabilities, type ModelOption, type TokenUsage, type SessionOptions } from './driver.js';
 import type { AgentConfig } from './agents.js';
+import type { EnvironmentOverrides } from './environment.js';
 
 // Grok sandbox profiles Helm defines in ~/.grok/sandbox.toml (see ensureGrokSandboxProfiles).
 export const grokProfiles = { write: 'helm', readOnly: 'helm-read-only' } as const;
 
 // Only agent differences belong here; ACP sequencing stays in AcpDriver.
 interface AcpAgentProfile {
+  capabilities: DriverCapabilities;
   name: string;
   command: string;
   arguments(agent: AgentConfig, projectEnvironmentNames?: string[]): string[];
   prepare?(agent: AgentConfig, projectEnvironmentNames: string[] | undefined, env: Record<string, string>): Promise<{ args: string[]; cleanup(): Promise<void> } | undefined>;
   authentication?: string;
-  environment: { set: Record<string, string>; unset: string[] };
+  environment: EnvironmentOverrides;
   homeVariable?: string;
   homeConfigFiles?: string[];
   permissionAllowed?(input: unknown, mode: SessionOptions['sandbox']['mode']): boolean;
@@ -53,6 +55,11 @@ function deepseekRoute(value: string): [string, string] | undefined {
 
 export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
   deepseek: {
+    capabilities: {
+      cleanStart: { supported: false, reason: '当前 DeepSeek 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
+      resume: true, contextUsage: false, coordinator: false,
+      autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+    },
     name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
     async prepare(agent, environmentNames = []) {
       if (!agent.skillsPath && !environmentNames.length) return;
@@ -130,6 +137,11 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     installCommand: 'npm install -g @deepseek-ai/dsh', loginCommand: 'dsh web',
   },
   grok: {
+    capabilities: {
+      cleanStart: { supported: false, reason: '当前 Grok 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
+      resume: true, contextUsage: false, coordinator: false,
+      autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+    },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
     async prepare(_agent, _names, env) { await ensureGrokSandboxProfiles(env.HOME ?? homedir()); return undefined; },
     // Process plugins are ignored by a shared leader, so explicitly use the

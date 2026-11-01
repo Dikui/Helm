@@ -62,6 +62,7 @@ function attachmentPath(brief: StartupBrief, fixture: ReturnType<typeof attachme
 function observedDriver(base: Driver) {
   const inputs: { options: SessionOptions; content: string }[] = [];
   const driver: Driver = {
+    capabilities: base.capabilities,
     checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
       const session = await base.start(options);

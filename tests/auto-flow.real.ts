@@ -78,6 +78,7 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
       ]]);
       let started = 0;
       const claude: Driver = {
+        capabilities: coordinator.capabilities,
         checkAvailability: agent => (agent.role === 'coordinator' ? coordinator : executor).checkAvailability(agent),
         start: options => (options.agent.role === 'executor' ? executor : started++ === 0 ? setup : coordinator).start(options),
       };

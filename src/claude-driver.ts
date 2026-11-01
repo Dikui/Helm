@@ -6,8 +6,8 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { query, type CanUseTool, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { credentialPaths, type Driver, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
-import { findExecutable, runtimeEnvironment } from './environment.js';
+import { credentialPaths, type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
+import { driverEnvironment, findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import { managedProcess } from './processes.js';
 import type { AgentConfig } from './agents.js';
@@ -103,6 +103,10 @@ const authStatus: AuthStatus = async (executable, options) => {
 interface ClaudeDriverConfig { pathToClaudeCodeExecutable?: string; query?: ClaudeQuery; authStatus?: AuthStatus }
 
 export class ClaudeDriver implements Driver {
+  capabilities: DriverCapabilities = {
+    cleanStart: { supported: true }, resume: true, contextUsage: true, coordinator: true,
+    autoMemory: { status: 'disabled', mechanism: 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 与 SDK settings.autoMemoryEnabled=false，按会话关闭。' },
+  };
   install = { executable: 'claude', command: 'npm install -g @anthropic-ai/claude-code', login: 'claude auth login' };
   constructor(private config: ClaudeDriverConfig = {}, private role?: 'coordinator' | 'executor') {}
 
@@ -172,9 +176,10 @@ export class ClaudeDriver implements Driver {
     options.signal?.addEventListener('abort', cancel, { once: true });
     // Per-session override: never let a caller's force-enable reach Claude.
     // https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory
-    const env: Record<string, string> = { ...options.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
-    delete env.CLAUDE_CONFIG_DIR;
-    if (agent.home === 'dedicated') env.CLAUDE_CONFIG_DIR = claudeHome(agent, options.env.HOME);
+    const env = driverEnvironment(options.env, { unset: ['CLAUDE_CONFIG_DIR'], set: {
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      ...(agent.home === 'dedicated' ? { CLAUDE_CONFIG_DIR: claudeHome(agent, options.env.HOME) } : {}),
+    } });
     env.NO_PROXY = [...new Set([...(env.NO_PROXY ?? '').split(','), ...(env.no_proxy ?? '').split(','), '127.0.0.1', 'localhost'].filter(Boolean))].join(',');
     env.no_proxy = env.NO_PROXY;
     const sdkOptions: Options = {
