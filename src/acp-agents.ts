@@ -58,7 +58,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     capabilities: {
       cleanStart: { supported: false, reason: '当前 DeepSeek 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
       resume: true, contextUsage: false, coordinator: false,
-      autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+      autoMemory: { status: 'unsupported', reason: 'dsh 0.2.1-rc.2 默认 ACP 栈无内置自动记忆；用户另装的记忆插件或 MCP 没有统一的按会话关闭开关，启用后仍可能读写个人记忆。' },
     },
     name: 'DeepSeek', command: 'dsh', arguments: () => ['--profile', 'acp'],
     async prepare(agent, environmentNames = []) {
@@ -140,17 +140,15 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     capabilities: {
       cleanStart: { supported: false, reason: '当前 Grok 驱动仍加载 CLI 默认配置，尚未实现干净启动。' },
       resume: true, contextUsage: false, coordinator: false,
-      autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+      autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
     async prepare(_agent, _names, env) { await ensureGrokSandboxProfiles(env.HOME ?? homedir()); return undefined; },
-    // Process plugins are ignored by a shared leader, so explicitly use the
-    // native process when adding agent skills (grok agent --help).
-    arguments: (agent, environmentNames = []) => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []),
-      ...(agent.skillsPath || environmentNames.length ? ['--no-leader'] : []),
+    // A shared leader ignores process settings and plugins, including GROK_MEMORY=0.
+    arguments: agent => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []), '--no-leader',
       ...(agent.skillsPath ? ['--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
     // Subagents and background workflows run outside Helm's usage, sandbox and process cleanup.
-    environment: { set: { GROK_SANDBOX: grokProfiles.write, GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0',
+    environment: { set: { GROK_SANDBOX: grokProfiles.write, GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0', GROK_MEMORY: '0',
       // Grok's allowlisted config overlay changes filters, never embeds values.
       GROK_CONFIG: JSON.stringify({ shell_environment_policy: { inherit: 'all', ignore_default_excludes: true, exclude: [], include_only: [] },
         toolset: { bash: { login_shell_capture: false } } }),

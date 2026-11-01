@@ -61,7 +61,7 @@ export class CodexDriver implements Driver {
   capabilities: DriverCapabilities = {
     cleanStart: { supported: false, reason: '当前 Codex 驱动仍加载用户和项目配置，尚未实现干净启动。' },
     resume: true, contextUsage: true, coordinator: true,
-    autoMemory: { status: 'unverified', reason: '当前驱动未设置自动记忆开关，CLI 是否跨会话写入并加载用户记忆尚未核实；若启用，会话可能读写用户记忆。' },
+    autoMemory: { status: 'disabled', mechanism: '会话配置 features.memories=false、memories.generate_memories=false、memories.use_memories=false，关闭后台整理、生成与加载。' },
   };
   install = { executable: 'codex', command: 'npm install -g @openai/codex', login: 'codex login' };
   constructor(private config: { command?: CodexCommand } = {}, private role?: 'coordinator' | 'executor') {}
@@ -153,6 +153,10 @@ export class CodexDriver implements Driver {
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
+          // Opt out of future extraction and disable startup consolidation as well as injection.
+          // https://github.com/openai/codex/blob/main/codex-rs/memories/write/src/start.rs
+          features: { memories: false },
+          memories: { generate_memories: false, use_memories: false },
           // The app-server environment is already filtered by Helm. Forward it
           // to shell commands, including project KEY/SECRET/TOKEN variables.
           ...(!coordinator ? { shell_environment_policy: { inherit: 'all', ignore_default_excludes: true,

@@ -51,6 +51,28 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
 
+test('Codex 新开和续跑均关闭自动记忆生成、加载及后台整理，不改用户设置或已有记忆', async t => {
+  for (const role of ['coordinator', 'executor'] as const) for (const home of ['shared', 'dedicated'] as const) {
+    const ctx = await fixture(t, [completed()], {}, role);
+    const codexDir = home === 'shared' ? join(ctx.directory, '.codex') : join(ctx.directory, '.helm', 'agent-homes', ctx.options.agent.id);
+    await mkdir(join(codexDir, 'memories'), { recursive: true });
+    const config = '[features]\nmemories = true\n[memories]\ngenerate_memories = true\nuse_memories = true\n';
+    await writeFile(join(codexDir, 'config.toml'), config);
+    await writeFile(join(codexDir, 'memories', 'MEMORY.md'), '用户已有记忆');
+    for (const resumeSessionId of [undefined, 'thread-scripted']) {
+      const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, home }, resumeSessionId });
+      t.after(() => session.cancel());
+      await session.send('处理卡片，不保存个人记忆');
+      await collect(session.events);
+      const thread = (await ctx.requests()).filter(request => ['thread/start', 'thread/resume'].includes(request.method)).at(-1);
+      assert.deepEqual(thread.params.config.memories, { generate_memories: false, use_memories: false });
+      assert.equal(thread.params.config.features.memories, false);
+    }
+    assert.equal(await readFile(join(codexDir, 'config.toml'), 'utf8'), config);
+    assert.equal(await readFile(join(codexDir, 'memories', 'MEMORY.md'), 'utf8'), '用户已有记忆');
+  }
+});
+
 test('Codex 执行者的 shell 策略保留项目 KEY，RPC 配置只有策略，没有变量值', async t => {
   const value = 'codex-project-env-shell-probe-17489';
   const ctx = await fixture(t, [completed()], { shellProbe: true });

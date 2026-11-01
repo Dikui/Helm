@@ -12,6 +12,35 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { until } from './browser-fixture.js';
 
+test('Grok 新开、续跑和探测在独立进程关闭自动记忆，不改用户记忆设置', async t => {
+  const ctx = await acpFixture(t);
+  await mkdir(join(ctx.home, '.grok', 'memory-v2', 'global', 'topics'), { recursive: true });
+  const config = '[cli]\nuse_leader = true\n[memory_v2]\nenabled = true\n';
+  const configPath = join(ctx.home, '.grok', 'config.toml');
+  const memoryPath = join(ctx.home, '.grok', 'memory-v2', 'global', 'topics', 'user.md');
+  await writeFile(configPath, config);
+  await writeFile(memoryPath, '用户已有记忆');
+  const env = { ...ctx.options.env, GROK_MEMORY: '1' };
+  for (const mode of ['workspace-write', 'read-only'] as const) for (const resumeSessionId of [undefined, 'previous']) {
+    const session = await ctx.driver.start({ ...ctx.options, env, resumeSessionId,
+      sandbox: { mode, writableRoots: mode === 'read-only' ? [] : [ctx.cwd] } });
+    t.after(() => session.cancel());
+    await session.send('处理卡片，不保存个人记忆');
+    await collect(session.events);
+  }
+  assert.equal((await ctx.driver.checkAvailability(ctx.agent)).available, true);
+  await ctx.driver.listModels();
+  const spawns = (await ctx.requests()).filter(request => request.method === 'fixture/spawn');
+  assert.equal(spawns.length, 6);
+  for (const spawn of spawns) {
+    assert.equal(spawn.env.GROK_MEMORY, '0');
+    assert.ok(spawn.args.includes('--no-leader'), '用户的共享 leader 不得忽略 Helm 进程的记忆开关');
+  }
+  assert.equal(await readFile(configPath, 'utf8'), config);
+  assert.equal(await readFile(memoryPath, 'utf8'), '用户已有记忆');
+  assert.equal(env.GROK_MEMORY, '1');
+});
+
 test('ACP 执行者 shell 读取项目 KEY，DeepSeek 用仅含名字的插件越过内部凭据过滤', async t => {
   for (const kind of ['grok', 'deepseek'] as const) {
     const value = `project-env-${kind}-shell-probe-9193`;
@@ -201,7 +230,7 @@ test('Grok 一轮经 ACP v1 认证、带令牌的 HTTP MCP、 Agent 提示词及
   assert.deepEqual(events.at(-1), { type: 'end', step: events.length, reason: 'completed', finalAnswer: '已完成', usage: { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 } });
   const [spawn, ...requests] = await ctx.requests();
   assert.deepEqual(processes, [spawn.pid]);
-  assert.deepEqual(spawn.args, ['agent', '--effort', 'low', 'stdio']);
+  assert.deepEqual(spawn.args, ['agent', '--effort', 'low', '--no-leader', 'stdio']);
   assert.equal(spawn.env.HOME, ctx.home);
   assert.equal(spawn.env.GROK_SANDBOX, 'helm');
   const profiles = await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8');
@@ -280,7 +309,7 @@ test('Grok 原样下发 CLI 的推理强度；每次派单新开进程，默认�
   const spawns = (await ctx.requests()).filter(r => r.method === 'fixture/spawn');
   assert.equal(new Set(spawns.map(r => r.pid)).size, 2);
   for (const spawn of spawns) {
-    assert.deepEqual(spawn.args, ['agent', '--effort', 'xhigh', 'stdio']);
+    assert.deepEqual(spawn.args, ['agent', '--effort', 'xhigh', '--no-leader', 'stdio']);
     assert.equal(spawn.env.GROK_HOME, undefined);
     assert.equal(spawn.env.HOME, ctx.home);
   }
@@ -524,7 +553,7 @@ test('Grok 从 initialize 公布的模型状态列出模型和各自的推理强
     { id: 'grok-4.7', label: 'grok-4.7', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null },
     { id: 'grok-4.5', label: 'grok-4.5', efforts: ['low', 'medium', 'high'], defaultEffort: null },
   ]);
-  assert.deepEqual((await ctx.requests()).find(r => r.method === 'fixture/spawn').args, ['agent', 'stdio']);
+  assert.deepEqual((await ctx.requests()).find(r => r.method === 'fixture/spawn').args, ['agent', '--no-leader', 'stdio']);
 });
 
 test('ACP plan 更新归一完整条目、替换和清空，忽略非本会话计划', async t => {
