@@ -13,7 +13,7 @@ import { ExecutionRunner } from './execution.js';
 import type { BrowserCommand } from './browser.js';
 import { UserOperations } from './user-operations.js';
 import { reconcileStartup } from './reconcile.js';
-import { AgentCatalog, migrateLegacyAgents } from './agents.js';
+import { AgentCatalog, migrateAgentGlobalConfig, migrateLegacyAgents } from './agents.js';
 import { McpLibrary, SkillLibrary } from './library.js';
 import { seedPrompts } from './prompts.js';
 import { monitorAgentAvailability } from './availability.js';
@@ -47,6 +47,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
     library, new McpLibrary(join(library.directory, '..', 'mcp')), join(dataDir, 'prompts')));
   seedPrompts(store.agents.promptDirectory);
   migrateLegacyAgents(store);
+  migrateAgentGlobalConfig(store.agents.directory);
   let scheduler: RoundScheduler;
   let executions: ExecutionRunner;
   let userOperations: UserOperations;

@@ -6,7 +6,7 @@ export type LibraryEntry = { name: string; agents: string[] } & (
 );
 export interface AgentSettings {
   role: AgentRole; driver: 'claude-sdk' | 'codex' | 'grok' | 'deepseek'; model: string | null;
-  reasoningEffort: string | null; fast: boolean;
+  reasoningEffort: string | null; fast: boolean; loadGlobalConfig: boolean;
   home: 'shared' | 'dedicated'; description: string;
   skills?: string[];
   mcp?: string[];
@@ -14,7 +14,7 @@ export interface AgentSettings {
 export interface AgentEntry {
   config?: AgentSettings;
   id: string; revision: string | null; role: AgentRole | null; driver: AgentSettings['driver'] | null;
-  model: string | null; reasoningEffort?: AgentSettings['reasoningEffort']; fast?: boolean;
+  model: string | null; reasoningEffort?: AgentSettings['reasoningEffort']; fast?: boolean; loadGlobalConfig?: boolean;
   home?: AgentSettings['home']; description: string | null; prompt?: string; directory?: string;
   skillsPath?: string | null; skills?: string[]; billing: string | null; available: boolean; reason: string | null; command?: string;
   runningDispatches: number; activeWorks: number;

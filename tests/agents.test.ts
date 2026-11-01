@@ -80,7 +80,7 @@ test('Agent 目录是唯一来源，坏 Agent 和 Claude fast 独立标为不可
 });
 
 const savedConfig = { role: 'executor', driver: 'claude-sdk', model: 'sonnet', reasoningEffort: 'high', fast: false,
-  home: 'shared', description: '界面保存的执行者', skills: [], mcp: [] };
+  home: 'shared', loadGlobalConfig: true, description: '界面保存的执行者', skills: [], mcp: [] };
 
 test('规则提示词首次启动从仓库复制到数据目录，之后只读数据目录，改写后 Agent 立即带上且不被再次复制覆盖', async t => {
   const daemon = await fixture(t);
@@ -1142,7 +1142,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     } else {
       const current = (await daemon.call('list-agents')).result.find((item: any) => item.id === 'file-executor');
       ok(await daemon.call('save-agent', { id: 'file-executor', mode: 'update', baseRevision: current.revision,
-        config: { ...savedConfig, driver: 'codex', model: 'after-queue' }, prompt: '排队后更新的策略' }));
+        config: { ...savedConfig, driver: 'codex', model: 'after-queue', loadGlobalConfig: false }, prompt: '排队后更新的策略' }));
       const running = (await daemon.call('get-dispatch', { workId: work.id, dispatchId: queued[0].id })).result;
       assert.equal(running.status, 'running');
       assert.deepEqual(running.agent, queued[0].agent);
@@ -1150,6 +1150,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     release();
     const values = await until(dispatches, values => values.length === 2 && values.every(value => value.status === 'ended'));
     assert.equal(values[0].agent.model, 'before-queue');
+    assert.equal(values[0].agent.loadGlobalConfig, true);
     const denied = (await events()).find(event => event.action === 'operation-rejected' && event.actor.type === 'dispatch' && event.actor.id === values[0].id);
     assert.equal(denied?.details.code, 'FORBIDDEN');
     if (change !== 'valid') {
@@ -1164,6 +1165,7 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
       return;
     }
     assert.equal(values[1].agent.model, 'after-queue');
+    assert.equal(values[1].agent.loadGlobalConfig, false);
     assert.equal(values[1].agent.prompt, '排队后更新的策略');
     assert.deepEqual(routed, ['after-queue']);
   });

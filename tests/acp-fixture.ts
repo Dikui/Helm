@@ -28,7 +28,7 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   // Leave startup/configuration headroom under parallel suite load; timeout scenarios set their own shorter budget.
   const driver = new AcpDriver(kind, { command, timeoutMs: 5000 });
   const agent: AgentConfig = { id: `${kind}-executor`, role: 'executor', driver: kind, model: kind === 'grok' ? 'grok-4.7' : 'deepseek-flash',
-    reasoningEffort: 'low', fast: false, home: 'shared', description: '测试执行者', prompt: '测试策略', rules: roleRules('executor'), directory, skillsPath: null };
+    reasoningEffort: 'low', fast: false, home: 'shared', loadGlobalConfig: true, description: '测试执行者', prompt: '测试策略', rules: roleRules('executor'), directory, skillsPath: null };
   const options: SessionOptions = { agent, cwd, env: { ...agentEnvironment(agent), HOME: home, XAI_API_KEY: 'must-not-inherit' },
     sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };

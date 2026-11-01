@@ -216,6 +216,10 @@ test('模板改名为 Agent 的迁移改写列名和事件，已有工作时一�
   assert.deepEqual(changed.details, { previousAgentId: 'claude-coordinator', agentId: 'codex-coordinator' });
   assert.deepEqual((await call('list-agents')).map((agent: any) => agent.id),
     ['claude-coordinator', 'claude-executor', 'codex-coordinator', 'codex-executor', 'deepseek-executor', 'grok-executor']);
+  for (const agent of await call('list-agents')) {
+    const config = JSON.parse(await readFile(join(dataDir, 'agents', agent.id, 'config.json'), 'utf8'));
+    assert.equal(config.loadGlobalConfig, agent.role === 'executor');
+  }
   assert.equal(await readFile(join(dataDir, 'agents', 'codex-coordinator', 'prompt.md'), 'utf8'), '');
 });
 

@@ -28,7 +28,7 @@ test('驱动契约声明当前接入的能力，配置和自动记忆的限制�
 async function fixture(t: TestContext): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-driver-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  return { agent: { id: 'test', role: 'executor', driver: 'claude-sdk', model: null, reasoningEffort: null, fast: false, home: 'shared',
+  return { agent: { id: 'test', role: 'executor', driver: 'claude-sdk', model: null, reasoningEffort: null, fast: false, home: 'shared', loadGlobalConfig: true,
     description: '测试', prompt: '', rules: { role: '', runtime: '' }, directory: cwd, skillsPath: null }, cwd, env: { HELM_TEST: 'scripted' }, sandbox: { mode: 'workspace-write', writableRoots: [cwd] }, mcpServers: {} };
 }
 

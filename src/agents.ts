@@ -16,6 +16,7 @@ export const agentSettings = z.object({
   // The CLI's own effort value, chosen from what the driver reports (list-agent-models).
   reasoningEffort: z.string().trim().min(1).nullable(),
   fast: z.boolean().default(false), home: z.enum(['shared', 'dedicated']),
+  loadGlobalConfig: z.boolean().optional(),
   description: z.string().trim().min(1),
   skills: z.array(libraryName).default([]),
   mcp: z.array(libraryName).default([]),
@@ -27,8 +28,9 @@ export const saveAgentSchema = z.object({
   mode: z.enum(['update', 'create']), baseRevision: z.string().min(1).optional(),
 }).strict();
 
-export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills' | 'mcp'> {
+export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills' | 'mcp' | 'loadGlobalConfig'> {
   id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[]; mcp?: string[];
+  loadGlobalConfig: boolean;
   // Role rules from the prompt directory, read with the Agent so each snapshot records them.
   rules: { role: string; runtime: string };
 }
@@ -53,7 +55,8 @@ export class AgentCatalog {
     readonly promptDirectory = join(directory, '..', 'prompts')) {}
 
   save(input: z.infer<typeof saveAgentSchema>) {
-    const { id, config, prompt, mode, baseRevision } = saveAgentSchema.parse(input);
+    const { id, config: settings, prompt, mode, baseRevision } = saveAgentSchema.parse(input);
+    const config = { ...settings, loadGlobalConfig: settings.loadGlobalConfig ?? settings.role === 'executor' };
     const directory = join(this.directory, id);
     const assertRevision = () => {
       let current: string | undefined;
@@ -207,7 +210,8 @@ export class AgentCatalog {
     const directory = join(this.directory, id);
     const configFile = readFileSync(join(directory, 'config.json'));
     const promptFile = readFileSync(join(directory, 'prompt.md'));
-    const config = agentSettings.parse(JSON.parse(configFile.toString('utf8')));
+    const settings = agentSettings.parse(JSON.parse(configFile.toString('utf8')));
+    const config = { ...settings, loadGlobalConfig: settings.loadGlobalConfig ?? settings.role === 'executor' };
     const prompt = promptFile.toString('utf8');
     const skillsPath = join(directory, 'skills');
     return { id, ...config, config, prompt, rules: roleRules(config.role, this.promptDirectory), revision: revision(configFile, promptFile), directory,
@@ -372,6 +376,24 @@ export function migrateLegacyAgents(store: TaskStore) {
     mkdirSync(join(directory, id));
     writeFileSync(join(directory, id, 'config.json'), JSON.stringify(config, null, 2) + '\n');
     writeFileSync(join(directory, id, 'prompt.md'), '');
+  }
+}
+
+export function migrateAgentGlobalConfig(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(directory, entry.name, 'config.json');
+    let config: z.input<typeof agentSettings>;
+    try {
+      if (!lstatSync(path).isFile()) continue;
+      config = JSON.parse(readFileSync(path, 'utf8'));
+      if (!agentSettings.safeParse(config).success || config.loadGlobalConfig !== undefined) continue;
+    } catch { continue; } // Leave invalid Agent files for the catalog to report.
+    const temporary = join(directory, entry.name, `.config-${randomUUID()}.tmp`);
+    try {
+      writeFileSync(temporary, JSON.stringify({ ...config, loadGlobalConfig: config.role === 'executor' }, null, 2) + '\n', { flag: 'wx' });
+      renameSync(temporary, path);
+    } finally { rmSync(temporary, { force: true }); }
   }
 }
 

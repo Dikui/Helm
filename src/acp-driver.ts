@@ -85,7 +85,7 @@ export class AcpDriver implements Driver {
   async listModels(context?: ModelContext): Promise<ModelOption[]> {
     // Start with CLI defaults; DeepSeek publishes full routes only after session/new.
     const probe: AgentConfig = { id: `${this.agent}-models`, role: 'executor', driver: this.agent, model: null, reasoningEffort: null,
-      fast: false, home: 'shared', description: '', prompt: '', rules: { role: '', runtime: '' }, directory: homedir(), skillsPath: null, ...context };
+      fast: false, home: 'shared', loadGlobalConfig: true, description: '', prompt: '', rules: { role: '', runtime: '' }, directory: homedir(), skillsPath: null, ...context };
     const env = this.environment(agentEnvironment(probe), probe);
     const home = await this.homeAvailability(probe, env);
     if (home) throw new Error(home.reason);

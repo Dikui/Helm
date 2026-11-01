@@ -22,7 +22,7 @@ test('运行层对四家驱动和两种角色统一筛选宿主环境，只添�
     if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
   }));
   for (const driver of ['claude-sdk', 'codex', 'grok', 'deepseek'] as const) for (const role of ['coordinator', 'executor'] as const) {
-    const agent: AgentConfig = { id: 'environment-probe', driver, role, model: null, reasoningEffort: null, fast: false, home: 'shared',
+    const agent: AgentConfig = { id: 'environment-probe', driver, role, model: null, reasoningEffort: null, fast: false, home: 'shared', loadGlobalConfig: role === 'executor',
       description: '', prompt: '', rules: { role: '', runtime: '' }, directory: '/agent', skillsPath: null };
     const env = agentEnvironment(agent);
     assert.equal(env.PATH, '/host/bin');

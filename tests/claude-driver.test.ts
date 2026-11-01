@@ -58,6 +58,51 @@ async function collect(driver: Driver, options: SessionOptions) {
   return { session, events, end: events.find(event => event.type === 'end') };
 }
 
+for (const role of ['coordinator', 'executor'] as const) for (const home of ['shared', 'dedicated'] as const) {
+  for (const loadGlobalConfig of [false, true]) test(`Claude ${role}/${home} 加载全局配置 ${loadGlobalConfig} 时按开关选择来源并保持硬约束`, async t => {
+    const base = await fixture(t, role);
+    const options = { ...base, agent: { ...base.agent, home, loadGlobalConfig } };
+    let sdk!: Options;
+    await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+      query: fakeQuery([result()], args => { sdk = args.options!; }) }), options);
+    assert.deepEqual(sdk.settingSources, home === 'dedicated' ? ['user'] : loadGlobalConfig ? ['user', 'project', 'local'] : []);
+    assert.equal(sdk.strictMcpConfig, loadGlobalConfig ? undefined : true);
+    const settings = sdk.settings as Exclude<NonNullable<Options['settings']>, string>;
+    assert.equal(settings.disableClaudeAiConnectors, loadGlobalConfig ? undefined : true);
+    assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...base.mcpServers.helm } });
+    assert.equal(sdk.env!.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
+    assert.equal(settings.autoMemoryEnabled, false);
+    assert.equal(settings.fastMode, false);
+    assert.equal(sdk.env!.CLAUDE_CONFIG_DIR, home === 'dedicated' ? join(base.cwd, '.helm', 'agent-homes', base.agent.id) : undefined);
+    assert.equal(sdk.permissionMode, 'default');
+    assert.deepEqual(settings.permissions?.ask, ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
+    assert.deepEqual(settings.permissions?.deny, credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]));
+    assert.deepEqual(sdk.sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
+      filesystem: { disabled: false, allowWrite: role === 'coordinator' ? [] : [base.cwd],
+        ...(role === 'coordinator' ? { denyWrite: [base.cwd] } : {}), denyRead: credentialPaths() },
+      network: { allowLocalBinding: true },
+    });
+    const context = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'tool' };
+    for (const tool of ['Agent', 'Task']) assert.ok(!(sdk.tools as string[]).includes(tool));
+    assert.equal((await sdk.canUseTool!('Write', { file_path: join(base.cwd, '..', 'outside') }, context))?.behavior, 'deny');
+    assert.equal((await sdk.canUseTool!('Bash', { dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
+    assert.equal((await sdk.canUseTool!('Read', { file_path: 'README.md' }, context))?.behavior, 'allow');
+  });
+}
+
+for (const loadGlobalConfig of [false, true]) test(`Claude 只读执行者加载全局配置 ${loadGlobalConfig}，暂时保留用户层专用分支`, async t => {
+  const base = await fixture(t);
+  let sdk!: Options;
+  await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
+    query: fakeQuery([result()], args => { sdk = args.options!; }) }), {
+    ...base, agent: { ...base.agent, loadGlobalConfig }, sandbox: { mode: 'read-only', writableRoots: [] },
+  });
+  assert.deepEqual(sdk.settingSources, loadGlobalConfig ? ['user'] : []);
+  assert.equal(sdk.strictMcpConfig, loadGlobalConfig ? undefined : true);
+  assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [base.cwd], denyRead: credentialPaths() });
+});
+
 test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参数及环境变量和省略项', async t => {
   for (const role of ['coordinator', 'executor'] as const) {
     const options = await fixture(t, role);
