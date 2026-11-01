@@ -11,7 +11,7 @@ import { ActionDialog } from './ActionDialog.js';
 import './work-actions.css';
 
 export interface ActionWork extends Work { allowedOperations?: string[]; coordinatorAgentId?: string; outputsDeletedAt?: string | null }
-export function WorkActions({ work, reload, inline = false }: { work: ActionWork; reload: () => void; inline?: boolean }) {
+export function WorkActions({ work, reload, inline = false, coordinatorOnly = false }: { work: ActionWork; reload: () => void; inline?: boolean; coordinatorOnly?: boolean }) {
   const { t } = useI18n();
   const { api } = useData();
   const { navigate } = useRouter();
@@ -54,10 +54,11 @@ export function WorkActions({ work, reload, inline = false }: { work: ActionWork
     } finally { pending.current = false; setBusy(false); }
   }
   return <div ref={container} className={`work-actions${inline ? ' work-inline-actions' : ''}`} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-    {!inline && mutable && <button className={`btn sm ${work.status === 'paused' ? 'primary' : 'work-pause'}`} aria-label={t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')} disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
+    {!inline && !coordinatorOnly && mutable && <button className={`btn sm ${work.status === 'paused' ? 'primary' : 'work-pause'}`} aria-label={t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')} disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
       onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'workResumeAction' : 'workPauseAction')}</button>}
-    {work.outputsDeletedAt && <span className="pill">{t('outputsDeleted')}</span>}
-    {!inline && <button ref={trigger} className="btn sm" aria-expanded={open} onClick={() => setOpen(!open)}>{t('workActions')} <span aria-hidden="true">⌄</span></button>}
+    {!coordinatorOnly && work.outputsDeletedAt && <span className="pill">{t('outputsDeleted')}</span>}
+    {coordinatorOnly && <button ref={trigger} className="btn sm" disabled={!enabled('change-coordinator-agent')} onClick={() => { setError(undefined); setPanel('agent'); }}>{t('changeCoordinator')}</button>}
+    {!inline && !coordinatorOnly && <button ref={trigger} className="btn sm" aria-expanded={open} onClick={() => setOpen(!open)}>{t('workActions')} <span aria-hidden="true">⌄</span></button>}
     {(inline || open) && <div className="work-actions-menu" role="group" aria-label={t('workActionsGroup')}>
       {(!inline || !ended) && <button ref={inline ? trigger : undefined} className="btn sm" disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
         onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')}</button>}

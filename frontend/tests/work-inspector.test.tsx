@@ -1,3 +1,4 @@
+import { structureTab } from './inspector-navigation.js';
 import { afterEach, expect, test } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
@@ -134,7 +135,7 @@ test('全部 inspect 深链接、前后导航、卡片跳转与英文界面均�
   }
   for (const value of ['spec', 'report', 'delivery', 'coord']) {
     act(() => { window.history.pushState(null, '', `/works/${work.id}?inspect=${value}`); window.dispatchEvent(new PopStateEvent('popstate')); });
-    await waitFor(() => expect(inspector.textContent).toContain(value === 'spec' ? 'Requirements' : value === 'report' ? 'No summary report yet' : value === 'coord' ? 'Tokens by round' : 'Delivery'));
+    await waitFor(() => expect(inspector.textContent).toContain(value === 'spec' ? 'Requirements' : value === 'report' ? 'No summary report yet' : value === 'coord' ? 'Round tokens' : 'Delivery'));
     expect(inspector.textContent).not.toMatch(/[\u3400-\u9fff]/);
   }
   fireEvent.click(screen.getByRole('button', { name: 'Structure' }));
@@ -190,7 +191,7 @@ test('列表用真实卡片分组，展示等你决定、验收未过、受阻�
   expect(within(detail).getByText('已跳过 · 因「cancelled」取消')).toBeTruthy();
   expect(screen.getByRole('region', { name: '对话' })).toBe(chat);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'List' }));
+  fireEvent.click(structureTab('List'));
   const english = screen.getByRole('tabpanel', { name: 'List' });
   expect(await within(english).findByRole('region', { name: 'Needs your decision' })).toBeTruthy();
   expect(within(english).getByRole('region', { name: 'Blocked' })).toBeTruthy();

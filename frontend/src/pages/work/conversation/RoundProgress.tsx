@@ -30,23 +30,29 @@ export function Thinking({ round, steps }: { round?: Round; steps: RoundStep[] }
   </div>;
 }
 
-type RoundStepsProps = { round: Round; steps: RoundStep[]; plan?: PlanEntry[]; action?: ReactNode };
+type RoundStepsProps = { round: Round; steps: RoundStep[]; plan?: PlanEntry[]; action?: ReactNode; inspector?: boolean; notice?: ReactNode };
 
 export function RoundSteps({ workId, ...props }: RoundStepsProps & { workId: string }) {
-  return props.round.status === 'ended' ? <EndedRoundSteps workId={workId} round={props.round} action={props.action} /> : <RoundStepsContent {...props} />;
+  return props.round.status === 'ended' ? <EndedRoundSteps workId={workId} round={props.round} action={props.action} inspector={props.inspector} /> : <RoundStepsContent {...props} />;
 }
 
-function EndedRoundSteps({ workId, round, action }: { workId: string; round: Round; action?: ReactNode }) {
+function EndedRoundSteps({ workId, round, action, inspector }: { workId: string; round: Round; action?: ReactNode; inspector?: boolean }) {
   const { t } = useI18n();
   const output = useResource<RoundStep[] | { status: 'deleted' }>('get-round-output', { workId, roundId: round.id });
+  if (inspector) {
+    const steps = Array.isArray(output.data) ? output.data : [];
+    const notice = output.error ? <ErrorNotice error={output.error} retry={output.reload} />
+      : !output.data ? <p role="status">{t('loading')}</p> : !Array.isArray(output.data) ? <p>{t('graphDeleted')}</p> : undefined;
+    return <RoundStepsContent round={round} steps={steps} plan={steps.findLast(step => step.type === 'plan')?.entries ?? []} action={action} inspector notice={notice} />;
+  }
   return <>
     {output.error && <ErrorNotice error={output.error} retry={output.reload} />}
     {!output.data ? !output.error && <p role="status">{t('loading')}</p> : !Array.isArray(output.data) ? <p>{t('graphDeleted')}</p>
-      : <RoundStepsContent round={round} steps={output.data} plan={output.data.findLast(step => step.type === 'plan')?.entries ?? []} action={action} />}
+      : <RoundStepsContent round={round} steps={output.data} plan={output.data.findLast(step => step.type === 'plan')?.entries ?? []} action={action} inspector={inspector} />}
   </>;
 }
 
-function RoundStepsContent({ round, steps, plan = [], action }: RoundStepsProps) {
+function RoundStepsContent({ round, steps, plan = [], action, inspector, notice }: RoundStepsProps) {
   const { t } = useI18n();
   const now = useClock();
   const active = round.status === 'running';
@@ -71,6 +77,21 @@ function RoundStepsContent({ round, steps, plan = [], action }: RoundStepsProps)
   })}</ol>;
   const hidden = steps.filter(step => step.type !== 'end' && !meaningful.includes(step));
   const rawSteps = <>{stepList(meaningful)}{hidden.length > 0 && <details className="conversation-raw-steps"><summary>{t('conversationHiddenSteps')} · {hidden.length}</summary>{stepList(hidden)}</details>}</>;
+  if (inspector) {
+    const progress = plan.length ? t('inspectorPlanStep').replace('{current}', String(position)).replace('{total}', String(plan.length))
+      : meaningful.length ? t('inspectorNoPlan').replace('{count}', String(meaningful.length)) : t('nowNoSteps');
+    const content = <>{plan.length > 0 && <><h3 className="sect">{t('conversationPlan')} · {progress}</h3><PlanSteps entries={plan} /></>}
+      {plan.length > 0 ? <details className="conversation-raw-steps"><summary>{t('inspectorRawSteps')} · {meaningful.length}</summary>{rawSteps}</details>
+        : meaningful.length ? rawSteps : <p className="muted">{t(active ? 'inspectorWaitingOutput' : 'graphNoSteps')}</p>}
+      {!plan.length && hidden.length > 0 && !meaningful.length && <details className="conversation-raw-steps"><summary>{t('conversationHiddenSteps')} · {hidden.length}</summary>{stepList(hidden)}</details>}
+    </>;
+    return <section className="coordinator-progress" aria-label={t('conversationSteps')}>
+      <h2>{active ? plan.length ? t('inspectorPlanHeadline').replace('{current}', String(position)).replace('{total}', String(plan.length)) : progress : t('inspectorRoundEnded')}</h2>
+      <p className="muted">{t('structureRound')} #{round.number} · <time aria-label={t('conversationRoundElapsed')}>{elapsed(round.startedAt, until)}</time> · {t(active ? 'structureRunning' : 'conversationEnded')}</p>
+      {active ? <div className="coordinator-current">{content}</div> : <details className="coordinator-ended"><summary>{t('structureRound')} #{round.number} · {t('conversationEnded')} · {t('inspectorRecentSteps')}</summary>{notice ?? content}</details>}
+      {action}
+    </section>;
+  }
   return <details className="conversation-round">
     <summary className="conversation-round-heading">
       <span className={`spark ${active ? 'run busy' : 'ok'}`} aria-hidden="true">✦</span>

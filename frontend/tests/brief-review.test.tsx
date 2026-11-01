@@ -1,3 +1,4 @@
+import { structureTab } from './inspector-navigation.js';
 import { reviewReport } from '../../tests/fixtures/review-report.js';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -505,7 +506,7 @@ async function checkGraphDecision(question: string, zh: string, en: string) {
   fireEvent.click(node);
   expect(within(screen.getByRole('complementary', { name: '关卡检查器' })).getByText(zh)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Dependency graph' }));
+  fireEvent.click(structureTab('Dependency graph'));
   const englishNode = await within(await screen.findByRole('region', { name: 'Card graph' })).findByRole('button', { name: `Gate：${question}` });
   expect(englishNode.title).toContain(en);
   fireEvent.click(englishNode);

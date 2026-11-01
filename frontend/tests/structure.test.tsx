@@ -1,8 +1,14 @@
-import { afterEach, expect, test } from 'vitest';
+import { structureTab } from './inspector-navigation.js';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 import type { FakeContext, FakeScript, FakeStep } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 afterEach(async () => {
@@ -57,12 +63,12 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     const inspector = screen.getByRole('complementary', { name: '卡片检查器' });
     expect(await within(inspector).findByText('修复验证码过期检查')).toBeTruthy();
     expect(within(inspector).getByRole('button', { name: '派单 #3 · 执行' }).getAttribute('aria-pressed')).toBe('true');
-    await clickReady(screen.getByRole('tab', { name: '时间线' }));
+    await clickReady(structureTab('时间线'));
     lane = await within(screen.getByRole('tabpanel', { name: '时间线' })).findByRole('group', { name: '卡片 1：验证码登录' });
     await clickReady(within(lane).getByRole('button', { name: '派单 #2 · 验收 ✗' }));
     expect(await within(inspector).findByText('验证码过期检查缺失')).toBeTruthy();
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
-    await clickReady(screen.getByRole('tab', { name: '事件' }));
+    await clickReady(structureTab('事件'));
     const events = screen.getByRole('tabpanel', { name: '事件' });
     const verification = history.find((dispatch: any) => dispatch.purpose === 'verification');
     expect(within(events).getAllByRole('combobox')).toHaveLength(1);
@@ -80,7 +86,7 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     expect((within(output).getByLabelText('从步骤') as HTMLInputElement).value).toBe('24');
     expect(pages.some(page => page.dispatchId === verification.id && page.fromStep === 24 && page.toStep === 43)).toBe(true);
     expect(document.activeElement?.textContent).toContain('验收步骤 24');
-    await clickReady(screen.getByRole('tab', { name: '事件' }));
+    await clickReady(structureTab('事件'));
     const reopenedEvents = screen.getByRole('tabpanel', { name: '事件' });
     fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `card:${verification.cardId}` } });
     fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: `dispatch:${verification.id}` } });
@@ -89,10 +95,10 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
     expect(await within(reopenedEvents).findByText('没有符合筛选条件的事件。')).toBeTruthy();
     fireEvent.change(within(reopenedEvents).getByLabelText('事件筛选'), { target: { value: '' } });
     expect(await within(reopenedEvents).findByRole('link', { name: '查看对应步骤：卡片 1 · 派单执行步骤 · 步骤 24 · 验收步骤 24' })).toBeTruthy();
-    await clickReady(screen.getByRole('tab', { name: '依赖图' }));
+    await clickReady(structureTab('依赖图'));
     await clickReady(await screen.findByRole('button', { name: '卡片 1：验证码登录' }));
     expect(within(inspector).getByRole('button', { name: '派单 #2 · 验收' }).getAttribute('aria-pressed')).toBe('true');
-    await clickReady(screen.getByRole('tab', { name: '时间线' }));
+    await clickReady(structureTab('时间线'));
     const roundBlock = await waitFor(() => {
       return within(screen.getByRole('tabpanel', { name: '时间线' })).getAllByRole('button', { name: /^调度轮次 #/ })[0]!;
     });
@@ -174,8 +180,26 @@ test('调度者标签查看运行状态、历史轮次分页输出与调度笔�
     expect(coordinatorTab.getAttribute('aria-selected')).toBe('true');
     await clickReady(within(tabs).getByRole('tab', { name: '时间线' }));
     expect(screen.getByRole('tabpanel', { name: '时间线' })).toBeTruthy();
+    await clickReady(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
+    const inspector = await screen.findByRole('complementary', { name: '调度者检查器' });
+    expect(await within(inspector).findByRole('heading', { name: '最近调度轮次已结束' })).toBeTruthy();
+    expect(await within(inspector).findByText('接口通过后做表单')).toBeTruthy();
+    fireEvent.change(within(inspector).getByLabelText('调度笔记版本'), { target: { value: '1' } });
+    expect(within(inspector).getByText('先做接口')).toBeTruthy();
+    await clickReady(within(inspector).getByRole('button', { name: '调度轮次 #1' }));
+    const firstRound = await within(inspector).findByRole('region', { name: '调度轮次 #1' });
+    expect(await within(firstRound).findByText('第一轮对齐决策')).toBeTruthy();
+    await clickReady(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
+    const chooser = screen.getByRole('dialog', { name: '换调度者 Agent' });
+    expect(await within(chooser).findByRole('group', { name: '调度者 Agent' })).toBeTruthy();
+    fireEvent.click(within(chooser).getByRole('button', { name: '返回' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(within(inspector).getByRole('button', { name: '换调度者 Agent' }));
+
     await clickReady(screen.getByRole('button', { name: 'EN' }));
-    expect(screen.getByRole('tab', { name: 'Rounds' })).toBeTruthy();
+    expect(within(inspector).getByRole('region', { name: 'Round tokens' })).toBeTruthy();
+    expect(within(inspector).getByRole('button', { name: 'Change coordinator' })).toBeTruthy();
+    expect(within(inspector).getByLabelText('Notes version')).toBeTruthy();
   } finally { finish(); }
 });
 
@@ -191,13 +215,13 @@ test('无卡片和笔记时显示空态，事件读取错误可重试，轮次�
   render(<App baseUrl={daemon.url} transport={transport} />);
   await clickReady(await screen.findByRole('tab', { name: '时间线' }));
   expect(await screen.findByText('调度者还没有创建卡片。')).toBeTruthy();
-  await clickReady(screen.getByRole('tab', { name: '事件' }));
+  await clickReady(structureTab('事件'));
   const events = screen.getByRole('tabpanel', { name: '事件' });
   expect((await within(events).findByRole('alert')).textContent).toContain('读取事件连接失败');
   fail = false;
   await clickReady(within(events).getByRole('button', { name: '重新读取' }));
   expect(await within(events).findByText('创建工作')).toBeTruthy();
-  await clickReady(screen.getByRole('tab', { name: '调度轮次' }));
+  await clickReady(structureTab('调度轮次'));
   const coordinator = screen.getByRole('tabpanel', { name: '调度轮次' });
   expect(await within(coordinator).findByText('还没有调度笔记。')).toBeTruthy();
   await clickReady(within(coordinator).getByRole('button', { name: '调度轮次 #2' }));
@@ -214,7 +238,7 @@ test('调度者连续失败后从工作和轮次读取连败暂停与原始原�
   await screen.findByText('工作已暂停。恢复后才继续调度与派单。');
   expect(screen.queryByRole('tablist', { name: '结构' })).toBeNull();
   fireEvent.click(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: /调度者/ }));
-  const coordinator = screen.getByRole('complementary', { name: '调度者 Token 明细' });
+  const coordinator = screen.getByRole('complementary', { name: '调度者检查器' });
   expect(await within(coordinator).findByText('连败暂停')).toBeTruthy();
   expect(await within(coordinator).findByText('调度者连续失败 3 次')).toBeTruthy();
   expect(within(coordinator).getAllByText('出错退出')).toHaveLength(3);

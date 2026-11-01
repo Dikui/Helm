@@ -40,7 +40,7 @@ const gate = (key: string, question: string): FakeStep => ({ type: 'tool', name:
   workId: JSON.parse(ctx.input).work.id, key, question, options: ['保留一周', '一直保留'],
 }) });
 
-test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考和折叠步骤，重新打开保留已结束步骤', async phase => {
+test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考、展开的当前步骤和折叠的历史步骤，重新打开保留已结束步骤', async phase => {
   let output!: () => void;
   let finish!: () => void;
   const script: FakeStep[] = [
@@ -64,25 +64,26 @@ test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考和折叠
   expect(within(chat).queryByText('本轮 0 步 · 等待首次输出')).toBeNull();
   fireEvent.click(within(strip).getByRole('button', { name: /调度者/ }));
   const inspector = screen.getByRole('complementary', { name: '检查器' });
+  expect(await within(inspector).findByText('尚无本轮计划或执行步骤；等待首次输出。')).toBeTruthy();
+  expect(within(inspector).queryByRole('list', { name: '本轮计划' })).toBeNull();
   output();
-  const folded = (await within(inspector).findByText('本轮 1 步 · 最新：正在检查邮件模板')).closest('details')!;
-  expect(folded.open).toBe(false);
-  fireEvent.click(folded.querySelector('summary')!);
-  expect(folded.open).toBe(true);
-  expect(within(folded).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
+  expect(await within(inspector).findByRole('heading', { name: '本轮 1 步 · 无本轮计划' })).toBeTruthy();
+  expect(within(inspector).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
   finish();
   await waitFor(() => expect(within(chat).queryByText('调度者正在思考…')).toBeNull());
   expect(await within(strip).findByText(phase === '对齐' ? '已起草，等你确认' : '本轮已结束 · 最新：正在检查邮件模板')).toBeTruthy();
-  const ended = await within(inspector).findByText('本轮 1 步 · 已结束 · 最新：正在检查邮件模板');
+  await within(inspector).findByRole('heading', { name: '最近调度轮次已结束' });
+  const ended = await within(inspector).findByText(/调度轮次 #\d+ · 已结束 · 最近步骤/, { selector: 'summary' });
   expect(ended.closest('details')!.open).toBe(false);
-  const duration = ended.closest('summary')!.querySelector('time')!.textContent;
+  const duration = within(inspector).getByLabelText('本轮用时').textContent;
   await new Promise(resolve => setTimeout(resolve, 1100));
-  expect(ended.closest('summary')!.querySelector('time')!.textContent).toBe(duration);
+  expect(within(inspector).getByLabelText('本轮用时').textContent).toBe(duration);
   view.unmount();
   render(<App baseUrl={daemon!.url} />);
-  const reopened = await within(await screen.findByRole('complementary', { name: '检查器' })).findByText('本轮 1 步 · 已结束 · 最新：正在检查邮件模板');
-  fireEvent.click(reopened.closest('summary')!);
-  expect(within(reopened.closest('details')!).getByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
+  const reopened = await within(await screen.findByRole('complementary', { name: '检查器' })).findByText(/调度轮次 #\d+ · 已结束 · 最近步骤/, { selector: 'summary' });
+  expect(reopened.closest('details')!.open).toBe(false);
+  fireEvent.click(reopened);
+  expect(await within(reopened.closest('details')!).findByText('正在检查邮件模板', { selector: 'summary' })).toBeTruthy();
 });
 
 test('执行中对话支持三种消息范围；切换检查器时对话、输入和范围常驻', async () => {
@@ -435,27 +436,26 @@ test('本轮计划显示真实总数和三种状态，更新至全部完成，�
   expect(within(chat).queryByRole('list', { name: '本轮计划' })).toBeNull();
   fireEvent.click(within(strip).getByRole('button', { name: /调度者/ }));
   const inspector = await screen.findByRole('region', { name: '本轮步骤' });
-  expect(await within(inspector).findByText(/本轮计划 · 2 \/ 3/)).toBeTruthy();
+  expect(await within(inspector).findByText(/本轮计划 · 第 2 \/ 3 步/)).toBeTruthy();
   const plan = within(inspector).getByRole('list', { name: '本轮计划' });
   expect(within(plan).getAllByRole('listitem')).toHaveLength(3);
   expect(within(plan).getByText('已完成')).toBeTruthy();
   expect(within(plan).getByText('进行中').closest('li')?.getAttribute('aria-current')).toBe('step');
   expect(within(plan).getByText('待做')).toBeTruthy();
   expect(within(plan).getByText('核对标准')).toBeTruthy();
-  const heading = within(inspector).getByText(/本轮 \d+ 步 · 最新：原始执行步骤/);
-  fireEvent.click(heading.closest('summary')!);
-  const raw = within(inspector).getByText(/执行步骤 · \d+/, { selector: 'summary' });
+  const raw = within(inspector).getByText(/查看原始步骤 · 与计划分别计数 · \d+/, { selector: 'summary' });
+  expect(raw.closest('details')?.open).toBe(false);
   fireEvent.click(raw);
   expect(raw.closest('details')?.open).toBe(true);
   expect(within(inspector).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
   advance();
-  expect(await within(inspector).findByText(/本轮计划 · 3 \/ 3/)).toBeTruthy();
+  expect(await within(inspector).findByText(/本轮计划 · 第 3 \/ 3 步/)).toBeTruthy();
   expect(within(plan).getAllByText('已完成')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
-  expect(within(inspector).getByText(/Round plan · 3 \/ 3/)).toBeTruthy();
+  expect(within(inspector).getByText(/Round plan · Step 3 \/ 3/)).toBeTruthy();
   expect(within(inspector).getByRole('list', { name: 'Round plan' })).toBeTruthy();
   clear();
   await waitFor(() => expect(within(inspector).queryByRole('list', { name: 'Round plan' })).toBeNull());
-  expect(within(inspector).queryByText(/Round plan · \d+ \/ \d+/)).toBeNull();
+  expect(within(inspector).queryByText(/Round plan · Step \d+ \/ \d+/)).toBeNull();
   expect(within(inspector).getByText('原始执行步骤', { selector: 'pre' })).toBeTruthy();
 });

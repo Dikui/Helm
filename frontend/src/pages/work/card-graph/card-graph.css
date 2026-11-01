@@ -136,7 +136,7 @@
 .cg-token-table { min-width: 0; overflow-x: auto; }
 .cg-token-table table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .cg-token-table th, .cg-token-table td { padding: 8px 3px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
-/* Six columns must fit the inspector; labels wrap, numbers never do. */
+/* Labels wrap in the inspector; token counts stay on one line. */
 .cg-token-table th { white-space: normal; }
 .cg-token-table thead th { vertical-align: bottom; }
 .cg-token-table th:first-child { text-align: left; font-weight: 500; }

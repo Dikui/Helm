@@ -1,5 +1,4 @@
-import { UsageSummary } from './TokenDetails.js';
-import { sumUsage } from '../../../shared/token-usage.js';
+import { inspectorUsage, UsageSummary, UsageTable } from './TokenDetails.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { useCallback, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
@@ -11,10 +10,13 @@ import type { Rounds } from '../conversation/types.js';
 import { OutputSteps } from './DispatchDetails.js';
 import { endLabels } from './labels.js';
 import type { Dispatch } from './types.js';
+import type { AgentEntry } from '../../settings/types.js';
+import { WorkActions } from '../WorkActions.js';
+import { RoundSteps } from '../conversation/RoundProgress.js';
 
 interface Notes { body: string; version: number; versions: { body: string; version: number; time: string }[] }
 
-export function CoordinatorView({ work, initialRoundId, initialStep, compact = false }: { work: Work; initialRoundId?: string; initialStep?: number; compact?: boolean }) {
+export function CoordinatorView({ work, initialRoundId, initialStep, compact = false, agents }: { work: Work; initialRoundId?: string; initialStep?: number; compact?: boolean; agents?: AgentEntry[] }) {
   const { t, language } = useI18n();
   const now = useClock();
   const files = useWorkFiles(work.id);
@@ -24,7 +26,9 @@ export function CoordinatorView({ work, initialRoundId, initialStep, compact = f
   const [roundId, selectRound] = useState<string | null>(initialRoundId ?? null);
   const [version, selectVersion] = useState<number | null>(null);
   const current = rounds.data?.rounds.find(round => round.status === 'running');
-  const selected = rounds.data?.rounds.find(round => round.id === roundId) ?? rounds.data?.rounds.at(-1);
+  const latest = current ?? rounds.data?.rounds.at(-1);
+  const selected = rounds.data?.rounds.find(round => round.id === roundId) ?? latest;
+  const agent = agents?.find(agent => agent.id === latest?.agentId);
   const note = notes.data?.versions.find(note => note.version === version) ?? notes.data;
   const paused = work.status === 'paused' && work.runtimePauseReason === '调度者连续失败 3 次';
   const affects = useCallback((event: HelmEvent) => event.workId === work.id &&
@@ -42,12 +46,10 @@ export function CoordinatorView({ work, initialRoundId, initialStep, compact = f
     </section>;
   const roundDetails = selected && <section className="cs-round-detail" aria-label={`${t('structureRound')} #${selected.number}`}>
         <h3>{t('structureRound')} #{selected.number}</h3>
-        <dl className="cg-kv"><dt>{t('structureTokens')}</dt><dd className="mono" title={`${selected.usage.inputTokens} / ${selected.usage.outputTokens}`}>{formatTokens(selected.usage.inputTokens, language)} / {formatTokens(selected.usage.outputTokens, language)}</dd></dl>
+        <dl className="cg-kv"><dt>{t('structureCoordinator')}</dt><dd>{selected.agentId ?? '—'}</dd><dt>{t('inspectorStarted')}</dt><dd><time dateTime={selected.startedAt}>{date(selected.startedAt)}</time></dd><dt>{t('inspectorEnded')}</dt><dd>{selected.endedAt ? <time dateTime={selected.endedAt}>{date(selected.endedAt)}</time> : t('structureRunning')}</dd><dt>{t('structureTokens')}</dt><dd className="mono" title={`${selected.usage.inputTokens ?? '—'} / ${selected.usage.outputTokens ?? '—'}`}>{formatTokens(selected.usage.inputTokens, language)} / {formatTokens(selected.usage.outputTokens, language)}</dd></dl>
         <OutputSteps initialStep={initialStep} key={`${selected.id}:${initialStep}`} workId={work.id} roundId={selected.id} affects={affects} />
       </section>;
-  if (compact) return <div className="cs-coordinator cs-rounds-view">
-    {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
-    {rounds.data && <span className="sr" role="status">{t(current ? 'structureRunning' : paused ? 'structureFailurePause' : 'conversationIdle')}</span>}
+  const roundList = <>
     {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
     {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : !rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds compact">
       {rounds.data.rounds.map(round => <li key={round.id}>
@@ -57,29 +59,19 @@ export function CoordinatorView({ work, initialRoundId, initialStep, compact = f
         <button className="cs-event-link" aria-label={`${t('structureRound')} #${round.number}`} aria-pressed={roundId === round.id} onClick={() => selectRound(round.id)}>{t('roundView')}</button>
       </li>)}
     </ol>}
+  </>;
+  return <div className={`cs-coordinator ${compact ? 'cs-rounds-view' : 'coordinator-inspector'}`}>
+    {!compact && <p className="muted cg-coordinator-identity">{[t('structureCoordinator'), latest?.agentId, agent?.model, agent?.reasoningEffort].filter(Boolean).join(' · ')}</p>}
+    {work.runtimePauseReason && <p className="pause-reason">{paused ? t('inspectorFailureReason') : work.runtimePauseReason}</p>}
+    {rounds.data && <span className={compact || !paused ? 'sr' : 'pill bad'} role="status">{t(current ? 'structureRunning' : paused ? 'structureFailurePause' : 'conversationIdle')}</span>}
+    {!compact && latest && <RoundSteps key={latest.id} inspector workId={work.id} round={latest} steps={rounds.data?.currentSteps ?? []} plan={rounds.data?.currentPlan ?? []} />}
+    <section aria-label={t('structureRounds')}>{!compact && <h3 className="sect">{t('structureRounds')}</h3>}{roundList}</section>
     {notesSection}
     {roundId && roundDetails}
-    {preview.preview}
-  </div>;
-  return <div className="cs-coordinator">
-    <div className="row"><h2>{t('structureCoordinator')}</h2>{rounds.data && <span className={`pill ${current ? 'run' : paused ? 'bad' : ''}`} role="status">{current ? t('structureRunning') : paused ? t('structureFailurePause') : t('conversationIdle')}</span>}</div>
-    {work.runtimePauseReason && <p className="pause-reason">{work.runtimePauseReason}</p>}
-    {rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}
-    {!rounds.data ? <p role="status">{rounds.error ? '' : t('loading')}</p> : <>
-      <UsageSummary usage={sumUsage(rounds.data.rounds)} />
-      <h3 className="sect">{t('structureRounds')} <span className="count">{rounds.data.rounds.length}</span></h3>
-      {!rounds.data.rounds.length ? <p className="muted">{t('structureNoRounds')}</p> : <ol className="cs-rounds">
-        {rounds.data.rounds.slice().reverse().map(round => <li key={round.id}>
-          <button className="btn sm" aria-pressed={selected?.id === round.id} aria-label={`${t('structureRound')} #${round.number}`} onClick={() => selectRound(round.id)}>#{round.number}</button>
-          <span>{round.agentId}</span><span className={`pill ${round.status === 'running' ? 'run' : ''}`}>{round.status === 'running' ? t('structureRunning') : round.reason ? t(endLabels[round.reason as NonNullable<Dispatch['endReason']>]) : '—'}</span>
-          <time className="mono">{elapsed(round.startedAt, round.endedAt ? Date.parse(round.endedAt) : now)}</time>
-          <span className="muted">{t('tokenInput')} {formatTokens(round.usage.inputTokens, language)} · {t('tokenOutput')} {formatTokens(round.usage.outputTokens, language)}</span>
-          <small className="muted"><time dateTime={round.startedAt}>{date(round.startedAt)}</time> → {round.endedAt ? <time dateTime={round.endedAt}>{date(round.endedAt)}</time> : t('structureNow')}</small>
-        </li>)}
-      </ol>}
-      {roundDetails}
-    </>}
-    {notesSection}
+    {!compact && <section className="cg-usage" aria-label={t('tokenRounds')}><h3 className="sect">{t('tokenRounds')}</h3>
+      {!rounds.data ? !rounds.error && <p role="status">{t('loading')}</p> : <><UsageSummary usage={inspectorUsage(rounds.data.rounds)} /><UsageTable kind="round" select={selectRound} rows={rounds.data.rounds.map(round => ({ ...round, label: `#${round.number}${round.status === 'running' ? ` · ${t('structureRunning')}` : round.reason && round.reason !== 'completed' ? ` · ${t(endLabels[round.reason as NonNullable<Dispatch['endReason']>])}` : ''}` }))} /></>}
+    </section>}
+    {!compact && <WorkActions work={work} reload={rounds.reload} coordinatorOnly />}
     {preview.preview}
   </div>;
 }
