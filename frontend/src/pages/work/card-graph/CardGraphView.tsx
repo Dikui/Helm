@@ -7,7 +7,7 @@ import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { GraphCanvas } from './GraphCanvas.js';
 import { CardInspector } from './CardInspector.js';
-import { graphSummary, dispatchDuration } from './presentation.js';
+import { graphSummary, dispatchDuration, type CardFilter } from './presentation.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import { gateDecision, nodeTitle, NodeStatus, AggregateBadge, ReadOnlyBadge } from './labels.js';
@@ -18,11 +18,12 @@ import { TimelineView } from './TimelineView.js';
 import { EventsView } from './EventsView.js';
 import { CardList } from './CardList.js';
 import { structureViews, type Inspection, type StructureView } from '../useWorkInspector.js';
+import { RoundSteps } from '../conversation/RoundProgress.js';
 import './card-graph.css';
 import './structure.css';
 
 const tabLabels = { list: 'inspectorList', graph: 'graphTab', timeline: 'structureTimeline', rounds: 'inspectorRounds', events: 'structureEvents' } as const;
-export function CardGraphView({ work, inspection, inspect }: { work: Work; inspection: Inspection; inspect: (inspection: Inspection) => void }) {
+export function CardGraphView({ work, inspection, inspect, filter }: { work: Work; inspection: Inspection; inspect: (inspection: Inspection) => void; filter?: CardFilter }) {
   const workId = work.id;
   const { t } = useI18n();
   const now = useClock();
@@ -33,6 +34,7 @@ export function CardGraphView({ work, inspection, inspect }: { work: Work; inspe
   const [roundId, setRoundId] = useState<string>();
   const tabButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const rounds = useResource<Rounds>('list-rounds', { workId });
+  const latestRound = rounds.data?.rounds.find(round => round.status === 'running') ?? rounds.data?.rounds.at(-1);
   const coordinatorSelected = inspection === 'coord';
   const graph = useResource<GraphNode[]>('get-card-graph', { workId });
   // An ended work keeps its review gate pending on purpose; show the work's end state instead of a ticking "pending".
@@ -59,7 +61,7 @@ export function CardGraphView({ work, inspection, inspect }: { work: Work; inspe
     <div className="cg-errors">{rounds.error && <ErrorNotice error={rounds.error} retry={rounds.reload} />}{graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}{dispatches.error && <ErrorNotice error={dispatches.error} retry={dispatches.reload} />}</div>
     {!nodes ? <p className="hint" role="status">{graph.error ? '' : t('loading')}</p> : <>
       <div className="cg-main">
-        <div className="cg-bar"><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
+        <div className="cg-bar" hidden={Boolean(filter)}><div className="cs-tabs" role="tablist" aria-label={t('structure')}>
           {structureViews.map((key, index) => <button key={key} ref={element => { tabButtons.current[index] = element; }} type="button" role="tab"
             id={`${tabId}-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key} tabIndex={tab === key || !tab && index === 0 ? 0 : -1}
             onClick={() => inspect(key)} onKeyDown={event => {
@@ -72,7 +74,7 @@ export function CardGraphView({ work, inspection, inspect }: { work: Work; inspe
           {summary.skipped > 0 && <span><b>{summary.skipped}</b> {t('graphSummarySkipped')}</span>}
         </div></div>
         <div hidden={!tab} className={`cs-panel ${tab === 'graph' ? 'cs-graph-panel' : ''}`} role="tabpanel" id={`${tabId}-panel`} aria-labelledby={tab ? `${tabId}-${tab}` : undefined}>
-          {tab === 'list' && <CardList nodes={nodes} dispatches={dispatches.data} select={select} />}
+          {tab === 'list' && <CardList nodes={nodes} dispatches={dispatches.data} select={select} filter={filter} />}
           {tab === 'graph' && <GraphCanvas nodes={nodes} dispatches={dispatches.data ?? []} selectedId={selectedId} sendBacks={summary.sendBacks} select={select} coordinator={{ count: rounds.data?.rounds.length, usage: sumUsage(rounds.data?.rounds ?? []), selected: false, select: () => inspect('coord') }} />}
           {tab === 'rounds' && <CoordinatorView key={roundId} work={work} initialRoundId={roundId} />}
           {tab === 'timeline' && <TimelineView inspectRound={id => { setRoundId(id); inspect('rounds'); tabButtons.current[3]?.focus(); }} workId={workId} nodes={nodes} dispatches={dispatches.data} selectedId={selectedId} select={select} />}
@@ -80,7 +82,7 @@ export function CardGraphView({ work, inspection, inspect }: { work: Work; inspe
         </div>
       </div>
       <aside hidden={Boolean(tab)} className="cg-inspector" ref={details} tabIndex={-1} aria-label={t(coordinatorSelected ? 'tokenCoordinator' : selected?.type === 'gate' ? 'graphGateInspector' : 'graphInspector')}>
-        {coordinatorSelected ? <><CoordinatorTokens rounds={rounds.data?.rounds} /><CoordinatorView work={work} /></> : !selected ? <p className="hint">{t('graphSelect')}</p> : <>
+        {coordinatorSelected ? <>{latestRound && <section aria-label={t('conversationSteps')}><RoundSteps key={latestRound.id} workId={workId} round={latestRound} steps={rounds.data?.currentSteps ?? []} plan={rounds.data?.currentPlan ?? []} /></section>}<CoordinatorTokens rounds={rounds.data?.rounds} /><CoordinatorView work={work} /></> : !selected ? <p className="hint">{t('graphSelect')}</p> : <>
           <header className="cg-inspector-head"><small className="muted">{t(selected.type === 'card' ? 'graphCard' : 'graphGate')}{selected.type === 'card' ? ` ${ordinal(selected.id)}` : ''}</small><h2>{nodeTitle(selected)}</h2>
             <div className="row"><NodeStatus node={selected} />{selected.type === 'card' && selected.readOnly && <ReadOnlyBadge />}{selected.type === 'card' && selected.aggregate && <AggregateBadge />}{selected.type === 'card' && <time className="muted">{selectedDispatches ? elapsed(new Date(0).toISOString(), dispatchDuration(selectedDispatches, now)) : '—'}</time>}
               {!!summary.sendBacks.get(selected.id) && <span className="cg-rework">↺ {t('graphSendBackPrefix')} {summary.sendBacks.get(selected.id)} {t('graphSendBackSuffix')}</span>}</div>

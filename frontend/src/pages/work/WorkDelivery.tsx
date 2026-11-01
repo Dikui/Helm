@@ -7,7 +7,7 @@ import type { PushPreview, Work } from '../../shared/types.js';
 import { ActionDialog } from './ActionDialog.js';
 import './work-delivery.css';
 
-export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'delivery' | 'workBranch'> }) {
+export function WorkDelivery({ work, onPushingChange }: { work: Pick<Work, 'id' | 'status' | 'delivery' | 'workBranch'>; onPushingChange?: (pushing: boolean) => void }) {
   const { api } = useData();
   const { t } = useI18n();
   const [pending, setPending] = useState(false);
@@ -50,6 +50,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
   async function run(operation: string, params: object = {}) {
     if (busy.current) return;
     busy.current = true; setPending(true); setError(undefined);
+    if (operation === 'push-work') onPushingChange?.(true);
     try {
       const result = await api.call<{ status?: string; toCommit?: string; diff: string }>(operation, { workId: work.id, ...params });
       if (operation === 'finish-work-without-merge') setFinishConfirm(false);
@@ -57,7 +58,7 @@ export function WorkDelivery({ work }: { work: Pick<Work, 'id' | 'status' | 'del
       if (operation === 'recheck-work-merge') setNotContained(result.status === 'accepted');
     }
     catch (error) { setError(error as Error); }
-    finally { busy.current = false; setPending(false); }
+    finally { busy.current = false; setPending(false); if (operation === 'push-work') onPushingChange?.(false); }
   }
   return <section className="release-panel" aria-label={t('deliveryTitle')} aria-busy={inFlight}>
     <h2>{t(title)}</h2>

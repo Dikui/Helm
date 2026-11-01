@@ -425,7 +425,7 @@ test('草稿更新但网络未送达页面时，确认被运行层拒绝，显�
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   await screen.findByText('实时更新已连接');
   // Wait for replay to finish before dropping the shared stream.
-  await screen.findByText(/本轮.*已结束/);
+  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('工作说明已起草，等你确认');
   offline = true; controller?.abort();
   await screen.findByText('连接已断开，正在重连…');
   await daemon.call('send-message', { workId: work.id, body: '请更新草稿', key: 'update' });

@@ -1,7 +1,3 @@
-.work-inspect-links { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 22px 12px; border-bottom: 1px solid var(--border); }
-.work-inspect-links button { padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted); font-size: 12px; }
-.work-inspect-links button:hover { background: var(--hover); color: var(--text); }
-.work-inspect-links button[aria-pressed='true'] { border-color: var(--text); color: var(--text); }
 .inset > .aligning-work { display: flex; }
 .inset > .aligning-work > .aligning-chat { flex: 1; }
 .inspector-content > .aligning-brief { width: 100%; border: 0; }
@@ -37,4 +33,3 @@
 @media (max-width: 980px) {
   .inset > .conversation-view, .inset > .aligning-work { min-height: 65dvh; }
 }
-@media (max-width: 680px) { .work-inspect-links { padding: 8px 12px 12px; } }

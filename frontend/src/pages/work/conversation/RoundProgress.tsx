@@ -9,10 +9,10 @@ import { isHousekeeping, stepSummary } from '../../../shared/step-summary.js';
 import type { Round, RoundStep } from './types.js';
 import './conversation.css';
 
-function visibleSteps(steps: RoundStep[]) {
+export function visibleSteps(steps: RoundStep[]) {
   return steps.filter(step => step.type !== 'end' && step.type !== 'plan' && !(step.text && isHousekeeping(step.text)));
 }
-function headline(step: RoundStep, t: (key: MessageKey) => string) {
+export function headline(step: RoundStep, t: (key: MessageKey) => string) {
   const text = step.type === 'plan' ? t('conversationPlan') : step.text ? stepSummary(step.text, t) : step.path ?? t('conversationCompaction');
   return text.trim().split(/\r?\n/, 1)[0] ?? '';
 }

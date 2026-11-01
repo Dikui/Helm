@@ -1,23 +1,18 @@
-import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { ReviewDetails } from './ReviewDetails.js';
 import { ReviewReport } from './ReviewReport.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
-import type { HelmEvent, Work } from '../../../shared/types.js';
+import type { Work } from '../../../shared/types.js';
 import { Link } from '../../../shared/router.js';
-import type { ReviewGate } from './types.js';
+import type { useWorkReview } from './useWorkReview.js';
 
-export function WorkReview({ work }: { work: Pick<Work, 'id' | 'status' | 'delivery'> }) {
+export function WorkReview({ work, report }: { work: Pick<Work, 'id' | 'status' | 'delivery'>; report: ReturnType<typeof useWorkReview> }) {
   const { t } = useI18n();
-  const conversation = useResource<(ReviewGate & { type: string })[]>('get-conversation', { workId: work.id });
-  const events = useResource<HelmEvent[]>('get-events', { workId: work.id });
+  const { conversation, events, gate, invalid } = report;
   const files = useWorkFiles(work.id);
   const preview = useFilePreview(work.id);
-  const gate = conversation.data?.findLast(item => item.type === 'gate' && item.kind === 'review');
-  const invalid = events.data?.findLast(event => event.action === 'operation-rejected' && event.object.id === 'request-review'
-    && (event.details as { code?: string })?.code === 'INVALID_PARAMS' && gate?.status !== 'pending' && event.id > (gate?.sequence ?? 0));
   return <>
     {conversation.error && <><h3>{t('reportReadFailed')}</h3><ErrorNotice error={conversation.error} retry={conversation.reload} /></>}
     {events.error && <ErrorNotice error={events.error} retry={events.reload} />}

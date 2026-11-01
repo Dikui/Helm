@@ -183,6 +183,9 @@ test('旧版纯文本审核在工作页和收件箱继续显示 Markdown，接�
   render(<App baseUrl={daemon!.url} transport={transport} />);
   const review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByText('历史汇总报告 · 旧版文本')).toBeTruthy();
+  expect(within(screen.getByRole('navigation', { name: '现在条' })).getAllByRole('button').map(button => button.textContent)).toEqual([
+    expect.stringContaining('调度者'), '等你审核历史汇总报告', '+2', '说明 v1', '结构',
+  ]);
   expect(within(review).getByRole('heading', { name: '历史报告' })).toBeTruthy();
   expect(within(review).getByText('原始结论').tagName).toBe('STRONG');
   const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
@@ -214,20 +217,32 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
   render(<App baseUrl={daemon.url} transport={transport} />);
   try {
     const inspector = screen.getByRole('complementary', { name: '检查器' });
+    const strip = await screen.findByRole('navigation', { name: '现在条' });
+    const reportSequence = (detail: string) => waitFor(() => expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
+      expect.stringContaining('调度者'), `汇总报告${detail}`, '说明 v1', '结构',
+    ]));
     expect(await screen.findByText('正在读取汇总报告…')).toBeTruthy();
+    await within(strip).findByRole('button', { name: '汇总报告 正在读取' });
+    await reportSequence('正在读取');
     releaseRead();
     expect(await screen.findByText('汇总报告读取失败')).toBeTruthy();
+    await reportSequence('读取失败，等你重试');
     fail = false;
     fireEvent.click(within(within(inspector).getByText('审核读取连接中断').closest('[role="alert"]')!).getByRole('button', { name: '重新读取' }));
     expect(await screen.findByText('尚无汇总报告')).toBeTruthy();
+    await reportSequence('尚未提交');
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitInvalid();
     expect(await screen.findByText('汇总报告尚不能发起审核')).toBeTruthy();
+    await reportSequence('字段待补齐，未生成关卡');
     const invalid = screen.getByText('汇总报告尚不能发起审核').closest('section')!;
     expect(within(invalid).getByText(/report.summary: 缺少结论说明/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitValid();
     expect(await within(inspector).findByRole('button', { name: '接受' })).toBeTruthy();
+    expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
+      expect.stringContaining('调度者'), '等你审核建议接受', '说明 v1', '结构',
+    ]);
     expect(screen.queryByText('汇总报告尚不能发起审核')).toBeNull();
   } finally { releaseRead(); submitInvalid(); submitValid(); }
 });
@@ -329,6 +344,13 @@ test('审核显示真实汇总、计数和整体验收；长 diff 按需分段�
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('return');
   expect(gate.comment).toBe('请补齐边界说明');
+  const strip = screen.getByRole('navigation', { name: '现在条' });
+  const returned = await within(strip).findByRole('button', { name: '审核已退回 原因已记录，等待下一轮处理' });
+  expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
+    expect.stringContaining('调度者'), '审核已退回原因已记录，等待下一轮处理', '+2', '说明 v1', '结构',
+  ]);
+  fireEvent.click(returned);
+  expect(window.location.search).toBe('?inspect=report');
   expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
   await checkGraphDecision(gate.question, '已退回', 'Sent back');
 });
@@ -339,7 +361,14 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
   execFileSync('git', ['-C', daemon!.repo, 'remote', 'add', 'origin', remote], { stdio: 'ignore' });
   window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
-  render(<App baseUrl={daemon!.url} transport={trackDecisions} />);
+  let finishPush!: () => void;
+  const pushResponse = new Promise<void>(resolve => { finishPush = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    const response = await trackDecisions(input, init);
+    if (String(input).endsWith('/api/push-work')) await pushResponse;
+    return response;
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
   fireEvent.click(await screen.findByRole('button', { name: /安静/ }));
   let review = await screen.findByRole('region', { name: '审核' });
   const top = (await screen.findByRole('heading', { level: 1, name: '工作说明与审核' })).closest('header')!;
@@ -349,6 +378,10 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   expect(within(row).getByRole('link', { name: '查看审核详情' }).getAttribute('href')).toBe(`/works/${work.id}?inspect=report`);
   fireEvent.click(source === '工作页' ? within(review).getByRole('button', { name: '接受' }) : inboxAccept);
   let delivery = await screen.findByRole('region', { name: '合入与推送' });
+  const strip = screen.getByRole('navigation', { name: '现在条' });
+  expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([
+    expect.stringContaining('调度者'), '交付待合入', '+2', '说明 v1', '结构',
+  ]);
   expect(await within(delivery).findByRole('heading', { name: '已接受，待合入' })).toBeTruthy();
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('accepted');
   fireEvent.click(within(delivery).getByRole('button', { name: '撤回接受' }));
@@ -371,9 +404,15 @@ test.each(['工作页', '收件箱'])('%s接受审核与另一处同步，可撤
   expect(await within(delivery).findByRole('region', { name: '将推出的提交' })).toBeTruthy();
   expect(within(delivery).getByText(/将新建远端分支/)).toBeTruthy();
   fireEvent.click(within(delivery).getByRole('button', { name: '推送' }));
+  try {
+    const strip = screen.getByRole('navigation', { name: '现在条' });
+    expect(await within(within(strip).getByRole('button', { name: '交付' })).findByText('已完成 · 正在推送')).toBeTruthy();
+    expect(delivery.getAttribute('aria-busy')).toBe('true');
+  } finally { finishPush(); }
   await within(delivery).findByRole('heading', { name: '已推送 · 工作完成' });
+  expect(await within(within(screen.getByRole('navigation', { name: '现在条' })).getByRole('button', { name: '交付' })).findByText('已完成 · 已推送')).toBeTruthy();
   expect(execFileSync('git', ['-C', remote, 'show', 'main:result.txt'], { encoding: 'utf8' })).toContain('末尾成果');
-  fireEvent.click(screen.getByRole('button', { name: '汇总报告' }));
+  fireEvent.click(screen.getByRole('link', { name: '回看已审核报告' }));
   review = await screen.findByRole('region', { name: '审核' });
   expect(await within(review).findByText('已决定 · 接受')).toBeTruthy();
   expect(within(review).queryByRole('button', { name: '接受' })).toBeNull();
@@ -590,7 +629,7 @@ test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只
   const terminal = within(ended).getByRole('article', { name: '工作说明与审核' });
   expect(within(terminal).queryByRole('button')).toBeNull();
   fireEvent.click(within(terminal).getByRole('link'));
-  fireEvent.click(screen.getByRole('button', { name: '汇总报告' }));
+  fireEvent.click(screen.getByRole('button', { name: /^汇总报告/ }));
   const readOnlyReview = await screen.findByRole('region', { name: '审核' });
   expect(within(readOnlyReview).getByText('终态仍可读取的汇总报告')).toBeTruthy();
   expect(within(readOnlyReview).getByText('已取消')).toBeTruthy();

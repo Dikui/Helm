@@ -1,5 +1,20 @@
-import type { Dispatch, GraphNode, NodeRef } from './types.js';
+import type { CardNode, Dispatch, GraphNode, NodeRef } from './types.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
+
+export const liveCardStatuses = ['verification-failed', 'blocked', 'executing', 'verifying'] as const;
+export type LiveCardStatus = typeof liveCardStatuses[number];
+export type CardFilter = LiveCardStatus | 'other';
+export function cardDisplayStatus(card: CardNode, nodes: GraphNode[], dispatches?: Dispatch[]) {
+  const latest = dispatches?.find(dispatch => dispatch.id === card.latestDispatchId);
+  if (['executing', 'verifying'].includes(card.status) && latest?.status === 'ended') {
+    if (latest.conclusion === 'failed') return 'verification-failed';
+    if (latest.conclusion === 'blocked') return 'blocked';
+  }
+  return card.status === 'waiting' && card.dependencies.some(ref => nodes.some(node => node.id === ref.id && node.type === 'gate' && node.status === 'pending')) ? 'decision' : card.status;
+}
+export function isLiveCardStatus(status: string): status is LiveCardStatus {
+  return liveCardStatuses.some(value => value === status);
+}
 
 // These edges only arrange the two workflow gates. Never send them to the API.
 export function displayTopology(nodes: GraphNode[]) {

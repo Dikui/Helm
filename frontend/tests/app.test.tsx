@@ -268,7 +268,7 @@ test('在跑与安静行不展开；打开工作后仍可暂停、恢复并查�
   expect(within(row).queryByRole('button')).toBeNull();
   fireEvent.click(within(row).getByRole('link'));
   await screen.findByRole('heading', { name: '管理进展' });
-  await within(screen.getByRole('region', { name: '对话' })).findByText('本轮 1 步 · 最新：检查邮件模板');
+  await within(screen.getByRole('navigation', { name: '现在条' })).findByText('本轮 1 步 · 检查邮件模板');
   fireEvent.click(screen.getByRole('button', { name: '操作' }));
   fireEvent.click(screen.getByRole('button', { name: '暂停工作' }));
   await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'paused');

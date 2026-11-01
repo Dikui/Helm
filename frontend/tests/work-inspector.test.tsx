@@ -33,7 +33,8 @@ test('检查器随对齐、执行、审核和交付阶段归默认；阶段内�
   render(<App baseUrl={daemon.url} />);
   await screen.findByRole('complementary', { name: '工作说明' });
   const aligningChat = screen.getByRole('region', { name: '对话' });
-  fireEvent.click(screen.getByRole('button', { name: '结构' }));
+  expect(within(screen.getByRole('navigation', { name: '现在条' })).queryByRole('button', { name: '结构' })).toBeNull();
+  act(() => { window.history.pushState(null, '', `/works/${work.id}?inspect=list`); window.dispatchEvent(new PopStateEvent('popstate')); });
   fireEvent.click(await screen.findByRole('tab', { name: '事件' }));
   const events = screen.getByRole('tabpanel', { name: '事件' });
   ok(await daemon.call('send-message', { workId: work.id, body: 'Alignment note', key: 'note' }));

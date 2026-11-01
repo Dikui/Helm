@@ -9,7 +9,7 @@ import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/a
 import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
-import { RoundSteps, Thinking } from '../conversation/RoundProgress.js';
+import { Thinking } from '../conversation/RoundProgress.js';
 import { ConversationScroll } from '../conversation/ConversationScroll.js';
 import type { Rounds } from '../conversation/types.js';
 import { Inspector } from '../../../shared/Inspector.js';
@@ -24,7 +24,6 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId });
   const rounds = useResource<Rounds>('list-rounds', { workId });
   const running = rounds.data?.rounds.find(round => round.status === 'running');
-  const latestRound = running ?? rounds.data?.rounds.at(-1);
   const [version, setVersion] = useState<number>();
   const [confirming, setConfirming] = useState(false);
   const confirmationBusy = useRef(false);
@@ -85,7 +84,6 @@ export function AligningWork({ workId, workBranch, showBrief, inspectorTitle }: 
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
       <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
-        {latestRound && <div className="aligning-round"><RoundSteps key={latestRound.id} workId={workId} round={latestRound} steps={rounds.data?.currentSteps ?? []} plan={rounds.data?.currentPlan ?? []} /></div>}
         <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" ref={input} value={body} disabled={submission.pending || submission.uncertain} placeholder={t('alignmentReply')}
           onChange={event => setBody(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }

@@ -104,8 +104,7 @@ export function ConversationView({ work }: { work: Work }) {
     <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={120} onResize={setDockHeight}
       max={() => (view.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => dock.current?.getBoundingClientRect().height ?? 200} />
     <div className="conversation-dock" ref={dock} style={dockHeight ? { height: dockHeight } : undefined}>
-    <RoundSteering workId={work.id} round={running ?? rounds.data?.rounds.at(-1)} steps={rounds.data?.currentSteps ?? []}
-      plan={rounds.data?.currentPlan ?? []} withdraw={messageId => void withdraw(messageId)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
+    <RoundSteering active={Boolean(running)} withdraw={messageId => void withdraw(messageId)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={work.runtimePauseReason}
       busy={interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} interrupt={() => void interrupt()} />
     {withdrawError && <ErrorNotice error={withdrawError} />}
     {interruptError && <ErrorNotice error={interruptError} />}
@@ -119,6 +118,7 @@ export function ConversationView({ work }: { work: Work }) {
       <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
       <div className="conversation-hints"><span><kbd>⏎</kbd> {running ? t('conversationQueue') : t('alignmentSend')} · <kbd>⇧⏎</kbd> {t('conversationNewline')}</span>
         <span><kbd>⌘⏎ / Ctrl+Enter</kbd> {t('conversationInterrupt')}</span>
+        <button type="button" className="conversation-interrupt" aria-label={t('conversationInterrupt')} disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()} title={t('conversationInterrupt')}><span aria-hidden="true">❚❚</span></button>
         <label>{t('conversationAbout')}<select value={scope} disabled={locked} onChange={event => setScope(event.target.value)}>
           {!validScope && <option value={scope} disabled>{t('conversationScopeUnavailable')}</option>}
           {scopes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}

@@ -5,28 +5,25 @@ import { useI18n, type MessageKey } from '../../../shared/i18n.js';
 import type { AgentEntry } from '../../settings/types.js';
 import { cardStatusLabels, cardStatusTones } from '../../inbox/presentation.js';
 import { AggregateBadge, nodeTitle, NodeStatus, ReadOnlyBadge } from './labels.js';
-import { dispatchDuration } from './presentation.js';
+import { cardDisplayStatus, dispatchDuration, isLiveCardStatus, type CardFilter } from './presentation.js';
 import type { CardNode, Dispatch, GraphNode } from './types.js';
 
 const groups = ['decision', 'executing', 'verifying', 'verification-failed', 'blocked', 'waiting', 'ready', 'paused', 'completed', 'skipped', 'cancelled'];
-export function CardList({ nodes, dispatches, select }: { nodes: GraphNode[]; dispatches?: Dispatch[]; select: (id: string) => void }) {
+export function CardList({ nodes, dispatches, select, filter }: { nodes: GraphNode[]; dispatches?: Dispatch[]; select: (id: string) => void; filter?: CardFilter }) {
   const { t } = useI18n();
   const now = useClock();
   const agents = useResource<AgentEntry[]>('list-agents');
   const cards = nodes.filter((node): node is CardNode => node.type === 'card');
   const labels: Record<string, MessageKey> = { ...cardStatusLabels, decision: 'inspectorNeedsDecision' };
-  const status = (card: CardNode) => {
-    const latest = dispatches?.find(dispatch => dispatch.id === card.latestDispatchId);
-    if (['executing', 'verifying'].includes(card.status) && latest?.status === 'ended') {
-      if (latest.conclusion === 'failed') return 'verification-failed';
-      if (latest.conclusion === 'blocked') return 'blocked';
-    }
-    return card.status === 'waiting' && card.dependencies.some(ref => nodes.some(node => node.id === ref.id && node.type === 'gate' && node.status === 'pending')) ? 'decision' : card.status;
-  };
+  const status = (card: CardNode) => cardDisplayStatus(card, nodes, dispatches);
+  const shown = cards.filter(card => {
+    const value = status(card) === 'decision' ? 'blocked' : status(card);
+    return !filter || (filter === 'other' ? !isLiveCardStatus(value) : value === filter);
+  });
   return <div className="work-card-list">
-    {!cards.length && <p className="muted">{t('graphEmpty')}</p>}
+    {!shown.length && <p className="muted">{t('graphEmpty')}</p>}
     {groups.map(group => {
-      const members = cards.filter(card => status(card) === group);
+      const members = shown.filter(card => status(card) === group);
       return members.length > 0 && <section key={group} aria-label={t(labels[group]!)}>
         <h3>{t(labels[group]!)} · {members.length}</h3>
         <div className="work-card-rows">{members.map(card => {

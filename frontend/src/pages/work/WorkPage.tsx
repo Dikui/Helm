@@ -1,6 +1,6 @@
 import { formatUsage } from '../../shared/token-usage.js';
 import { WorkDelivery } from './WorkDelivery.js';
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { elapsed, useClock } from '../../shared/clock.js';
 import { WorkActions } from './WorkActions.js';
 import { useResource } from '../../shared/data.js';
@@ -16,6 +16,9 @@ import { ConversationView } from './conversation/ConversationView.js';
 import { Inspector } from '../../shared/Inspector.js';
 import { WorkReview } from './brief/WorkReview.js';
 import { useWorkInspector } from './useWorkInspector.js';
+import { NowStrip } from './NowStrip.js';
+import { cardStatusLabels } from '../inbox/presentation.js';
+import { useWorkReview } from './brief/useWorkReview.js';
 import './work-inspector.css';
 
 export function WorkPage({ route }: { route: RouteParams }) {
@@ -54,18 +57,19 @@ function SelectedWork({ route }: { route: RouteParams }) {
 
 function WorkContent({ work }: { work: Work }) {
   const { t } = useI18n();
-  const { inspection, choose } = useWorkInspector(work.id, work.status);
+  const [pushing, setPushing] = useState(false);
+  const report = useWorkReview(work.id);
+  const { inspection, choose, filter, chooseCards } = useWorkInspector(work.id, work.status);
   const structure = !['spec', 'report', 'delivery'].includes(inspection);
-  const title = t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
+  const title = filter ? filter === 'other' ? t('nowInactiveCards') : t('nowFilteredCards').replace('{status}', t(cardStatusLabels[filter]!))
+    : t(inspection === 'spec' ? 'brief' : inspection === 'report' ? 'reviewReport' : inspection === 'delivery' ? 'inspectorDelivery' : inspection === 'coord' ? 'alignmentCoordinator' : inspection.startsWith('card:') ? 'graphInspector' : 'structure');
   return <>
-    <nav className="work-inspect-links" aria-label={t('shellInspector')}>
-      {(['spec', 'list', 'report', 'delivery'] as const).map(value => <button type="button" key={value} aria-pressed={value === 'list' ? structure : inspection === value} onClick={() => choose(value)}>{t(value === 'spec' ? 'brief' : value === 'list' ? 'structure' : value === 'report' ? 'reviewReport' : 'inspectorDelivery')}</button>)}
-    </nav>
+    <NowStrip work={work} inspection={inspection} filter={filter} choose={choose} chooseCards={chooseCards} pushing={pushing} report={report} />
     {work.status === 'aligning' ? <AligningWork workId={work.id} projectId={work.projectId} workBranch={work.workBranch} showBrief={inspection === 'spec'} inspectorTitle={title} /> : <ConversationView work={work} />}
     {inspection === 'spec' && work.status !== 'aligning' && <Inspector title={title}><BriefView work={work} /></Inspector>}
-    {inspection === 'report' && <Inspector title={title}><WorkReview work={work} /></Inspector>}
-    {inspection === 'delivery' && <Inspector title={title}><WorkDelivery work={work} /></Inspector>}
-    {structure && <Inspector title={title}><CardGraphView work={work} inspection={inspection} inspect={choose} /></Inspector>}
+    {inspection === 'report' && <Inspector title={title}><WorkReview work={work} report={report} /></Inspector>}
+    {inspection === 'delivery' && <Inspector title={title}><WorkDelivery work={work} onPushingChange={setPushing} /></Inspector>}
+    {structure && <Inspector title={title}><CardGraphView work={work} inspection={inspection} filter={filter} inspect={choose} /></Inspector>}
   </>;
 }
 
