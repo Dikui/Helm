@@ -63,13 +63,21 @@ export function verificationCommit(store: TaskStore, card: { id: string; workId:
   return dispatchGit(projectPath(store, card.workId), 'rev-parse', `refs/heads/${branch}`);
 }
 
-// Read tools flag verification conclusions whose commit the card has since moved past.
+// Read tools flag conclusions superseded by a commit or a later scratch execution ending.
 export function markOutdated(store: TaskStore, dispatches: Dispatch[]) {
   const commits = new Map<string, string | null>();
   return dispatches.map(item => {
-    if (item.purpose !== 'verification' || !item.startCommit) return item;
+    if (item.purpose !== 'verification') return item;
+    const card = cardDetails(store, item.workId, item.cardId);
+    if (card.workspace === 'scratch') {
+      const endedAfterStart = store.db.prepare(`SELECT 1 FROM events e JOIN dispatches d ON d.id = e.dispatch_id
+        WHERE e.card_id = ? AND e.action = 'dispatch-ended' AND d.purpose = 'execution'
+        AND e.id > (SELECT MIN(id) FROM events WHERE dispatch_id = ? AND action = 'dispatch-started') LIMIT 1`)
+        .get(item.cardId, item.id);
+      return { ...item, outdated: Boolean(endedAfterStart) };
+    }
+    if (!item.startCommit) return item;
     if (!commits.has(item.cardId)) {
-      const card = cardDetails(store, item.workId, item.cardId);
       const settled = ['completed', 'cancelled'].includes(card.status) || ['completed', 'cancelled'].includes(store.work(item.workId).status);
       // Completed cards no longer have a branch; retain the validity at completion.
       const completed = settled ? store.events({ workId: item.workId, cardId: item.cardId }).findLast(event => event.action === 'card-completed') : undefined;
@@ -177,8 +185,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
-  if (purpose === 'verification' && card.workspace === 'scratch') throw new RuleError('SCRATCH_VERIFICATION_UNSUPPORTED', '临时目录卡片暂不支持验收派单。');
-  if ((purpose === 'verification' || card.workspace === 'copy') && !projectGitReady(projectPath(store, work.id))) {
+  if (card.workspace === 'copy' && !projectGitReady(projectPath(store, work.id))) {
     requireGitInitialization(store, work.id, card.id);
   }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
@@ -209,8 +216,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   if (needsWorkCopy) store.transaction(() => ensureWorkCopy(store, work.id));
   const copy = needsWorkCopy ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.
-  if (purpose === 'verification' && !work.baseRef) recordBaseBranch(store, work.id);
-  const startCommit = purpose === 'verification' ? verificationCommit(store, card) : null;
+  if (purpose === 'verification' && card.workspace === 'copy' && !work.baseRef) recordBaseBranch(store, work.id);
+  const startCommit = purpose === 'verification' && card.workspace === 'copy' ? verificationCommit(store, card) : null;
   const id = randomUUID();
   const outputPath = join(store.dataDir, 'dispatches', id, 'steps');
   mkdirSync(outputPath, { recursive: true });

@@ -21,7 +21,7 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
   const requiresGit = (value: unknown) => {
     const result = value as any;
     assert.equal(result.ok, false);
-    assert.ok(['GIT_INITIALIZATION_PENDING', 'CARD_NOT_DISPATCHABLE', 'SCRATCH_VERIFICATION_UNSUPPORTED'].includes(result.error.code));
+    assert.ok(['GIT_INITIALIZATION_PENDING', 'CARD_NOT_DISPATCHABLE'].includes(result.error.code));
     rejected++;
   };
   const dispatch = (card: string, purpose: 'execution' | 'verification', check = ok): FakeStep => ({
@@ -39,8 +39,6 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
     [
       { type: 'tool', name: 'create-card', saveAs: 'read', arguments: { key: 'read', content: '分析文件' }, check: ok },
       dispatch('read', 'execution', requiresGit), dispatch('read', 'verification', requiresGit),
-      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, workspace: 'scratch' }), check: ok },
-      dispatch('read', 'verification', requiresGit),
       { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, workspace: 'scratch' }), check: ok },
       dispatch('read', 'execution'),
     ],
@@ -83,7 +81,7 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
   assert.equal(confirmed.result.baseCommit, null);
   await until(() => daemon.call('list-rounds', params), value => value.result.rounds.filter((round: any) => round.status === 'ended').length === 2);
   await until(async () => executorStarted, Boolean);
-  assert.equal(rejected, 3);
+  assert.equal(rejected, 2);
   release();
   await until(() => daemon.call('get-work', params), value => value.result.status === 'awaiting-review');
   const descriptions = (await daemon.call('get-work-descriptions', params)).result;
@@ -100,7 +98,7 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
   assert.equal(review.review.noCodeChanges, true);
   assert.equal(review.review.diff, '');
   assert.equal(review.review.diffUnavailableReason, null);
-  assert.equal(review.review.rejectedOperationCount, 3);
+  assert.equal(review.review.rejectedOperationCount, 2);
   assert.deepEqual((await daemon.call('list-work-files', params)).result, []);
   assert.equal(existsSync(join(projectPath, '.git')), false);
   assert.equal(existsSync(join(daemon.directory, 'data', 'worktrees', work.id)), false);

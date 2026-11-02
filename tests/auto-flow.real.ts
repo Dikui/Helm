@@ -3,7 +3,8 @@
 // Alignment is fixture setup; both subsequent coordinator rounds and both dispatches use real CLIs. No browser is started.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -28,7 +29,7 @@ const execution = `这是 Helm 自动流程执行冒烟。在当前卡片副本�
 读取文件确认内容，然后必须调用 helm MCP 的 submit-conclusion，conclusion=completed，reason 写文件名和实际内容。
 不自行执行 git add 或 git commit，运行层会保存提交。${restrictions}`;
 
-test('真实自动流程：执行完成后运行层派验收并合并卡片，期间不唤醒调度者，空闲后只唤醒一轮',
+for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 ${workspace}：执行完成后派验收并完成卡片，期间不唤醒调度者，空闲后只唤醒一轮`,
   { skip: !enabled, timeout: 600_000 }, async t => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-auto-flow-real-')));
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
@@ -40,6 +41,11 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
     try {
       const repo = join(directory, 'project');
       const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+      const verificationContent = workspace === 'scratch'
+        ? verification.replace('不得修改文件。', '读取确认后，把当前目录中的 auto-flow-result.txt 改为 reviewer-edit 加一个换行，用于验证验收副本隔离。')
+        : verification;
+      const executionContent = workspace === 'scratch' ? execution.replace('当前卡片副本', '当前临时目录')
+        .replace('不自行执行 git add 或 git commit，运行层会保存提交。', '不执行 git 操作，运行层会保存文件成果。') : execution;
       execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
       await writeFile(join(repo, 'README.md'), 'autoFlow real smoke baseline\n');
       git('add', 'README.md');
@@ -63,14 +69,33 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
         const instructions = attempt === 1
           ? `这是 Helm 自动流程冒烟。工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 只用当前 helm MCP 端点，必须依次实际成功调用以下两个工具：
-1. create-card，key=auto-flow-card，content=写入 auto-flow-result.txt，内容为 auto-flow-ok 加一个换行，workspace=copy，needsVerification=true，autoFlow 必须为 ${JSON.stringify({ verifications: [{ agentId: verifierId, content: verification, needsBrowser: false }] })}。
-2. create-dispatch，key=auto-flow-execution，cardId 用上一步返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false，content 必须为 ${JSON.stringify(execution)}。
+1. create-card，key=auto-flow-card，content=写入 auto-flow-result.txt，内容为 auto-flow-ok 加一个换行，workspace=${workspace}，needsVerification=true，autoFlow 必须为 ${JSON.stringify({ verifications: [{ agentId: verifierId, content: verificationContent, needsBrowser: false }] })}。
+2. create-dispatch，key=auto-flow-execution，cardId 用上一步返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false，content 必须为 ${JSON.stringify(executionContent)}。
 禁止手动派验收、修改卡片或完成卡片；这些步骤由运行层自动推进。两个调用成功后立即简短回答并退出，不等待派单。`
           : `这是 Helm 自动流程完成后的唤醒轮次。${restrictions} 不调用任何工具，不改变工作状态，只回答“自动流程唤醒已收到”后退出。`;
         return query({ ...args, prompt: `${instructions}\n\n启动简报：\n${args.prompt}`,
           options: { ...args.options, maxTurns: 16 } });
       } });
-      const executor = new ClaudeExecutorDriver({ query: args => query({ ...args, options: { ...args.options, maxTurns: 12 } }) });
+      const paths: string[] = [];
+      const observed = (driver: Driver): Driver => ({
+        capabilities: driver.capabilities,
+        checkAvailability: agent => driver.checkAvailability(agent),
+        async start(options) {
+          const session = await driver.start(options);
+          paths.push(options.cwd);
+          return { ...session, events: (async function* () {
+            for await (const event of session.events) {
+              if (workspace === 'scratch' && paths.length === 2 && event.type === 'end' && event.reason === 'completed') {
+                assert.notEqual(paths[0], paths[1]);
+                assert.equal(await readFile(join(paths[0]!, 'auto-flow-result.txt'), 'utf8'), 'auto-flow-ok\n');
+                assert.equal(await readFile(join(paths[1]!, 'auto-flow-result.txt'), 'utf8'), 'reviewer-edit\n');
+              }
+              yield event;
+            }
+          })() };
+        },
+      });
+      const executor = observed(new ClaudeExecutorDriver({ query: args => query({ ...args, options: { ...args.options, maxTurns: 12 } }) }));
       const setup = new FakeDriver([[
         { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
           key: 'draft', requirements: '自动流程真实冒烟', boundary: '临时项目，无浏览器', criteria: '写文件、自动验收和完成后唤醒' }),
@@ -83,7 +108,7 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
         start: options => (options.agent.role === 'executor' ? executor : started++ === 0 ? setup : coordinator).start(options),
       };
       daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir,
-        drivers: { 'claude-sdk': claude, codex } });
+        drivers: { 'claude-sdk': claude, codex: observed(codex) } });
       const call = async (name: string, params: object = {}): Promise<any> => {
         const response = await fetch(`${daemon!.url}/api/${name}`, { method: 'POST',
           headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
@@ -103,9 +128,9 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
       assert.equal(cards.length, 1);
       const card = cards[0];
       assert.equal(card.key, 'auto-flow-card');
-      assert.equal(card.workspace, 'copy');
+      assert.equal(card.workspace, workspace);
       assert.equal(card.needsVerification, true);
-      assert.deepEqual(card.autoFlow, { verifications: [{ agentId: verifierId, content: verification, needsBrowser: false }] });
+      assert.deepEqual(card.autoFlow, { verifications: [{ agentId: verifierId, content: verificationContent, needsBrowser: false }] });
       const dispatches = await call('list-dispatches', params) as Dispatch[];
       assert.equal(dispatches.length, 2);
       const run = dispatches.find(item => item.key === 'auto-flow-execution');
@@ -151,8 +176,22 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
       assert.equal(sequence.some(event => event.action === 'browser-started'), false);
       assert.equal(card.status, 'completed');
       const work = await call('get-work', params);
-      assert.ok(work.workBranch);
-      assert.equal(execFileSync('git', ['-C', repo, 'show', `${work.workBranch}:auto-flow-result.txt`], { encoding: 'utf8' }), 'auto-flow-ok\n');
+      if (workspace === 'scratch') {
+        assert.equal(work.workBranch, null);
+        assert.equal(run.startCommit, null);
+        assert.equal(vote.startCommit, null);
+        assert.equal(paths.length, 2);
+        assert.equal(paths[0], join(directory, 'data', 'scratch', initial.id, card.id));
+        assert.equal(paths[1], join(directory, 'data', 'worktrees', initial.id, 'verifications', vote.id));
+        for (const path of paths) assert.equal(existsSync(path), false);
+        assert.equal(vote.outdated, false);
+        const artifact = (await call('get-dispatch-artifacts', { ...params, dispatchId: run.id })).find((item: any) => item.name === 'auto-flow-result.txt');
+        assert.ok(artifact);
+        assert.equal((await call('read-artifact', { ...params, artifactId: artifact.id })).content, 'auto-flow-ok\n');
+      } else {
+        assert.ok(work.workBranch);
+        assert.equal(execFileSync('git', ['-C', repo, 'show', `${work.workBranch}:auto-flow-result.txt`], { encoding: 'utf8' }), 'auto-flow-ok\n');
+      }
     } catch (error) {
       const sequence = await events?.().catch(() => []);
       console.error('autoFlow 真实冒烟事件序列：\n' + (sequence ?? []).map(event => {

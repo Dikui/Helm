@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { removeScratchDirectory } from './scratch.js';
 import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
-import { dispatchGit, listDispatches, revokeDispatch, verificationCommit } from './dispatch.js';
+import { dispatchGit, listDispatches, markOutdated, revokeDispatch, verificationCommit } from './dispatch.js';
 import { cancelCard as recordCancellation, cardDetails, refreshCardReadiness, type Card } from './graph.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent } from './store.js';
 
@@ -59,6 +59,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须至少有一票正常结束且通过的验收才能标完成；计票由调度者负责。');
   }
   if (card.workspace === 'scratch') {
+    if (card.needsVerification && !markOutdated(store, passed).some(item => !item.outdated)) {
+      throw new RuleError('VERIFICATION_OUTDATED', '当前临时目录没有有效的通过验收票，须重新验收。');
+    }
     removeScratchDirectory(store, card.workId, card.id);
     const checkedCommit = null;
     return store.transaction(() => {

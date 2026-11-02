@@ -216,7 +216,7 @@ export const operations: readonly Operation[] = [
     execute: ({ store, actor }, params) => submitConclusion(store, actor, params),
   }),
   operation({
-    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结论；完整回答和派单内容用 get-dispatch 读；验收派单的 startCommit 是它检查的提交，outdated=true 表示卡片已有新提交、结论已过期', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'list-dispatches', description: '读取工作或卡片的全部派单及结论；完整回答和派单内容用 get-dispatch 读；验收派单的 startCommit 是它检查的提交，outdated=true 表示卡片已有新提交，或临时目录卡片在验收开始后又有执行派单结束，结论已过期', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), cardId: z.string().min(1).optional() }).strict(),
     execute: ({ store, actor }, { workId, cardId }) => markOutdated(store, listDispatches(store, workId, cardId))
       .map(dispatch => actor.type === 'coordinator-round' ? omit(dispatch, coordinatorListOmits) : dispatch),
