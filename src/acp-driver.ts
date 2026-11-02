@@ -199,15 +199,15 @@ export class AcpDriver implements Driver {
     const profile = this.profile;
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
-    const readOnly = options.sandbox.mode === 'read-only';
-    if (agent.role === 'coordinator' && (!readOnly || options.sandbox.writableRoots.length)) {
+    const coordinator = agent.role === 'coordinator';
+    if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length)) {
       throw new Error('ACP coordinator requires a read-only coordinator round');
     }
-    if (agent.driver !== this.agent || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1)) {
+    if (agent.driver !== this.agent || (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1))) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (!readOnly && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
+    if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
     options.signal?.throwIfAborted();
     const queue: DriverEvent[] = [];
     let wake: (() => void) | undefined;
@@ -236,7 +236,6 @@ export class AcpDriver implements Driver {
       void close();
     };
     const env = this.environment(options.env, agent);
-    if (readOnly) Object.assign(env, this.agent === 'deepseek' ? { DSH_PERMISSION_MODE: 'read-only' } : { GROK_SANDBOX: grokProfiles.readOnly });
     const home = await this.homeAvailability(agent, env);
     if (home) throw new Error(home.reason);
     const { acp, close: closeAgent } = await this.launch(agent, { ...options, cwd }, env, {

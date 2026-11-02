@@ -84,17 +84,16 @@ export class CodexDriver implements Driver {
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
-    const readOnly = options.sandbox.mode === 'read-only';
     const agent = options.agent;
     if (coordinator && (agent.role !== 'coordinator' || options.sandbox.mode !== 'read-only'
       || options.sandbox.writableRoots.length)) {
       throw new Error('CodexCoordinatorDriver requires a read-only coordinator round');
     }
-    if (!coordinator && (agent.role !== 'executor' || (readOnly ? options.sandbox.writableRoots.length !== 0 : options.sandbox.writableRoots.length !== 1))) {
+    if (!coordinator && (agent.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
       throw new Error('CodexExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (!readOnly && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
+    if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('Codex executor writable roots must contain only its card copy');
     if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
@@ -138,8 +137,8 @@ export class CodexDriver implements Driver {
           // A permissions profile rather than sandbox_workspace_write, which cannot deny reads. Writes
           // stay limited to the thread cwd (its only workspace root); /tmp and TMPDIR stay read-only.
           default_permissions: helmProfile,
-          permissions: { [helmProfile]: { filesystem: { ':root': 'read', ...!readOnly ? { ':workspace_roots': 'write' } : {},
-            ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) }, ...!readOnly ? { network: { enabled: true } } : {} } },
+          permissions: { [helmProfile]: { filesystem: { ':root': 'read', ...!coordinator ? { ':workspace_roots': 'write' } : {},
+            ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) }, ...!coordinator ? { network: { enabled: true } } : {} } },
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             ...(server.type === 'stdio' ? { command: server.command, args: server.args, env: server.env }
               : { url: server.url, http_headers: server.headers }),

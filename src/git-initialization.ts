@@ -97,7 +97,7 @@ export function requireGitInitialization(store: TaskStore, workId: string, cardI
     return store.gate(workId, id);
   });
   throw new RuleError(gate.decision === 'refuse' ? 'GIT_INITIALIZATION_REFUSED' : 'GIT_INITIALIZATION_PENDING',
-    gate.decision === 'refuse' ? `用户已拒绝初始化 git：${gate.comment}。卡片保持阻塞，可改成只读或取消。`
+    gate.decision === 'refuse' ? `用户已拒绝初始化 git：${gate.comment}。卡片保持阻塞，可改为临时目录或取消。`
       : '已请用户决定是否初始化 git。卡片已阻塞，请等待关卡决定后重新派单。', 409, { gateId: gate.id, gateWorkId: gate.workId });
 }
 

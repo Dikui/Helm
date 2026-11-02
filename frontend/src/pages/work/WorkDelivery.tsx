@@ -20,7 +20,7 @@ export function WorkDelivery({ delivery: d, reload }: { delivery: WorkDeliverySt
   if (!d.visible) return null;
   const { work } = d;
   const title = d.pushing ? 'nowPushing' : d.failedPush ? 'nowPushFailed' : work.status === 'completed'
-    ? d.withoutMerge ? 'nowWithoutMerge' : d.noCodeChanges ? 'nowReadOnly' : work.delivery?.push?.status === 'pushed' ? 'nowPushed'
+    ? d.withoutMerge ? 'nowWithoutMerge' : d.noCodeChanges ? 'nowNoCodeChanges' : work.delivery?.push?.status === 'pushed' ? 'nowPushed'
       : d.merge?.status === 'already-contained' ? 'nowContained' : d.merge?.status === 'merged' ? 'nowMerged' : 'deliveryCompleted'
     : d.solving ? 'deliverySolving' : d.manual ? 'deliveryManual' : d.resolved ? 'deliveryResolved'
       : d.conflict ? 'deliveryConflict' : d.failedMerge ? 'deliveryMergeFailed' : work.status === 'accepted' ? 'nowAwaitingMerge' : work.status;
@@ -35,7 +35,7 @@ export function WorkDelivery({ delivery: d, reload }: { delivery: WorkDeliverySt
     <div className="delivery-sub">{t('inspectorDelivery')}</div>
     <h2>{t(title)}</h2><p>{t(hint)}</p>
     {reason && <details className="delivery-details"><summary>{t('deliveryRawReason')}</summary><pre>{reason}</pre></details>}
-    {d.noCodeChanges ? <><h3>{t('deliveryReadonly')}</h3><p className="hint">{t('deliveryReadonlyHint')}</p></> : <>
+    {d.noCodeChanges ? <><h3>{t('deliveryNoCodeChangesTitle')}</h3><p className="hint">{t('deliveryNoCodeChangesHint')}</p></> : <>
       <h3>{t('graphBranch')}</h3><div className="delivery-branches" aria-label={t('deliveryBranchFlow')}>
         <span className="ref">{d.merge?.workBranch || work.workBranch}</span><span aria-hidden="true">→</span><span className="ref">{branch(d.merge?.baseBranch || work.baseRef)}</span>
         {d.preview?.remote && <><span aria-hidden="true">→</span><span className="ref">{d.preview.remote}/{branch(d.preview.remoteBranch)}</span></>}
@@ -49,7 +49,7 @@ export function WorkDelivery({ delivery: d, reload }: { delivery: WorkDeliverySt
     {d.solving && d.resolution && <p className="hint">{t('deliveryFixedBase')} <code>{d.resolution.baseCommit}</code></p>}
     {d.notContained && d.manual && <p role="status">{t('deliveryNotContained')}</p>}
     {work.status === 'completed' && <details className="delivery-cleanup"><summary>{t('deliveryCleanup')}{work.delivery?.cleanup?.reason && <span className="delivery-cleanup-warning"> · {t('deliveryCleanupFailedHint')}</span>}</summary><section aria-label={t('deliveryCleanup')}><p className="hint" role={work.delivery?.cleanup?.reason ? 'status' : undefined}>{t(work.delivery?.cleanup?.reason ? 'deliveryCleanupFailedHint'
-        : work.delivery?.cleanup ? d.noCodeChanges ? 'deliveryReadonlyCleanup' : d.withoutMerge || !['merged', 'already-contained'].includes(d.merge?.status ?? '') ? 'deliveryCleanupKeptBranch' : 'deliveryCleanupDone' : 'deliveryCleanupPending')}</p>
+        : work.delivery?.cleanup ? d.noCodeChanges ? 'deliveryNoCodeChangesCleanup' : d.withoutMerge || !['merged', 'already-contained'].includes(d.merge?.status ?? '') ? 'deliveryCleanupKeptBranch' : 'deliveryCleanupDone' : 'deliveryCleanupPending')}</p>
       {work.delivery?.cleanup?.reason && <details className="delivery-details"><summary>{t('deliveryRawReason')}</summary><pre>{work.delivery.cleanup.reason}</pre></details>}</section>
     </details>}
     {d.noCodeChanges && <DeliveryArtifacts workId={work.id} />}

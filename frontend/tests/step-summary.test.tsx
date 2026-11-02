@@ -70,3 +70,10 @@ test('运行层登记的事件动作均有中文摘要名，未知事件保留�
   expect(systemValueLabel('Bash · npm run check', zh)).toBe('运行命令 · npm run check');
   expect(eventSummary({ id: 1, action: 'auto-flow-stopped', time: '', workId: 'w', cardId: null, dispatchId: null, object: { type: 'card', id: 'c' }, details: { step: 'verification', reason: '等待处理' } }, zh)).toBe('自动派单已停止 · 验收 · 等待处理');
 });
+
+test('历史只读违规事件使用通用摘要，保留可读后备', () => {
+  const event = { id: 1, action: 'dispatch-read-only-violated', time: '', workId: 'work', cardId: null,
+    dispatchId: 'dispatch', object: { type: 'dispatch', id: 'dispatch' }, details: { status: 'violated', paths: ['report.md'] } };
+  expect(eventSummary(event, key => messages.zh[key])).toBe('记录工作事件');
+  expect(eventSummary(event, key => messages.en[key])).toBe('Work event recorded');
+});

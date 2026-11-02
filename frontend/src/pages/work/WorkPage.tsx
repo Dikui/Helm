@@ -56,7 +56,7 @@ function SelectedWork({ route }: { route: RouteParams }) {
     : work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'deliveryMergeFailed'
     : work?.status === 'completed' ? work.delivery?.completedWithoutMerge ? 'nowWithoutMerge'
     : work.delivery?.push?.status === 'pushed' ? 'nowPushed' : work.delivery?.merge?.status === 'already-contained' ? 'nowContained'
-    : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowReadOnly'
+    : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowNoCodeChanges'
     : work?.status === 'accepted' ? 'nowAwaitingMerge' : work?.status;
   const tone = work?.status === 'accepted' && work.delivery?.merge?.status === 'failed' ? 'bad'
     : work?.status === 'executing' || work?.status === 'merging' || solving ? 'run'

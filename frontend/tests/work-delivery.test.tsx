@@ -30,7 +30,7 @@ const workId = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
 const saved = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result.id;
 const tool = (name: string, args: Record<string, unknown> | ((ctx: FakeContext) => Record<string, unknown>), saveAs?: string): FakeStep => ({ type: 'tool', name, arguments: args, saveAs, check: ok });
 const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-async function prepare(options: { readonly?: boolean; resolution?: FakeScript } = {}) {
+async function prepare(options: { scratch?: boolean; resolution?: FakeScript } = {}) {
   const executors: FakeScript[] = [];
   const scripts: FakeScript[] = [];
   const stages = new Map<string, FakeScript>();
@@ -58,13 +58,13 @@ async function prepare(options: { readonly?: boolean; resolution?: FakeScript } 
     const number = ++sequence;
     let release!: () => void;
     const executed = new Promise<void>(resolve => { release = resolve; });
-    executors.push(options.readonly ? [{ type: 'write', path: 'README.md', content: 'baseline\n' }]
+    executors.push(options.scratch ? [{ type: 'write', path: 'README.md', content: 'baseline\n' }]
       : [{ type: 'write', path: number === 1 ? 'result.txt' : 'other-work.txt', content: 'work change\n' }]);
     const work = (await daemon!.call('send-message', { projectId: daemon!.project.id, key: `start-${number}`, body: number === 1 ? 'Delivery work' : 'Another delivery' })).result.work;
     const descriptions = (await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length > 0)).result;
     await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
     stages.set(work.id, [
-      tool('create-card', { workId: work.id, key: 'card', content: 'Delivery card', workspace: options.readonly ? 'scratch' : 'copy' }, 'card'),
+      tool('create-card', { workId: work.id, key: 'card', content: 'Delivery card', workspace: options.scratch ? 'scratch' : 'copy' }, 'card'),
       tool('create-dispatch', ctx => ({ workId: work.id, key: 'execute', cardId: saved(ctx, 'card'), agentId: 'claude-executor' })),
       { type: 'hang', until: executed },
       tool('complete-card', ctx => ({ workId: work.id, cardId: saved(ctx, 'card') })),
@@ -319,10 +319,10 @@ test.each(['no-remote', 'no-commits', 'preview-failed'] as const)('%s 预览不�
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-test('只读完成显示真实成果和导出删除入口，不读取推送预览', async () => {
-  await prepare({ readonly: true }); show();
+test('临时目录工作完成显示真实成果和导出删除入口，不读取推送预览', async () => {
+  await prepare({ scratch: true }); show();
   await screen.findByRole('region', { name: '合入与推送' });
-  expect(within(delivery()).getByRole('heading', { name: '已完成 · 只读工作' })).toBeTruthy();
+  expect(within(delivery()).getByRole('heading', { name: '已完成 · 无代码改动' })).toBeTruthy();
   fireEvent.click(await within(delivery()).findByRole('button', { name: 'README.md' }));
   const artifact = await screen.findByRole('dialog', { name: 'README.md' });
   expect(await within(artifact).findByText('baseline')).toBeTruthy();

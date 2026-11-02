@@ -48,7 +48,7 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
   const deliveryState: MessageKey = pushing ? 'nowPushing' : work.delivery?.push?.status === 'failed' ? 'nowPushFailed'
     : work.status === 'completed' ? work.delivery?.completedWithoutMerge ? 'nowWithoutMerge'
     : work.delivery?.push?.status === 'pushed' ? 'nowPushed' : work.delivery?.merge?.status === 'already-contained' ? 'nowContained'
-    : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowReadOnly'
+    : work.delivery?.merge?.status === 'merged' ? 'nowMerged' : 'nowNoCodeChanges'
     : work.status === 'merge-queued' || work.status === 'merging' ? work.status
     : work.delivery?.resolution?.status === 'solving' ? 'deliverySolving'
     : work.delivery?.resolution?.status === 'manual' ? 'deliveryManual'
@@ -60,7 +60,7 @@ export function NowStrip({ work, inspection, filter, choose, chooseCards, pushin
     deliveryMergeFailed: 'nowIdleMergeFailed', nowMerged: 'nowEndedMerged', nowContained: 'nowEndedContained',
     nowPushing: 'nowEndedPushing', nowPushFailed: 'nowEndedPushFailed', nowPushed: 'nowEndedPushed',
     deliveryConflict: 'nowIdleConflict', deliverySolving: 'nowSolvingConflict', deliveryResolved: 'nowIdleResolved',
-    deliveryManual: 'nowIdleManual', nowReadOnly: 'nowEndedReadOnly', nowWithoutMerge: 'nowEndedWithoutMerge',
+    deliveryManual: 'nowIdleManual', nowNoCodeChanges: 'nowEndedNoCodeChanges', nowWithoutMerge: 'nowEndedWithoutMerge',
   };
   const deliveryTone = work.delivery?.push?.status === 'failed' ? 'bad' : pushing || ['merge-queued', 'merging'].includes(work.status) || work.delivery?.resolution?.status === 'solving' && ['executing', 'paused'].includes(work.status) ? 'run'
     : work.status === 'completed' ? 'quiet' : 'att';

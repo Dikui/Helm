@@ -70,7 +70,7 @@ test('收件箱中英文同步，拒绝须有原因且卡片保持阻塞，工�
   fireEvent.change(within(gate).getByLabelText('Comment (required to refuse)'), { target: { value: 'Keep this directory outside git' } });
   fireEvent.click(within(gate).getByRole('button', { name: 'Refuse initialization' }));
   const chat = screen.getByRole('region', { name: 'Chat' });
-  await within(chat).findByText('Initialization was refused. The card stays blocked; the coordinator can make it read-only or cancel it.');
+  await within(chat).findByText('Initialization was refused. The card stays blocked; the coordinator can switch it to a scratch directory or cancel it.');
   await within(chat).findByText('Keep this directory outside git');
   await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds[2]?.status === 'ended');
   const graph = (await daemon.call('get-card-graph', { workId: work.id })).result;

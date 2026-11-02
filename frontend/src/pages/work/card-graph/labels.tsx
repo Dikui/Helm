@@ -43,11 +43,6 @@ export function AggregateBadge() {
   return <span className="cg-aggregate" title={t('graphAggregateHint')}>{t('graphAggregate')}</span>;
 }
 
-export function ReadOnlyBadge() {
-  const { t } = useI18n();
-  return <span className="cg-read-only" title={t('graphReadOnlyHint')}>{t('graphReadOnly')}</span>;
-}
-
 export function WorkspaceBadge({ workspace }: { workspace: 'copy' | 'scratch' }) {
   const { t } = useI18n();
   return <span className="cg-workspace">{t(workspace === 'scratch' ? 'graphWorkspaceScratch' : 'graphWorkspaceCopy')}</span>;

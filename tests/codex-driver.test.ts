@@ -12,7 +12,7 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 // Codex runs every Helm agent under one permissions profile: whole-disk read except credentials,
-// and for writing executors the card copy (thread cwd) plus network.
+// and for executors the card copy (thread cwd) plus network.
 function assertProfile(thread: any, write: boolean) {
   assert.equal(thread.permissions, 'helm');
   assert.equal(Object.hasOwn(thread, 'sandbox'), false);
@@ -317,10 +317,10 @@ for (const role of ['executor', 'coordinator'] as const) test(`Codex ${role} 中
 
 for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时仍拒绝错误沙箱和卡片副本外的可写根`, async t => {
   const ctx = await fixture(t, []);
-  for (const sandbox of [{ mode: 'read-only', writableRoots: [ctx.directory] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] },
+  for (const sandbox of [{ mode: 'read-only', writableRoots: [] }, { mode: 'read-only', writableRoots: [ctx.directory] }, { mode: 'workspace-write', writableRoots: [ctx.directory, tmpdir()] },
     { mode: 'workspace-write', writableRoots: [tmpdir()] }] as const) {
     await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, loadGlobalConfig },
-      sandbox: { ...sandbox, writableRoots: [...sandbox.writableRoots] } }), /card copy/);
+      sandbox: { ...sandbox, writableRoots: [...sandbox.writableRoots] } }).then(session => session.cancel()), /card copy/);
   }
   assert.deepEqual(await ctx.requests(), []);
 });
@@ -480,18 +480,18 @@ test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近
 });
 
 
-for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时只读卡片在新建和续跑的 thread 与 turn 都使用只读沙箱`, async t => {
+for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时执行者新建和续跑的 thread 与 turn 都可写可联网`, async t => {
   const ctx = await fixture(t, [completed()]);
   for (const resumeSessionId of [undefined, 'thread-scripted']) {
     const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.options.agent, loadGlobalConfig },
-      resumeSessionId, sandbox: { mode: 'read-only', writableRoots: [] } });
-    await session.send('只读分析');
+      resumeSessionId });
+    await session.send('联网调研并写报告');
     await collect(session.events);
     session.cancel();
   }
   const requests = await ctx.requests();
   for (const thread of requests.filter(request => ['thread/start', 'thread/resume'].includes(request.method))) {
-    assertProfile(thread.params, false);
+    assertProfile(thread.params, true);
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);
   }
   for (const turn of requests.filter(request => request.method === 'turn/start')) {

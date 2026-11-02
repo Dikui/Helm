@@ -13,7 +13,7 @@ interface Observation { options: SessionOptions; sessionId: string; messages: an
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 // The real coordinator performs alignment, dispatch and review. A fake
-// executor completes the read-only card so this smoke needs only one login.
+// executor completes the card so this smoke needs only one login.
 export async function acpCoordinatorSmoke(t: TestContext, kind: 'grok' | 'deepseek') {
   const stagedAuth = join(homedir(), kind === 'grok' ? '.grok/auth.json' : '.dsh/.credentials.yaml');
   assert.ok((await stat(stagedAuth)).isFile(), `先运行 ${kind === 'grok' ? 'grok login' : 'dsh web'} 登录；测试只链接 CLI 的凭据，不读取内容`);

@@ -146,8 +146,8 @@ test('等你格随确认、决策和审核出现，报告与交付按阶段开�
   expect(within(strip).queryByRole('button', { name: /^等你审核/ })).toBeNull();
   fireEvent.click(delivery);
   expect(window.location.search).toBe('?inspect=delivery');
-  expect(await within(delivery).findByText('已完成 · 只读工作')).toBeTruthy();
-  expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringContaining('调度者'), '交付已完成 · 只读工作', '说明 v1', '结构']);
+  expect(await within(delivery).findByText('已完成 · 无代码改动')).toBeTruthy();
+  expect(within(strip).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringContaining('调度者'), '交付已完成 · 无代码改动', '说明 v1', '结构']);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(screen.getByRole('navigation', { name: 'Now strip' }).textContent).not.toMatch(/[\u3400-\u9fff]/);
 });

@@ -71,7 +71,7 @@ for (const agent of ['claude-executor', 'codex-executor', 'grok-executor', 'deep
     for (const [dispatch, content] of [[first, 'draft\n'], [second, 'revised\n']] as const) {
       assert.equal(dispatch.startCommit, null);
       assert.equal(dispatch.endCommit, null);
-      assert.equal(dispatch.readOnlyCheck, null);
+      assert.equal('readOnlyCheck' in dispatch, false);
       const files = dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[];
       assert.deepEqual(files.map(file => [file.kind, file.name]), [['file', 'report.txt']]);
       assert.equal(readArtifact(ctx.store, 'work', String(files[0]!.id)).content, content);

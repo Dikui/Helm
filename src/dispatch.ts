@@ -12,7 +12,6 @@ import { redactDispatchContent, redactDispatchText } from './project-environment
 import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 import { readArtifactDiff } from './artifact-diff.js';
-import type { ReadOnlyCheck } from './read-only-check.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -27,21 +26,19 @@ export interface Dispatch {
   endReason: EndReason | null; abortReason: string | null; finalAnswer: string | null;
   conclusion: 'completed' | 'blocked' | 'passed' | 'failed' | 'undeclared'; conclusionReason: string | null; usage: TokenUsage; failure: string | null;
   outdated?: boolean;
-  readOnlyCheck: ReadOnlyCheck | null;
 }
 
 const dispatchColumns = `id, work_id AS workId, card_id AS cardId, key, purpose, agent_id AS agentId,
   agent_snapshot AS agent, content, status, resume_session_id AS resumeSessionId, session_id AS sessionId, sqlite_path AS sqlitePath,
   created_at AS createdAt, started_at AS startedAt, ended_at AS endedAt, start_commit AS startCommit, end_commit AS endCommit,
   output_path AS outputPath, end_reason AS endReason, abort_reason AS abortReason, final_answer AS finalAnswer,
-  conclusion, conclusion_reason AS conclusionReason, usage, failure, read_only_check AS readOnlyCheck,
+  conclusion, conclusion_reason AS conclusionReason, usage, failure,
   needs_browser AS needsBrowser, browser_pgid AS browserPgid, browser_started_at AS browserStartedAt,
   port_start AS portStart, port_end AS portEnd, pgid, process_started_at AS processStartedAt,
   card_content_snapshot AS cardContentSnapshot, work_description_id AS workDescriptionId, work_description_version AS workDescriptionVersion`;
 
 function readDispatch(row: Record<string, unknown>, outputsDeleted: boolean): Dispatch {
-  return { ...row, readOnlyCheck: row.readOnlyCheck ? JSON.parse(String(row.readOnlyCheck)) : null,
-    outputStatus: outputsDeleted ? 'deleted' : 'available', needsBrowser: Boolean(row.needsBrowser), agent: JSON.parse(String(row.agent)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
+  return { ...row, outputStatus: outputsDeleted ? 'deleted' : 'available', needsBrowser: Boolean(row.needsBrowser), agent: JSON.parse(String(row.agent)), usage: JSON.parse(String(row.usage)) } as unknown as Dispatch;
 }
 
 export function getDispatch(store: TaskStore, workId: string, dispatchId: string) {

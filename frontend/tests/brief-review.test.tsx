@@ -655,7 +655,7 @@ test('审核没有 diff 或整体验收时如实显示，默认生效版本通�
   expect(within(review).queryByLabelText('Diff 内容')).toBeNull();
 });
 
-test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接受后直接完成并隐藏交付按钮（%s）', async language => {
+test.each(['zh', 'en'])('只有临时目录卡片的工作显示无代码改动，接受后直接完成并隐藏交付按钮（%s）', async language => {
   let release!: () => void;
   const executionEnded = new Promise<void>(resolve => { release = resolve; });
   daemon = await uiFixture([[draft(1)], [
@@ -683,7 +683,7 @@ test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接�
     expect(within(review).queryByText(/无法读取.*diff/)).toBeNull();
     fireEvent.click(within(review).getByRole('button', { name: language === 'zh' ? '接受' : 'Accept' }));
     const delivery = await screen.findByRole('region', { name: language === 'zh' ? '合入与推送' : 'Merge and push' });
-    expect(await within(delivery).findByRole('heading', { name: language === 'zh' ? '已完成 · 只读工作' : 'Completed · read-only work' })).toBeTruthy();
+    expect(await within(delivery).findByRole('heading', { name: language === 'zh' ? '已完成 · 无代码改动' : 'Completed · no code changes' })).toBeTruthy();
     expect(within(delivery).queryByRole('button', { name: /^(合入|推送|Merge|Push)$/ })).toBeNull();
     expect(within(delivery).getByRole('button', { name: language === 'zh' ? '导出' : 'Export' })).toBeTruthy();
     expect(within(delivery).getByRole('button', { name: language === 'zh' ? '删除输出' : 'Delete outputs' })).toBeTruthy();

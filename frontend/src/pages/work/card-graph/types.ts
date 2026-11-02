@@ -20,7 +20,6 @@ export interface Dispatch {
   abortReason: string | null; finalAnswer: string | null; failure: string | null;
   conclusion: 'completed' | 'blocked' | 'passed' | 'failed' | 'undeclared'; conclusionReason: string | null;
   usage: Usage; outputStatus: 'available' | 'deleted';
-  readOnlyCheck?: import('../../../../../src/read-only-check.js').ReadOnlyCheck | null;
 }
 export type OutputStep =
   | { type: 'plan'; step: number; entries: import('../../../../../src/driver.js').PlanEntry[] }

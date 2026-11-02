@@ -22,7 +22,6 @@ export function DispatchDetails({ workId, dispatchId, lastStep, initialStep, sho
         {detail.data.conclusionReason && <><dt>{t('graphReason')}</dt><dd>{detail.data.conclusionReason}</dd></>}
       </dl>
       {detail.data.failure && <p className="error">{detail.data.failure}</p>}
-      <ReadOnlyCheckResult check={detail.data.readOnlyCheck} />
       {detail.data.status === 'ended' && <section aria-label={t('graphFinalAnswer')}><h3>{t('graphFinalAnswer')}</h3><p className="cg-prose">{detail.data.finalAnswer || t('graphNoFinalAnswer')}</p></section>}
       {detail.data.outputStatus === 'deleted' ? <p>{t('graphDeleted')}</p> : <OutputSteps workId={workId} dispatchId={dispatchId} lastStep={lastStep} initialStep={initialStep} affects={affects} />}
       {showArtifacts && <DispatchArtifacts workId={workId} dispatchId={dispatchId} affects={affects} />}
@@ -30,18 +29,6 @@ export function DispatchDetails({ workId, dispatchId, lastStep, initialStep, sho
   </section>;
 }
 
-function ReadOnlyCheckResult({ check }: { check: Dispatch['readOnlyCheck'] }) {
-  const { t } = useI18n();
-  if (!check) return null;
-  const reasons = { 'not-git': 'graphReadOnlyNotGit', 'check-failed': 'graphReadOnlyCheckFailed', 'baseline-missing': 'graphReadOnlyBaselineMissing' } as const;
-  return <section aria-label={t('graphReadOnlyCheck')}>
-    <h3>{t('graphReadOnlyCheck')}</h3>
-    <p className={check.status === 'violated' ? 'error' : 'muted'}>{t(check.status === 'violated' ? 'graphReadOnlyViolation'
-      : check.status === 'unchanged' ? 'graphReadOnlyUnchanged' : reasons[check.reason ?? 'check-failed'])}</p>
-    {check.projectDirectory && <p className="hint">{t('graphReadOnlyProjectDirectory')}</p>}
-    {check.paths.length > 0 && <ul className="cg-prose" aria-label={t('graphReadOnlyPaths')}>{check.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>}
-  </section>;
-}
 export function OutputSteps({ workId, dispatchId, roundId, lastStep, initialStep, affects }: {
   workId: string; lastStep?: number; initialStep?: number; affects: (event: HelmEvent) => boolean;
 } & ({ dispatchId: string; roundId?: never } | { roundId: string; dispatchId?: never })) {
@@ -157,7 +144,7 @@ export function DispatchEvidence({ workId, dispatchId }: { workId: string; dispa
     <section id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab-${tab}`}>
       {tab === 0 ? <DispatchArtifacts workId={workId} dispatchId={dispatchId} affects={affects} /> : tab === 1 ? <>
         {detail.error && <ErrorNotice error={detail.error} retry={detail.reload} />}
-        {!detail.data ? <p role="status">{t('loading')}</p> : <><dl className="cg-kv"><dt>{t('graphConclusion')}</dt><dd>{detail.data.status === 'ended' ? t(conclusionLabels[detail.data.conclusion]) : '—'}</dd>{detail.data.conclusionReason && <><dt>{t('graphReason')}</dt><dd>{detail.data.conclusionReason}</dd></>}</dl><ReadOnlyCheckResult check={detail.data.readOnlyCheck} /><h3>{t('graphFinalAnswer')}</h3><p className="cg-prose">{detail.data.finalAnswer || t('graphNoFinalAnswer')}</p></>}
+        {!detail.data ? <p role="status">{t('loading')}</p> : <><dl className="cg-kv"><dt>{t('graphConclusion')}</dt><dd>{detail.data.status === 'ended' ? t(conclusionLabels[detail.data.conclusion]) : '—'}</dd>{detail.data.conclusionReason && <><dt>{t('graphReason')}</dt><dd>{detail.data.conclusionReason}</dd></>}</dl><h3>{t('graphFinalAnswer')}</h3><p className="cg-prose">{detail.data.finalAnswer || t('graphNoFinalAnswer')}</p></>}
       </> : <><dl className="cg-kv"><dt>Agent id</dt><dd>{detail.data?.agentId ?? '—'}</dd><dt>{t('graphDispatch')}</dt><dd>{dispatchId}</dd></dl><DispatchDetails workId={workId} dispatchId={dispatchId} showArtifacts={false} /></>}
     </section>
   </div>;

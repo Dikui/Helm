@@ -21,9 +21,8 @@ test('Grok 新开、续跑和探测在独立进程关闭自动记忆，不改用
   await writeFile(configPath, config);
   await writeFile(memoryPath, '用户已有记忆');
   const env = { ...ctx.options.env, GROK_MEMORY: '1' };
-  for (const mode of ['workspace-write', 'read-only'] as const) for (const resumeSessionId of [undefined, 'previous']) {
-    const session = await ctx.driver.start({ ...ctx.options, env, resumeSessionId,
-      sandbox: { mode, writableRoots: mode === 'read-only' ? [] : [ctx.cwd] } });
+  for (const resumeSessionId of [undefined, 'previous']) {
+    const session = await ctx.driver.start({ ...ctx.options, env, resumeSessionId });
     t.after(() => session.cancel());
     await session.send('处理卡片，不保存个人记忆');
     await collect(session.events);
@@ -31,7 +30,7 @@ test('Grok 新开、续跑和探测在独立进程关闭自动记忆，不改用
   assert.equal((await ctx.driver.checkAvailability(ctx.agent)).available, true);
   await ctx.driver.listModels();
   const spawns = (await ctx.requests()).filter(request => request.method === 'fixture/spawn');
-  assert.equal(spawns.length, 6);
+  assert.equal(spawns.length, 4);
   for (const spawn of spawns) {
     assert.equal(spawn.env.GROK_MEMORY, '0');
     assert.ok(spawn.args.includes('--no-leader'), '用户的共享 leader 不得忽略 Helm 进程的记忆开关');
@@ -382,10 +381,11 @@ test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第
 for (const kind of ['grok', 'deepseek'] as const) for (const loadGlobalConfig of [false, true]) test(`${kind} 全局配置 ${loadGlobalConfig} 时可写根仍必须恰为卡片副本`, async t => {
   const ctx = await acpFixture(t, {}, false, kind);
   for (const sandbox of [
+    { mode: 'read-only' as const, writableRoots: [] },
     { mode: 'read-only' as const, writableRoots: [ctx.cwd] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, ctx.home] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.home] },
-  ]) await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, sandbox }), /card copy/);
+  ]) await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, sandbox }).then(session => session.cancel()), /card copy/);
   assert.deepEqual(await ctx.requests(), []);
 });
 
@@ -591,7 +591,7 @@ test('Grok 按字段保留未知用量，明确零用量不丢失', async t => {
 });
 
 
-for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGlobalConfig} 时仍覆盖只读沙箱并拒绝 DeepSeek 扩大权限`, async t => {
+for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGlobalConfig} 时执行者覆盖调用方沙箱并允许目录写入权限`, async t => {
   for (const kind of ['grok', 'deepseek'] as const) {
     const permissions = [
       { optionId: 'allow', name: '允许一次', kind: 'allow_once' },
@@ -609,17 +609,16 @@ for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGloba
       ] } : {}),
     }, false, kind);
     const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig },
-      env: { ...ctx.options.env, GROK_SANDBOX: 'off', DSH_PERMISSION_MODE: 'danger-full-access' },
-      sandbox: { mode: 'read-only', writableRoots: [] } });
-    await session.send('只读分析');
+      env: { ...ctx.options.env, GROK_SANDBOX: 'off', DSH_PERMISSION_MODE: 'danger-full-access' } });
+    await session.send('联网调研并写报告');
     const events = await collect(session.events);
     session.cancel();
     const spawn = (await ctx.requests()).find(request => request.method === 'fixture/spawn');
-    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], kind === 'grok' ? 'helm-read-only' : 'read-only');
+    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], kind === 'grok' ? 'helm' : 'workspace-write');
     if (kind === 'deepseek') {
       const decisions = events.filter(event => event.type === 'output').map(event => JSON.parse(event.text))
         .filter(message => message.method === 'session/request_permission');
-      assert.deepEqual(decisions.map(message => message.allowed), [true, false]);
+      assert.deepEqual(decisions.map(message => message.allowed), [true, true]);
     }
   }
 });

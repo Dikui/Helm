@@ -91,25 +91,6 @@ for (const role of ['coordinator', 'executor'] as const) for (const home of ['sh
   });
 }
 
-for (const home of ['shared', 'dedicated'] as const) for (const loadGlobalConfig of [false, true]) test(`Claude 只读执行者/${home} 加载全局配置 ${loadGlobalConfig} 时按开关选择来源并保持硬约束`, async t => {
-  const base = await fixture(t);
-  let sdk!: Options;
-  await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
-    query: fakeQuery([result()], args => { sdk = args.options!; }) }), {
-    ...base, agent: { ...base.agent, home, loadGlobalConfig }, sandbox: { mode: 'read-only', writableRoots: [] },
-  });
-  assert.deepEqual(sdk.settingSources, home === 'dedicated' ? ['user'] : loadGlobalConfig ? ['user', 'project', 'local'] : []);
-  assert.equal(sdk.strictMcpConfig, loadGlobalConfig ? undefined : true);
-  const settings = sdk.settings as Exclude<NonNullable<Options['settings']>, string>;
-  assert.equal(settings.disableClaudeAiConnectors, loadGlobalConfig ? undefined : true);
-  assert.deepEqual(settings.permissions?.deny, credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]));
-  assert.equal(sdk.sandbox?.enabled, true);
-  assert.equal(sdk.sandbox?.failIfUnavailable, true);
-  assert.equal(sdk.sandbox?.allowUnsandboxedCommands, false);
-  assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [base.cwd], denyRead: credentialPaths() });
-  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) assert.ok(!(sdk.tools as string[]).includes(tool));
-});
-
 test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参数及环境变量和省略项', async t => {
   for (const role of ['coordinator', 'executor'] as const) {
     const options = await fixture(t, role);
@@ -835,27 +816,11 @@ test('Claude 调度者可续跑，结束时报告最后一次主会话请求的�
 });
 
 
-test('Claude 只读卡片沿用只读沙箱并拒绝写工具和 Bash 越界', async t => {
+for (const loadGlobalConfig of [false, true]) test(`Claude 全局配置 ${loadGlobalConfig} 时执行者新建和续跑都拒绝只读启动`, async t => {
   const options = await fixture(t);
-  let permission!: CanUseTool;
-  const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
-    query: fakeQuery([result()], args => {
-      const sdk = args.options!;
-      assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
-      assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [options.cwd], denyRead: credentialPaths() });
-      assert.ok(!(sdk.tools as string[]).includes('Write'));
-      assert.ok(!(sdk.tools as string[]).includes('Edit'));
-      assert.ok((sdk.tools as string[]).includes('WebSearch'));
-      permission = sdk.canUseTool!;
-    }) });
-  await collect(driver, { ...options, sandbox: { mode: 'read-only', writableRoots: [] } });
-  const context = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request' };
-  for (const tool of ['Write', 'Edit', 'NotebookEdit', 'MultiEdit']) {
-    assert.equal((await permission(tool, { file_path: 'file' }, context))?.behavior, 'deny');
-  }
-  assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
-  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: options.cwd }))?.behavior, 'deny');
-  for (const tool of ['Read', 'Bash', 'WebSearch', 'mcp__helm__submit-conclusion']) {
-    assert.equal((await permission(tool, {}, context))?.behavior, 'allow');
+  const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([]) });
+  for (const resumeSessionId of [undefined, 'previous']) {
+    await assert.rejects(driver.start({ ...options, agent: { ...options.agent, loadGlobalConfig }, resumeSessionId,
+      sandbox: { mode: 'read-only', writableRoots: [] } }), /executor card copy/);
   }
 });

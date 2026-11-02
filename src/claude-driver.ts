@@ -81,9 +81,9 @@ function executorPermission(cwd: string): CanUseTool {
   };
 }
 
-function coordinatorPermission(allowWeb = false): CanUseTool {
+function coordinatorPermission(): CanUseTool {
   return async (tool, input, context) => {
-    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill', ...allowWeb ? ['WebFetch', 'WebSearch'] : []].includes(tool) || tool.startsWith('mcp__');
+    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill'].includes(tool) || tool.startsWith('mcp__');
     if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
       return { behavior: 'deny', message: 'Helm coordinator may only read project code and use Skill or MCP tools; Bash must stay sandboxed.' };
     }
@@ -146,16 +146,15 @@ export class ClaudeDriver implements Driver {
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
-    const readOnly = options.sandbox.mode === 'read-only';
     if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
       || options.agent?.role === 'executor')) {
       throw new Error('ClaudeCoordinatorDriver requires a read-only coordinator round');
     }
-    if (!coordinator && (options.agent?.role === 'coordinator' || (readOnly && options.sandbox.writableRoots.length))) {
+    if (!coordinator && (options.agent?.role === 'coordinator' || options.sandbox.mode !== 'workspace-write')) {
       throw new Error('ClaudeExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (!readOnly && (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd)) {
+    if (!coordinator && (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd)) {
       throw new Error('Claude executor writable roots must contain only its card copy');
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
@@ -200,11 +199,10 @@ export class ClaudeDriver implements Driver {
       skills: 'all',
       systemPrompt: agentPrompt(agent),
       permissionMode: 'default', abortController: controller,
-      canUseTool: readOnly ? coordinatorPermission(!coordinator) : executorPermission(cwd),
+      canUseTool: coordinator ? coordinatorPermission() : executorPermission(cwd),
       // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
       // An explicit tools list hides Skill unless it is listed, even with `skills` set.
       tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite']
-        : readOnly ? ['Bash', 'Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'TodoWrite']
         : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], 'Skill'],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
@@ -222,7 +220,7 @@ export class ClaudeDriver implements Driver {
         // these session settings cannot remove those user sandbox exceptions.
         // Claude grants cwd writes by default; an empty allowWrite alone does
         // not make it read-only. Explicitly deny cwd, including temp worktrees.
-        filesystem: { disabled: false, ...readOnly ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] }, denyRead: credentialPaths() },
+        filesystem: { disabled: false, ...coordinator ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] }, denyRead: credentialPaths() },
         network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) =>

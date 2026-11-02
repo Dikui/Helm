@@ -140,6 +140,10 @@ test('Codex 真实临时目录卡片联网查证并写文件，成果可读且�
     const dispatch = (await daemon.ended(1, 240_000))[0];
     assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? JSON.stringify(dispatch));
     assert.equal(dispatch.conclusion, 'completed');
+    assert.equal('readOnlyCheck' in dispatch, false);
+    const detail = (await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: dispatch.id })).result;
+    assert.equal('readOnlyCheck' in detail, false);
+    assert.equal((await daemon.events()).some(event => event.action === 'dispatch-read-only-violated'), false);
     assert.equal(dispatch.startCommit, null);
     assert.equal(dispatch.endCommit, null);
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;

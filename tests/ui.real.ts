@@ -76,7 +76,7 @@ test('初始化 git 关卡：收件箱与工作对话、中英文、编辑规则
         await inboxGate.getByRole('button', { name: 'Refuse initialization', exact: true }).click();
         const englishChat = page.getByRole('region', { name: 'Chat', exact: true });
         await englishChat.getByText('Gate decided · 初始化 git · refuse', { exact: true }).click();
-        await englishChat.getByText('Initialization was refused. The card stays blocked; the coordinator can make it read-only or cancel it.', { exact: true }).waitFor();
+        await englishChat.getByText('Initialization was refused. The card stays blocked; the coordinator can switch it to a scratch directory or cancel it.', { exact: true }).waitFor();
         await page.setViewportSize({ width: 720, height: 900 });
         await page.screenshot({ path: join(evidence, 'git-init-refused-narrow-en.png'), animations: 'disabled' });
       }
@@ -87,9 +87,9 @@ test('初始化 git 关卡：收件箱与工作对话、中英文、编辑规则
   console.log(`初始化 git 关卡截图：${evidence}`);
 });
 
-test('只读工作审核显示无代码改动，接受即完成且没有交付按钮', { skip: !enabled, timeout: 90_000 }, async t => {
+test('临时目录工作审核显示无代码改动，接受即完成且没有交付按钮', { skip: !enabled, timeout: 90_000 }, async t => {
   if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
-  const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-read-only-ui-')));
+  const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-scratch-ui-')));
   let release!: () => void;
   const executionEnded = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
@@ -125,18 +125,19 @@ test('只读工作审核显示无代码改动，接受即完成且没有交付�
   await review.getByText('这项工作没有代码改动。', { exact: true }).waitFor();
   assert.equal(await review.getByRole('button', { name: '查看 diff', exact: true }).count(), 0);
   assert.equal(await review.getByText(/无法读取.*diff/).count(), 0);
-  await page.screenshot({ path: join(evidence, 'readonly-report-inspector.png'), animations: 'disabled' });
+  await page.screenshot({ path: join(evidence, 'scratch-report-inspector.png'), animations: 'disabled' });
   await review.getByRole('button', { name: '接受', exact: true }).click();
   const delivery = page.getByRole('region', { name: '合入与推送', exact: true });
-  await delivery.getByRole('heading', { name: '已完成 · 只读工作', exact: true }).waitFor();
+  await delivery.getByRole('heading', { name: '已完成 · 无代码改动', exact: true }).waitFor();
   await delivery.getByText('这项工作没有代码改动，已完成。', { exact: true }).waitFor();
   assert.equal(await delivery.getByRole('button', { name: /合入|推送/ }).count(), 0);
+  assert.equal(await delivery.getByText(/只读|违规/).count(), 0);
   await delivery.getByRole('button', { name: '导出', exact: true }).waitFor();
   await delivery.getByRole('button', { name: '删除输出', exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
   assert.deepEqual(errors, []);
-  await page.screenshot({ path: join(evidence, 'readonly-delivery-completed.png'), animations: 'disabled' });
-  console.log(`只读工作审核与完成截图：${evidence}`);
+  await page.screenshot({ path: join(evidence, 'scratch-delivery-completed.png'), animations: 'disabled' });
+  console.log(`临时目录工作审核与完成截图：${evidence}`);
 });
 
 // Keep the real model's job small, and hold the review until the UI has visited execution views.
@@ -281,7 +282,7 @@ test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审
     await screenshot('02c-new-work-register-project-dialog', registration);
     await click(registration.getByRole('button', { name: '登记', exact: true }));
     await registration.waitFor({ state: 'hidden' });
-    await visible(newWork.getByText('本项目尚未初始化 git，可以先对齐或派只读卡片。首次写代码或验收派单前，运行层会请你决定是否初始化。', { exact: true }));
+    await visible(newWork.getByText('本项目尚未初始化 git，可以先对齐或派临时目录卡片。首次写代码或验收派单前，运行层会请你决定是否初始化。', { exact: true }));
     assert.equal(await newWork.getByRole('combobox', { name: '基准分支', exact: true }).isDisabled(), true);
     assert.equal(await newWork.getByRole('button', { name: '开始', exact: true }).isEnabled(), true);
     assert.equal(existsSync(join(plain, '.git')), false);
