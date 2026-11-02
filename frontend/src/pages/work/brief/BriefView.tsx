@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
@@ -13,7 +13,8 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
   const descriptions = useResource<WorkDescription[]>('get-work-descriptions', { workId: work.id });
   const files = useWorkFiles(work.id);
   const preview = useFilePreview(work.id);
-  const events = useResource<HelmEvent[]>('get-events', { workId: work.id });
+  const decidedAffects = useCallback((event: HelmEvent) => event.workId === work.id && event.action === 'gate-decided', [work.id]);
+  const events = useResource<HelmEvent[]>('get-events', { workId: work.id, actions: ['gate-decided'] }, decidedAffects);
   const [version, setVersion] = useState<number>();
   const versions = descriptions.data ?? [];
   const active = versions.find(item => item.status === 'active');

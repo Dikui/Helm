@@ -48,6 +48,7 @@ export interface EventFilter {
   dispatchId?: string;
   actorType?: ActorType;
   actorId?: string;
+  actions?: string[];
 }
 export interface HelmEvent {
   id: number;
@@ -108,7 +109,7 @@ COMMIT;`);
     return result;
   }
 
-  appendEvent(actor: Actor, object: HelmEvent['object'], action: string, details: unknown, scope: Omit<EventFilter, 'after' | 'actorType' | 'actorId'> = {}) {
+  appendEvent(actor: Actor, object: HelmEvent['object'], action: string, details: unknown, scope: Omit<EventFilter, 'after' | 'actorType' | 'actorId' | 'actions'> = {}) {
     const time = new Date().toISOString();
     const inserted = this.db.prepare(`INSERT INTO events
       (time, actor_type, actor_id, object_type, object_id, action, details, work_id, card_id, dispatch_id)
@@ -132,6 +133,7 @@ COMMIT;`);
       const value = filter[field as keyof typeof fields];
       if (value !== undefined) { clauses.push(`${column} = ?`); values.push(value); }
     }
+    if (filter.actions) { clauses.push(`action IN (${filter.actions.map(() => '?').join(', ')})`); values.push(...filter.actions); }
     return this.db.prepare(`SELECT * FROM events WHERE ${clauses.join(' AND ')} ORDER BY id`).all(...values).map(row => ({
       id: Number(row.id), time: String(row.time),
       actor: { type: row.actor_type as ActorType, id: String(row.actor_id) },

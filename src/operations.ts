@@ -51,6 +51,7 @@ export const eventFilterSchema = z.object({
   after: z.number().int().nonnegative().optional(),
   workId: z.string().min(1).optional(), cardId: z.string().min(1).optional(), dispatchId: z.string().min(1).optional(),
   actorType: z.enum(['user', 'coordinator-round', 'dispatch', 'runtime']).optional(), actorId: z.string().min(1).optional(),
+  actions: z.array(z.string().min(1)).min(1).max(20).optional(),
 }).strict();
 
 const nodeSchema = z.object({ type: z.enum(['card', 'gate']), id: z.string().min(1) }).strict();

@@ -266,6 +266,8 @@ test('库 skill 安装拒绝重名、缺 SKILL.md、非法名字和符号链接�
   assert.equal((await daemon.call('install-skill', { path: source, name: 'linked-skill' })).error.code, 'INVALID_SKILL_PATH');
   assert.deepEqual(await readdir(library), ['valid']);
   assert.equal((await daemon.call('get-events')).result.filter((event: any) => event.action === 'library-skill-installed').length, 1);
+  const filtered = (await daemon.call('get-events', { actions: ['library-skill-installed'] })).result;
+  assert.deepEqual(filtered.map((event: any) => event.action), ['library-skill-installed']);
 });
 
 test('覆盖被引用的库 skill 保留引用，HTTP 和生成的 CLI 参数生效，事件区分安装和覆盖', async t => {

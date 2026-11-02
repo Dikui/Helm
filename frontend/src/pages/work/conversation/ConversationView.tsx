@@ -21,6 +21,9 @@ import { GatePin } from '../GatePin.js';
 import { useRouter } from '../../../shared/router.js';
 import './conversation.css';
 
+// Dispatch steps make up nearly the whole timeline; the conversation only shows these.
+const conversationEvents = ['card-completed', 'work-paused', 'work-resumed', 'dispatch-ended', 'gate-decided', 'gate-withdrawn'];
+
 export function ConversationView({ work, report, deliveryPin }: { work: Work; report: ReturnType<typeof useWorkReview>; deliveryPin?: ReactNode }) {
   const { api } = useData();
   const { navigate } = useRouter();
@@ -30,7 +33,8 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
     && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted'), [work.id]);
   const cardsAffects = useCallback((event: HelmEvent) => event.workId === work.id && event.action.startsWith('card-'), [work.id]);
   const conversation = useResource<ConversationItem[]>('get-conversation', params, conversationAffects);
-  const events = useResource<HelmEvent[]>('get-events', params);
+  const eventsAffects = useCallback((event: HelmEvent) => event.workId === work.id && conversationEvents.includes(event.action), [work.id]);
+  const events = useResource<HelmEvent[]>('get-events', { ...params, actions: conversationEvents }, eventsAffects);
   const graph = useResource<GraphNode[]>('get-card-graph', params, cardsAffects);
   const rounds = useResource<Rounds>('list-rounds', params);
   const [body, setBody] = useState('');
