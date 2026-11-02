@@ -37,3 +37,5 @@ Codex 0.165 开着插件时，每次启动 app-server 都会重新下载并安�
 三组下载量同为约 0.7–0.8 MB，没有再现约 18 MB 的重复安装。Helm 改为显式传 `features.remote_plugin=false`，防止将来默认值翻转，仍将此开关标为 [openai/codex#47483](https://github.com/openai/codex/issues/47483) 的上游缺陷绕过。删除 Helm 读取本地插件配置和缓存、补回插件 skill 的逻辑；本地插件由 Codex 原生发现，Agent 自带和库 skill 仍经 `skills/extraRoots` 叠加。
 
 本机 gungnir 4.3.0 没有 MCP 或 hooks，本次不能验证这两项的实际执行。原生插件加载后的 MCP、hooks 按 Codex 自身行为进入会话，Helm 不再为本地插件补偿。测量原始数据和 skills 列表保留在本地开发单证据中。
+
+2026-11-02 补充：只关远程插件后，ChatGPT 账号连接器（`codex_apps`）随 `features.apps` 默认开启而进入会话，工具数量多到 Codex 把工具折叠到搜索之后，低推理强度的调度者和执行者多次找不到 helm 的 `submit-conclusion` 等工具。Helm 启动 app-server 时另加 `features.apps=false`；关闭后 Codex 调度者真实冒烟恢复通过。
