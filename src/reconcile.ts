@@ -105,11 +105,11 @@ export async function reconcileStartup(store: TaskStore) {
     if (accepted && !work.workBranch && work.status === 'accepted') {
       store.transaction(() => completeReviewedWork(store, runtime, work.id, { gateId: accepted.id, noCodeChanges: true }));
     }
+    // No dispatch runs yet, so every verification copy left by a crash is stale.
+    if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     // A deleted project, or one whose repository was removed, has nothing to repair; keep the work as recorded instead of failing startup.
     const project = projectPath(store, work.id);
     if (!existsSync(project) || !projectGitRoot(project)) { await compressWorkOutputs(store, work.id); continue; }
-    // No dispatch runs yet, so every verification copy left by a crash is stale.
-    if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
     if (accepted && work.workBranch) {
       const events = store.events({ workId: work.id });

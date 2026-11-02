@@ -202,14 +202,14 @@ export class ExecutionRunner {
         throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
       dispatch = { ...dispatch, agent };
-      if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, dispatch.startCommit ?? verificationCommit(this.store, card));
+      if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, scratch ? null : dispatch.startCommit ?? verificationCommit(this.store, card));
       else if (scratch) createScratchDirectory(this.store, dispatch.workId, card.id);
       else prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
       startCommit = scratch ? null : dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
         this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
           .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), dispatch.id);
-        if (scratch) this.store.db.prepare('UPDATE cards SET work_path = ? WHERE id = ?').run(workPath, card.id);
+        if (scratch && dispatch.purpose === 'execution') this.store.db.prepare('UPDATE cards SET work_path = ? WHERE id = ?').run(workPath, card.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
           this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }

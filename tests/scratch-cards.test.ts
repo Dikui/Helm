@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { AgentCatalog } from '../src/agents.js';
-import { createDispatch, dispatchArtifacts, getDispatch, readArtifact } from '../src/dispatch.js';
+import { createDispatch, dispatchArtifacts, getDispatch, listDispatches, markOutdated, readArtifact, submitConclusion } from '../src/dispatch.js';
 import { FakeDriver, type Driver, type EndReason, type SessionOptions } from '../src/driver.js';
 import { ExecutionRunner } from '../src/execution.js';
 import { cardDetails, cardGraph, createCard, updateCard } from '../src/graph.js';
@@ -16,7 +16,7 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 const actor = { type: 'runtime', id: 'test' } as const;
 const code = (expected: string) => (error: unknown) => error instanceof RuleError && error.code === expected;
 
-function fixture(t: TestContext, execute = (_options: SessionOptions, _input: any) => {}, reason: EndReason = 'completed') {
+function fixture(t: TestContext, execute = (_options: SessionOptions, _input: any) => {}, reason: EndReason | (() => EndReason) = 'completed') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'helm-scratch-')));
   const project = join(directory, 'project');
   mkdirSync(project);
@@ -30,9 +30,9 @@ function fixture(t: TestContext, execute = (_options: SessionOptions, _input: an
     async checkAvailability() { return { available: true }; },
     async start(options) {
       starts.push(options);
-      return { id: `session-${starts.length}`, async send(input) { execute(options, JSON.parse(input)); }, cancel() {},
+      return { id: `session-${starts.length}`, async send(input) { await execute(options, JSON.parse(input)); }, cancel() {},
         events: (async function* () {
-          yield { type: 'end' as const, step: 1, reason, finalAnswer: '报告：report.txt', usage: { inputTokens: 1, outputTokens: 1 } };
+          yield { type: 'end' as const, step: 1, reason: typeof reason === 'function' ? reason() : reason, finalAnswer: '报告：report.txt', usage: { inputTokens: 1, outputTokens: 1 } };
         })() };
     },
   };
@@ -85,11 +85,10 @@ for (const agent of ['claude-executor', 'codex-executor', 'grok-executor', 'deep
   });
 }
 
-test('运行位置派单后锁定，临时目录卡片暂不支持验收且不生成初始化关卡', async t => {
+test('运行位置派单后锁定，临时目录卡片不生成初始化关卡', async t => {
   const ctx = fixture(t);
   const card = ctx.card();
   assert.equal(createCard(ctx.store, actor, { workId: 'work', key: 'default', content: '代码' }).workspace, 'copy');
-  await assert.rejects(ctx.dispatch(card.id, 'claude-executor', 'verification'), code('SCRATCH_VERIFICATION_UNSUPPORTED'));
   assert.equal(ctx.store.gates('work').length, 0);
   const queued = await ctx.dispatch(card.id);
   assert.throws(() => updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, workspace: 'copy' }), code('CARD_ALREADY_DISPATCHED'));
@@ -98,6 +97,138 @@ test('运行位置派单后锁定，临时目录卡片暂不支持验收且不�
   assert.throws(() => updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, workspace: 'copy' }), error =>
     error instanceof RuleError && ['CARD_COPY_EXISTS', 'CARD_ALREADY_DISPATCHED'].includes(error.code));
   assert.equal(cardGraph(ctx.store, 'work').find(node => node.id === card.id)?.type, 'card');
+});
+
+for (const ending of ['completed', 'error', 'quota-exhausted', 'timed-out', 'aborted', 'context-overflow'] as const) {
+  test(`验收后同卡片执行以 ${ending} 结束，即使文件未变旧票也过期，重新验收才能完成`, async t => {
+    let reason: EndReason = 'completed';
+    const ctx = fixture(t, (options, input) => {
+      if (input.purpose === 'execution') writeFileSync(join(options.cwd, 'report.txt'), 'unchanged research\n');
+      else submitConclusion(ctx.store, ctx.runner.authenticate(options.mcpServers.helm!.headers!.Authorization!)!, { conclusion: 'passed', reason: '报告通过' });
+    }, () => reason);
+    const card = ctx.card();
+    updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, needsVerification: true });
+    await ctx.run(card.id);
+    const vote = await ctx.dispatch(card.id, 'claude-executor', 'verification');
+    await ctx.runner.settle('work', card.id);
+    const readVote = () => markOutdated(ctx.store, [getDispatch(ctx.store, 'work', vote.id)])[0]!;
+    assert.equal(readVote().outdated, false);
+    await ctx.run(ctx.card().id);
+    assert.equal(readVote().outdated, false, '别的卡片执行结束不会让这张票过期');
+    reason = ending;
+    assert.equal((await ctx.run(card.id)).endReason, ending);
+    assert.equal(readVote().outdated, true);
+    assert.throws(() => completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }), code('VERIFICATION_OUTDATED'));
+    assert.ok(existsSync(cardDetails(ctx.store, 'work', card.id).workPath!));
+    reason = 'completed';
+    const fresh = await ctx.dispatch(card.id, 'claude-executor', 'verification');
+    await ctx.runner.settle('work', card.id);
+    assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
+    const votes = markOutdated(ctx.store, listDispatches(ctx.store, 'work', card.id)).filter(item => item.purpose === 'verification');
+    assert.deepEqual(votes.map(item => [item.id, item.outdated]), [[vote.id, true], [fresh.id, false]]);
+  });
+}
+
+test('临时目录验收在一次性复制中可写，结束删除复制且保留原目录，无 git 也可凭当前通过票完成', async t => {
+  let original = '', verification = '';
+  const ctx = fixture(t, (options, input) => {
+    if (input.purpose === 'execution') {
+      original = options.cwd;
+      mkdirSync(join(original, 'reports'));
+      writeFileSync(join(original, 'reports', 'report.txt'), 'original research\n');
+      symlinkSync(join(original, 'reports'), join(original, 'linked-reports'));
+      return;
+    }
+    verification = options.cwd;
+    assert.notEqual(verification, original);
+    assert.deepEqual(options.sandbox, { mode: 'workspace-write', writableRoots: [verification] });
+    assert.equal(readFileSync(join(verification, 'reports', 'report.txt'), 'utf8'), 'original research\n');
+    assert.equal(existsSync(join(verification, 'linked-reports')), false);
+    writeFileSync(join(verification, 'reports', 'report.txt'), 'reviewer edit\n');
+    assert.equal(readFileSync(join(original, 'reports', 'report.txt'), 'utf8'), 'original research\n');
+    submitConclusion(ctx.store, ctx.runner.authenticate(options.mcpServers.helm!.headers!.Authorization!)!, { conclusion: 'passed', reason: '已核查报告' });
+  });
+  const card = ctx.card();
+  updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, needsVerification: true });
+  assert.equal((await ctx.run(card.id)).endReason, 'completed');
+  const vote = await ctx.dispatch(card.id, 'claude-executor', 'verification');
+  await ctx.runner.settle('work', card.id);
+  const ended = getDispatch(ctx.store, 'work', vote.id);
+  assert.equal(ended.endReason, 'completed', ended.failure ?? '');
+  assert.equal(ended.conclusion, 'passed');
+  assert.equal(ended.startCommit, null);
+  assert.equal(ended.endCommit, null);
+  assert.ok(verification);
+  assert.equal(existsSync(verification), false);
+  assert.equal(cardDetails(ctx.store, 'work', card.id).workPath, original);
+  assert.equal(readFileSync(join(original, 'reports', 'report.txt'), 'utf8'), 'original research\n');
+  assert.equal(ctx.store.gates('work').length, 0);
+  assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
+  assert.equal(existsSync(original), false);
+  assert.equal(ctx.store.work('work').workBranch, null);
+});
+
+test('临时目录自动流程派齐预写验收票，通过后自动完成，无分支且执行成果仍可读', async t => {
+  const ctx = fixture(t, (options, input) => {
+    if (input.purpose === 'execution') writeFileSync(join(options.cwd, 'report.txt'), 'research fact\n');
+    else {
+      assert.equal(readFileSync(join(options.cwd, 'report.txt'), 'utf8'), 'research fact\n');
+      writeFileSync(join(options.cwd, 'report.txt'), 'verifier edit\n');
+    }
+    submitConclusion(ctx.store, ctx.runner.authenticate(options.mcpServers.helm!.headers!.Authorization!)!, {
+      conclusion: input.purpose === 'execution' ? 'completed' : 'passed', reason: '已检查报告',
+    });
+  });
+  const card = ctx.card();
+  updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, needsVerification: true,
+    autoFlow: { verifications: ['检查事实', '检查证据'].map(content => ({ agentId: 'claude-executor', content, needsBrowser: false })) } });
+  const execution = await ctx.run(card.id);
+  await ctx.runner.settle('work', card.id);
+  assert.equal(cardDetails(ctx.store, 'work', card.id).status, 'completed');
+  const votes = markOutdated(ctx.store, listDispatches(ctx.store, 'work', card.id)).filter(item => item.purpose === 'verification');
+  assert.deepEqual(votes.map(item => [item.key, item.endReason, item.conclusion, item.outdated]), [
+    [`auto-verify-${execution.id}-0`, 'completed', 'passed', false], [`auto-verify-${execution.id}-1`, 'completed', 'passed', false],
+  ]);
+  assert.equal(new Set(ctx.starts.map(start => start.cwd)).size, 3);
+  for (const start of ctx.starts) assert.equal(existsSync(start.cwd), false);
+  assert.equal(ctx.store.work('work').workBranch, null);
+  const file = (dispatchArtifacts(ctx.store, 'work', execution.id) as any[]).find(item => item.name === 'report.txt');
+  assert.equal(readArtifact(ctx.store, 'work', file.id).content, 'research fact\n');
+  const events = ctx.store.events({ workId: 'work' });
+  assert.equal(events.some(event => event.action === 'auto-flow-stopped'), false);
+  assert.equal(events.find(event => event.action === 'card-completed')?.actor.type, 'runtime');
+});
+
+test('临时目录的多票验收各用独立副本且与执行互斥', async t => {
+  const { until } = await import('./ui-fixture.js');
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const ctx = fixture(t, async (options, input) => {
+    if (input.purpose === 'execution') writeFileSync(join(options.cwd, 'report.txt'), 'research fact\n');
+    else {
+      assert.equal(readFileSync(join(options.cwd, 'report.txt'), 'utf8'), 'research fact\n');
+      writeFileSync(join(options.cwd, 'report.txt'), input.dispatchId);
+      await hold;
+    }
+  });
+  const card = ctx.card();
+  await ctx.dispatch(card.id);
+  await assert.rejects(ctx.dispatch(card.id, 'claude-executor', 'verification'), code('DISPATCH_ACTIVE'));
+  await ctx.runner.settle('work', card.id);
+  const votes = [await ctx.dispatch(card.id, 'claude-executor', 'verification'), await ctx.dispatch(card.id, 'claude-executor', 'verification')];
+  const settling = ctx.runner.settle('work', card.id);
+  await until(async () => ctx.starts.length === 3 && votes.every((vote, index) =>
+    readFileSync(join(ctx.starts[index + 1]!.cwd, 'report.txt'), 'utf8') === vote.id), Boolean);
+  await assert.rejects(ctx.dispatch(card.id), code('DISPATCH_ACTIVE'));
+  assert.equal(new Set(ctx.starts.map(start => start.cwd)).size, 3);
+  const original = ctx.starts[0]!.cwd;
+  assert.equal(cardDetails(ctx.store, 'work', card.id).workPath, original);
+  assert.equal(readFileSync(join(original, 'report.txt'), 'utf8'), 'research fact\n');
+  release();
+  await settling;
+  for (const start of ctx.starts.slice(1)) assert.equal(existsSync(start.cwd), false);
+  assert.equal(existsSync(original), true);
 });
 
 for (const reason of ['completed', 'error', 'quota-exhausted', 'timed-out', 'aborted', 'context-overflow'] as const) {
@@ -170,6 +301,32 @@ test('启动对账保存被中断派单的成果，保留活动卡片临时目�
   assert.equal(readArtifact(ctx.store, 'work', file.id).content, 'recovered [REDACTED]\n');
   await reconcileStartup(ctx.store);
   assert.ok(existsSync(join(root, 'work', active.id)));
+});
+
+test('非 git 项目启动对账删除中断的临时目录验收及孤儿副本，保留原件且重复对账不重复结束', async t => {
+  const ctx = fixture(t, options => writeFileSync(join(options.cwd, 'report.txt'), 'original research\n'));
+  const card = ctx.card();
+  await ctx.run(card.id);
+  const original = cardDetails(ctx.store, 'work', card.id).workPath!;
+  await ctx.runner.close();
+  const vote = await ctx.dispatch(card.id, 'claude-executor', 'verification');
+  ctx.store.db.prepare("UPDATE dispatches SET status = 'running', started_at = '2026-11-01' WHERE id = ?").run(vote.id);
+  const copies = join(ctx.store.dataDir, 'worktrees', 'work', 'verifications');
+  for (const id of [vote.id, 'orphan']) {
+    mkdirSync(join(copies, id), { recursive: true });
+    writeFileSync(join(copies, id, 'report.txt'), 'reviewer changes\n');
+  }
+  await reconcileStartup(ctx.store);
+  const ended = getDispatch(ctx.store, 'work', vote.id);
+  assert.equal(ended.endReason, 'aborted');
+  assert.equal(ended.abortReason, '运行层重启');
+  assert.equal(ended.endCommit, null);
+  assert.equal(existsSync(copies), false);
+  assert.equal(readFileSync(join(original, 'report.txt'), 'utf8'), 'original research\n');
+  assert.deepEqual(dispatchArtifacts(ctx.store, 'work', vote.id), []);
+  await reconcileStartup(ctx.store);
+  assert.equal(existsSync(copies), false);
+  assert.equal(ctx.store.events({ dispatchId: vote.id }).filter(event => event.action === 'dispatch-ended').length, 1);
 });
 
 test('启动恢复被取消的排队返工派单，保存并脱敏已有文件后清理目录', async t => {
