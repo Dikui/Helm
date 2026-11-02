@@ -1,5 +1,7 @@
 # 订阅模板用 agent CLI 默认主目录，全局配置正常进入
 
+> 2026-11-02：按角色写死的配置加载规则已由 [ADR 0022](0022-driver-contract-and-global-config-switch.md) 的“加载全局配置”开关取代；“调度者对代码只读”已由 [ADR 0024](0024-coordinator-directory.md) 取代，执行者的只读模式已由 [ADR 0023](0023-scratch-cards-replace-read-only.md) 取消。
+
 [ADR 0004](0004-agent-homes-and-cli-owned-credentials.md) 让订阅模板改用 `~/.helm/agent-homes/<cli>/` 专用主目录，只为一件事：Helm 拉起的会话记录不混进用户自己的历史。做下来发现专用目录只隔离各家 CLI 放在配置目录里的东西，CLI 还会顺着真实 `HOME` 和工作目录去读别的位置（Codex 读 `~/.agents/skills`，Claude 读 `~/.claude/skills`，Grok 读 `~/.claude` 的规则），每接一家就要逐个来源补漏；Claude 在 macOS 上还得在专用目录另登录一次，因为钥匙串条目按配置目录区分。用户 2026-10-23 决定第一版彻底开放，和 Orca、Conductor、vibe-kanban 等编排器一样：订阅模板不设 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`，用本机默认位置和已有登录；用户的全局配置（设置、`CLAUDE.md` / `AGENTS.md`、hooks、插件、MCP、skills）正常进入 Helm 拉起的会话；会话记录混进用户历史可以接受。这推翻了第一版"执行者也不读全局配置"的决定。
 
 模板在全局配置之上按职责叠加：提示词、skills（只叠加，不藏用户和 CLI 自带的）、模型、推理强度。工具按角色走运行层（调度者用 Helm 调度工具、对代码只读；执行者只有"提交结论"，需要时加浏览器工具），用户的 MCP 两种角色都能用。
