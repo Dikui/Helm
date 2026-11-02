@@ -37,7 +37,7 @@ export async function acpCoordinatorFixture(t: TestContext, kind: 'grok' | 'deep
   const agentId = `${kind}-coordinator`;
   await cp(join(agentDir, `${kind}-executor`), join(agentDir, agentId), { recursive: true });
   await configureTestAgent(agentDir, agentId, { role: 'coordinator', loadGlobalConfig: false,
-    model: config.model ?? (kind === 'grok' ? 'grok-4.7' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
+    model: config.model ?? (kind === 'grok' ? 'grok-4.5' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
   const executor = new FakeDriver([[
     { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'README.md 基线检查完成' },
       check: value => assert.equal((value as any).ok, true) },
