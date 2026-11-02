@@ -17,7 +17,8 @@ import { helmVersion } from './version.js';
 // Upstream defect workaround: https://github.com/openai/codex/issues/47483
 // Disable only remote plugins to avoid connector reinstalls; Codex loads local plugins natively.
 const helmProfile = 'helm';
-const appServer = { file: 'codex', args: ['app-server', '-c', 'features.remote_plugin=false'] };
+// ChatGPT connectors (codex_apps) add enough tools that Codex defers them behind search and agents miss helm's tools.
+const appServer = { file: 'codex', args: ['app-server', '-c', 'features.remote_plugin=false', '-c', 'features.apps=false'] };
 
 function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);

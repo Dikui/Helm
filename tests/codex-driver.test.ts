@@ -51,7 +51,7 @@ async function collect(events: AsyncIterable<DriverEvent>) {
 const notification = (method: string, params: object) => ({ method, params: { threadId: 'thread-scripted', turnId: 'turn-scripted', ...params } });
 const completed = (status = 'completed', error: object | null = null) => notification('turn/completed', { turn: { id: 'turn-scripted', status, error, items: [] } });
 
-for (const mode of ['executor', 'coordinator', 'models'] as const) test(`Codex ${mode} 默认启动命令只关闭远程插件`, async t => {
+for (const mode of ['executor', 'coordinator', 'models'] as const) test(`Codex ${mode} 默认启动命令关闭远程插件和 ChatGPT 连接器`, async t => {
   const ctx = await fixture(t, [completed()], {}, mode === 'coordinator' ? 'coordinator' : 'executor');
   const previous = { HOME: process.env.HOME, PATH: process.env.PATH };
   process.env.HOME = ctx.directory;
@@ -78,7 +78,7 @@ for (const mode of ['executor', 'coordinator', 'models'] as const) test(`Codex $
     assert.deepEqual((await ctx.requests()).find(request => request.method === 'skills/extraRoots/set').params.extraRoots,
       [ctx.options.agent.skillsPath]);
   }
-  assert.deepEqual(JSON.parse(await readFile(evidence, 'utf8')), ['app-server', '-c', 'features.remote_plugin=false']);
+  assert.deepEqual(JSON.parse(await readFile(evidence, 'utf8')), ['app-server', '-c', 'features.remote_plugin=false', '-c', 'features.apps=false']);
 });
 
 for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlobalConfig} 时新开和续跑保持沙箱、MCP、skills 与记忆约束，不改用户设置`, async t => {
