@@ -115,7 +115,8 @@ ${instructions}\n\n启动简报：\n${content}`);
       assert.equal(response.status, 401, '结束后的轮次令牌必须失效');
     }
     await daemon.call('decide-gate', { ...daemon.params, gateId: review.id, decision: 'accept' });
-    assert.equal((await daemon.call('get-work', daemon.params)).status, 'completed');
+    // A copy card opens the work branch, so accepting leaves the work waiting to be merged.
+    assert.equal((await daemon.call('get-work', daemon.params)).status, 'accepted');
   } finally {
     for (const [index, round] of rounds.entries()) await writeFile(join(evidence, `round-${index + 1}.json`), JSON.stringify(round, null, 2));
     if (daemon) {
