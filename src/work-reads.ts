@@ -84,7 +84,9 @@ export function listWorks(store: TaskStore, projectId?: string) {
     .all(projectId ?? null, projectId ?? null).map(row => {
       const work = readWork(store, String(row.id));
       const ended = ['completed', 'cancelled'].includes(work.status);
-      const pendingGates = ended ? [] : store.gates(work.id).filter(gate => gate.status === 'pending')
+      // The confirmation gate opens when the draft is written; it is the user's turn only after the round ends.
+      const drafting = work.status === 'aligning' && Boolean(store.db.prepare(`SELECT 1 FROM coordinator_rounds WHERE work_id = ? AND status = 'running'`).get(work.id));
+      const pendingGates = ended ? [] : store.gates(work.id).filter(gate => gate.status === 'pending' && !(drafting && gate.kind === 'work-confirmation'))
         .map(({ id, kind, question }) => ({ id, kind, question }));
       const counts = store.db.prepare(`SELECT count(*) AS totalCards,
         COALESCE(SUM(status = 'completed'), 0) AS completedCards FROM cards WHERE work_id = ?`).get(work.id) as { totalCards: number; completedCards: number };
