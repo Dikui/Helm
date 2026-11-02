@@ -29,8 +29,9 @@ test('整页读取真实 helmd：收件箱分组、搜索、SSE 更新及语言�
   const ended = await create('整理 README', 'ended');
   await daemon.call('cancel-work', { workId: ended.id });
   render(<App baseUrl={daemon.url} />);
-  const attention = await screen.findByRole('region', { name: '等你' });
-  expect(await within(attention).findByText('登录页改版')).toBeTruthy();
+  // The coordinator round is still drafting, so the confirmation gate is not yet the user's turn.
+  const running = await screen.findByRole('region', { name: '在跑' });
+  expect(await within(running).findByText('登录页改版')).toBeTruthy();
   expect(screen.queryByRole('article', { name: '整理 README' })).toBeNull();
   await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 10'));
   fireEvent.click(screen.getByRole('button', { name: /安静/ }));
