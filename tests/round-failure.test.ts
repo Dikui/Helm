@@ -572,8 +572,13 @@ test('卡片汇总全部派单 token，工作另加全部轮次 token，压缩�
   await daemon.confirm(work.id);
   await until(() => daemon.events(work.id), events => events.some(event => event.action === 'dispatch-ended'));
   release();
-  const events = await until(() => daemon.events(work.id), events => events.filter(event => event.action === 'dispatch-ended').length === 2
-    && events.filter(event => event.action === 'round-ended').length >= 2);
+  const events = await until(() => daemon.events(work.id), events => {
+    const dispatchEnds = events.filter(event => event.action === 'dispatch-ended');
+    if (dispatchEnds.length !== 2) return false;
+    // 派单结束还会唤醒下一轮；目录清理期间，该轮次的用量仍未结算。
+    return events.some(event => event.action === 'round-started' && event.details.eventIds.includes(dispatchEnds.at(-1)!.id)
+      && events.some(ended => ended.action === 'round-ended' && ended.object.id === event.object.id));
+  });
   const cardId = events.find(event => event.action === 'card-created').cardId;
   const checkTotals = async () => {
     const params = { workId: work.id, cardId };

@@ -191,6 +191,8 @@ test('断线期间工作说明更新，行内操作显示运行层拒绝的原�
 test('运行层暂停归安静并保留原因；工作页计时每秒走，深链接保持位置', async () => {
   daemon = await uiFixture([[{ type: 'end', reason: 'quota-exhausted' }]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '额度暂停', key: 'start' })).result.work;
+  // 目录清理完成后才发布暂停；页面标题出现不代表轮次已结束。
+  await until(() => daemon!.call('get-work', { workId: work.id }), value => value.result.status === 'paused');
   window.history.replaceState(null, '', `/works/${work.id}/brief`);
   render(<App baseUrl={daemon.url} />);
   await screen.findByRole('heading', { level: 1, name: '额度暂停' });
@@ -199,9 +201,11 @@ test('运行层暂停归安静并保留原因；工作页计时每秒走，深�
   const row = await screen.findByRole('article', { name: '额度暂停' });
   expect(within(row).getByText('已暂停 · 调度者额度用完')).toBeTruthy();
   expect(within(row).queryByRole('button')).toBeNull();
-  const header = screen.getByRole('main');
-  const first = header.textContent;
-  await waitFor(() => expect(header.textContent).not.toBe(first), { timeout: 2_500 });
+  const header = screen.getByRole('banner', { name: '工作概况' });
+  await waitFor(() => expect(header.querySelector('time')).toBeTruthy());
+  const clock = header.querySelector('time')!;
+  const first = clock.textContent;
+  await waitFor(() => expect(clock.textContent).not.toBe(first), { timeout: 2_500 });
   expect(window.location.pathname).toBe(`/works/${work.id}`);
   expect(window.location.search).toBe('?inspect=spec');
   cleanup();

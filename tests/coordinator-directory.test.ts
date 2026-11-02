@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { FakeDriver, type SessionOptions } from '../src/driver.js';
+import { FakeDriver, type FakeContext, type SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { existingWorkCopy, fixtureAgentDir, startTestHelmd } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
@@ -120,4 +120,41 @@ test('启动对账保留活动工作的调度者目录，清理终态、孤儿�
     for (const status of active) assert.equal(await readFile(join(root, status, 'notes.txt'), 'utf8'), status);
     for (const status of ['completed', 'cancelled', 'orphan', 'invalid-file']) assert.equal(existsSync(join(root, status)), false);
   }
+});
+
+for (const cause of ['quota-exhausted', 'consecutive-failures'] as const) test(`调度者目录内${cause}后暂停保留文件，手动恢复复用目录`, async t => {
+  const cwds: string[] = [];
+  const failures = cause === 'quota-exhausted' ? ['quota-exhausted'] as const : ['error', 'timed-out', 'context-overflow'] as const;
+  const daemon = await uiFixture([
+    ...failures.map((reason, index) => (ctx: FakeContext) => {
+      cwds.push(ctx.options.cwd);
+      return [...(index === 0 ? [{ type: 'write' as const, path: 'notes.txt', content: '失败前保存的调度笔记' }] : []),
+        { type: 'end' as const, reason }];
+    }),
+    ctx => { cwds.push(ctx.options.cwd); return []; },
+  ]);
+  t.after(() => daemon.close());
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '失败暂停' })).result.work;
+  const params = { workId: work.id };
+  await until(() => daemon.call('get-work', params), value => value.result.status === 'paused');
+  const summary = (await daemon.call('list-works')).result.find((item: any) => item.id === work.id);
+  assert.equal(summary.status, 'paused');
+  assert.equal(summary.runtimePauseReason, cause === 'quota-exhausted' ? '调度者额度用完' : '调度者连续失败 3 次');
+  // 待确认关卡仍存在，但不能覆盖运行层暂停状态。
+  assert.equal(summary.hasPendingGate, true);
+  assert.equal(summary.pendingGates[0].kind, 'work-confirmation');
+  assert.equal(summary.workPath, null);
+  const rounds = (await daemon.call('list-rounds', params)).result.rounds;
+  assert.equal(rounds.length, failures.length);
+  assert.ok(rounds.every((round: any) => round.status === 'ended'));
+  assert.deepEqual(rounds.map((round: any) => round.reason), [...failures]);
+  const cwd = join(daemon.directory, 'data', 'coordinator', work.id);
+  assert.deepEqual(cwds, failures.map(() => cwd));
+  assert.equal(await readFile(join(cwd, 'notes.txt'), 'utf8'), '失败前保存的调度笔记');
+  assert.equal((await daemon.call('resume-work', params)).result.status, 'aligning');
+  await until(() => daemon.call('list-rounds', params), value => value.result.rounds.length === failures.length + 1
+    && value.result.rounds.every((round: any) => round.status === 'ended'));
+  assert.equal(cwds.at(-1), cwd);
+  assert.equal(await readFile(join(cwd, 'notes.txt'), 'utf8'), '失败前保存的调度笔记');
+  assert.equal((await daemon.call('get-work', params)).result.runtimePauseReason, null);
 });
