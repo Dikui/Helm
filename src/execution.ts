@@ -12,7 +12,7 @@ import { completeCard, removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
 import { checkOutputUsage } from './outputs.js';
-import { outputSummary } from './output-summary.js';
+import { outputChunk, outputSummary } from './output-summary.js';
 import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
 import { projectEnvironment, protectDispatchEnvironment, redactEnvironmentEvent } from './project-environment.js';
 import { createScratchDirectory, saveScratchArtifacts, scratchPath } from './scratch.js';
@@ -28,10 +28,10 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+const summaryLine = (text: string) => text.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 200) ?? '';
 function stepSummary(event: DriverEvent) {
-  const text = event.type === 'output' ? outputSummary(event.text) : event.type === 'end' ? (event.reason === 'completed' ? event.finalAnswer ?? '' : event.reason)
-    : event.type === 'artifact' ? event.path : event.type === 'plan' ? outputSummary(JSON.stringify(event)) : '上下文压缩';
-  return text.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 200) ?? '';
+  return summaryLine(event.type === 'output' ? outputSummary(event.text) : event.type === 'end' ? (event.reason === 'completed' ? event.finalAnswer ?? '' : event.reason)
+    : event.type === 'artifact' ? event.path : event.type === 'plan' ? outputSummary(JSON.stringify(event)) : '上下文压缩');
 }
 
 // Both normal shutdown and startup recovery save the same git state and artifacts.
@@ -176,6 +176,7 @@ export class ExecutionRunner {
     };
     stop.signal.addEventListener('abort', drainEvents, { once: true });
     let latestSummary = card.latestStepSummary ?? '';
+    let streamed = { step: 0, text: '' };
     let events: AsyncIterator<DriverEvent> | undefined;
     this.stops.set(dispatch.id, stop);
     const watchdog = this.store.db.prepare('SELECT dispatch_wall_timeout_ms, dispatch_idle_timeout_ms FROM settings WHERE id = 1').get()!;
@@ -275,12 +276,23 @@ export class ExecutionRunner {
           if (!Number.isSafeInteger(event.step) || event.step <= previousStep) throw new Error('Driver step numbers must increase');
           previousStep = event.step;
           writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
-          const summary = stepSummary(event) || latestSummary;
-          latestSummary = summary;
+          // Streamed text becomes one step event per message; steps without a new summary add no event.
+          const chunk = event.type === 'output' ? outputChunk(event.text) : undefined;
+          const own = chunk === undefined ? stepSummary(event) : '';
+          const steps: [number, string][] = [];
+          if (chunk !== undefined) streamed = { step: event.step, text: streamed.text + chunk };
+          else if (own || event.type === 'end') {
+            steps.push([streamed.step, summaryLine(streamed.text)], [event.step, own]);
+            streamed = { step: 0, text: '' };
+          }
           const artifact = next.value.type === 'artifact' && !scratch ? reportedArtifact(workPath, next.value.path) : undefined;
           this.store.transaction(() => {
-            this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
-            this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step: event.step, summary }, scope);
+            for (const [step, summary] of steps) {
+              if (!summary || summary === latestSummary) continue;
+              latestSummary = summary;
+              this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step, summary }, scope);
+            }
+            this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, latestSummary, card.id);
             if (event.type === 'compaction') this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'context-compacted', { step: event.step }, scope);
             if (event.type === 'artifact' && artifact) saveArtifact(this.store, dispatch, event.kind, artifact.name, artifact.content);
           });

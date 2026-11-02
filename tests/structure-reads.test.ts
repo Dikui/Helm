@@ -69,7 +69,7 @@ test('调度笔记读取保留当前全文并提供各版本原文和时间', as
 });
 
 
-test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要，原始输出仍可读取', async t => {
+test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要，流式片段合成一步，原始输出仍可读取', async t => {
   const samples: [unknown, string | undefined][] = [
     [{ type: 'assistant', message: { content: [{ type: 'text', text: '检查登录边界\n后续说明' }] } }, '检查登录边界'],
     [{ type: 'system', subtype: 'init', text: '系统元数据' }, undefined],
@@ -87,6 +87,7 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
     [{ method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '正在核对 Grok 输出' } } } }, '正在核对 Grok 输出'],
     [{ method: 'session/update', params: { update: { sessionUpdate: 'tool_call', title: 'Read', rawInput: { path: 'README.md' } } } }, 'Read'],
     [{ method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '正在核对 DeepSeek 输出' } } } }, '正在核对 DeepSeek 输出'],
+    [{ method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '，接着读' } } } }, '，接着读'],
     [{ method: 'session/update', params: { update: { sessionUpdate: 'tool_call_update', rawInput: { command: 'git status' } } } }, 'git status'],
     [{ method: 'session/update', params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '用户输入' } } } }, undefined],
     [{ method: 'session/update', params: { update: { sessionUpdate: 'tool_call_update', content: [{ type: 'content', content: { type: 'text', text: '工具返回结果' } }] } } }, undefined],
@@ -100,6 +101,8 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
     ['  可读文本\n第二行', '可读文本'],
     ['长'.repeat(220), '长'.repeat(200)],
   ];
+  // Streamed fragments only become a step once the next readable step arrives.
+  const streamed = new Set([7, 9, 13, 15, 16]);
   const releases: (() => void)[] = [];
   const raw = samples.map(([message]) => typeof message === 'string' ? message : JSON.stringify(message));
   let begin!: () => void;
@@ -132,7 +135,7 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
   let expected = '';
   for (let index = 0; index < samples.length; index++) {
     const card = (await until(graph, value => value.result.some((node: any) => node.type === 'card' && node.currentStep === index + 1))).result.find((node: any) => node.type === 'card');
-    expected = samples[index]![1] ?? expected;
+    if (!streamed.has(index)) expected = samples[index]![1] ?? expected;
     assert.equal(card.latestStepSummary, expected, `步骤 ${index + 1}: ${raw[index]}`);
     const event = (await daemon.call('get-events', params)).result.findLast((event: any) => event.action === 'dispatch-step');
     assert.equal(event.details.summary, expected);
@@ -142,6 +145,9 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
     releases[index]!();
   }
   const dispatch = (await until(() => daemon.call('list-dispatches', params), value => value.result[0]?.status === 'ended')).result[0];
+  const stepSummaries = (await daemon.call('get-events', { ...params, actions: ['dispatch-step'] })).result.map((event: any) => event.details.summary);
+  for (const text of ['正在核对 Claude 输出', '读取卡片说明', '正在核对 Grok 输出', '正在核对 DeepSeek 输出，接着读']) assert.ok(stepSummaries.includes(text), text);
+  assert.equal(stepSummaries.includes('，接着读'), false);
   assert.equal((await graph()).result.find((node: any) => node.type === 'card').latestStepSummary, expected);
   const output = (await daemon.call('get-dispatch-output', { ...params, dispatchId: dispatch.id })).result;
   assert.deepEqual(output.filter((step: any) => step.type === 'output').map((step: any) => step.text), raw);

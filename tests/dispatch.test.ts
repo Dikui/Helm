@@ -176,7 +176,9 @@ test('派单看门狗分别限制无输出和墙钟总时长，超时保留改�
     assert.equal(result.conclusion, 'undeclared');
     assert.equal(daemon.git('show', `${result.endCommit}:progress.txt`), '超时前进度');
     assert.equal(events.find(event => event.action === 'dispatch-timed-out').details.threshold, threshold);
-    if (threshold === 'wall') assert.ok(events.filter(event => event.action === 'dispatch-step').length >= 4);
+    // Repeated identical output is one step event; the raw steps show streaming continued.
+    if (threshold === 'wall') assert.ok((await daemon.call('get-dispatch-output', { workId: daemon.work.id, dispatchId: result.id })).result
+      .filter((step: any) => step.text === '仍有输出').length >= 4);
   });
 });
 
