@@ -46,7 +46,7 @@ test('DeepSeek 可创建调度者 Agent，能力关闭时禁用角色并显示�
   expect(saved.config.loadGlobalConfig).toBe(false);
 });
 
-test('设置页按 Grok 的真实能力声明禁用调度者角色并显示 docker.sock 软链接的只读沙箱问题', async () => {
+test('设置页按 Grok 的真实能力声明开放调度者角色，可保存调度者 Agent', async () => {
   daemon = await uiFixture();
   const capabilities = new AcpDriver('grok').capabilities;
   const transport: typeof fetch = (url, options) => {
@@ -59,6 +59,17 @@ test('设置页按 Grok 的真实能力声明禁用调度者角色并显示 dock
   render(<App baseUrl={daemon.url} transport={transport} />);
   const form = await screen.findByRole('form', { name: 'Agent 详情' });
   fireEvent.change(within(form).getByLabelText('驱动'), { target: { value: 'grok' } });
-  await waitFor(() => expect((within(form).getByRole('option', { name: '调度者' }) as HTMLOptionElement).disabled).toBe(true));
-  expect(within(form).getByText('Grok 1.0.70 的只读沙箱在 /var/run/docker.sock 为软链接的机器上拒绝启动；调度者需要只读沙箱，因此当前不能用作调度者。')).toBeTruthy();
+  if (!capabilities.cleanStart.supported) await within(form).findByText(capabilities.cleanStart.reason);
+  await waitFor(() => expect((within(form).getByRole('option', { name: '调度者' }) as HTMLOptionElement).disabled).toBe(false));
+  fireEvent.change(within(form).getByLabelText('角色'), { target: { value: 'coordinator' } });
+  fireEvent.change(within(form).getByLabelText('名字'), { target: { value: 'grok-coordinator' } });
+  fireEvent.change(within(form).getByLabelText('模型'), { target: { value: 'grok-4.7' } });
+  fireEvent.change(within(form).getByLabelText('推理强度'), { target: { value: 'low' } });
+  fireEvent.change(within(form).getByLabelText('职责说明'), { target: { value: '推进工作' } });
+  fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+  await screen.findByText('已保存');
+  const saved = (await daemon.call('list-agents')).result.find((entry: any) => entry.id === 'grok-coordinator');
+  expect(saved.available).toBe(true);
+  expect(saved.config.role).toBe('coordinator');
+  expect(saved.config.loadGlobalConfig).toBe(false);
 });

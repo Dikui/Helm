@@ -623,7 +623,7 @@ for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGloba
   }
 });
 
-test('Grok 沙箱配置档只维护 sandbox.toml 里 Helm 的标记段，保留用户自己的配置，内容不变时不重写', async t => {
+test('Grok 沙箱标记段只保留可写 profile，移除旧只读 profile，保留用户配置且内容不变时不重写', async t => {
   const home = await mkdtemp(join(tmpdir(), 'helm-grok-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const path = join(home, '.grok', 'sandbox.toml');
@@ -633,12 +633,14 @@ test('Grok 沙箱配置档只维护 sandbox.toml 里 Helm 的标记段，保留�
   await ensureGrokSandboxProfiles(home);
   const first = await readFile(path, 'utf8');
   assert.ok(first.startsWith(`${user}\n\n# >>> Helm sandbox profiles`));
-  assert.match(first, /\[profiles\.helm-read-only\]\nextends = "read-only"\n/);
+  assert.match(first, /\[profiles\.helm\]\nextends = "workspace"\n/);
+  assert.doesNotMatch(first, /helm-read-only/);
   const written = (await stat(path)).mtimeMs;
   await ensureGrokSandboxProfiles(home);
   assert.equal((await stat(path)).mtimeMs, written, '内容不变不重写');
   // An outdated block is replaced in place; text after it stays.
-  await writeFile(path, first.replace('extends = "read-only"', 'extends = "workspace"') + '\n[profiles.mine]\nextends = "read-only"\n');
+  await writeFile(path, first.replace('# <<< Helm sandbox profiles',
+    '[profiles.helm-read-only]\nextends = "read-only"\ndeny = []\n# <<< Helm sandbox profiles') + '\n[profiles.mine]\nextends = "read-only"\n');
   await ensureGrokSandboxProfiles(home);
   assert.equal(await readFile(path, 'utf8'), first + '\n[profiles.mine]\nextends = "read-only"\n');
 });

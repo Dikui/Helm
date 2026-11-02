@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test, type TestContext } from 'node:test';
+import { test } from 'node:test';
 import { acpAgents } from '../src/acp-agents.js';
+import { credentialPaths } from '../src/driver.js';
 import { roleRules } from '../src/prompts.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { acpCoordinatorFixture } from './acp-coordinator-fixture.js';
@@ -15,16 +16,7 @@ const configOptions = [
     options: [{ value: 'low', name: 'Low' }] },
 ];
 
-// Mechanism tests use scripted ACP peers; real CLI support is checked separately.
-function enableCoordinatorForFixture(t: TestContext, kind: 'grok' | 'deepseek') {
-  const capabilities = acpAgents[kind].capabilities;
-  const previous = { ...capabilities };
-  capabilities.coordinator = true;
-  t.after(() => { Object.assign(capabilities, previous); });
-}
-
-for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者暂时接受可写调度者目录，CLI 与权限回调仍只读，保留轮次 MCP 和结束事件`, async t => {
-  enableCoordinatorForFixture(t, kind);
+for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调度者目录以可写权限启动，保留轮次 MCP 和结束事件`, async t => {
   const ctx = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions,
     permissions: Array.from({ length: 3 }, () => ['allow_once', 'reject_once'].map(kind => ({ kind, name: kind, optionId: kind }))),
     permissionToolCalls: ['read-only', 'workspace-write', 'danger-full-access'].map(mode => ({
@@ -35,10 +27,13 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者暂时�
     { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '本轮已完成' } },
   ] }, true, kind);
   const agent = { ...ctx.agent, role: 'coordinator' as const, rules: roleRules('coordinator'), loadGlobalConfig: false };
+  const cwd = join(ctx.directory, 'data', 'coordinator', 'work');
+  await mkdir(cwd, { recursive: true });
   assert.equal((await ctx.driver.checkAvailability(agent)).available, true);
   for (const resumeSessionId of [undefined, 'previous']) {
-    const session = await ctx.driver.start({ ...ctx.options, agent, resumeSessionId,
-      sandbox: resumeSessionId ? { mode: 'workspace-write', writableRoots: [ctx.cwd] } : { mode: 'read-only', writableRoots: [] },
+    const session = await ctx.driver.start({ ...ctx.options, agent, cwd, resumeSessionId,
+      env: { ...ctx.options.env, DSH_PERMISSION_MODE: 'read-only', GROK_SANDBOX: 'helm-read-only' },
+      sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
       mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: `Bearer round-${resumeSessionId ?? 'new'}` } } } });
     t.after(() => session.cancel());
     await session.send('处理本轮事件');
@@ -50,9 +45,11 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者暂时�
   }
   const requests = await ctx.requests();
   for (const spawn of requests.filter(request => request.method === 'fixture/spawn')) {
-    assert.equal(kind === 'grok' ? spawn.env.GROK_SANDBOX : spawn.env.DSH_PERMISSION_MODE, kind === 'grok' ? 'helm-read-only' : 'read-only');
+    assert.equal(kind === 'grok' ? spawn.env.GROK_SANDBOX : spawn.env.DSH_PERMISSION_MODE, kind === 'grok' ? 'helm' : 'workspace-write');
   }
   const sessions = requests.filter(request => ['session/new', 'session/resume'].includes(request.method) && request.params.mcpServers.length);
+  assert.ok(sessions.every(request => request.params.cwd === cwd));
+  assert.ok(requests.filter(request => request.method === 'fixture/spawn' && request.cwd !== ctx.home).every(request => request.cwd === cwd));
   assert.deepEqual(sessions.map(request => request.params.mcpServers), ['new', 'previous'].map(id => [{
     type: 'http', name: 'helm', url: 'http://127.0.0.1:4242/mcp', headers: [{ name: 'Authorization', value: `Bearer round-${id}` }],
   }]));
@@ -64,33 +61,38 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者暂时�
     assert.deepEqual(request.params.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
   }
   if (kind === 'deepseek') assert.deepEqual(requests.filter(request => String(request.id).startsWith('agent-')).map(request => request.result.outcome.optionId),
-    ['allow_once', 'reject_once', 'reject_once', 'allow_once', 'reject_once', 'reject_once'], '调度者不能把只读权限提到可写或完全访问');
-  if (kind === 'grok') assert.match(await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8'), /\[profiles\.helm-read-only\]\nextends = "read-only"/);
+    ['allow_once', 'allow_once', 'reject_once', 'allow_once', 'allow_once', 'reject_once'], '调度者可写当前目录，不能提到完全访问');
+  if (kind === 'grok') {
+    const profiles = await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8');
+    assert.match(profiles, /\[profiles\.helm\]\nextends = "workspace"/);
+    assert.ok(profiles.includes(`deny = ${JSON.stringify(credentialPaths(ctx.home))}`));
+  }
 });
 
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝错误可写根与未开放的调度者能力，不启动 CLI`, async t => {
-  enableCoordinatorForFixture(t, kind);
   const ctx = await acpFixture(t, {}, true, kind);
   const agent = { ...ctx.agent, role: 'coordinator' as const };
-  for (const sandbox of [{ mode: 'workspace-write' as const, writableRoots: [join(ctx.cwd, '..')] },
+  for (const sandbox of [{ mode: 'read-only' as const, writableRoots: [] },
+    { mode: 'workspace-write' as const, writableRoots: [] }, { mode: 'workspace-write' as const, writableRoots: [join(ctx.cwd, '..')] },
     { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, join(ctx.cwd, '..')] }, { mode: 'read-only' as const, writableRoots: [ctx.cwd] }]) {
-    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox }), /coordinator/);
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox }).then(session => {
+      t.after(() => session.cancel()); return session;
+    }), /coordinator/);
   }
   const capabilities = acpAgents[kind].capabilities;
   const previous = capabilities.coordinator;
-  const reason = `${kind} 调度者真实冒烟未通过，只读约束未获验证。`;
+  const reason = `${kind} 调度者真实冒烟未通过。`;
   Object.assign(capabilities, { coordinator: false, coordinatorUnavailableReason: reason });
   try {
     const availability = await ctx.driver.checkAvailability(agent);
     assert.equal(availability.available, false);
     assert.equal(availability.reason, reason);
-    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox: { mode: 'read-only', writableRoots: [] } }), { message: reason });
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent }), { message: reason });
   } finally { capabilities.coordinator = previous; Reflect.deleteProperty(capabilities, 'coordinatorUnavailableReason'); }
   assert.deepEqual(await ctx.requests(), []);
 });
 
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} ACP 调度者仅获得调度工具，不能经客户端写代码，续跑更换且结束后撤销轮次令牌`, async t => {
-  enableCoordinatorForFixture(t, kind);
   const acp = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions } : {}), mcpTools: [
     { name: 'draft-work-description', arguments: { key: 'draft', requirements: '只读检查 README', boundary: '临时项目', criteria: '基线内容保持原样' } },
   ], clientRequests: [{ method: 'fs/write_text_file', params: { path: 'coordinator-write.txt', content: 'forbidden' } }],
@@ -121,12 +123,11 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} ACP 调度者仅
   assert.equal(daemon.git('status', '--porcelain'), '');
 });
 
-test('Grok 调度者因 docker.sock 软链接导致只读沙箱无法启动而不可用，预检和启动均不运行 CLI', async t => {
+test('Grok 声明支持调度者且没有不可用原因，通过 CLI 预检', async t => {
   const ctx = await acpFixture(t);
   const agent = { ...ctx.agent, role: 'coordinator' as const };
-  const reason = 'Grok 1.0.70 的只读沙箱在 /var/run/docker.sock 为软链接的机器上拒绝启动；调度者需要只读沙箱，因此当前不能用作调度者。';
-  assert.equal(ctx.driver.capabilities.coordinator, false);
-  assert.deepEqual(await ctx.driver.checkAvailability(agent), { available: false, reason });
-  await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox: { mode: 'read-only', writableRoots: [] } }), { message: reason });
-  assert.deepEqual(await ctx.requests(), []);
+  assert.equal(ctx.driver.capabilities.coordinator, true);
+  assert.equal(Object.hasOwn(ctx.driver.capabilities, 'coordinatorUnavailableReason'), false);
+  assert.deepEqual(await ctx.driver.checkAvailability(agent), { available: true });
+  assert.ok((await ctx.requests()).some(request => request.method === 'initialize'));
 });

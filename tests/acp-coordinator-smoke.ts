@@ -25,19 +25,20 @@ export async function acpCoordinatorSmoke(t: TestContext, kind: 'grok' | 'deepse
     capabilities: base.capabilities,
     checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
-      assert.deepEqual(options.sandbox, { mode: 'read-only', writableRoots: [] });
+      assert.deepEqual(options.sandbox, { mode: 'workspace-write', writableRoots: [options.cwd] });
       assert.deepEqual(Object.keys(options.mcpServers), ['helm']);
       const session = await base.start(options);
-      const record: Observation = { options, sessionId: session.id, messages: [],
-        command: `printf forbidden > ${shellQuote(join(options.cwd, 'coordinator-write.txt'))}` };
+      const record: Observation = { options, sessionId: session.id, messages: [], command: '' };
       rounds.push(record);
       return {
         ...session,
         async send(content) {
           const brief = JSON.parse(content) as StartupBrief;
           record.brief = brief;
+          record.command = `printf forbidden > ${shellQuote(join(brief.projectPath, 'coordinator-write.txt'))}`;
           const instructions = brief.work.status === 'aligning'
-            ? `先用 shell 原样尝试一次命令 ${record.command}。预期由只读沙箱拒绝，不得重试、提权或绕过。然后读取 README.md。
+            ? `先用 shell 原样尝试一次命令 ${record.command}。预期由 workspace 沙箱拒绝写项目，不得重试、提权或绕过。
+然后在当前调度者目录写 coordinator-notes.txt，内容为 allowed（不带换行）；再实际读取项目文件 ${join(brief.projectPath, 'README.md')}。
 调用 draft-work-description，key=smoke-description，requirements=只读检查 README，boundary=临时项目，criteria=README.md 内容保持 coordinator read-only baseline 加换行。
 只起草一次，等用户确认；本轮立即退出。`
             : `先读简报卡片图；需要时调用 get-card-graph 和 list-dispatches。
@@ -49,7 +50,7 @@ verdict=accept，summary=README 只读检查完成，exceptions=[]，suggestions
 criteria=[{criterion: "README 基线保持原样", status: "passed", evidence: [{label: "派单结果", kind: "dispatch", ref: "实际派单 id"}]}]；
 cards=[{cardId: "实际卡片 id", title: "README 检查", result: "已完成只读检查", verification: "not-applicable", evidence: [{label: "派单结果", kind: "dispatch", ref: "实际派单 id"}], dispatches: [{agentId: "claude-executor", dispatchId: "实际派单 id"}]}]。
 报告中的实际 id 必须取自工具结果，不能照抄占位文字。审核只交给用户，本轮退出。`;
-          await session.send(`这是低消耗 Helm 调度者冒烟。工作由轮次令牌确定，MCP 调用不传 workId；只用注入的 helm 端点和只读工具。
+          await session.send(`这是低消耗 Helm 调度者冒烟。工作由轮次令牌确定，MCP 调用不传 workId；业务操作只用注入的 helm 端点，文件与 shell 工具遵守本轮沙箱。
 不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。工具失败即报告退出。若有原生计划工具，可用它展示本轮步骤。
 ${instructions}\n\n启动简报：\n${content}`);
         },
@@ -102,10 +103,14 @@ ${instructions}\n\n启动简报：\n${content}`);
     }
     const first = rounds[0]!;
     assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(first.command)
-      && /operation not permitted|permission denied|read-only file system|sandbox|read.only.*denied/i.test(JSON.stringify(entries))), '必须有实际写入被沙箱拒绝的工具证据');
-    await assert.rejects(readFile(join(daemon.repo, 'coordinator-write.txt')), { code: 'ENOENT' });
-    assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
-    assert.equal(daemon.git('status', '--porcelain'), '');
+      && /operation not permitted|permission denied|read-only file system|file access denied under workspace-write|outside.*workspace|sandbox.*(?:denied|reject|not allowed)/i.test(JSON.stringify(entries))), '必须有实际写项目被沙箱拒绝的工具证据');
+    await assert.rejects(readFile(join(first.brief!.projectPath, 'coordinator-write.txt')), { code: 'ENOENT' });
+    assert.equal(await readFile(join(first.options.cwd, 'coordinator-notes.txt'), 'utf8'), 'allowed');
+    assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(join(first.brief!.projectPath, 'README.md'))
+      && JSON.stringify(entries).includes('coordinator read-only baseline') && entries.some(entry => entry.status === 'completed')), '必须有实际读取项目文件的工具证据');
+    assert.equal(await readFile(join(first.brief!.projectPath, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
+    assert.equal(daemon.git('-C', first.brief!.projectPath, 'status', '--porcelain'), '');
+    assert.ok(rounds.every(round => round.options.cwd === join(daemon!.dataDir, 'coordinator', daemon!.work.id)), '所有轮次复用调度者目录');
     assert.equal(first.options.resumeSessionId, undefined);
     assert.ok(rounds.slice(1).some(round => round.options.resumeSessionId === first.sessionId), '低占用轮次须由新 ACP 进程续跑');
     assert.equal(new Set(rounds.map(round => round.options.mcpServers.helm!.headers.Authorization)).size, rounds.length);

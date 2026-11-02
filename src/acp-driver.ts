@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, RequestError, type InitializeResponse, type NewSessionRequest, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
-import { acpAgents, configValues, grokProfiles } from './acp-agents.js';
+import { acpAgents, configValues } from './acp-agents.js';
 import { AcpClient, type AcpCommand } from './acp-client.js';
 import type { Driver, DriverEvent, DriverSession, SessionOptions, AgentAvailability, ModelOption, ModelContext, TokenUsage } from './driver.js';
 import { agentPrompt } from './prompts.js';
@@ -30,8 +30,6 @@ export class AcpDriver implements Driver {
   private environment(base: Record<string, string>, agent: AgentConfig) {
     return driverEnvironment(base, { unset: this.profile.environment.unset, set: {
       ...this.profile.environment.set,
-      ...(agent.role === 'coordinator' ? this.agent === 'deepseek'
-        ? { DSH_PERMISSION_MODE: 'read-only' } : { GROK_SANDBOX: grokProfiles.readOnly } : {}),
       ...(this.profile.homeVariable && agent.home === 'dedicated'
         ? { [this.profile.homeVariable]: join(base.HOME ?? homedir(), '.helm', 'agent-homes', agent.id) } : {}),
     } });
@@ -200,15 +198,14 @@ export class AcpDriver implements Driver {
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
     const coordinator = agent.role === 'coordinator';
-    if (coordinator && !(options.sandbox.mode === 'read-only' && !options.sandbox.writableRoots.length)
-      && !(options.sandbox.mode === 'workspace-write' && options.sandbox.writableRoots.length === 1)) {
+    if (coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
       throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
     }
     if (agent.driver !== this.agent || (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1))) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (coordinator && options.sandbox.writableRoots.length && await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
+    if (coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
       throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
     }
     if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
@@ -265,8 +262,7 @@ export class AcpDriver implements Driver {
       },
       permission(request) {
         const input = request.toolCall.rawInput ?? toolInputs.get(request.toolCall.toolCallId);
-        // ACP coordinators accept the new cwd contract but stay read-only until their driver migration.
-        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, coordinator ? 'read-only' : options.sandbox.mode) ?? true);
+        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, options.sandbox.mode) ?? true);
         const option = allowed ? request.options.find(option => option.kind === 'allow_once') : undefined;
         // Selecting a persistent rejection can also mutate the user's settings.
         const reject = request.options.find(option => option.kind === 'reject_once');

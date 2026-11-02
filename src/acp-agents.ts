@@ -10,7 +10,7 @@ import type { AgentConfig } from './agents.js';
 import type { EnvironmentOverrides } from './environment.js';
 
 // Grok sandbox profiles Helm defines in ~/.grok/sandbox.toml (see ensureGrokSandboxProfiles).
-export const grokProfiles = { write: 'helm', readOnly: 'helm-read-only' } as const;
+export const grokProfiles = { write: 'helm' } as const;
 
 // Only agent differences belong here; ACP sequencing stays in AcpDriver.
 interface AcpAgentProfile {
@@ -93,7 +93,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     homeConfigFiles: ['.credentials.yaml', '.env', 'cordis.patch.yml'],
     permissionAllowed(input, mode) {
       // dsh's bash/fs tools can request a per-call sandbox escalation. Never
-      // auto-approve a wider boundary than the standing card sandbox.
+      // auto-approve a wider boundary than the standing session sandbox.
       if (!input || typeof input !== 'object' || !('sandbox_permissions' in input)) return true;
       return input.sandbox_permissions === 'read-only' || (mode === 'workspace-write' && input.sandbox_permissions === 'workspace-write');
     },
@@ -143,9 +143,7 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       // GROK_CONFIG is an allowlisted deep-merge overlay, not a replacement.
       // https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md
       cleanStart: { supported: false, reason: 'Grok 1.0.70 没有跳过用户与项目配置的 ACP 开关；GROK_CONFIG 仅叠加配置，仍会加载全局规则、MCP、skills 和 hooks。' },
-      // Grok 1.0.70's built-in read-only profile refuses symlinked docker.sock endpoints (e.g. OrbStack).
-      resume: true, contextUsage: false, coordinator: false,
-      coordinatorUnavailableReason: 'Grok 1.0.70 的只读沙箱在 /var/run/docker.sock 为软链接的机器上拒绝启动；调度者需要只读沙箱，因此当前不能用作调度者。',
+      resume: true, contextUsage: false, coordinator: true,
       autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
@@ -206,8 +204,7 @@ export async function ensureGrokSandboxProfiles(home: string) {
   const path = join(home, '.grok', 'sandbox.toml');
   // JSON string arrays are valid TOML inline arrays.
   const deny = `deny = ${JSON.stringify(credentialPaths(home))}`;
-  const block = [grokBlockStart, `[profiles.${grokProfiles.write}]`, 'extends = "workspace"', deny, '',
-    `[profiles.${grokProfiles.readOnly}]`, 'extends = "read-only"', deny, grokBlockEnd].join('\n');
+  const block = [grokBlockStart, `[profiles.${grokProfiles.write}]`, 'extends = "workspace"', deny, grokBlockEnd].join('\n');
   let current = '';
   try { current = await readFile(path, 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
@@ -12,7 +12,8 @@ import { configureTestAgent, copyAgents } from './helmd-fixture.js';
 // only the CLI-owned login; the coordinator itself uses the supplied driver.
 export async function acpCoordinatorFixture(t: TestContext, kind: 'grok' | 'deepseek', driver: Driver,
   config: { stagedAuth?: string; model?: string } = {}) {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), `helm-${kind}-coordinator-`)));
+  // Real sandboxes may allow all of /tmp; keep the project outside that grant.
+  const directory = await realpath(await mkdtemp(join(config.stagedAuth ? homedir() : tmpdir(), `.helm-${kind}-coordinator-`)));
   const home = join(directory, 'home');
   const previousHome = process.env.HOME;
   let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
