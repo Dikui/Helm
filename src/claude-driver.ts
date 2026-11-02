@@ -66,27 +66,17 @@ async function writablePath(cwd: string, path: unknown): Promise<boolean> {
   }
 }
 
-function executorPermission(cwd: string): CanUseTool {
+function workspacePermission(cwd: string): CanUseTool {
   return async (tool, input, context) => {
-    const deny = { behavior: 'deny' as const, message: 'Helm executor may write only inside its card copy and must keep Bash sandboxed.' };
+    const deny = { behavior: 'deny' as const, message: 'Helm agents may write only inside their writable root and must keep Bash sandboxed.' };
     if (context.signal.aborted) return deny;
     if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
       if (!await writablePath(cwd, tool === 'NotebookEdit' ? input.notebook_path : input.file_path)) return deny;
     }
     if (tool === 'Bash' && (input.dangerouslyDisableSandbox || (context.blockedPath && !await writablePath(cwd, context.blockedPath)))) return deny;
-    if (tool === 'AskUserQuestion' || tool === 'ExitPlanMode') return { behavior: 'deny', message: 'Report blockers through the Helm submit-conclusion tool.' };
+    if (tool === 'AskUserQuestion' || tool === 'ExitPlanMode') return { behavior: 'deny', message: 'Report blockers through the Helm tools.' };
     // SDK allow is allow_once. Never echo suggestions as updatedPermissions:
     // they can persist allow_always rules in the user's or project's settings.
-    return { behavior: 'allow', updatedInput: input };
-  };
-}
-
-function coordinatorPermission(): CanUseTool {
-  return async (tool, input, context) => {
-    const allowed = ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill'].includes(tool) || tool.startsWith('mcp__');
-    if (context.signal.aborted || !allowed || (tool === 'Bash' && (input.dangerouslyDisableSandbox || context.blockedPath))) {
-      return { behavior: 'deny', message: 'Helm coordinator may only read project code and use Skill or MCP tools; Bash must stay sandboxed.' };
-    }
     return { behavior: 'allow', updatedInput: input };
   };
 }
@@ -146,16 +136,17 @@ export class ClaudeDriver implements Driver {
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
-    if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length
+    if (coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1
       || options.agent?.role === 'executor')) {
-      throw new Error('ClaudeCoordinatorDriver requires a read-only coordinator round');
+      throw new Error('ClaudeCoordinatorDriver requires a writable coordinator directory');
     }
     if (!coordinator && (options.agent?.role === 'coordinator' || options.sandbox.mode !== 'workspace-write')) {
       throw new Error('ClaudeExecutorDriver requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
-    if (!coordinator && (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd)) {
-      throw new Error('Claude executor writable roots must contain only its card copy');
+    if (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
+      throw new Error(coordinator ? 'Claude coordinator writable roots must contain only its coordinator directory'
+        : 'Claude executor writable roots must contain only its card copy');
     }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
     const agent = options.agent;
@@ -199,11 +190,10 @@ export class ClaudeDriver implements Driver {
       skills: 'all',
       systemPrompt: agentPrompt(agent),
       permissionMode: 'default', abortController: controller,
-      canUseTool: coordinator ? coordinatorPermission() : executorPermission(cwd),
-      // Fix each role's built-ins rather than inheriting the CLI's evolving defaults.
+      canUseTool: workspacePermission(cwd),
+      // Fix built-ins rather than inheriting the CLI's evolving defaults.
       // An explicit tools list hides Skill unless it is listed, even with `skills` set.
-      tools: [...coordinator ? ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite']
-        : ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'], 'Skill'],
+      tools: ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill'],
       spawnClaudeCodeProcess: processOptions => {
         controller.signal.throwIfAborted();
         const child = spawn(processOptions.command, processOptions.args, {
@@ -218,9 +208,7 @@ export class ClaudeDriver implements Driver {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
         // The CLI still merges user-scope excludedCommands and allowWrite;
         // these session settings cannot remove those user sandbox exceptions.
-        // Claude grants cwd writes by default; an empty allowWrite alone does
-        // not make it read-only. Explicitly deny cwd, including temp worktrees.
-        filesystem: { disabled: false, ...coordinator ? { allowWrite: [], denyWrite: [cwd] } : { allowWrite: [cwd] }, denyRead: credentialPaths() },
+        filesystem: { disabled: false, allowWrite: [cwd], denyRead: credentialPaths() },
         network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) =>

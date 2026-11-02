@@ -22,7 +22,7 @@ async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'execu
   return {
     cwd, env: { HOME: cwd, PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
     agent: { ...new AgentCatalog(fixtureAgentDir).get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
-    sandbox: role === 'executor' ? { mode: 'workspace-write', writableRoots: [cwd] } : { mode: 'read-only', writableRoots: [] },
+    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
   };
 }
@@ -79,8 +79,7 @@ for (const role of ['coordinator', 'executor'] as const) for (const home of ['sh
     assert.deepEqual(settings.permissions?.deny, credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]));
     assert.deepEqual(sdk.sandbox, {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-      filesystem: { disabled: false, allowWrite: role === 'coordinator' ? [] : [base.cwd],
-        ...(role === 'coordinator' ? { denyWrite: [base.cwd] } : {}), denyRead: credentialPaths() },
+      filesystem: { disabled: false, allowWrite: [base.cwd], denyRead: credentialPaths() },
       network: { allowLocalBinding: true },
     });
     const context = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'tool' };
@@ -152,7 +151,7 @@ test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent�
         yield result();
       } }) });
     await collect(driver, { ...base, agent,
-      sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : base.sandbox });
+      sandbox: base.sandbox });
     assert.equal(inspected, true);
   }));
 });
@@ -298,7 +297,7 @@ test('真实 Claude 驱动在新开和续跑派单中注入默认执行规则，
   }
 });
 
-test('同一个 Claude 驱动按 Agent 角色选择会话权限，并在内置角色规则和 Agent 提示词后追加运行约定', async t => {
+test('同一个 Claude 驱动按 Agent 角色注入规则，两种角色都使用目录写权限', async t => {
   for (const role of ['coordinator', 'executor'] as const) {
     const options = await fixture(t, role);
     options.agent = { ...options.agent!, prompt: '测试自定义策略' };
@@ -314,19 +313,19 @@ test('同一个 Claude 驱动按 Agent 角色选择会话权限，并在内置�
           assert.match(args.options!.systemPrompt as string, /不要 git commit 或改 git 配置/);
           assert.match(args.options!.systemPrompt as string, /不要自己安装或启动浏览器/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
-        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
+        } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
       }) });
     assert.equal((await collect(driver, options)).end?.reason, 'completed');
   }
 });
 
-test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP 与单次读取权限', async t => {
+test('Claude 调度者只写调度者目录，允许联网并保留轮次 MCP 与单次权限', async t => {
   const base = await fixture(t);
-  const cwd = join(base.cwd, '_work');
+  const cwd = join(base.cwd, 'coordinator');
   await mkdir(cwd);
   const options: SessionOptions = { ...base, cwd,
     agent: { ...new AgentCatalog(fixtureAgentDir).get('claude-coordinator'), model: 'haiku', reasoningEffort: 'low' },
-    sandbox: { mode: 'read-only', writableRoots: [] },
+    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-token' } } },
   };
   let permission: CanUseTool | undefined;
@@ -337,10 +336,10 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
       assert.deepEqual(sdk.settingSources, [], '调度者不加载用户的全局插件、hooks、CLAUDE.md');
       assert.equal((sdk.settings as Exclude<NonNullable<Options['settings']>, string>).disableClaudeAiConnectors, true);
       assert.equal(sdk.permissionMode, 'default');
-      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'Skill']);
+      assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
       assert.deepEqual(sdk.sandbox, {
         enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        filesystem: { disabled: false, allowWrite: [], denyWrite: [cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
+        filesystem: { disabled: false, allowWrite: [cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
       });
       assert.equal(sdk.strictMcpConfig, true);
       assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
@@ -361,17 +360,21 @@ test('Claude 调度者每轮新开只读会话，保留带轮次令牌的 MCP �
     const input = { command: 'cat README.md' };
     assert.deepEqual(await permission(tool, input, context), { behavior: 'allow', updatedInput: input });
   }
-  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'AskUserQuestion', 'ExitPlanMode']) {
-    assert.equal((await permission(tool, { file_path: join(cwd, 'file') }, context))?.behavior, 'deny', tool);
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+    const key = tool === 'NotebookEdit' ? 'notebook_path' : 'file_path';
+    assert.equal((await permission(tool, { [key]: join(cwd, 'file') }, context))?.behavior, 'allow', tool);
+    assert.equal((await permission(tool, { [key]: join(base.cwd, 'project', 'file') }, context))?.behavior, 'deny', tool);
   }
+  for (const tool of ['AskUserQuestion', 'ExitPlanMode']) assert.equal((await permission(tool, {}, context))?.behavior, 'deny');
   assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
-  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: cwd }))?.behavior, 'deny');
+  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: base.cwd }))?.behavior, 'deny');
   assert.equal((await permission('Read', {}, { ...context, signal: AbortSignal.abort() }))?.behavior, 'deny');
   for (const invalid of [
-    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd] } },
-    { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [cwd] } },
+    { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [] } },
+    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd, base.cwd] } },
+    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [base.cwd] } },
     { ...options, agent: base.agent },
-  ]) await assert.rejects(driver.start(invalid), /read-only coordinator round/);
+  ]) await assert.rejects(driver.start(invalid), /coordinator/);
 });
 
 test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和新开/续跑选项', async t => {

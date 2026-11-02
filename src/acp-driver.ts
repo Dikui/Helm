@@ -200,13 +200,17 @@ export class AcpDriver implements Driver {
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
     const coordinator = agent.role === 'coordinator';
-    if (coordinator && (options.sandbox.mode !== 'read-only' || options.sandbox.writableRoots.length)) {
-      throw new Error('ACP coordinator requires a read-only coordinator round');
+    if (coordinator && !(options.sandbox.mode === 'read-only' && !options.sandbox.writableRoots.length)
+      && !(options.sandbox.mode === 'workspace-write' && options.sandbox.writableRoots.length === 1)) {
+      throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
     }
     if (agent.driver !== this.agent || (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1))) {
       throw new Error('ACP executor requires an executor card copy');
     }
     const cwd = await realpath(options.cwd);
+    if (coordinator && options.sandbox.writableRoots.length && await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
+      throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
+    }
     if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
     options.signal?.throwIfAborted();
     const queue: DriverEvent[] = [];
@@ -261,7 +265,8 @@ export class AcpDriver implements Driver {
       },
       permission(request) {
         const input = request.toolCall.rawInput ?? toolInputs.get(request.toolCall.toolCallId);
-        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, options.sandbox.mode) ?? true);
+        // ACP coordinators accept the new cwd contract but stay read-only until their driver migration.
+        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, coordinator ? 'read-only' : options.sandbox.mode) ?? true);
         const option = allowed ? request.options.find(option => option.kind === 'allow_once') : undefined;
         // Selecting a persistent rejection can also mutate the user's settings.
         const reject = request.options.find(option => option.kind === 'reject_once');

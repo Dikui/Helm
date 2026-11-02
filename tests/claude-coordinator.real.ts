@@ -46,13 +46,11 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number, cwd
     assert.equal(sdk.model, 'haiku');
     assert.equal(sdk.effort, 'low');
     assert.ok(sdk.cwd);
-    if (brief.work.workPath) {
-      assert.equal(sdk.cwd, brief.work.workPath);
-      assert.ok(sdk.cwd.endsWith('/_work'));
-    } else assert.equal(brief.work.workBranch, null);
+    assert.ok(sdk.cwd.endsWith(`/coordinator/${brief.work.id}`));
+    assert.notEqual(sdk.cwd, brief.projectPath);
     assert.deepEqual(sdk.settingSources, []);
     assert.equal(sdk.strictMcpConfig, true);
-    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [], denyWrite: [sdk.cwd], denyRead: credentialPaths() });
+    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [sdk.cwd], denyRead: credentialPaths() });
     assert.deepEqual(Object.keys(sdk.mcpServers ?? {}), ['helm']);
     const endpoint = sdk.mcpServers!.helm!;
     assert.ok('url' in endpoint && endpoint.type === 'http');
@@ -126,7 +124,7 @@ function successfulTool(round: Observation, name: string, count: number) {
 
 const restrictions = '只用当前 helm MCP 端点和指定工具；不启动浏览器、不安装、不派生子代理、不推送、不部署。工具失败就停止并报告，不寻找绕过方法。';
 
-test('冒烟①⑤：三轮真实调度者从项目目录经带令牌 HTTP MCP 建卡、改依赖、派单后建立副本，无 needs-auth 且记录 token',
+test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MCP 建卡、改依赖、派单后建立副本，无 needs-auth 且记录 token',
   { skip: !enabled, timeout: 600_000 }, async t => {
     const sessions: string[] = [];
     const tokens: string[] = [];
@@ -148,7 +146,7 @@ test('冒烟①⑤：三轮真实调度者从项目目录经带令牌 HTTP MCP �
       assert.ok(end.details.usage.inputTokens > 0 && end.details.usage.outputTokens > 0);
       assert.equal(observed.rounds.length, 1);
       const round = observed.rounds[0]!;
-      assert.equal(round.cwd, daemon.repo);
+      assert.equal(round.cwd, join(daemon.directory, 'data', 'coordinator', daemon.work.id));
       assert.equal(round.brief.work.workPath, null);
       assert.equal(round.brief.work.workBranch, null);
       connected(round);
@@ -157,7 +155,6 @@ test('冒烟①⑤：三轮真实调度者从项目目录经带令牌 HTTP MCP �
       assert.equal(cards.length, 2);
       const upstream = cards.find((card: any) => card.key === 'smoke-upstream');
       const downstream = cards.find((card: any) => card.key === 'smoke-downstream');
-      // A read-only upstream would legitimately skip the work copy asserted below.
       assert.equal(upstream.workspace, 'copy');
       assert.equal(downstream.status, 'waiting');
       assert.deepEqual(downstream.dependencies, [{ type: 'card', id: upstream.id }]);
@@ -206,9 +203,10 @@ test('冒烟②：真实调度者操作后被用户打断，新轮次重投同�
     assert.equal(observed.rounds.length, 2);
     const [first, replay] = observed.rounds as [Observation, Observation];
     const work = await daemon.call('get-work', daemon.params);
-    assert.equal(first.cwd, daemon.repo);
+    assert.equal(first.cwd, join(daemon.directory, 'data', 'coordinator', daemon.work.id));
     assert.equal(first.brief.work.workPath, null);
-    assert.equal(replay.cwd, work.workPath);
+    assert.equal(replay.cwd, first.cwd);
+    assert.equal(replay.brief.projectPath, work.workPath);
     for (const round of [first, replay]) {
       connected(round);
       successfulTool(round, 'create-card', 1);
@@ -231,17 +229,18 @@ test('冒烟②：真实调度者操作后被用户打断，新轮次重投同�
     }
   });
 
-test('冒烟③调度者：对齐轮次在项目目录内 Bash 写入被真实沙箱拦截，读取正常且项目代码不变',
+test('冒烟③调度者：项目写入被拒、调度者目录可写，项目读取正常且代码不变',
   { skip: !enabled, timeout: 240_000 }, async t => {
     let command = '';
     const observed = observedDriver((brief, _attempt, cwd) => {
       assert.equal(brief.work.status, 'aligning');
-      command = `printf forbidden > ${shellQuote(join(cwd, 'coordinator-write.txt'))}`;
-      return `这是只读沙箱冒烟。${restrictions}
+      command = `printf forbidden > ${shellQuote(join(brief.projectPath, 'coordinator-write.txt'))}`;
+      return `这是调度者目录沙箱冒烟。${restrictions}
 1. 必须用 Bash 原样尝试一次：${command}
 预期写入被沙箱拦下。禁止使用 dangerouslyDisableSandbox，禁止重试或其他写法。
-2. 拒绝是预期结果，继续用 Read 读取当前项目目录的 README.md。
-3. 简短回答实际读到的内容和写入错误，然后退出。`;
+2. 拒绝是预期结果，继续用 Bash 执行：printf allowed > ${shellQuote(join(cwd, 'coordinator-notes.txt'))}
+3. 用 Read 读取 ${join(brief.projectPath, 'README.md')}。
+4. 简短回答实际读到的内容和写入错误，然后退出。`;
     });
     const daemon = await fixture(t, observed.driver, 1, { realFirstRound: true, roundTimeout: 180_000 });
     const events = await daemon.events();
@@ -249,7 +248,7 @@ test('冒烟③调度者：对齐轮次在项目目录内 Bash 写入被真实�
     assert.equal(end.details.reason, 'completed', JSON.stringify(end.details));
     assert.equal(observed.rounds.length, 1);
     const round = observed.rounds[0]!;
-    assert.equal(round.cwd, daemon.repo);
+    assert.equal(round.cwd, join(daemon.directory, 'data', 'coordinator', daemon.work.id));
     assert.equal(round.brief.work.workPath, null);
     assert.equal(round.brief.work.workBranch, null);
     assert.equal(existsSync(join(daemon.directory, 'data', 'worktrees', daemon.work.id, '_work')), false);
@@ -259,7 +258,7 @@ test('冒烟③调度者：对齐轮次在项目目录内 Bash 写入被真实�
     const denied = toolResult(round.messages, bash.id);
     assert.equal(denied?.is_error, true);
     assert.match(JSON.stringify(denied.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
-    assert.ok(!round.permissions.some(item => item.tool === 'Bash' && item.input.command === command && item.behavior === 'deny'), '写入必须由真实沙箱拒绝');
+    assert.equal(await readFile(join(round.cwd, 'coordinator-notes.txt'), 'utf8'), 'allowed');
     await assert.rejects(readFile(join(daemon.repo, 'coordinator-write.txt')), { code: 'ENOENT' });
     assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
     const read = toolCalls(round.messages).find(call => call.name === 'Read');
@@ -270,27 +269,29 @@ test('冒烟③调度者：对齐轮次在项目目录内 Bash 写入被真实�
     assert.equal(daemon.git('status', '--porcelain'), '');
   });
 
-test('冒烟④：对齐只读项目目录，首次写代码派单取最新基准建副本并提示差异，换目录后新开会话',
+test('冒烟④：调度者目录保持不变，首次写代码派单取最新基准建副本，后续简报引用副本并续跑',
   { skip: !enabled, timeout: 600_000 }, async t => {
     const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
-    const command = 'printf forbidden > alignment-write.txt';
+    let command = '';
     let original = '';
     let latest = '';
     const observed = observedDriver((brief, attempt, cwd) => {
       assert.equal(brief.work.baseRef, 'main');
+      const codePath = brief.projectPath;
       if (attempt === 1) {
         assert.equal(brief.work.status, 'aligning');
         assert.equal(brief.work.activeDescriptionId, null);
         assert.equal(brief.work.workPath, null);
         assert.equal(brief.work.workBranch, null);
-        assert.equal(git(cwd, 'branch', '--show-current'), 'main');
-        original = git(cwd, 'rev-parse', 'HEAD');
+        assert.equal(git(codePath, 'branch', '--show-current'), 'main');
+        original = git(codePath, 'rev-parse', 'HEAD');
+        command = `printf forbidden > ${shellQuote(join(codePath, 'alignment-write.txt'))}`;
         return `这是按需副本的首个对齐轮次冒烟。${restrictions}
-1. 用 Bash 执行 pwd，再用 Bash 执行 git branch --show-current。
-2. 用 Read 读取当前项目目录的 README.md。
+1. 用 Bash 执行 pwd，再用 Bash 执行 git -C ${shellQuote(codePath)} branch --show-current。
+2. 用 Read 读取 ${join(codePath, 'README.md')}。
 3. 必须用 Bash 原样尝试一次：${command}
 预期写入被沙箱拒绝；禁止 dangerouslyDisableSandbox、重试或其他写法。拒绝后继续。
-4. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=对齐只读项目目录，首次写代码执行派单前才建立副本。
+4. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=调度者只能写自己的目录，首次写代码执行派单前才建立副本。
 然后简短回答读到的内容并退出。`;
       }
       if (attempt === 2) {
@@ -299,18 +300,18 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
         assert.equal(brief.work.workPath, null, '确认工作说明不能创建工作副本');
         assert.equal(brief.work.workBranch, null);
         assert.equal(brief.work.baseCommit, original);
-        assert.equal(git(cwd, 'branch', '--list', `helm/${brief.work.id}`), '');
-        assert.equal(existsSync(join(cwd, '..', 'data', 'worktrees', brief.work.id, '_work')), false);
+        assert.equal(git(codePath, 'branch', '--list', `helm/${brief.work.id}`), '');
+        assert.equal(existsSync(join(cwd, '..', '..', 'worktrees', brief.work.id, '_work')), false);
         // Advance main after confirmation, before the first real execution dispatch.
-        // These host-side fixture edits are outside the coordinator's read-only sandbox.
-        writeFileSync(join(cwd, 'base-latest.txt'), 'committed after confirmation\n');
-        git(cwd, 'add', 'base-latest.txt');
-        git(cwd, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'advance base after confirmation');
-        latest = git(cwd, 'rev-parse', 'main');
+        // Host-side fixture edits advance the project before dispatch.
+        writeFileSync(join(codePath, 'base-latest.txt'), 'committed after confirmation\n');
+        git(codePath, 'add', 'base-latest.txt');
+        git(codePath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'advance base after confirmation');
+        latest = git(codePath, 'rev-parse', 'main');
         assert.notEqual(latest, original);
-        git(cwd, 'checkout', '-b', 'user-switched');
-        writeFileSync(join(cwd, 'README.md'), 'user checkout modified before dispatch\n');
-        writeFileSync(join(cwd, 'uncommitted.txt'), 'must not enter the copy\n');
+        git(codePath, 'checkout', '-b', 'user-switched');
+        writeFileSync(join(codePath, 'README.md'), 'user checkout modified before dispatch\n');
+        writeFileSync(join(codePath, 'uncommitted.txt'), 'must not enter the copy\n');
         return `这是首次写代码执行派单冒烟。${restrictions}
 只按顺序调用：
 1. create-card，key=on-demand-card，content=按需副本冒烟写代码卡片，workspace=copy。
@@ -319,7 +320,7 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
       }
       assert.equal(attempt, 3);
       return `这是工作副本建立后的下一轮调度者冒烟。${restrictions}
-只用 Bash 执行 pwd 和 git branch --show-current，再用 Read 分别读取 README.md 和 base-latest.txt。
+只用 Bash 执行 pwd 和 git -C ${shellQuote(codePath)} branch --show-current，再用 Read 分别读取 ${join(codePath, 'README.md')} 和 ${join(codePath, 'base-latest.txt')}。
 简短报告读到的结果后退出，不建卡、不派单。`;
     });
     const daemon = await fixture(t, observed.driver, 3, { realFirstRound: true, roundTimeout: 180_000 });
@@ -329,7 +330,7 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
     assert.equal(observed.rounds.length, 1);
     const alignment = observed.rounds[0]!;
     connected(alignment);
-    assert.equal(alignment.cwd, daemon.repo);
+    assert.equal(alignment.cwd, join(daemon.directory, 'data', 'coordinator', daemon.work.id));
     assert.equal(daemon.work.workPath, null);
     assert.equal(daemon.work.workBranch, null);
     const workPath = join(daemon.directory, 'data', 'worktrees', daemon.work.id, '_work');
@@ -342,9 +343,10 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
       assert.ok(pwd, '真实 CLI 必须报告 cwd');
       const pwdResult = toolResult(round.messages, pwd.id);
       assert.ok(pwdResult && !pwdResult.is_error);
-      assert.ok(JSON.stringify(pwdResult.content).includes(path));
+      assert.ok(JSON.stringify(pwdResult.content).includes(round.cwd));
       const read = calls.find(call => call.name === 'Read' && String((call.input as any).file_path).endsWith('README.md'));
       assert.ok(read);
+      assert.equal((read.input as any).file_path, join(path, 'README.md'));
       const result = toolResult(round.messages, read.id);
       assert.ok(result && !result.is_error);
       assert.match(JSON.stringify(result.content), /coordinator read-only baseline/);
@@ -372,7 +374,7 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
     assert.equal(observed.rounds.length, 2);
     const dispatchRound = observed.rounds[1]!;
     connected(dispatchRound);
-    assert.equal(dispatchRound.cwd, daemon.repo, '建副本的这一轮仍在项目目录');
+    assert.equal(dispatchRound.cwd, alignment.cwd);
     successfulTool(dispatchRound, 'create-card', 1);
     successfulTool(dispatchRound, 'create-dispatch', 1);
     const copied = await daemon.call('get-work', daemon.params);
@@ -409,11 +411,12 @@ test('冒烟④：对齐只读项目目录，首次写代码派单取最新基�
     assert.equal(observed.rounds.length, 3);
     const next = observed.rounds[2]!;
     connected(next);
-    assert.equal(next.cwd, workPath);
-    assert.equal(next.resumeSessionId, undefined, '换目录不能续跑旧会话');
-    assert.notEqual(next.sessionId, dispatchRound.sessionId);
-    assert.equal(next.brief.resumed, undefined);
-    assert.equal(finalEvents.filter(event => event.action === 'round-agent-loaded')[2]!.details.resumed, false);
+    assert.equal(next.cwd, alignment.cwd);
+    assert.equal(next.brief.projectPath, workPath);
+    assert.equal(next.resumeSessionId, dispatchRound.sessionId);
+    assert.equal(next.sessionId, dispatchRound.sessionId);
+    assert.equal(next.brief.resumed, true);
+    assert.equal(finalEvents.filter(event => event.action === 'round-agent-loaded')[2]!.details.resumed, true);
     assertReadLocation(next, workPath);
     const latestRead = toolCalls(next.messages).find(call => call.name === 'Read' && String((call.input as any).file_path).endsWith('base-latest.txt'));
     assert.ok(latestRead);

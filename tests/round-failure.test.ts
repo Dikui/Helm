@@ -485,7 +485,7 @@ test('用户手动暂停仍撤销运行中和排队派单，包括已被运行�
   });
 });
 
-test('轮次结束清理 _work 残留进程及同组的子进程，不触碰项目目录的进程', async t => {
+test('轮次结束清理调度者目录残留进程及同组的子进程，不触碰项目目录的进程', async t => {
   for (const outcome of ['completed', 'quota-exhausted', 'timed-out', 'ignores-sigterm'] as const) await t.test(outcome, async t => {
     const reason = outcome === 'ignores-sigterm' ? 'completed' : outcome;
     let child: ChildProcess | undefined;

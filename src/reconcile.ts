@@ -13,6 +13,7 @@ import { removeVerificationCopy } from './verification.js';
 import { reconcileScratchDirectories } from './scratch.js';
 import { projectEnvironment, protectDispatchEnvironment } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
+import { reconcileCoordinatorDirectories } from './coordinator-directory.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -56,6 +57,9 @@ export async function reconcileStartup(store: TaskStore) {
 
   const scratchRoot = join(store.dataDir, 'scratch');
   if (existsSync(scratchRoot)) await cleanupWorktreeProcesses(scratchRoot);
+
+  const coordinatorRoot = join(store.dataDir, 'coordinator');
+  if (existsSync(coordinatorRoot)) await cleanupWorktreeProcesses(coordinatorRoot);
 
   const works = store.db.prepare('SELECT id FROM works ORDER BY rowid').all().map(row => store.work(String(row.id)));
   for (const work of works) {
@@ -146,6 +150,7 @@ export async function reconcileStartup(store: TaskStore) {
     }
     await compressWorkOutputs(store, work.id);
   }
+  reconcileCoordinatorDirectories(store);
   store.transaction(() => {
     store.db.prepare(`INSERT OR IGNORE INTO wake_queue (event_id, work_id)
       SELECT e.id, c.work_id FROM cards c JOIN works w ON w.id = c.work_id

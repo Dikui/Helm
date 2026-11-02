@@ -54,7 +54,7 @@ function fixture(t: TestContext) {
 }
 
 for (const outcome of ['completed', 'quota-exhausted', 'error', 'timed-out', 'aborted'] as const) {
-  test(`项目目录调度轮次 ${outcome} 时按本轮进程组清理，记录 OS 启动时间且保留用户进程`, async t => {
+  test(`调度轮次 ${outcome} 时按进程组清理已离开调度者目录的进程，保留项目内用户进程`, async t => {
     const ctx = fixture(t);
     const outside = await ctx.child();
     let managed: ChildProcess | undefined;
@@ -62,7 +62,7 @@ for (const outcome of ['completed', 'quota-exhausted', 'error', 'timed-out', 'ab
       capabilities: new FakeDriver().capabilities,
       async checkAvailability() { return { available: true }; },
       async start(options) {
-        assert.equal(options.cwd, ctx.project);
+        assert.equal(options.cwd, join(ctx.store.dataDir, 'coordinator', 'work'));
         managed = await ctx.child();
         // Drivers report the OS start time themselves; the round layer records it unchanged.
         options.onProcess?.({ pid: managed.pid!, pgid: managed.pid!, startedAt: processStartTime(managed.pid!)! });

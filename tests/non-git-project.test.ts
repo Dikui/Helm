@@ -31,8 +31,9 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
   });
   const daemon = await uiFixture([
     ctx => {
-      assert.equal(ctx.options.cwd, projectPath);
-      assert.deepEqual(ctx.options.sandbox, { mode: 'read-only', writableRoots: [] });
+      assert.equal(ctx.options.cwd, join(daemon.directory, 'data', 'coordinator', JSON.parse(ctx.input).work.id));
+      assert.equal(JSON.parse(ctx.input).projectPath, projectPath);
+      assert.deepEqual(ctx.options.sandbox, { mode: 'workspace-write', writableRoots: [ctx.options.cwd] });
       assert.equal(JSON.parse(ctx.input).work.baseRef, null);
       return [draft];
     },
@@ -45,7 +46,8 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
     ctx => {
       const brief = JSON.parse(ctx.input);
       const card = brief.cardGraph.find((item: any) => item.key === 'read');
-      assert.equal(ctx.options.cwd, projectPath);
+      assert.equal(ctx.options.cwd, join(daemon.directory, 'data', 'coordinator', JSON.parse(ctx.input).work.id));
+      assert.equal(JSON.parse(ctx.input).projectPath, projectPath);
       return [
         { type: 'tool', name: 'complete-card', arguments: { cardId: card.id }, check: ok },
         { type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport('只读分析完成') }, check: ok },

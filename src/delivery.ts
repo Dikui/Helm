@@ -7,6 +7,7 @@ import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { compressWorkOutputs } from './outputs.js';
 import type { ConflictResolution } from './conflict-resolution.js';
+import { removeCoordinatorDirectory } from './coordinator-directory.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const exec = promisify(execFile);
@@ -134,6 +135,7 @@ export function completeReviewedWork(store: TaskStore, actor: Actor, workId: str
 }
 
 export async function finishDelivery(store: TaskStore, workId: string) {
+  removeCoordinatorDirectory(store, workId);
   await cleanupReviewedCopy(store, workId);
   await compressWorkOutputs(store, workId);
   return store.work(workId);

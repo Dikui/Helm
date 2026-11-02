@@ -23,7 +23,7 @@ function enableCoordinatorForFixture(t: TestContext, kind: 'grok' | 'deepseek') 
   t.after(() => { Object.assign(capabilities, previous); });
 }
 
-for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者新开和续跑均使用只读沙箱、轮次 MCP 和调度规则，保留计划与结束事件`, async t => {
+for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者暂时接受可写调度者目录，CLI 与权限回调仍只读，保留轮次 MCP 和结束事件`, async t => {
   enableCoordinatorForFixture(t, kind);
   const ctx = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions,
     permissions: Array.from({ length: 3 }, () => ['allow_once', 'reject_once'].map(kind => ({ kind, name: kind, optionId: kind }))),
@@ -38,7 +38,7 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者新开�
   assert.equal((await ctx.driver.checkAvailability(agent)).available, true);
   for (const resumeSessionId of [undefined, 'previous']) {
     const session = await ctx.driver.start({ ...ctx.options, agent, resumeSessionId,
-      sandbox: { mode: 'read-only', writableRoots: [] },
+      sandbox: resumeSessionId ? { mode: 'workspace-write', writableRoots: [ctx.cwd] } : { mode: 'read-only', writableRoots: [] },
       mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: `Bearer round-${resumeSessionId ?? 'new'}` } } } });
     t.after(() => session.cancel());
     await session.send('处理本轮事件');
@@ -68,12 +68,13 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者新开�
   if (kind === 'grok') assert.match(await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8'), /\[profiles\.helm-read-only\]\nextends = "read-only"/);
 });
 
-for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝可写沙箱与未开放的调度者能力，不启动 CLI`, async t => {
+for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝错误可写根与未开放的调度者能力，不启动 CLI`, async t => {
   enableCoordinatorForFixture(t, kind);
   const ctx = await acpFixture(t, {}, true, kind);
   const agent = { ...ctx.agent, role: 'coordinator' as const };
-  for (const sandbox of [ctx.options.sandbox, { mode: 'read-only' as const, writableRoots: [ctx.cwd] }]) {
-    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox }), /read-only coordinator/);
+  for (const sandbox of [{ mode: 'workspace-write' as const, writableRoots: [join(ctx.cwd, '..')] },
+    { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, join(ctx.cwd, '..')] }, { mode: 'read-only' as const, writableRoots: [ctx.cwd] }]) {
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox }), /coordinator/);
   }
   const capabilities = acpAgents[kind].capabilities;
   const previous = capabilities.coordinator;

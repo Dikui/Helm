@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
+import { removeCoordinatorDirectory } from './coordinator-directory.js';
 import { readWork } from './work-reads.js';
 import { attachmentDirectory } from './attachments.js';
 
@@ -205,6 +206,7 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
       }
     }
     await rm(join(store.dataDir, 'scratch', workId), { recursive: true, force: true });
+    removeCoordinatorDirectory(store, workId);
     await rm(join(store.dataDir, 'worktrees', workId), { recursive: true, force: true });
     await rm(attachmentDirectory(store, workId), { recursive: true, force: true });
     const branches = new Set([

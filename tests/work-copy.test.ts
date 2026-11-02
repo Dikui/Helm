@@ -9,12 +9,13 @@ import { uiFixture, until } from './ui-fixture.js';
 import { existingWorkCopy } from './helmd-fixture.js';
 import type { FakeContext, FakeStep } from '../src/driver.js';
 
-test('创建工作只固定基准分支，对齐只读项目目录且不建副本', async t => {
+test('创建工作只固定基准分支，调度者使用独立目录且不建副本', async t => {
   let cwd: string | undefined;
   const daemon = await uiFixture([ctx => {
     cwd = ctx.options.cwd;
-    assert.equal(ctx.options.sandbox.mode, 'read-only');
-    assert.deepEqual(ctx.options.sandbox.writableRoots, []);
+    assert.equal(ctx.options.sandbox.mode, 'workspace-write');
+    assert.deepEqual(ctx.options.sandbox.writableRoots, [cwd]);
+    assert.equal(JSON.parse(ctx.input).projectPath, daemon.repo);
     return [];
   }]);
   t.after(() => daemon.close());
@@ -34,10 +35,10 @@ test('创建工作只固定基准分支，对齐只读项目目录且不建副�
   assert.equal(git('for-each-ref', '--format=%(refname)', 'refs/heads/helm/'), '');
   assert.equal(git('worktree', 'list', '--porcelain').split('worktree ').length, 2);
   await until(async () => cwd, value => Boolean(value));
-  assert.equal(cwd, daemon.repo);
+  assert.equal(cwd, join(daemon.directory, 'data', 'coordinator', work.id));
   git('checkout', 'main');
   await writeFile(join(daemon.repo, 'README.md'), '用户切分支后改动\n');
-  assert.equal(await readFile(join(cwd!, 'README.md'), 'utf8'), '用户切分支后改动\n');
+  assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), '用户切分支后改动\n');
   assert.equal((await daemon.call('send-message', params)).result.work.workPath, work.workPath);
   assert.equal((await daemon.call('list-works')).result.length, 1);
 });
@@ -106,7 +107,7 @@ test('没有工作副本和分支时，取消、重复取消及删除均可完�
   assert.equal((await daemon.call('list-works')).result.length, 0);
 });
 
-for (const hasDraft of [false, true]) test(`旧对齐工作${hasDraft ? '已有草稿' : '尚无草稿'}时，下轮仍只读项目目录，不补建副本`, async t => {
+for (const hasDraft of [false, true]) test(`旧对齐工作${hasDraft ? '已有草稿' : '尚无草稿'}时，下轮从简报读项目目录，不补建副本`, async t => {
   let resumedCwd: string | undefined;
   const daemon = await uiFixture([
     hasDraft ? [{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({
@@ -131,8 +132,8 @@ for (const hasDraft of [false, true]) test(`旧对齐工作${hasDraft ? '已有�
   assert.equal(resumed.baseRef, null);
   assert.equal(resumed.workPath, null);
   assert.equal(resumed.workBranch, null);
-  assert.equal(resumedCwd, daemon.repo);
-  assert.equal(await readFile(join(resumedCwd!, 'README.md'), 'utf8'), '用户未提交的内容');
+  assert.equal(resumedCwd, join(daemon.directory, 'data', 'coordinator', work.id));
+  assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), '用户未提交的内容');
 });
 
 test('默认基准取当前本地分支，同名 tag 不改变工作起点', async t => {
@@ -151,9 +152,10 @@ test('默认基准取当前本地分支，同名 tag 不改变工作起点', asy
   assert.equal((await daemon.call('list-project-branches', { projectId: daemon.project.id })).result.currentBranch, 'main');
 });
 
-test('已有副本的旧工作继续只读原副本，不删除或重建', async t => {
+test('已有副本的旧工作在简报引用原副本，不删除或重建', async t => {
   let cwd = '';
-  const daemon = await uiFixture([[], ctx => { cwd = ctx.options.cwd; return []; }]);
+  let codePath = '';
+  const daemon = await uiFixture([[], ctx => { cwd = ctx.options.cwd; codePath = JSON.parse(ctx.input).projectPath; return []; }]);
   t.after(() => daemon.close());
   const initial = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '旧工作' })).result.work;
   const params = { workId: initial.id };
@@ -162,8 +164,9 @@ test('已有副本的旧工作继续只读原副本，不删除或重建', async
   await writeFile(join(work.workPath!, 'kept.txt'), '保留旧副本内容\n');
   await daemon.call('send-message', { ...params, key: 'next', body: '继续对齐' });
   await until(async () => cwd, Boolean);
-  assert.equal(cwd, work.workPath);
-  assert.equal(await readFile(join(cwd, 'kept.txt'), 'utf8'), '保留旧副本内容\n');
+  assert.equal(cwd, join(daemon.directory, 'data', 'coordinator', work.id));
+  assert.equal(codePath, work.workPath);
+  assert.equal(await readFile(join(work.workPath!, 'kept.txt'), 'utf8'), '保留旧副本内容\n');
   assert.equal((await daemon.call('get-work', params)).result.workBranch, work.workBranch);
   assert.equal((await daemon.call('cancel-work', params)).ok, true);
   assert.equal(existsSync(cwd), false);
@@ -233,8 +236,9 @@ for (const [differentBranch, dirty] of [[false, false], [true, false], [false, t
     }
     assert.equal(git('branch', '--show-current'), differentBranch ? 'user-branch' : 'main');
     assert.equal(git('status', '--porcelain'), projectStatus);
-    assert.equal(rounds[0]!.options.cwd, daemon.repo);
-    assert.equal(rounds[1]!.options.cwd, daemon.repo);
+    const coordinator = join(daemon.directory, 'data', 'coordinator', work.id);
+    assert.equal(rounds[0]!.options.cwd, coordinator);
+    assert.equal(rounds[1]!.options.cwd, coordinator);
     assert.equal(typeof rounds[1]!.options.resumeSessionId, 'string');
 
     // A later card starts from the current work tip, without recreating _work.
@@ -245,19 +249,19 @@ for (const [differentBranch, dirty] of [[false, false], [true, false], [false, t
     const tip = workGit('rev-parse', 'HEAD');
     await daemon.call('send-message', { ...params, key: 'next', body: '继续' });
     await ended(3);
-    assert.equal(rounds[2]!.options.cwd, prepared.workPath);
-    assert.equal(rounds[2]!.options.resumeSessionId, undefined);
-    assert.equal(JSON.parse(rounds[2]!.input).resumed, undefined);
-    assert.ok(JSON.parse(rounds[2]!.input).workDescription);
+    assert.equal(rounds[2]!.options.cwd, coordinator);
+    assert.equal(typeof rounds[2]!.options.resumeSessionId, 'string');
+    assert.equal(JSON.parse(rounds[2]!.input).resumed, true);
+    assert.equal(JSON.parse(rounds[2]!.input).projectPath, prepared.workPath);
     const second = (await daemon.call('get-card-graph', params)).result.find((node: any) => node.key === 'second');
     assert.equal(git('rev-parse', second.cardBranch), tip);
     await daemon.call('send-message', { ...params, key: 'same-cwd', body: '继续查看' });
     await ended(4);
-    assert.equal(rounds[3]!.options.cwd, prepared.workPath);
+    assert.equal(rounds[3]!.options.cwd, coordinator);
     assert.equal(typeof rounds[3]!.options.resumeSessionId, 'string');
     assert.equal(JSON.parse(rounds[3]!.input).resumed, true);
     const loaded = (await daemon.call('get-events', params)).result.filter((event: any) => event.action === 'round-agent-loaded');
-    assert.deepEqual(loaded.map((event: any) => event.details.resumed), [false, true, false, true]);
+    assert.deepEqual(loaded.map((event: any) => event.details.resumed), [false, true, true, true]);
     assert.equal((await conversation()).result.filter((item: any) => item.sender === 'runtime' && item.body.includes('工作副本不包含')).length, notices.length);
   });
 }

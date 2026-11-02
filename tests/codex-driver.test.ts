@@ -12,14 +12,14 @@ import { fixtureAgentDir } from './helmd-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
 // Codex runs every Helm agent under one permissions profile: whole-disk read except credentials,
-// and for executors the card copy (thread cwd) plus network.
-function assertProfile(thread: any, write: boolean) {
+// and writes only in the session cwd plus network.
+function assertProfile(thread: any) {
   assert.equal(thread.permissions, 'helm');
   assert.equal(Object.hasOwn(thread, 'sandbox'), false);
   assert.equal(thread.config.default_permissions, 'helm');
   assert.deepEqual(thread.config.permissions, { helm: {
-    filesystem: { ':root': 'read', ...write ? { ':workspace_roots': 'write' } : {}, ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) },
-    ...write ? { network: { enabled: true } } : {} } });
+    filesystem: { ':root': 'read', ':workspace_roots': 'write', ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) },
+    network: { enabled: true } } });
 }
 
 async function fixture(t: TestContext, notifications: object[], script: object = {}, role: 'executor' | 'coordinator' = 'executor') {
@@ -36,7 +36,7 @@ async function fixture(t: TestContext, notifications: object[], script: object =
     reasoningEffort: 'low', fast: true, home: 'shared', loadGlobalConfig: role === 'executor', description: '执行', prompt: '测试策略', rules: roleRules(role), directory, skillsPath: join(directory, 'skills') };
   const options: SessionOptions = { agent, cwd: directory, dataDir: join(directory, 'dispatch'),
     env: { CODEX_HOME: '/caller/must-not-use', HOME: directory, PATH: process.env.PATH!, NO_PROXY: 'example.test', no_proxy: 'internal.test' },
-    sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [directory] },
+    sandbox: { mode: 'workspace-write', writableRoots: [directory] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } } };
   const requests = async () => (await readFile(record, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   return { driver, options, directory, requests };
@@ -95,7 +95,7 @@ for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlo
       await session.send('处理卡片，不保存个人记忆');
       await collect(session.events);
       const thread = (await ctx.requests()).filter(request => ['thread/start', 'thread/resume'].includes(request.method)).at(-1);
-      assertProfile(thread.params, role === 'executor');
+      assertProfile(thread.params);
       assert.equal(thread.params.approvalPolicy, 'never');
       assert.deepEqual(thread.params.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp',
         http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
@@ -176,7 +176,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.deepEqual(requests[2].params, { extraRoots: [ctx.options.agent!.skillsPath] });
   const thread = requests[3].params;
   assert.equal(thread.approvalPolicy, 'never');
-  assertProfile(thread, true);
+  assertProfile(thread);
   assert.equal(thread.serviceTier, 'fast');
   assert.equal(thread.config.service_tier, 'fast');
   assert.deepEqual(thread.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp', http_headers: { Authorization: 'Bearer dispatch-token' }, default_tools_approval_mode: 'approve' } });
@@ -365,7 +365,7 @@ test('Codex 订阅可用性由默认环境的 CLI 退出码决定，不依赖 au
   assert.equal((await driver.checkAvailability(api)).available, true, 'API Agent 不调用登录检查');
 });
 
-test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP 配置生效', async t => {
+test('Codex 调度者每轮新进程、新 thread，只写调度者目录的联网沙箱及轮次 MCP 配置生效', async t => {
   const ctx = await fixture(t, [
     notification('item/completed', { item: { type: 'agentMessage', phase: 'commentary', text: '进行中' } }),
     notification('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 13, outputTokens: 4 } } }),
@@ -395,12 +395,13 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
   assert.equal(requests.some(r => r.method === 'thread/resume'), false);
   for (const [round, thread] of requests.filter(r => r.method === 'thread/start').entries()) {
     assert.equal(thread.params.serviceTier, 'fast');
-    assertProfile(thread.params, false);
+    assertProfile(thread.params);
     assert.equal(thread.params.approvalPolicy, 'never');
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);
     assert.deepEqual(thread.params.config.mcp_servers, { helm: { url: 'http://127.0.0.1:4242/mcp',
       http_headers: { Authorization: `Bearer round-${round}` }, default_tools_approval_mode: 'approve' } });
-    assert.match(thread.params.developerInstructions, /项目代码只读/);
+    assert.match(thread.params.developerInstructions, /只能写调度者目录/);
+    assert.equal(thread.params.cwd, ctx.directory);
     assert.doesNotMatch(thread.params.developerInstructions, /submit-conclusion/);
   }
   for (const turn of requests.filter(r => r.method === 'turn/start')) {
@@ -409,12 +410,13 @@ test('Codex 调度者每轮新进程、新 thread，只读沙箱及轮次 MCP �
   }
 });
 
-test('Codex 调度者拒绝可写沙箱和错配角色，角色专用驱动不越界', async t => {
+test('Codex 调度者拒绝只读、额外可写根与错配角色，角色专用驱动不越界', async t => {
   const ctx = await fixture(t, [], {}, 'coordinator');
   for (const options of [
-    { ...ctx.options, sandbox: { mode: 'workspace-write' as const, writableRoots: [ctx.directory] } },
-    { ...ctx.options, sandbox: { mode: 'read-only' as const, writableRoots: [ctx.directory] } },
-  ]) await assert.rejects(ctx.driver.start(options), /read-only coordinator round/);
+    { ...ctx.options, sandbox: { mode: 'read-only' as const, writableRoots: [] } },
+    { ...ctx.options, sandbox: { mode: 'workspace-write' as const, writableRoots: [ctx.directory, tmpdir()] } },
+    { ...ctx.options, sandbox: { mode: 'workspace-write' as const, writableRoots: [tmpdir()] } },
+  ]) await assert.rejects(ctx.driver.start(options).then(session => session.cancel()), /coordinator/);
   await assert.rejects(new CodexCoordinatorDriver().start({ ...ctx.options, agent: { ...ctx.options.agent!, role: 'executor' } }), /coordinator/);
   await assert.rejects(new CodexExecutorDriver().start(ctx.options), /executor card copy/);
   assert.deepEqual(await ctx.requests(), []);
@@ -475,7 +477,7 @@ test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近
   assert.deepEqual(end.type === 'end' && end.context, { tokens: 34, window: 258400 });
   const thread = (await ctx.requests()).find(request => request.method === 'thread/resume');
   assert.equal(thread.params.threadId, 'thread-scripted');
-  assertProfile(thread.params, false);
+  assertProfile(thread.params);
   assert.equal(thread.params.config.mcp_servers.helm.http_headers.Authorization, 'Bearer round-2');
 });
 
@@ -491,7 +493,7 @@ for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlo
   }
   const requests = await ctx.requests();
   for (const thread of requests.filter(request => ['thread/start', 'thread/resume'].includes(request.method))) {
-    assertProfile(thread.params, true);
+    assertProfile(thread.params);
     assert.equal(thread.params.config.sandbox_workspace_write, undefined);
   }
   for (const turn of requests.filter(request => request.method === 'turn/start')) {

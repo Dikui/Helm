@@ -14,7 +14,7 @@ test('初始化断言允许用户 MCP 和 Skill，拒绝额外内置工具、伪
   for (const tool of ['Artifact', 'DesignSync', 'PushNotification', 'SendMessage', 'mcp__helm__desktop-tool']) {
     assert.throws(() => check({ ...init, tools: [...init.tools, tool] }), /不应加载工具/);
   }
-  assert.throws(() => check({ ...init, tools: [...init.tools, 'Write'] }, 'coordinator'), /不应加载工具 Write/);
+  check({ ...init, tools: [...init.tools, 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite'] }, 'coordinator');
   assert.throws(() => check({ ...init, tools: [] }), /必须报告可用工具/);
   assert.throws(() => check({ ...init, mcp_servers: [{ name: 'user', status: 'connected' }] }), /必须保留注入/);
   assert.throws(() => check({ ...init, fast_mode_state: 'on' }), /fast/);

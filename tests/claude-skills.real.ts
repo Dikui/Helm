@@ -50,7 +50,7 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
       let session;
       try {
         session = await driver.start({ cwd, env, agent, signal: controller.signal, mcpServers: {},
-          sandbox: role === 'coordinator' ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [cwd] } });
+          sandbox: { mode: 'workspace-write', writableRoots: [cwd] } });
         await session.send('请实际调用当前 Agent 的 secret 技能，最后只回答它给出的暗号。禁止猜测、使用 Read/Bash 或读取其他目录。');
         const messages: SDKMessage[] = [];
         let completed = false;

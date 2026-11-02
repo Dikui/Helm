@@ -138,9 +138,10 @@ test('MCP 从轮次令牌确定工作，HTTP 保留范围检查，令牌限制�
   const daemon = await fixture(t, [ctx => {
     headers = ctx.options.mcpServers.helm!.headers;
     ownWorkId = workIdOf(ctx);
-    assert.equal(ctx.options.cwd, daemon.repo);
+    assert.equal(ctx.options.cwd, join(daemon.directory, 'data', 'coordinator', ownWorkId));
+    assert.equal(ctx.brief.projectPath, daemon.repo);
     assert.equal(ctx.brief.work.workPath, null);
-    assert.equal(ctx.options.sandbox.mode, 'read-only');
+    assert.equal(ctx.options.sandbox.mode, 'workspace-write');
     assert.equal(ctx.options.resumeSessionId, undefined);
     assert.ok(ctx.options.env.NO_PROXY?.split(',').includes('127.0.0.1'));
     assert.ok(ctx.options.env.NO_PROXY?.split(',').includes('localhost'));

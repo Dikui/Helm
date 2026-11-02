@@ -29,7 +29,7 @@ function observedDriver() {
     capabilities: base.capabilities,
     checkAvailability: agent => base.checkAvailability(agent),
     async start(options) {
-      assert.deepEqual(options.sandbox, { mode: 'read-only', writableRoots: [] });
+      assert.deepEqual(options.sandbox, { mode: 'workspace-write', writableRoots: [options.cwd] });
       assert.equal(options.resumeSessionId, undefined);
       assert.equal(options.agent?.model, 'gpt-6-luna');
       assert.equal(options.agent?.reasoningEffort, 'low');
@@ -46,11 +46,11 @@ function observedDriver() {
         async send(content) {
           const brief = JSON.parse(content) as StartupBrief;
           record.brief = brief;
-          record.command = `printf forbidden > ${shellQuote(join(options.cwd, 'coordinator-write.txt'))}`;
+          record.command = `printf forbidden > ${shellQuote(join(brief.projectPath, 'coordinator-write.txt'))}`;
           await session.send(`这是低消耗 Helm 调度者冒烟。只执行下列步骤，不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。
 所有 MCP 操作只用注入的 helm 端点，工作由轮次令牌确定，调用不传 workId。工具失败即报告退出，不寻找绕过方式。
 ${attempt === 1 ? `先用 shell 原样尝试一次命令：${record.command}
-预期被 read-only 沙箱拒绝；不得重试或提权。拒绝后读取 README.md 并继续以下操作。` : ''}
+预期被沙箱拒绝；不得重试或提权。拒绝后用 shell 执行 printf allowed > ${shellQuote(join(options.cwd, 'coordinator-notes.txt'))}，再用 shell 执行 cat ${shellQuote(join(brief.projectPath, 'README.md'))} 并继续以下操作。` : ''}
 无论简报是否已有对象，每轮都必须按顺序实际重放：
 1. create-card，key=smoke-upstream，content=上游卡片。
 2. create-card，key=smoke-downstream，content=下游卡片。
@@ -99,7 +99,7 @@ function successfulTool(round: Observation, name: string, count: number) {
   }
 }
 
-test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重投 key 去重、只读沙箱和 NO_PROXY',
+test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重投 key 去重、调度者目录可写、项目禁写与读取和 NO_PROXY',
   { skip: !enabled, timeout: 600_000 }, async t => {
     // Only this smoke links the real login into a temporary default CLI home; never write to the real home.
     const stagedAuth = join(homedir(), '.codex', 'auth.json');
@@ -127,6 +127,8 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
     assert.ok(ends[2].details.usage.inputTokens > 0 && ends[2].details.usage.outputTokens > 0);
     assert.equal(observed.rounds.length, 2);
     const [first, replay] = observed.rounds as [Observation, Observation];
+    assert.equal(first.options.cwd, join(daemon.dataDir, 'coordinator', daemon.work.id));
+    assert.equal(replay.options.cwd, first.options.cwd);
     assert.notEqual(first.sessionId, replay.sessionId);
     assert.notEqual(first.sqlitePath, replay.sqlitePath);
     assert.notEqual(first.options.mcpServers.helm!.headers.Authorization, replay.options.mcpServers.helm!.headers.Authorization);
@@ -151,9 +153,12 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
     assert.equal((await daemon.call('list-dispatches', daemon.params)).length, 1);
     assert.equal(events.filter(e => e.action === 'card-created').length, 2);
     assert.equal(events.filter(e => e.action === 'dispatch-created').length, 1);
-    assert.ok(await sandboxDenied(items(first), join(daemon.home, '.codex'), join(first.options.cwd, 'coordinator-write.txt')),
+    assert.ok(await sandboxDenied(items(first), join(daemon.home, '.codex'), join(first.brief.projectPath, 'coordinator-write.txt')),
       '必须实际尝试写入并被真实沙箱拒绝');
-    await assert.rejects(readFile(join(first.options.cwd, 'coordinator-write.txt')), { code: 'ENOENT' });
-    assert.equal(await readFile(join(first.options.cwd, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
-    assert.equal(daemon.git('-C', first.options.cwd, 'status', '--porcelain'), '');
+    await assert.rejects(readFile(join(first.brief.projectPath, 'coordinator-write.txt')), { code: 'ENOENT' });
+    assert.equal(await readFile(join(first.options.cwd, 'coordinator-notes.txt'), 'utf8'), 'allowed');
+    assert.ok(items(first).some(item => item.type === 'commandExecution' && item.exitCode === 0
+      && String(item.aggregatedOutput).includes('coordinator read-only baseline')), '必须实际读取项目文件');
+    assert.equal(await readFile(join(first.brief.projectPath, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
+    assert.equal(daemon.git('-C', first.brief.projectPath, 'status', '--porcelain'), '');
   });

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContextSize, DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
 import { projectPath } from './alignment.js';
@@ -11,8 +11,11 @@ import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { projectEnvironmentNames } from './project-environment.js';
 import { readPrompt } from './prompts.js';
+import { createCoordinatorDirectory } from './coordinator-directory.js';
 
 export interface StartupBrief {
+  projectPath: string;
+  projectInstructionPaths: string[];
   projectEnvironmentNames: string[];
   work: Work;
   delivery: ReturnType<typeof deliveryDetails>;
@@ -33,6 +36,7 @@ export interface StartupBrief {
 export function startupBrief(store: TaskStore, workId: string, wakeIds: number[], resumedRoundId?: string): StartupBrief {
   const withdrawn = new Set(store.db.prepare('SELECT id FROM messages WHERE work_id = ? AND withdrawn_at IS NOT NULL').all(workId).map(row => String(row.id)));
   const work = store.work(workId);
+  const codePath = work.workPath ?? projectPath(store, workId);
   const versions = store.descriptions(workId);
   const description = versions.at(-1);
   const lastStart = store.db.prepare(`SELECT MAX(id) AS id FROM events WHERE work_id = ? AND action = 'round-started'`).get(workId)!.id;
@@ -44,6 +48,9 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   const resumedStart = resumedRoundId && store.db.prepare(`SELECT details FROM events WHERE action = 'round-started' AND object_id = ?`).get(resumedRoundId);
   const sessionHasExecutingRules = resumedStart && JSON.parse(String(resumedStart.details)).executingRules === true;
   return {
+    projectPath: codePath,
+    projectInstructionPaths: ['AGENTS.md', 'CLAUDE.md'].map(name => join(codePath, name))
+      .filter(path => statSync(path, { throwIfNoEntry: false })?.isFile()),
     projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),
     ...(work.activeDescriptionId && !sessionHasExecutingRules ? { phaseRules: readPrompt(store.agents.promptDirectory, 'coordinator-executing') } : {}),
     ...(resumedRoundId ? { resumed: true } : {
@@ -137,6 +144,7 @@ export class RoundScheduler {
   }
 
   private async run(workId: string) {
+    const cwd = createCoordinatorDirectory(this.store, workId);
     const id = randomUUID();
     const token = randomBytes(32).toString('hex');
     const outputPath = join(this.store.dataDir, 'rounds', `${id}.jsonl`);
@@ -164,7 +172,7 @@ export class RoundScheduler {
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
       this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started',
-        { eventIds: ids, outputPath, cwd: brief.work.workPath ?? projectPath(this.store, workId), executingRules: Boolean(brief.work.activeDescriptionId) }, { workId });
+        { eventIds: ids, outputPath, cwd, executingRules: Boolean(brief.work.activeDescriptionId) }, { workId });
       return { ids, brief, resume, fullBrief };
     });
     const ids = started.ids;
@@ -220,16 +228,14 @@ export class RoundScheduler {
       this.sessions.delete(workId);
       if (stopReason || this.stopping || abortReason) { reason = this.stopping || abortReason ? 'aborted' : stopReason!; finalAnswer = undefined; }
       if (this.stopping) abortReason ??= '运行层重启';
-      if (brief.work.workPath || processes.length) {
-        try {
-          const cleaned = await cleanupWorktreeProcesses(brief.work.workPath ?? projectPath(this.store, workId), processes, Boolean(brief.work.workPath));
-          if (cleaned.pids.length) this.store.transaction(() => {
-            this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-processes-cleaned', cleaned, { workId });
-          });
-        } catch (error) {
-          failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
-          if (reason === 'completed') { reason = 'error'; finalAnswer = undefined; }
-        }
+      try {
+        const cleaned = await cleanupWorktreeProcesses(cwd, processes);
+        if (cleaned.pids.length) this.store.transaction(() => {
+          this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-processes-cleaned', cleaned, { workId });
+        });
+      } catch (error) {
+        failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
+        if (reason === 'completed') { reason = 'error'; finalAnswer = undefined; }
       }
       if (reason === 'timed-out') failure = [failure, '调度轮次超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
       let failures = 0;
@@ -264,7 +270,6 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const cwd = brief.work.workPath ?? projectPath(this.store, workId);
       const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
@@ -293,7 +298,7 @@ export class RoundScheduler {
         cwd,
         env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
-        sandbox: { mode: 'read-only', writableRoots: [] },
+        sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
         mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
         ...(resume ? { resumeSessionId: resume.sessionId } : {}),
         signal: controller.signal,

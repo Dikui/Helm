@@ -13,6 +13,7 @@ import { compressWorkOutputs } from './outputs.js';
 import { checkAgent, checkEnvironment, installTool, listModels } from './availability.js';
 import type { DriverRegistry, ModelContext } from './driver.js';
 import { completeWithoutMerge, deliveryDetails, finishDelivery, mergeReviewedWork, pushReviewedWork, recheckReviewedWork, setDeliveryStatus } from './delivery.js';
+import { removeCoordinatorDirectory } from './coordinator-directory.js';
 
 export class UserOperations {
   private projectDeliveries = new Map<string, Promise<unknown>>();
@@ -173,6 +174,7 @@ export class UserOperations {
       this.store.appendEvent(actor, { type: 'work', id: workId }, 'work-cancelled', {}, { workId });
     });
     await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '工作取消')]);
+    removeCoordinatorDirectory(this.store, workId);
     rmSync(join(this.store.dataDir, 'scratch', workId), { recursive: true, force: true });
     for (const node of cardGraph(this.store, workId)) if (node.type === 'card') removeCardCopy(this.store, node);
     if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
