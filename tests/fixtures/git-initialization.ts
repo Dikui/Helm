@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uiFixture, until } from '../ui-fixture.js';
 
-// Real HTTP/store/SSE, fake agents; also used by the headed screenshot case.
+// Real HTTP/store/SSE, fake agents; also used by the headless screenshot case.
 export async function gitInitializationFixture(existingIgnore = false, staticDir?: string) {
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '修改项目', boundary: '项目目录', criteria: '保留现有文件' } },

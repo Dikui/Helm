@@ -114,7 +114,7 @@ helm get-events --workId <工作id>
 - **进程清理**：派单和轮次结束时，按工作目录找出残留进程，`SIGTERM`，5 秒后 `SIGKILL`（macOS 用 `lsof`，Linux 用 `/proc`）；切到副本外目录的进程可能找不到。Helm 启动的进程组和组长在副本里的进程组整组结束；组长在副本外的（如编辑器）只结束当前目录在副本里的那个进程。不要在副本里开终端，`helmd` 重启时会结束它；要看代码请检出工作分支。
 - **环境**：Agent 子进程的环境变量按白名单构造，逐项说明见 [src/environment.ts](src/environment.ts)；运行层再注入禁止推送的 git 配置和无效的 `GH_TOKEN`。Claude 会话关闭自动记忆。
 - **沙箱**：执行者只能写自己的卡片副本，调度者只读工作副本，Bash 禁止退出沙箱。Claude、Codex、Grok 的 Agent 读不到 `~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.kube`、`~/.config/gh`、`~/.git-credentials`、`~/.netrc`、`~/.docker/config.json`（见 `credentialPaths`）：Claude 用 Bash 沙箱 `denyRead` 加 `Read(...)` 拒绝规则；Codex 用权限配置档 `helm`；Grok 用 `helm` / `helm-read-only` 沙箱配置档，Helm 每次启动 Grok 前在 `~/.grok/sandbox.toml` 末尾维护一段带标记的配置（只改标记段，不动你自己的配置）。DeepSeek 的沙箱只限制写、没有按路径禁读的设置，仍读得到。执行者能联网，禁止推送的 git 配置只防误操作，不是安全边界。**已知缺口**：`~/.claude/settings.json` 里的 `sandbox.filesystem.allowWrite`、`sandbox.excludedCommands` 和 `Edit(...)` 放行路径会话里覆盖不掉，对 Helm 的 Agent 同样生效（[官方说明](https://code.claude.com/docs/en/sandboxing#repository-settings-under-an-admin-required-sandbox)）。
-- **浏览器检查**：调度者派单时加 `needsBrowser: true`，运行层在执行者沙箱外为这次派单启动有界面、隔离的 Playwright MCP（固定 `@playwright/mcp@0.0.83` 自带的 Chromium），只转发白名单里的工具。用 `npm run browser:install` 安装浏览器。
+- **浏览器检查**：调度者派单时加 `needsBrowser: true`，运行层在执行者沙箱外为这次派单启动无头、隔离的 Playwright MCP（固定 `@playwright/mcp@0.0.83` 自带的 Chromium），只转发白名单里的工具。用 `npm run browser:install` 安装浏览器。
 
 ## 开发
 
@@ -134,7 +134,7 @@ npm run dev:ui  # 界面开发服务器
 npm run test:real --cache /private/tmp/helm-npm-cache
 ```
 
-它依次跑浏览器、各驱动的调度者与执行者和界面几组测试，某组失败也会跑完其余组，最后汇总失败组。需要本机已登录的 CLI 和有界面的 Chromium（Linux 还需显示服务），不用无头模式和系统 Chrome。输出的截图要打开核对。`test:browser`、`test:claude-executor` 等可单独跑其中一组。
+它依次跑浏览器、各驱动的调度者与执行者和界面几组测试，某组失败也会跑完其余组，最后汇总失败组。需要本机已登录的 CLI 和 Playwright 自带的 Chromium，浏览器以无头模式运行、不弹窗抢焦点，不用系统 Chrome。输出的截图要打开核对。`test:browser`、`test:claude-executor` 等可单独跑其中一组。
 
 **代码结构**：`src/` 是后端，主要有任务库与事务（`store.ts`）、操作表（`operations.ts`）、对齐（`alignment.ts`）、调度轮次（`rounds.ts`）、派单（`dispatch.ts`）、验收（`verification.ts`）、审核与合入（`review.ts`、`delivery.ts`）、驱动（`driver.ts` 及各 `*-driver.ts`）、HTTP/SSE（`server.ts`）、MCP（`mcp.ts`）和 CLI（`cli.ts`）。`frontend/` 是 React 界面，构建到 `dist/ui/` 由 `helmd` 直接提供。新增业务操作只需在操作表里登记。
 

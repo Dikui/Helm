@@ -1,6 +1,6 @@
 // Outside the sandbox only, after npm run build:
 // HELM_THINKING_UI_REAL=1 node --test dist/tests/thinking-ui.real.js
-// Uses fake Agents and headed Chromium; no real CLI login is needed.
+// Uses fake Agents and headless Chromium; no real CLI login is needed.
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -10,11 +10,10 @@ import { test } from 'node:test';
 import { uiFixture, until } from './ui-fixture.js';
 
 test('现在条与调度者检查器：思考、计划、原始步骤与结束折叠状态截图', { skip: process.env.HELM_THINKING_UI_REAL !== '1', timeout: 90_000 }, async t => {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
   const evidence = await mkdtemp(join(tmpdir(), 'helm-thinking-ui-'));
   const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
   const { chromium } = require('playwright') as typeof import('playwright');
-  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
   t.after(() => browser.close());
   const hold = () => {
     let release!: () => void;

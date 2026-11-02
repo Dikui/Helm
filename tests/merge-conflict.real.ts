@@ -13,7 +13,7 @@ import { ClaudeDriver } from '../src/claude-driver.js';
 import { startHelmd } from '../src/server.js';
 import { configureTestAgent, fixtureAgentDir } from './helmd-fixture.js';
 
-test('真实合入冲突：本地检测、调度者卡片解决与验收、查看改动、再次合入（有界面 Chromium）',
+test('真实合入冲突：本地检测、调度者卡片解决与验收、查看改动、再次合入',
   { skip: process.env.HELM_MERGE_CONFLICT_REAL !== '1', timeout: 600_000 }, async t => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-conflict-real-')));
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-conflict-evidence-')));
@@ -67,7 +67,7 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
     }
     const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
     const { chromium } = require('playwright') as typeof import('playwright');
-    browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+    browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
     const page = await browser.newPage({ viewport: { width: 1600, height: 1050 }, locale: 'zh-CN' });
     page.setDefaultTimeout(20_000);
     const errors: string[] = [];

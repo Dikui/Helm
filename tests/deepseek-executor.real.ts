@@ -26,7 +26,6 @@ test('DeepSeek 真实账号执行者：一轮、同端点结论/浏览器、卡�
       if (previousBrowsers === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
       else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsers;
     });
-    if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有界面的 Chromium');
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-deepseek-smoke-evidence-')));
     console.log(`DeepSeek 冒烟证据目录：${evidence}`);
     // Place the protected destination outside writable system temp directories.

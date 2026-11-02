@@ -1,6 +1,6 @@
 // Outside the sandbox only, after npm run build:
 // HELM_SCROLL_UI_REAL=1 node --test dist/tests/scroll-ui.real.js
-// Uses fake Agents and headed Chromium; no real CLI login is needed.
+// Uses fake Agents and headless Chromium; no real CLI login is needed.
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -12,11 +12,10 @@ import { uiFixture, until } from './ui-fixture.js';
 test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换工作的真实布局验收', {
   skip: process.env.HELM_SCROLL_UI_REAL !== '1', timeout: 90_000,
 }, async t => {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
   const evidence = await mkdtemp(join(tmpdir(), 'helm-scroll-ui-'));
   const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
   const { chromium } = require('playwright') as typeof import('playwright');
-  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
   t.after(() => browser.close());
   let finishAlignment!: () => void;
   let finishExecution!: () => void;

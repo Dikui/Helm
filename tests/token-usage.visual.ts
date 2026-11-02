@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { uiFixture, until } from './ui-fixture.js';
 
-if (process.env.HELM_TOKEN_VISUAL !== '1') throw new Error('Set HELM_TOKEN_VISUAL=1 outside the sandbox to run headed screenshot acceptance.');
+if (process.env.HELM_TOKEN_VISUAL !== '1') throw new Error('Set HELM_TOKEN_VISUAL=1 outside the sandbox to run headless screenshot acceptance.');
 const output = resolve(process.argv[2] ?? '/private/tmp/helm-token-visual');
 const design = process.argv[3];
 await mkdir(output, { recursive: true });
@@ -26,7 +26,7 @@ let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: 'Token 验收', key: 'start' })).result.work;
   await until(() => daemon.call('list-rounds', { workId: work.id }), value => value.result.rounds[0]?.status === 'ended');
-  browser = await chromium.launch({ headless: false });
+  browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const shot = async (name: string) => page.screenshot({ path: resolve(output, `${name}.png`), fullPage: true });
   await page.goto(`${daemon.url}/works/${work.id}`);

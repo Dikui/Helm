@@ -1,5 +1,5 @@
 // Explicitly run outside the agent sandbox: npm run test:claude-executor.
-// Requires Claude login in a disposable HOME and the bundled, headed Chromium.
+// Requires Claude login in a disposable HOME and the bundled, headless Chromium.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -84,7 +84,6 @@ function connected(observed: ReturnType<typeof observedDriver>) {
 
 test('冒烟①⑤：三次真实派单在同端点使用结论与浏览器工具，无 needs-auth，保存截图和 token',
   { skip: !enabled, timeout: 600_000 }, async t => {
-    if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有显示服务的沙箱外环境，禁止无头模式');
     const evidence = await mkdtemp(join(tmpdir(), 'helm-claude-smoke-evidence-'));
     const site = createServer((_request, response) => response.end('<h1>Helm browser dispatch</h1>'));
     await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));

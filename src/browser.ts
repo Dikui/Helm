@@ -37,10 +37,10 @@ export class BrowserProcess {
     mkdirSync(outputDir, { recursive: true });
     const configPath = join(outputDir, 'config.json');
     writeFileSync(configPath, JSON.stringify({
-      browser: { browserName: 'chromium', launchOptions: { channel: 'chrome-for-testing', headless: false } },
+      browser: { browserName: 'chromium', launchOptions: { channel: 'chrome-for-testing', headless: true } },
       outputDir,
     }));
-    // Environment overrides must not select system Chrome, a remote browser, or headless mode.
+    // Environment overrides must not select system Chrome or a remote browser.
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('PLAYWRIGHT_MCP_')));
     env.NO_PROXY = [env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',');
     env.no_proxy = env.NO_PROXY;

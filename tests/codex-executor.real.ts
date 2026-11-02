@@ -28,7 +28,6 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
       if (previousBrowsers === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
       else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsers;
     });
-    if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有界面的 Chromium');
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-codex-smoke-evidence-')));
     console.log(`Codex 冒烟证据目录：${evidence}`);
     const outside = join(evidence, 'outside.txt');

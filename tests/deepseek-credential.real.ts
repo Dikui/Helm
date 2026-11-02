@@ -11,11 +11,10 @@ import { AcpDriver } from '../src/acp-driver.js';
 import { acpExecutorFixture, ok } from './acp-executor-fixture.js';
 
 async function checkUi(url: string, reason: string) {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有界面的 Chromium');
   const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-deepseek-credential-ui-')));
   const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
   const { chromium } = require('playwright') as typeof import('playwright');
-  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN' });
     page.setDefaultTimeout(30_000);
@@ -69,7 +68,7 @@ test('真实 dsh 无 key 路由：派单失败后不可用，重新检测清除�
   assert.ok(unavailable.reason.includes(route[0]));
   assert.equal(unavailable.command, 'dsh web');
   assert.ok((await daemon.call('list-pending')).result.some((item: any) => item.kind === 'agent-unavailable' && item.agentId === unavailable.id));
-  // Opt in separately; this branch launches headed Chromium only outside the sandbox.
+  // Opt in separately; this branch launches headless Chromium only outside the sandbox.
   if (process.env.HELM_DEEPSEEK_CREDENTIAL_UI === '1') await checkUi(daemon.url, unavailable.reason);
   const rechecked = await daemon.call('recheck-agent', { id: unavailable.id });
   ok(rechecked);

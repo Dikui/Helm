@@ -29,11 +29,10 @@ const executionQuestion = '开始 smoke.txt 执行？';
 const contents = 'helm-ui-smoke\n';
 
 test('初始化 git 关卡：收件箱与工作对话、中英文、编辑规则、失败重试和拒绝截图', { skip: !enabled, timeout: 90_000 }, async t => {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
   const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-git-initialization-ui-')));
   const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
   const { chromium } = require('playwright') as typeof import('playwright');
-  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', colorScheme: 'light' });
   page.setDefaultTimeout(15_000);
@@ -88,7 +87,6 @@ test('初始化 git 关卡：收件箱与工作对话、中英文、编辑规则
 });
 
 test('临时目录工作审核显示无代码改动，接受即完成且没有交付按钮', { skip: !enabled, timeout: 90_000 }, async t => {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '须在沙箱外的显示服务运行，禁止无头模式');
   const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-scratch-ui-')));
   let release!: () => void;
   const executionEnded = new Promise<void>(resolve => { release = resolve; });
@@ -112,7 +110,7 @@ test('临时目录工作审核显示无代码改动，接受即完成且没有�
   await until(() => daemon.call('get-work', { workId: work.id }), value => value.result.status === 'awaiting-review');
   const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
   const { chromium } = require('playwright') as typeof import('playwright');
-  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+  const browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', colorScheme: 'light' });
   page.setDefaultTimeout(15_000);
@@ -185,9 +183,8 @@ function workHeader(page: Page) {
   return page.getByRole('banner', { name: '工作概况', exact: true });
 }
 
-test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审核 → 合入，真实 Claude 与有界面 Chromium 截图',
+test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审核 → 合入，真实 Claude 与 Chromium 截图',
   { skip: !enabled, timeout: 600_000 }, async t => {
-    if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '请在有显示服务的沙箱外运行，禁止无头模式');
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-real-')));
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-ui-real-output-')));
     console.log(`UI 冒烟截图目录（保留供人工对照 design/INDEX.md）：${evidence}`);
@@ -232,8 +229,8 @@ test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审
     daemon = await startHelmd({ port: 0, dataDir: join(evidence, 'data'), agentDir, drivers: { 'claude-sdk': claude } });
     const require = createRequire(createRequire(import.meta.url).resolve('@playwright/mcp/package.json'));
     const { chromium } = require('playwright') as typeof import('playwright');
-    // Playwright's bundled Chrome for Testing, headed; never system Chrome.
-    browser = await chromium.launch({ channel: 'chrome-for-testing', headless: false });
+    // Playwright's bundled Chrome for Testing, headless; never system Chrome.
+    browser = await chromium.launch({ channel: 'chrome-for-testing', headless: true });
     const context = await browser.newContext({ viewport: { width: 1600, height: 1050 }, locale: 'zh-CN', colorScheme: 'light' });
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);

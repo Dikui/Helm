@@ -25,7 +25,6 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       if (previousBrowsers === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
       else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsers;
     });
-    if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '需要有界面的 Chromium');
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-grok-smoke-evidence-')));
     console.log(`Grok 冒烟证据目录：${evidence}`);
     // The protected destination must be outside the sandbox's writable temp roots.

@@ -9,8 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fixture } from './browser-fixture.js';
 
-test('有界面 Chromium 经派单 MCP 打开副本里的页面并截图', { skip: process.env.HELM_BROWSER_REAL !== '1' }, async t => {
-  if (process.platform === 'linux') assert.ok(process.env.DISPLAY, '请在有显示服务的沙箱外运行，禁止无头模式');
+test('Chromium 经派单 MCP 打开副本里的页面并截图', { skip: process.env.HELM_BROWSER_REAL !== '1' }, async t => {
   const screenshotPath = join(tmpdir(), `helm-browser-${Date.now()}.png`);
   const daemon = await fixture(t, [ctx => {
     let failure: unknown;
