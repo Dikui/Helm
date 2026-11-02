@@ -44,3 +44,17 @@ test('工作摘要按卡片图顺序读取状态，区分已结束派单的失�
   store.db.prepare("UPDATE cards SET latest_dispatch_id = 'retry', status = 'executing' WHERE id = 'c'").run();
   assert.equal(listWorks(store)[0]!.cardStatuses[2], 'executing');
 });
+
+test('调度者轮次还在跑时，工作说明确认关卡不算等你处理', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'helm-work-summary-'));
+  const store = new TaskStore(directory, new AgentCatalog(join(directory, 'agents')));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.db.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p', 'project', '/unused', '2026-01-01');
+    INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'p', 'aligning', 'start', '2026-01-01');
+    INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES ('round', 'work', 'running', '2026-01-01', '[]', '/unused');`);
+  const event = store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'gate', id: 'gate' }, 'gate-created', { kind: 'work-confirmation' }, { workId: 'work' });
+  store.db.prepare(`INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence) VALUES ('gate', 'work', 'work-confirmation', 'pending', '确认工作说明', ?, ?)`).run(event.time, event.id);
+  assert.equal(listWorks(store)[0]!.hasPendingGate, false);
+  store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended' WHERE id = 'round'`).run();
+  assert.equal(listWorks(store)[0]!.pendingGates[0]!.kind, 'work-confirmation');
+});
