@@ -536,6 +536,21 @@ test('Grok 按 initialize 公布的模型与各模型推理档位检查可用性
   assert.equal((await ctx.requests()).some(r => r.method === 'authenticate'), false);
 });
 
+test('Grok initialize 尚未带模型列表时不判不可用，会话配置仍校验模型', async t => {
+  const initialize = { protocolVersion: 1, authMethods: [{ id: 'cached_token', name: 'Local login' }],
+    agentCapabilities: { mcpCapabilities: { http: true }, sessionCapabilities: { resume: {} } } };
+  for (const meta of [{}, { _meta: { modelState: { currentModelId: null, availableModels: [] } } }]) {
+    const ctx = await acpFixture(t, { initialize: { ...initialize, ...meta } });
+    assert.equal((await ctx.driver.checkAvailability(ctx.agent)).available, true);
+    const session = await ctx.driver.start(ctx.options);
+    t.after(() => session.cancel());
+    await session.send('执行');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type === 'end' && end.reason, 'completed');
+    await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, model: 'unknown-model' } }), /unknown-model/);
+  }
+});
+
 test('Grok 正常结束先关管道，忽略 TERM 的 ACP 进程在收尾期限后被强杀', async t => {
   const ctx = await acpFixture(t, { stubborn: true });
   const session = await ctx.driver.start(ctx.options);

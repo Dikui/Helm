@@ -166,7 +166,9 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     },
     initializationUnavailable(agent, response) {
       const state = modelState.safeParse(response._meta?.modelState);
-      const model = state.success ? state.data.availableModels.find(model => model.modelId === agent.model) : undefined;
+      // Grok sometimes answers initialize before its model list loads; session config still verifies the model.
+      if (!state.success || !state.data.availableModels.length) return undefined;
+      const model = state.data.availableModels.find(model => model.modelId === agent.model);
       if (!model) return `Grok initialize 没有公布模型 ${agent.model}，请选当前 CLI 支持的模型 id。`;
       if (!model._meta?.reasoningEfforts.some(option => option.value === agent.reasoningEffort)) return `Grok 模型 ${agent.model} 不支持推理强度 ${agent.reasoningEffort}。`;
     },
