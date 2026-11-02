@@ -63,7 +63,7 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
         const instructions = attempt === 1
           ? `这是 Helm 自动流程冒烟。工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 只用当前 helm MCP 端点，必须依次实际成功调用以下两个工具：
-1. create-card，key=auto-flow-card，content=写入 auto-flow-result.txt，内容为 auto-flow-ok 加一个换行，readOnly=false，needsVerification=true，autoFlow 必须为 ${JSON.stringify({ verifications: [{ agentId: verifierId, content: verification, needsBrowser: false }] })}。
+1. create-card，key=auto-flow-card，content=写入 auto-flow-result.txt，内容为 auto-flow-ok 加一个换行，workspace=copy，needsVerification=true，autoFlow 必须为 ${JSON.stringify({ verifications: [{ agentId: verifierId, content: verification, needsBrowser: false }] })}。
 2. create-dispatch，key=auto-flow-execution，cardId 用上一步返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false，content 必须为 ${JSON.stringify(execution)}。
 禁止手动派验收、修改卡片或完成卡片；这些步骤由运行层自动推进。两个调用成功后立即简短回答并退出，不等待派单。`
           : `这是 Helm 自动流程完成后的唤醒轮次。${restrictions} 不调用任何工具，不改变工作状态，只回答“自动流程唤醒已收到”后退出。`;
@@ -103,7 +103,7 @@ test('真实自动流程：执行完成后运行层派验收并合并卡片，�
       assert.equal(cards.length, 1);
       const card = cards[0];
       assert.equal(card.key, 'auto-flow-card');
-      assert.equal(card.readOnly, false);
+      assert.equal(card.workspace, 'copy');
       assert.equal(card.needsVerification, true);
       assert.deepEqual(card.autoFlow, { verifications: [{ agentId: verifierId, content: verification, needsBrowser: false }] });
       const dispatches = await call('list-dispatches', params) as Dispatch[];

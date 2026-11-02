@@ -4,12 +4,14 @@ import { projectPath } from './alignment.js';
 import { removeCardCopy } from './completion.js';
 import { dispatchGit, getDispatch } from './dispatch.js';
 import { finishDispatchCopy } from './execution.js';
-import { cardGraph, refreshCardReadiness } from './graph.js';
+import { cardDetails, cardGraph, refreshCardReadiness } from './graph.js';
 import { cleanupRecordedProcessGroup, cleanupWorktreeProcesses } from './processes.js';
 import { deliveryDetails, mergeReviewedWork, completeReviewedWork, cleanupReviewedCopy } from './delivery.js';
 import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
+import { reconcileScratchDirectories } from './scratch.js';
+import { projectEnvironment, protectDispatchEnvironment } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
@@ -52,15 +54,25 @@ export async function reconcileStartup(store: TaskStore) {
   const root = join(store.dataDir, 'worktrees');
   if (existsSync(root)) await cleanupWorktreeProcesses(root);
 
+  const scratchRoot = join(store.dataDir, 'scratch');
+  if (existsSync(scratchRoot)) await cleanupWorktreeProcesses(scratchRoot);
+
   const works = store.db.prepare('SELECT id FROM works ORDER BY rowid').all().map(row => store.work(String(row.id)));
   for (const work of works) {
     // Also settle a queued dispatch whose revocation was interrupted before shutdown.
     const dispatches = store.db.prepare(`SELECT id, status FROM dispatches WHERE work_id = ? AND
       (status = 'running' OR (status = 'queued' AND (abort_reason IS NOT NULL OR ? IN ('completed', 'cancelled')
+        OR (purpose = 'execution' AND EXISTS (SELECT 1 FROM cards c WHERE c.id = dispatches.card_id AND c.workspace = 'copy' AND c.card_branch IS NULL))
         OR (? NOT IN ('executing', 'paused') AND EXISTS (SELECT 1 FROM gates WHERE work_id = ? AND kind = 'review' AND decision = 'accept')))))`).all(work.id, work.status, work.status, work.id);
     for (const row of dispatches) {
       const dispatch = getDispatch(store, work.id, String(row.id));
-      const endCommit = dispatch.status === 'running' ? finishDispatchCopy(store, dispatch, 'aborted', restartReason) : null;
+      const protection = protectDispatchEnvironment(store, dispatch.id, projectEnvironment(store, work.projectId));
+      let endCommit: string | null;
+      // Migrated read-only executions never had a card copy; abort them so a new dispatch can prepare one.
+      const card = cardDetails(store, work.id, dispatch.cardId);
+      const hasCopy = dispatch.purpose === 'verification' || (card.workPath && card.cardBranch);
+      try { endCommit = card.workspace === 'scratch' || (dispatch.status === 'running' && hasCopy) ? finishDispatchCopy(store, dispatch, 'aborted', restartReason) : null; }
+      finally { protection.release(); }
       store.transaction(() => {
         store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = 'aborted', abort_reason = ?,
           final_answer = NULL, conclusion = 'undeclared', conclusion_reason = NULL, end_commit = ? WHERE id = ?`)
@@ -72,6 +84,7 @@ export async function reconcileStartup(store: TaskStore) {
       });
     }
   }
+  reconcileScratchDirectories(store);
   for (const row of store.db.prepare(`SELECT id, work_id, event_ids FROM coordinator_rounds WHERE status = 'running'`).all()) {
     store.transaction(() => {
       store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = 'aborted' WHERE id = ?`).run(new Date().toISOString(), String(row.id));
@@ -94,7 +107,7 @@ export async function reconcileStartup(store: TaskStore) {
     }
     // A deleted project, or one whose repository was removed, has nothing to repair; keep the work as recorded instead of failing startup.
     const project = projectPath(store, work.id);
-    if (!existsSync(project) || (work.workBranch && !projectGitRoot(project))) { await compressWorkOutputs(store, work.id); continue; }
+    if (!existsSync(project) || !projectGitRoot(project)) { await compressWorkOutputs(store, work.id); continue; }
     // No dispatch runs yet, so every verification copy left by a crash is stale.
     if (existsSync(join(root, work.id, 'verifications'))) removeVerificationCopy(store, work.id, join(root, work.id, 'verifications'));
     if (work.workPath && existsSync(work.workPath)) abortMerge(store, work.id, work.workPath, 'work-merge-aborted', true);
@@ -123,7 +136,7 @@ export async function reconcileStartup(store: TaskStore) {
       } else if (['merging', 'merge-queued'].includes(work.status)) await mergeReviewedWork(store, work.id);
     }
     for (const node of cardGraph(store, work.id)) {
-      if (node.type !== 'card' || node.readOnly || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
+      if (node.type !== 'card' || node.workspace === 'scratch' || (!['completed', 'cancelled'].includes(node.status) && !['completed', 'cancelled'].includes(work.status))) continue;
       removeCardCopy(store, { ...node, workPath: node.workPath ?? join(root, work.id, node.id), cardBranch: node.cardBranch ?? `helm-card/${work.id}/${node.id}` });
     }
     const workPath = work.workPath ?? join(root, work.id, '_work');

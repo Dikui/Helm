@@ -41,7 +41,7 @@ export async function acpCoordinatorSmoke(t: TestContext, kind: 'grok' | 'deepse
 调用 draft-work-description，key=smoke-description，requirements=只读检查 README，boundary=临时项目，criteria=README.md 内容保持 coordinator read-only baseline 加换行。
 只起草一次，等用户确认；本轮立即退出。`
             : `先读简报卡片图；需要时调用 get-card-graph 和 list-dispatches。
-没有卡片时：create-card，key=smoke-readme，content=只读检查 README.md，readOnly=true，needsVerification=false；
+没有卡片时：create-card，key=smoke-readme，content=只读检查 README.md，workspace=copy，needsVerification=false；
 然后 create-dispatch，key=smoke-dispatch，cardId 用返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false，content=只读检查 README 基线并提交 completed。不要等待派单，本轮立即退出。
 已有卡片时：不得重复建卡或派单。若派单未结束，本轮退出。若派单正常结束且 conclusion=completed，调用 complete-card 完成卡片。
 卡片已完成后，调用 request-review，key=smoke-review，report 为结构化汇总报告：
@@ -80,7 +80,7 @@ ${instructions}\n\n启动简报：\n${content}`);
     const graph = (await daemon.call('get-card-graph', daemon.params)).filter((node: any) => node.type === 'card');
     assert.equal(graph.length, 1);
     assert.equal(graph[0].status, 'completed');
-    assert.equal(graph[0].readOnly, true);
+    assert.equal(graph[0].workspace, 'copy');
     const dispatches = await daemon.call('list-dispatches', daemon.params);
     assert.equal(dispatches.length, 1);
     assert.equal(dispatches[0].endReason, 'completed');

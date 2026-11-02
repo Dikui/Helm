@@ -58,13 +58,13 @@ async function prepare(options: { readonly?: boolean; resolution?: FakeScript } 
     const number = ++sequence;
     let release!: () => void;
     const executed = new Promise<void>(resolve => { release = resolve; });
-    executors.push(options.readonly ? [{ type: 'artifact', kind: 'file', path: 'README.md' }]
+    executors.push(options.readonly ? [{ type: 'write', path: 'README.md', content: 'baseline\n' }]
       : [{ type: 'write', path: number === 1 ? 'result.txt' : 'other-work.txt', content: 'work change\n' }]);
     const work = (await daemon!.call('send-message', { projectId: daemon!.project.id, key: `start-${number}`, body: number === 1 ? 'Delivery work' : 'Another delivery' })).result.work;
     const descriptions = (await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length > 0)).result;
     await until(() => daemon!.call('list-rounds', { workId: work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
     stages.set(work.id, [
-      tool('create-card', { workId: work.id, key: 'card', content: 'Delivery card', readOnly: Boolean(options.readonly) }, 'card'),
+      tool('create-card', { workId: work.id, key: 'card', content: 'Delivery card', workspace: options.readonly ? 'scratch' : 'copy' }, 'card'),
       tool('create-dispatch', ctx => ({ workId: work.id, key: 'execute', cardId: saved(ctx, 'card'), agentId: 'claude-executor' })),
       { type: 'hang', until: executed },
       tool('complete-card', ctx => ({ workId: work.id, cardId: saved(ctx, 'card') })),

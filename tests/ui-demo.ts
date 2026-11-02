@@ -174,7 +174,7 @@ async function main() {
   await run(active, [tool('write-coordinator-notes', { workId: active, body: '第三轮：校验已打回一次，仍有时钟偏移问题；缺少外部凭据。待用户决定存储，再做汇合验收。' })]);
 
   const many = await create('演示 03 · 执行中：六张活卡片，检查现在条合并');
-  await run(many, Array.from({ length: 6 }, (_, index) => card(`parallel-${index}`, `并行卡片 ${index + 1}`, { readOnly: true })));
+  await run(many, Array.from({ length: 6 }, (_, index) => card(`parallel-${index}`, `并行卡片 ${index + 1}`, { workspace: 'scratch' })));
   const manyCards = Object.values(await cards(many));
   for (const [index, item] of manyCards.entries()) {
     await dispatch(many, item.id, index === 5 ? [conclusion('failed', '演示未通过的验收结果。'), end()] : held(`并行步骤 ${index + 1}：保持活动，检查合并状态格。`),

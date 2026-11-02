@@ -15,7 +15,7 @@ import { checkOutputUsage } from './outputs.js';
 import { outputSummary } from './output-summary.js';
 import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
 import { projectEnvironment, protectDispatchEnvironment, redactEnvironmentEvent } from './project-environment.js';
-import { finishReadOnlyCheck, readOnlySnapshot } from './read-only-check.js';
+import { createScratchDirectory, saveScratchArtifacts, scratchPath } from './scratch.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
@@ -44,7 +44,7 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
     if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }
-  if (card.readOnly) { finishReadOnlyCheck(store, dispatch); return null; }
+  if (card.workspace === 'scratch') { saveScratchArtifacts(store, dispatch); return null; }
   const workPath = card.workPath!;
   const conflictMerge = reason === 'completed' && pendingConflictCardMerge(store, dispatch, workPath);
   if (!conflictMerge) abortCardGit(store, dispatch, workPath, card.cardBranch!);
@@ -160,9 +160,9 @@ export class ExecutionRunner {
     let redact = (text: string) => text;
     let releaseEnvironment = () => {};
     const card = cardDetails(this.store, dispatch.workId, dispatch.cardId);
-    const readOnly = dispatch.purpose === 'execution' && card.readOnly;
+    const scratch = card.workspace === 'scratch';
     const workPath = dispatch.purpose === 'verification' ? verificationPath(this.store, dispatch)
-      : readOnly ? this.store.work(dispatch.workId).workPath ?? projectPath(this.store, dispatch.workId) : card.workPath!;
+      : scratch ? scratchPath(this.store, dispatch.workId, card.id) : card.workPath!;
     const processes: ManagedProcess[] = [];
     const stop = new AbortController();
     const eventStop = new AbortController();
@@ -190,6 +190,10 @@ export class ExecutionRunner {
     const wallTimer = setTimeout(() => timeout('wall'), Number(watchdog.dispatch_wall_timeout_ms));
     let idleTimer = setTimeout(() => timeout('idle'), Number(watchdog.dispatch_idle_timeout_ms));
     try {
+      const environment = projectEnvironment(this.store, this.store.work(dispatch.workId).projectId);
+      const protection = protectDispatchEnvironment(this.store, dispatch.id, environment);
+      redact = protection.redact;
+      releaseEnvironment = protection.release;
       const configuredAgent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
       if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(dispatch.outputPath, '..'));
@@ -199,18 +203,19 @@ export class ExecutionRunner {
       }
       dispatch = { ...dispatch, agent };
       if (dispatch.purpose === 'verification') createVerificationCopy(this.store, dispatch, dispatch.startCommit ?? verificationCommit(this.store, card));
-      else if (!readOnly) prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
-      startCommit = readOnly ? null : dispatchGit(workPath, 'rev-parse', 'HEAD');
-      const readOnlyBefore = readOnly ? readOnlySnapshot(workPath, workPath === projectPath(this.store, dispatch.workId)) : null;
+      else if (scratch) createScratchDirectory(this.store, dispatch.workId, card.id);
+      else prepareCardCopy(this.store, dispatch, workPath, card.cardBranch!);
+      startCommit = scratch ? null : dispatchGit(workPath, 'rev-parse', 'HEAD');
       this.store.transaction(() => {
-        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ?, read_only_snapshot = ? WHERE id = ?`)
-          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), readOnlyBefore ? JSON.stringify(readOnlyBefore) : null, dispatch.id);
+        this.store.db.prepare(`UPDATE dispatches SET status = 'running', started_at = ?, start_commit = ?, port_start = ?, port_end = ?, agent_snapshot = ? WHERE id = ?`)
+          .run(new Date().toISOString(), startCommit, ports.start, ports.end, JSON.stringify(agent), dispatch.id);
+        if (scratch) this.store.db.prepare('UPDATE cards SET work_path = ? WHERE id = ?').run(workPath, card.id);
         if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !['paused', 'completed', 'cancelled'].includes(card.status)) {
           this.store.db.prepare(`UPDATE cards SET status = ? WHERE id = ?`).run(dispatch.purpose === 'verification' ? 'verifying' : 'executing', card.id);
         }
         this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-started', { startCommit, portStart: ports.start, portEnd: ports.end }, scope);
       });
-      const conflictResolution = !readOnly && prepareConflictCardMerge(this.store, dispatch, workPath);
+      const conflictResolution = !scratch && prepareConflictCardMerge(this.store, dispatch, workPath);
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
         if (dispatch.needsBrowser) {
           const browser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), () => {
@@ -227,18 +232,14 @@ export class ExecutionRunner {
         }
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason || this.stopping) return;
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
-        const pushUrls = readOnly ? [] : dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
+        const pushUrls = scratch ? [] : dispatchGit(workPath, 'remote').split('\n').filter(Boolean)
           .flatMap(remote => dispatchGit(workPath, 'remote', 'get-url', '--push', '--all', remote).split('\n'));
-        const environment = projectEnvironment(this.store, this.store.work(dispatch.workId).projectId);
-        const protection = protectDispatchEnvironment(this.store, dispatch.id, environment);
-        redact = protection.redact;
-        releaseEnvironment = protection.release;
         const starting = this.drivers[dispatch.agent.driver]!.start({
           dataDir: join(dispatch.outputPath, '..'),
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls), ...environment,
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           projectEnvironmentNames: Object.keys(environment),
-          sandbox: readOnly ? { mode: 'read-only', writableRoots: [] } : { mode: 'workspace-write', writableRoots: [workPath] },
+          sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
           signal: stop.signal,
@@ -260,7 +261,7 @@ export class ExecutionRunner {
         this.store.transaction(() => { this.store.db.prepare('UPDATE dispatches SET session_id = ?, sqlite_path = ? WHERE id = ?').run(session.id, session.sqlitePath ?? null, dispatch.id); });
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
         const conclusions = dispatch.purpose === 'verification' ? 'passed 或 failed' : 'completed 或 blocked';
-        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, readOnly, content: dispatch.content,
+        await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, workspace: card.workspace, content: dispatch.content,
           ...(conflictResolution ? { conflictResolution } : {}),
           conclusionInstruction: `本次派单结束前必须调用 submit-conclusion 并附一句理由，结论只能是 ${conclusions}。` })), stop.signal);
         let previousStep = 0;
@@ -276,7 +277,7 @@ export class ExecutionRunner {
           writeFileSync(join(dispatch.outputPath, `${event.step}.json`), JSON.stringify(event));
           const summary = stepSummary(event) || latestSummary;
           latestSummary = summary;
-          const artifact = next.value.type === 'artifact' ? reportedArtifact(workPath, next.value.path) : undefined;
+          const artifact = next.value.type === 'artifact' && !scratch ? reportedArtifact(workPath, next.value.path) : undefined;
           this.store.transaction(() => {
             this.store.db.prepare('UPDATE cards SET current_step = ?, latest_step_summary = ? WHERE id = ?').run(event.step, summary, card.id);
             this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-step', { step: event.step, summary }, scope);
@@ -336,14 +337,13 @@ export class ExecutionRunner {
       if (browserFailed) reason = 'error';
       if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
       try {
-        // Shared read-only directories belong to other dispatches or the user; clean only this dispatch's groups.
         // An aborted verification may never have created its copy, and then started no process.
-        const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes, !readOnly) : { pids: [] };
+        const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes) : { pids: [] };
         if (cleaned.pids.length) this.store.transaction(() => this.store.appendEvent(runtime,
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        if (readOnly || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+        if (scratch || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
           getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');

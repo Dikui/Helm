@@ -9,7 +9,7 @@ const ok = (value: unknown) => expect((value as any).ok).toBe(true);
 const workId = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
 const idOf = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result.id;
 const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'draft', requirements: 'Inbox', boundary: 'Local', criteria: 'States' }), check: ok };
-const card = (key: string): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content: key, readOnly: true }), saveAs: key, check: ok });
+const card = (key: string): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content: key, workspace: 'copy' }), saveAs: key, check: ok });
 const dispatch = (key: string, purpose = 'execution'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), key: `dispatch-${key}`, cardId: idOf(ctx, key), agentId: 'claude-executor', purpose }), check: ok });
 async function create(body: string, key = body) {
   return (await daemon!.call('send-message', { projectId: daemon!.project.id, body, key })).result.work;

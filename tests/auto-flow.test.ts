@@ -268,7 +268,7 @@ test('重启对账为跳过唤醒但自动步骤未完成的卡片补唤醒，�
     // Create while executing, then restore the work state being recovered.
     store.db.prepare("UPDATE works SET status = 'executing' WHERE id = ?").run(scenario);
     const card = store.transaction(() => createCard(store, { type: 'runtime', id: 'test' }, { workId: scenario, key: 'card', content: scenario,
-      readOnly: true, ...(scenario !== 'no-flow' ? { autoFlow: flow(0) } : {}) }));
+      workspace: 'scratch', ...(scenario !== 'no-flow' ? { autoFlow: flow(0) } : {}) }));
     store.db.prepare('UPDATE works SET status = ? WHERE id = ?').run(status, scenario);
     store.db.prepare(`INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, output_path, end_reason, conclusion)
       VALUES (?, ?, ?, 'run', 'execution', 'claude-executor', '{}', '执行', 'ended', '2026-10-31', ?, 'completed', 'completed')`)
@@ -366,7 +366,7 @@ test('自动完成状态、事件和必要唤醒在同一事务提交，完成�
   store.db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('p', 'project', ?, '2026-10-31')").run(directory);
   store.db.exec("INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('w', 'p', 'executing', 'work', '2026-10-31')");
   const runtime = { type: 'runtime', id: 'helmd' } as const;
-  const card = store.transaction(() => createCard(store, runtime, { workId: 'w', key: 'card', content: '只读成果', readOnly: true, autoFlow: flow(0) }));
+  const card = store.transaction(() => createCard(store, runtime, { workId: 'w', key: 'card', content: '只读成果', workspace: 'scratch', autoFlow: flow(0) }));
   const next = store.transaction(() => createCard(store, runtime, { workId: 'w', key: 'next', content: '下游' }));
   store.transaction(() => addDependency(store, runtime, { workId: 'w', upstream: { type: 'card', id: card.id }, downstream: { type: 'card', id: next.id } }));
   store.db.prepare(`INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, output_path, end_reason, conclusion)

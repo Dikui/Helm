@@ -204,11 +204,12 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
         await rm(path, { recursive: true, force: true });
       }
     }
+    await rm(join(store.dataDir, 'scratch', workId), { recursive: true, force: true });
     await rm(join(store.dataDir, 'worktrees', workId), { recursive: true, force: true });
     await rm(attachmentDirectory(store, workId), { recursive: true, force: true });
     const branches = new Set([
       ...(work.workBranch ? [work.workBranch] : []),
-      ...store.db.prepare('SELECT id, card_branch FROM cards WHERE work_id = ? ORDER BY rowid').all(workId)
+      ...store.db.prepare("SELECT id, card_branch FROM cards WHERE work_id = ? AND workspace = 'copy' ORDER BY rowid").all(workId)
         .map(row => row.card_branch ? String(row.card_branch) : `helm-card/${workId}/${row.id}`),
     ]);
     const keptBranches: { branch: string; reason: string }[] = [];

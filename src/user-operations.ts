@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { projectPath } from './alignment.js';
 import { branchExists, deleteBranch } from './branch-cleanup.js';
 import { cardDetails, cardGraph, refreshCardReadiness } from './graph.js';
@@ -172,6 +173,7 @@ export class UserOperations {
       this.store.appendEvent(actor, { type: 'work', id: workId }, 'work-cancelled', {}, { workId });
     });
     await Promise.all([this.executions.settle(workId), this.rounds.cancel(workId, '工作取消')]);
+    rmSync(join(this.store.dataDir, 'scratch', workId), { recursive: true, force: true });
     for (const node of cardGraph(this.store, workId)) if (node.type === 'card') removeCardCopy(this.store, node);
     if (work.workPath && existsSync(work.workPath)) dispatchGit(projectPath(this.store, workId), 'worktree', 'remove', '--force', work.workPath);
     if (!work.activeDescriptionId && work.workBranch) {

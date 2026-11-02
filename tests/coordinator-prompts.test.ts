@@ -6,7 +6,7 @@ test('默认调度者规则缩减固定输入并保留跨轮与派单约定', ()
   const rules = roleRules('coordinator');
   const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
   assert.ok(Buffer.byteLength(rules.role) <= 6_000, '角色规则预算 6000 字节（精简前 8535）');
-  assert.ok(Buffer.byteLength(executing) <= 9_700, '执行阶段规则预算 9700 字节（精简前 13265）');
+  assert.ok(Buffer.byteLength(executing) <= 10_100, '执行阶段规则预算 10100 字节（精简前 13265）');
   for (const convention of ['helm MCP', 'resumed', 'phaseRules', 'write-coordinator-notes', 'send-message'])
     assert.ok(rules.role.includes(convention), `角色规则保留 ${convention}`);
   for (const convention of ['submit-conclusion', 'complete-card', 'request-review', 'outdated', 'autoFlow'])
@@ -21,4 +21,18 @@ test('默认执行阶段规则明确自动派票、无效验收和停止返工�
   assert.match(executing, /自动操作在 newEvents 中，actor=runtime/);
   assert.match(executing, /\| 验收 failed 缺少可复现证据[^|\n]*命令与失败输出[^|\n]*\| 无效票：新开对话重派一次验收[^|\n]*不计打回/);
   assert.match(executing, /无进展或同问题反复时不再返工，提关卡④/);
+});
+
+
+test('规则按是否需要项目代码选择运行位置，临时目录交付文件以相对路径引用', () => {
+  const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
+  assert.match(executing, /workspace=copy/);
+  assert.match(executing, /workspace=scratch/);
+  assert.match(executing, /读或改.*项目代码/);
+  assert.doesNotMatch(executing, /readOnly|只读卡片/);
+  const runtime = readPrompt(defaultPromptDir, 'executor-runtime');
+  assert.match(runtime, /workspace.*scratch/);
+  assert.match(runtime, /当前目录下的文件/);
+  assert.match(runtime, /相对路径/);
+  assert.doesNotMatch(runtime, /readOnly/);
 });

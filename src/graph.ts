@@ -7,7 +7,7 @@ export interface AutoFlow {
 }
 
 export interface Card {
-  id: string; workId: string; key: string; content: string; needsVerification: boolean; aggregate: boolean; readOnly: boolean;
+  id: string; workId: string; key: string; content: string; needsVerification: boolean; aggregate: boolean; workspace: 'copy' | 'scratch';
   autoFlow: AutoFlow | null;
   status: string; createdAt: string; workPath?: string | null; cardBranch?: string | null;
   agentId?: string | null; latestDispatchId?: string | null; currentStep?: number;
@@ -18,7 +18,7 @@ export interface Card {
 export interface NodeRef { type: 'card' | 'gate'; id: string }
 interface Dependency { upstream: NodeRef; downstream: NodeRef }
 
-const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, aggregate, read_only AS readOnly, auto_flow AS autoFlow, status, created_at AS createdAt,
+const cardColumns = `id, work_id AS workId, key, content, needs_verification AS needsVerification, aggregate, workspace, auto_flow AS autoFlow, status, created_at AS createdAt,
   work_path AS workPath, card_branch AS cardBranch, repair_of_card_id AS repairOfCardId, write_scopes AS writeScopes, agent_id AS agentId, latest_dispatch_id AS latestDispatchId,
   current_step AS currentStep, latest_step_summary AS latestStepSummary,
   (SELECT end_reason FROM dispatches WHERE id = cards.latest_dispatch_id) AS lastEndReason,
@@ -32,7 +32,7 @@ function readCard(row: Record<string, unknown>): Card {
   const { incomplete, cacheReadTokens, cacheWriteTokens, ...usage } = JSON.parse(String(row.usage));
   if (cacheReadTokens !== null) usage.cacheReadTokens = cacheReadTokens;
   if (cacheWriteTokens !== null) usage.cacheWriteTokens = cacheWriteTokens;
-  return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), readOnly: Boolean(row.readOnly), autoFlow: JSON.parse(String(row.autoFlow)), writeScopes: JSON.parse(String(row.writeScopes)),
+  return { ...row, needsVerification: Boolean(row.needsVerification), aggregate: Boolean(row.aggregate), autoFlow: JSON.parse(String(row.autoFlow)), writeScopes: JSON.parse(String(row.writeScopes)),
     usage: incomplete && (usage.inputTokens !== null || usage.outputTokens !== null) ? { ...usage, incomplete: true } : usage } as unknown as Card;
 }
 
@@ -78,7 +78,7 @@ function validateAutoFlow(autoFlow: AutoFlow | null, needsVerification: boolean)
 }
 
 export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...params }: {
-  workId: string; key: string; content: string; needsVerification?: boolean; aggregate?: boolean; readOnly?: boolean; repairOfCardId?: string; writeScopes?: string[];
+  workId: string; key: string; content: string; needsVerification?: boolean; aggregate?: boolean; workspace?: Card['workspace']; repairOfCardId?: string; writeScopes?: string[];
   autoFlow?: AutoFlow;
 }) {
   store.work(params.workId);
@@ -86,12 +86,12 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
   if (existing) return readCard(existing);
   requireExecuting(store, params.workId);
   if (params.repairOfCardId) requireMutable(cardDetails(store, params.workId, params.repairOfCardId));
-  const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false, aggregate: params.aggregate ?? false, readOnly: params.readOnly ?? false,
+  const card: Card = { id: randomUUID(), ...params, needsVerification: params.needsVerification ?? false, aggregate: params.aggregate ?? false, workspace: params.workspace ?? 'copy',
     autoFlow: params.autoFlow ?? null,
     writeScopes: normalizeWriteScopes(writeScopes ?? []), status: 'ready', createdAt: new Date().toISOString(), usage: { inputTokens: null, outputTokens: null } };
   validateAutoFlow(card.autoFlow, card.needsVerification);
-  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, aggregate, read_only, status, created_at, repair_of_card_id, write_scopes, auto_flow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), Number(card.aggregate), Number(card.readOnly), card.status, card.createdAt, card.repairOfCardId ?? null,
+  store.db.prepare('INSERT INTO cards (id, work_id, key, content, needs_verification, aggregate, workspace, status, created_at, repair_of_card_id, write_scopes, auto_flow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(card.id, card.workId, card.key, card.content, Number(card.needsVerification), Number(card.aggregate), card.workspace, card.status, card.createdAt, card.repairOfCardId ?? null,
       JSON.stringify(card.writeScopes), card.autoFlow ? JSON.stringify(card.autoFlow) : null);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-created', card, { workId: card.workId, cardId: card.id });
   store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'card', id: card.id }, 'card-ready', { status: card.status }, { workId: card.workId, cardId: card.id });
@@ -99,7 +99,7 @@ export function createCard(store: TaskStore, actor: Actor, { writeScopes, ...par
 }
 
 export function updateCard(store: TaskStore, actor: Actor, params: {
-  workId: string; cardId: string; content?: string; needsVerification?: boolean; aggregate?: boolean; readOnly?: boolean; writeScopes?: string[];
+  workId: string; cardId: string; content?: string; needsVerification?: boolean; aggregate?: boolean; workspace?: Card['workspace']; writeScopes?: string[];
   autoFlow?: AutoFlow | null;
 }) {
   const card = cardDetails(store, params.workId, params.cardId);
@@ -109,20 +109,19 @@ export function updateCard(store: TaskStore, actor: Actor, params: {
   const autoFlow = params.autoFlow === undefined ? card.autoFlow : params.autoFlow;
   validateAutoFlow(autoFlow, needsVerification);
   const aggregate = params.aggregate ?? card.aggregate;
-  const readOnly = params.readOnly ?? card.readOnly;
-  if (readOnly !== card.readOnly) {
-    if (readOnly && (card.cardBranch || card.workPath)) throw new RuleError('CARD_COPY_EXISTS', '已有卡片副本的卡片不能改成只读，以免丢失卡片分支上的提交。');
-    if (store.db.prepare("SELECT 1 FROM dispatches WHERE card_id = ? AND status IN ('queued', 'running')").get(card.id)) {
-      throw new RuleError('DISPATCH_ACTIVE', '派单结束后才能修改只读标记。');
+  const workspace = params.workspace ?? card.workspace;
+  if (workspace !== card.workspace) {
+    if (card.cardBranch || card.workPath) throw new RuleError('CARD_COPY_EXISTS', '已有运行目录的卡片不能修改运行位置。');
+    if (store.db.prepare('SELECT 1 FROM dispatches WHERE card_id = ?').get(card.id)) {
+      throw new RuleError('CARD_ALREADY_DISPATCHED', '已派过单的卡片不能修改运行位置。');
     }
   }
   const writeScopes = params.writeScopes ? normalizeWriteScopes(params.writeScopes) : card.writeScopes;
-  // Explicitly choosing read-only also releases a gate added by a verification attempt.
-  const released = params.readOnly === true ? store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND downstream_type = 'card' AND downstream_id = ?
+  const released = params.workspace === 'scratch' ? store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND downstream_type = 'card' AND downstream_id = ?
     AND upstream_type = 'gate' AND upstream_id IN (SELECT id FROM gates WHERE kind = 'git-initialization')`).run(card.workId, card.id).changes : 0;
-  if (!released && content === card.content && needsVerification === card.needsVerification && JSON.stringify(autoFlow) === JSON.stringify(card.autoFlow) && aggregate === card.aggregate && readOnly === card.readOnly && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
-  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, read_only = ?, write_scopes = ?, auto_flow = ? WHERE id = ?')
-    .run(content, Number(needsVerification), Number(aggregate), Number(readOnly), JSON.stringify(writeScopes), autoFlow ? JSON.stringify(autoFlow) : null, card.id);
+  if (!released && content === card.content && needsVerification === card.needsVerification && JSON.stringify(autoFlow) === JSON.stringify(card.autoFlow) && aggregate === card.aggregate && workspace === card.workspace && writeScopes.join('\n') === card.writeScopes.join('\n')) return card;
+  store.db.prepare('UPDATE cards SET content = ?, needs_verification = ?, aggregate = ?, workspace = ?, write_scopes = ?, auto_flow = ? WHERE id = ?')
+    .run(content, Number(needsVerification), Number(aggregate), workspace, JSON.stringify(writeScopes), autoFlow ? JSON.stringify(autoFlow) : null, card.id);
   const updated = cardDetails(store, card.workId, card.id);
   store.appendEvent(actor, { type: 'card', id: card.id }, 'card-updated', { before: card, after: updated }, { workId: card.workId, cardId: card.id });
   refreshCardReadiness(store, card.workId);
@@ -145,7 +144,7 @@ export function cardGraph(store: TaskStore, workId: string) {
   const cards = store.db.prepare(`SELECT ${cardColumns} FROM cards WHERE work_id = ? ORDER BY created_at, id`).all(workId).map(readCard);
   const gates = store.gates(workId);
   const edges = dependencies(store, workId);
-  const active = cards.filter(card => !['completed', 'cancelled', 'skipped'].includes(card.status) && card.writeScopes.length);
+  const active = cards.filter(card => card.workspace === 'copy' && !['completed', 'cancelled', 'skipped'].includes(card.status) && card.writeScopes.length);
   const upstream = new Map(active.map(card => [card.id, new Set(ancestors(edges, { type: 'card', id: card.id }).map(node => `${node.type}:${node.id}`))]));
   // Overlap only matters between cards that no dependency orders; it warns and never blocks.
   const warnings = (card: Card) => active.flatMap(other => {
@@ -291,7 +290,7 @@ export function removeDependency(store: TaskStore, actor: Actor, params: { workI
   graphNode(store, params.workId, params.upstream);
   graphNode(store, params.workId, params.downstream);
   if (params.upstream.type === 'gate' && store.gate(params.workId, params.upstream.id).kind === 'git-initialization') {
-    throw new RuleError('FIXED_DEPENDENCY', '初始化 git 的依赖由运行层维护。可把卡片改为只读或取消。');
+    throw new RuleError('FIXED_DEPENDENCY', '初始化 git 的依赖由运行层维护。可把卡片改为临时目录或取消。');
   }
   const removed = store.db.prepare(`DELETE FROM dependencies WHERE work_id = ? AND upstream_type = ? AND upstream_id = ? AND downstream_type = ? AND downstream_id = ?`)
     .run(params.workId, params.upstream.type, params.upstream.id, params.downstream.type, params.downstream.id);

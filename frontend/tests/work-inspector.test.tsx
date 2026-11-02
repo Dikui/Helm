@@ -116,7 +116,7 @@ test.each([['chat', null], ['structure', 'graph'], ['graph', 'graph'], ['brief',
 });
 
 test('全部 inspect 深链接、前后导航、卡片跳转与英文界面均可用', async () => {
-  daemon = await uiFixture([[draft], [{ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'card', content: 'A real card', readOnly: true }), check: ok }]]);
+  daemon = await uiFixture([[draft], [{ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'card', content: 'A real card', workspace: 'scratch' }), check: ok }]]);
   const work = await create(); await confirm(work.id);
   const nodes = (await until(() => daemon!.call('get-card-graph', { workId: work.id }), value => value.result.some((node: any) => node.type === 'card'))).result;
   const cardId = nodes.find((node: any) => node.type === 'card').id;
@@ -151,7 +151,7 @@ test('全部 inspect 深链接、前后导航、卡片跳转与英文界面均�
 test('列表用真实卡片分组，展示等你决定、验收未过、受阻、跳过原因、Agent 和汇总；打开详情后对话保留', async () => {
   let complete!: () => void;
   const id = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result.id;
-  const card = (key: string, aggregate = false): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content: key, readOnly: true, aggregate }), saveAs: key, check: ok });
+  const card = (key: string, aggregate = false): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content: key, workspace: 'copy', aggregate }), saveAs: key, check: ok });
   const dispatch = (key: string, purpose = 'execution'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), key: `dispatch-${key}`, cardId: id(ctx, key), agentId: 'claude-executor', purpose }), check: ok });
   const depends = (upstream: string, downstream: string, type = 'card'): FakeStep => ({ type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workId(ctx), upstream: { type, id: id(ctx, upstream) }, downstream: { type: 'card', id: id(ctx, downstream) } }), check: ok });
   daemon = await uiFixture([[draft], [
@@ -201,7 +201,7 @@ test('列表用真实卡片分组，展示等你决定、验收未过、受阻�
 
 
 test('卡片检查器框架显示真实卡号，标题中的状态文字原样保留', async () => {
-  daemon = await uiFixture([[draft], [{ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'literal-title', content: '真实名称 · 执行中', readOnly: true }), check: ok }]]);
+  daemon = await uiFixture([[draft], [{ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key: 'literal-title', content: '真实名称 · 执行中', workspace: 'scratch' }), check: ok }]]);
   const work = await create(); await confirm(work.id);
   window.history.replaceState(null, '', `/works/${work.id}`);
   render(<App baseUrl={daemon.url} />);

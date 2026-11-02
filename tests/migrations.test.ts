@@ -182,7 +182,7 @@ test('去掉 Agent 表的迁移保留已有派单快照、卡片 Agent id 和成
   assert.deepEqual((await call('get-dispatch', { workId: 'work', dispatchId: 'dispatch' })).agent, snapshot);
   const card = await call('get-card', { workId: 'work', cardId: 'card' });
   assert.equal(card.agentId, 'legacy-executor');
-  assert.equal(card.readOnly, false, '已有卡片迁移后按写代码处理');
+  assert.equal((card as any).workspace, 'copy', '已有卡片迁移为卡片副本');
   assert.equal((await call('get-dispatch-artifacts', { workId: 'work', dispatchId: 'dispatch' }))[0].id, 'artifact');
   assert.equal((await call('read-artifact', { workId: 'work', artifactId: 'artifact' })).content, '旧成果');
 });
@@ -275,5 +275,79 @@ test('合入即完成迁移转换 merged / pushing、清空暂停字段并把中
   try {
     assert.equal(store.events({}).length, count);
     assert.equal(store.work('finished').status, 'completed');
+  } finally { store.close(); }
+});
+
+
+test('旧只读卡片迁移为 copy，移除 read_only 并保留历史派单与事件', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-workspace-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  const beforeWorkspace = migrations.findIndex(sql => sql.includes('ADD COLUMN workspace'));
+  assert.ok(beforeWorkspace > 0);
+  try {
+    for (const [index, sql] of migrations.slice(0, beforeWorkspace).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`
+      INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/old/project', '2026-01-01');
+      INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'project', 'executing', 'work', '2026-01-01');
+      INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, read_only)
+        VALUES ('read', 'work', 'read', '旧只读卡片', 0, 'ready', '2026-01-01', 1),
+          ('write', 'work', 'write', '旧写代码卡片', 0, 'ready', '2026-01-01', 0);
+      INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, output_path)
+        VALUES ('dispatch', 'work', 'read', 'dispatch', 'execution', 'executor', '{}', '{"readOnly":true}', 'ended', '2026-01-01', '/old/steps');
+      INSERT INTO events (time, actor_type, actor_id, object_type, object_id, action, details, work_id)
+        VALUES ('2026-01-01', 'runtime', 'helmd', 'card', 'read', 'card-created', '{"readOnly":true}', 'work');
+    `);
+  } finally { db.close(); }
+  const agents = new AgentCatalog(join(directory, 'agents'));
+  for (let restart = 0; restart < 2; restart++) {
+    const store = new TaskStore(directory, agents);
+    try {
+      const { cardDetails } = await import('../src/graph.js');
+      assert.equal((cardDetails(store, 'work', 'read') as any).workspace, 'copy');
+      assert.equal((cardDetails(store, 'work', 'write') as any).workspace, 'copy');
+      assert.equal('readOnly' in cardDetails(store, 'work', 'read'), false);
+      assert.equal(store.db.prepare('PRAGMA table_info(cards)').all().some(column => column.name === 'read_only'), false);
+      assert.equal(store.db.prepare('SELECT content FROM dispatches').get()!.content, '{"readOnly":true}');
+      assert.deepEqual(store.events({ workId: 'work' })[0]!.details, { readOnly: true });
+      assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { store.close(); }
+  }
+});
+
+
+test('旧只读卡片没有卡片副本的活动派单升级后可启动，中止后可重新派单', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-active-read-only-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const project = join(directory, 'project');
+  await mkdir(project);
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  try {
+    const beforeWorkspace = migrations.findIndex(sql => sql.includes('ADD COLUMN workspace'));
+    for (const [index, sql] of migrations.slice(0, beforeWorkspace).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', ?, '2026-01-01')").run(project);
+    db.exec(`
+      INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'project', 'paused', 'work', '2026-01-01');
+      INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at, read_only)
+        VALUES ('running', 'work', 'running', '旧只读卡片', 0, 'executing', '2026-01-01', 1),
+          ('queued', 'work', 'queued', '旧只读卡片', 0, 'ready', '2026-01-01', 1),
+          ('completed', 'work', 'completed', '旧只读卡片', 0, 'completed', '2026-01-01', 1);
+      INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, output_path)
+        VALUES ('running', 'work', 'running', 'running', 'execution', 'claude-executor', '{}', '旧派单', 'running', '2026-01-01', '/old/steps'),
+          ('queued', 'work', 'queued', 'queued', 'execution', 'claude-executor', '{}', '旧派单', 'queued', '2026-01-01', '/old/steps');
+    `);
+  } finally { db.close(); }
+  const store = new TaskStore(directory, new AgentCatalog(join(directory, 'agents')));
+  try {
+    const { reconcileStartup } = await import('../src/reconcile.js');
+    const { getDispatch } = await import('../src/dispatch.js');
+    await reconcileStartup(store);
+    for (const id of ['running', 'queued']) {
+      const dispatch = getDispatch(store, 'work', id);
+      assert.equal(dispatch.status, 'ended');
+      assert.equal(dispatch.endReason, 'aborted');
+      assert.equal(dispatch.endCommit, null);
+      assert.equal(dispatch.content, '旧派单');
+    }
   } finally { store.close(); }
 });

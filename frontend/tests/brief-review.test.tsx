@@ -659,7 +659,7 @@ test.each(['zh', 'en'])('只有只读卡片的工作显示无代码改动，接�
   let release!: () => void;
   const executionEnded = new Promise<void>(resolve => { release = resolve; });
   daemon = await uiFixture([[draft(1)], [
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '只读分析', readOnly: true }), saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '只读分析', workspace: 'scratch' }), saveAs: 'card', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id }), check: ok },

@@ -338,15 +338,18 @@ test('关卡链的前置都满足后才放行卡片，修订工作说明的固�
 });
 
 
-test('create-card 和 update-card 接受只读标记，卡片图按布尔值读取且省略时保留', async t => {
+test('create-card 和 update-card 选择运行位置，默认 copy 且省略时保留', async t => {
   const daemon = await fixture(t, [
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '调研', readOnly: true }), saveAs: 'card', check: value => { ok(value); assert.equal((value as any).result.readOnly, true); } },
-    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, readOnly: false }), check: value => { ok(value); assert.equal((value as any).result.readOnly, false); } },
-    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, readOnly: true }), check: ok },
-    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '分析结果' }), check: value => { ok(value); assert.equal((value as any).result.readOnly, true); } },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'research', content: '调研', workspace: 'scratch' }), saveAs: 'card', check: value => { ok(value); assert.equal((value as any).result.workspace, 'scratch'); } },
+    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, workspace: 'copy' }), check: value => { ok(value); assert.equal((value as any).result.workspace, 'copy'); } },
+    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, workspace: 'scratch' }), check: ok },
+    { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '分析结果' }), check: value => { ok(value); assert.equal((value as any).result.workspace, 'scratch'); } },
+    { type: 'tool', name: 'create-card', arguments: { key: 'default', content: '默认位置' }, check: value => { ok(value); assert.equal((value as any).result.workspace, 'copy'); } },
+    { type: 'tool', name: 'create-card', arguments: { key: 'old', content: '旧参数', readOnly: true }, check: value => assert.equal((value as any).error.code, 'INVALID_PARAMS') },
   ]);
   await daemon.finished();
   const card = (await daemon.call('get-card-graph', { workId: daemon.work.id })).result.find((node: any) => node.type === 'card');
-  assert.equal(card.readOnly, true);
+  assert.equal(card.workspace, 'scratch');
   assert.equal(card.content, '分析结果');
+  assert.equal('readOnly' in card, false);
 });

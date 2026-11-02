@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { removeScratchDirectory } from './scratch.js';
 import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
 import { dispatchGit, listDispatches, revokeDispatch, verificationCommit } from './dispatch.js';
@@ -13,6 +14,7 @@ function wakeAutoCompletion(store: TaskStore, actor: Actor, card: Card, event: H
 }
 
 export function removeCardCopy(store: TaskStore, card: Card) {
+  if (card.workspace === 'scratch') { removeScratchDirectory(store, card.workId, card.id); return; }
   if (!card.workPath && !card.cardBranch) return;
   const project = projectPath(store, card.workId);
   const copies = dispatchGit(project, 'worktree', 'list', '--porcelain').split('\n');
@@ -56,11 +58,9 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (card.needsVerification && !passed.length) {
     throw new RuleError('VERIFICATION_REQUIRED', '需要验收的卡片须至少有一票正常结束且通过的验收才能标完成；计票由调度者负责。');
   }
-  if (card.readOnly) {
-    const checkedCommit = card.needsVerification ? verificationCommit(store, card) : null;
-    if (card.needsVerification && !passed.some(item => item.startCommit === checkedCommit)) {
-      throw new RuleError('VERIFICATION_OUTDATED', '当前提交没有有效的通过验收票，须重新验收。');
-    }
+  if (card.workspace === 'scratch') {
+    removeScratchDirectory(store, card.workId, card.id);
+    const checkedCommit = null;
     return store.transaction(() => {
       store.db.prepare("UPDATE cards SET status = 'completed' WHERE id = ?").run(card.id);
       const event = store.appendEvent(actor, { type: 'card', id: card.id }, 'card-completed', { workBranch: work.workBranch, mergeCommit: null, checkedCommit }, { workId: work.id, cardId: card.id });

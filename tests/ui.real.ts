@@ -96,7 +96,7 @@ test('只读工作审核显示无代码改动，接受即完成且没有交付�
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '分析项目', boundary: '只读', criteria: '给出分析结论' }) },
   ], [
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'research', content: '分析项目', readOnly: true }), saveAs: 'card' },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'research', content: '分析项目', workspace: 'scratch' }), saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id }) },

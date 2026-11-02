@@ -77,9 +77,9 @@ function controlledTransport() {
 test('收件箱底部随真实派单更新运行数、排队数和上限，收起后不显示用量', async () => {
   const ok = (value: unknown) => expect((value as any).ok).toBe(true);
   daemon = await uiFixture([[draft('v1')], [
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'first', content: '第一张', readOnly: true }), saveAs: 'first', check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'first', content: '第一张', workspace: 'scratch' }), saveAs: 'first', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'first', cardId: (ctx.results.get('first') as any).result.id, agentId: 'claude-executor' }), check: ok },
-    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'second', content: '第二张', readOnly: true }), saveAs: 'second', check: ok },
+    { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'second', content: '第二张', workspace: 'scratch' }), saveAs: 'second', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'second', cardId: (ctx.results.get('second') as any).result.id, agentId: 'claude-executor' }), check: ok },
     { type: 'hang' },
   ]], undefined, { executorScripts: [[{ type: 'hang' }], [{ type: 'hang' }]] });

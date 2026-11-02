@@ -6,7 +6,7 @@ import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js
 import { AgentMark } from '../../../shared/AgentMark.js';
 import { DispatchArtifacts, DispatchDetails } from './DispatchDetails.js';
 import { CardActions } from './CardActions.js';
-import { AggregateBadge, conclusionLabels, DispatchStatus, nodeTitle, NodeStatus, ReadOnlyBadge } from './labels.js';
+import { AggregateBadge, conclusionLabels, DispatchStatus, nodeTitle, NodeStatus, WorkspaceBadge } from './labels.js';
 import { sendBackDispatchIds } from './dispatch-history.js';
 import { cardDisplayStatus, dispatchDuration } from './presentation.js';
 import { cardStatusLabels, cardStatusTones } from '../../inbox/presentation.js';
@@ -58,12 +58,12 @@ export function CardInspector({ card, number, nodes, agents, select, selectToken
       <div className="row cg-card-identity">
         {card.status === 'skipped' ? <NodeStatus node={card} /> : <span className={`pill ${status === 'decision' ? 'att' : cardStatusTones[status] ?? ''}`}>{t(status === 'decision' ? 'inspectorNeedsDecision' : cardStatusLabels[status]!)}</span>}
         {loops.size > 0 && <span className="cg-rework">↺ {t('graphSendBackPrefix')} {loops.size} {t('graphSendBackSuffix')}</span>}
-        {card.readOnly && <ReadOnlyBadge />}{card.aggregate && <AggregateBadge />}
+        <WorkspaceBadge workspace={card.workspace ?? 'copy'} />{card.aggregate && <AggregateBadge />}
         <span className="cg-agent"><AgentMark driver={agent?.driver} /><span>{card.agentId ? [card.agentId, agent?.model, agent?.reasoningEffort].filter(Boolean).join(' · ') : t('graphNoAgent')}</span></span>
       </div>
     </header>
     <div className="cg-inspector-body">
-      <dl className="cg-kv"><dt>{t('graphDependency')}</dt><dd>{card.dependencies.length ? card.dependencies.map(ref => refButton(ref.id)) : '—'}</dd>
+      <dl className="cg-kv"><dt>{t('graphWorkspace')}</dt><dd>{t(card.workspace === 'scratch' ? 'graphWorkspaceScratch' : 'graphWorkspaceCopy')}</dd><dt>{t('graphDependency')}</dt><dd>{card.dependencies.length ? card.dependencies.map(ref => refButton(ref.id)) : '—'}</dd>
         <dt>{t('graphDownstream')}</dt><dd>{nodes.some(node => node.dependencies.some(ref => ref.id === card.id)) ? nodes.filter(node => node.dependencies.some(ref => ref.id === card.id)).map(node => refButton(node.id)) : '—'}</dd>
         <dt>{t('inspectorDuration')}</dt><dd>{dispatches ? elapsed(new Date(0).toISOString(), dispatchDuration(dispatches, now)) : '—'} · {t('inspectorDispatchDuration')}</dd>
         <dt>Token</dt><dd>{formatInspectorUsage(usage, language)} <button className="cg-text-link" onClick={() => setTokenMode(true)}>{t('inspectorByDispatch')}</button></dd>
@@ -100,7 +100,7 @@ export function CardInspector({ card, number, nodes, agents, select, selectToken
           : t(card.needsVerification ? 'graphAutoFlowManualVerification' : 'graphAutoFlowExecution')}</p>}
       <section aria-label={t('inspectorBranchCopy')}><h3 className="sect">{t('inspectorBranchCopy')}</h3>
         <dl className="cg-kv"><dt>{t('graphBranch')}</dt><dd className="mono">{card.cardBranch ?? '—'}</dd><dt>{t('graphCopy')}</dt><dd className="mono">{card.workPath ?? '—'}</dd></dl>
-        {card.workPath && <p className="cg-copy-warning">{t('graphCopyWarning')}</p>}
+        {card.workspace !== 'scratch' && card.workPath && <p className="cg-copy-warning">{t('graphCopyWarning')}</p>}
         <CardActions card={card} />
       </section>
 

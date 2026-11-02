@@ -28,7 +28,7 @@ function fixture(t: TestContext) {
   const work = (id: string) => store.db.prepare("INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES (?, 'project', 'executing', ?, '2026-10-30')").run(id, id);
   work('work');
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const card = (workId = 'work', readOnly = false) => createCard(store, actor, { workId, key: `card-${store.events({}).length}`, content: '实现功能', readOnly });
+  const card = (workId = 'work') => createCard(store, actor, { workId, key: `card-${store.events({}).length}`, content: '实现功能' });
   const dispatch = (cardId: string, workId = 'work', purpose: 'execution' | 'verification' = 'execution') => createDispatch(store, actor,
     { workId, cardId, key: `dispatch-${cardId}-${purpose}`, agentId: 'claude-executor', purpose });
   const gate = () => store.gates('work').find(item => item.kind === 'git-initialization')!;
@@ -36,7 +36,7 @@ function fixture(t: TestContext) {
   return { store, project, directory, work, card, dispatch, gate, decide };
 }
 
-test('运行层生成唯一的项目初始化关卡，写代码执行和只读验收均等待它，项目目录保持不变', async t => {
+test('运行层生成唯一的项目初始化关卡，copy 执行和验收均等待它，项目目录保持不变', async t => {
   const ctx = fixture(t);
   const { store, project } = ctx;
   mkdirSync(join(project, 'node_modules'));
@@ -46,7 +46,7 @@ test('运行层生成唯一的项目初始化关卡，写代码执行和只读�
   writeFileSync(join(project, 'large.bin'), '');
   truncateSync(join(project, 'large.bin'), 33 * 1024 * 1024);
   ctx.work('other');
-  const first = ctx.card(), second = ctx.card('work', true), third = ctx.card('other');
+  const first = ctx.card(), second = ctx.card('work'), third = ctx.card('other');
   await Promise.all([
     assert.rejects(ctx.dispatch(first.id), code('GIT_INITIALIZATION_PENDING')),
     assert.rejects(ctx.dispatch(second.id, 'work', 'verification'), code('GIT_INITIALIZATION_PENDING')),
@@ -115,7 +115,7 @@ for (const existingIgnore of [true, false]) test(`同意初始化按${existingIg
   assert.equal(existsSync(join(copy.workPath, '.env')), false);
 });
 
-test('拒绝保留阻塞及原因，复用拒绝决定；显式改为只读可执行，或取消卡片', async t => {
+test('拒绝保留阻塞及原因，复用拒绝决定；显式改为临时目录可执行，或取消卡片', async t => {
   const ctx = fixture(t);
   const { store } = ctx;
   ctx.work('other');
@@ -136,7 +136,7 @@ test('拒绝保留阻塞及原因，复用拒绝决定；显式改为只读可�
   await assert.rejects(ctx.dispatch(third.id), code('GIT_INITIALIZATION_REFUSED'));
   assert.equal(store.gates('work').length, 1);
   assert.equal(store.pending().length, 0);
-  updateCard(store, actor, { workId: 'work', cardId: first.id, readOnly: true });
+  updateCard(store, actor, { workId: 'work', cardId: first.id, workspace: 'scratch' });
   assert.equal(cardDetails(store, 'work', first.id).status, 'ready');
   assert.equal((await ctx.dispatch(first.id)).purpose, 'execution');
   assert.equal(cancelCard(store, actor, { workId: 'other', cardId: second.id, reason: '用户拒绝初始化' }).status, 'cancelled');
@@ -181,7 +181,7 @@ for (const atDecision of [true, false]) test(`用户自行初始化在${atDecisi
 test('共享关卡从另一项工作决定，所有依赖卡片解除阻塞，验收单检查初始化提交且不建工作副本', async t => {
   const ctx = fixture(t);
   ctx.work('other');
-  const first = ctx.card(), second = ctx.card('other', true);
+  const first = ctx.card(), second = ctx.card('other');
   await assert.rejects(ctx.dispatch(first.id), code('GIT_INITIALIZATION_PENDING'));
   await assert.rejects(ctx.dispatch(second.id, 'other', 'verification'), code('GIT_INITIALIZATION_PENDING'));
   ctx.store.db.exec("UPDATE works SET status = 'cancelled' WHERE id = 'work'");
@@ -196,7 +196,7 @@ test('共享关卡从另一项工作决定，所有依赖卡片解除阻塞，�
   assert.equal(ctx.store.work('other').workBranch, null);
 });
 
-test('用户只执行 git init 尚无初始提交时明确提示，仍能拒绝并改派只读', async t => {
+test('用户只执行 git init 尚无初始提交时明确提示，仍能拒绝并改派临时目录', async t => {
   const ctx = fixture(t);
   const card = ctx.card();
   await assert.rejects(ctx.dispatch(card.id), code('GIT_INITIALIZATION_PENDING'));
@@ -204,14 +204,14 @@ test('用户只执行 git init 尚无初始提交时明确提示，仍能拒绝�
   assert.throws(() => ctx.decide(), code('GIT_INITIAL_COMMIT_REQUIRED'));
   assert.equal(ctx.gate().status, 'pending');
   ctx.decide('refuse', undefined, '稍后再建立基准');
-  updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, readOnly: true });
+  updateCard(ctx.store, actor, { workId: 'work', cardId: card.id, workspace: 'scratch' });
   assert.equal((await ctx.dispatch(card.id)).purpose, 'execution');
 });
 
 for (const state of ['unborn', 'detached'] as const) for (const existingGate of [false, true]) for (const purpose of ['execution', 'verification'] as const) {
   test(`${state} 项目的 ${purpose} 派单${existingGate ? '复用' : '创建'}初始化关卡，不绕过用户决定`, async t => {
     const ctx = fixture(t);
-    const first = ctx.card('work', purpose === 'verification');
+    const first = ctx.card('work');
     if (existingGate) await assert.rejects(ctx.dispatch(first.id, 'work', purpose), code('GIT_INITIALIZATION_PENDING'));
     const gateId = existingGate ? ctx.gate().id : undefined;
     git(ctx.project, 'init', '-b', 'user-base');
@@ -221,7 +221,7 @@ for (const state of ['unborn', 'detached'] as const) for (const existingGate of 
       git(ctx.project, 'checkout', '--detach');
     }
     // Use a new card to reach the readiness check even when the first card already waits on a gate.
-    const second = ctx.card('work', purpose === 'verification');
+    const second = ctx.card('work');
     await assert.rejects(ctx.dispatch(second.id, 'work', purpose), code('GIT_INITIALIZATION_PENDING'));
     if (gateId) assert.equal(ctx.gate().id, gateId);
     assert.equal(ctx.store.gates('work').length, 1);

@@ -32,7 +32,7 @@ export const result = (ctx: FakeContext, key: string): any => (ctx.results.get(k
 
 // Both CLI homes, the project and all daemon state live under this temporary root.
 export async function codexFixture(t: TestContext, executor: Driver, config: {
-  content?: string; needsBrowser?: boolean; after?: FakeScript;
+  content?: string; needsBrowser?: boolean; workspace?: 'copy' | 'scratch'; after?: FakeScript;
   stagedAuth?: string; skills?: Record<string, string>;
   firstMessage?: FirstMessage; dispatchContent?: (brief: StartupBrief) => string;
 } = {}) {
@@ -76,7 +76,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
       created = true;
       return [
         // Keep the card short: every later dispatch on it gets the card snapshot.
-        { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: 'Codex 执行者冒烟卡片' }, saveAs: 'card', check: ok },
+        { type: 'tool', name: 'create-card', arguments: { workId, key: 'card', content: 'Codex 执行者冒烟卡片', workspace: config.workspace ?? 'copy' }, saveAs: 'card', check: ok },
         { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId, cardId: result(ctx, 'card').id, agentId: 'codex-executor',
           key: 'first', content: config.dispatchContent?.(JSON.parse(ctx.input)) ?? config.content ?? '实现卡片', needsBrowser: config.needsBrowser ?? false }), check: ok },
       ];

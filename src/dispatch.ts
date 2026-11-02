@@ -58,7 +58,7 @@ export function listDispatches(store: TaskStore, workId: string, cardId?: string
     .all(workId, cardId ?? null, cardId ?? null).map(row => readDispatch(row, Boolean(work.outputsDeletedAt)));
 }
 
-// A verification checks the card branch, or for read-only and verification-only cards the work branch or latest base.
+// A verification checks the card branch, or for verification-only cards the work branch or latest base.
 export function verificationCommit(store: TaskStore, card: { id: string; workId: string; cardBranch?: string | null }) {
   const executed = card.cardBranch && store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ? AND purpose = 'execution'`).get(card.id);
   const work = store.work(card.workId);
@@ -180,7 +180,8 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const card = cardDetails(store, work.id, params.cardId);
   if (['waiting', 'skipped', 'paused', 'completed', 'cancelled'].includes(card.status)) throw new RuleError('CARD_NOT_DISPATCHABLE', '等待前置、已跳过、暂停或终态卡片不能派单。');
   const purpose = params.purpose ?? 'execution';
-  if ((purpose === 'verification' || !card.readOnly) && !projectGitReady(projectPath(store, work.id))) {
+  if (purpose === 'verification' && card.workspace === 'scratch') throw new RuleError('SCRATCH_VERIFICATION_UNSUPPORTED', '临时目录卡片暂不支持验收派单。');
+  if ((purpose === 'verification' || card.workspace === 'copy') && !projectGitReady(projectPath(store, work.id))) {
     requireGitInitialization(store, work.id, card.id);
   }
   // Verifications only use their own copies and may overlap; an execution needs the card alone.
@@ -199,7 +200,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   }
   // The card snapshot is always prefixed below; omitted content must not repeat it.
   let content = params.content ?? '';
-  if (card.repairOfCardId && purpose === 'execution' && !card.readOnly) {
+  if (card.repairOfCardId && purpose === 'execution' && card.workspace === 'copy') {
     const original = cardDetails(store, work.id, card.repairOfCardId);
     if (!original.cardBranch || ['completed', 'cancelled'].includes(original.status)) throw new RuleError('REPAIR_SOURCE_UNAVAILABLE', '修复自卡片的分支已不可用。');
     content = `修复自卡片 ${original.id}。请把原卡片分支 ${original.cardBranch} 合进当前卡片分支并解决冲突，保留合并关系。\n\n${content}`;
@@ -207,7 +208,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
   const description = purpose === 'verification' ? store.descriptions(work.id).find(item => item.id === work.activeDescriptionId) : undefined;
   const cardContentSnapshot = card.content;
   content = `卡片说明快照：\n${cardContentSnapshot}${content ? `\n\n${content}` : ''}`;
-  const needsWorkCopy = purpose === 'execution' && !card.readOnly;
+  const needsWorkCopy = purpose === 'execution' && card.workspace === 'copy';
   if (needsWorkCopy) store.transaction(() => ensureWorkCopy(store, work.id));
   const copy = needsWorkCopy ? cardCopy(store, work.id, card.id) : card;
   // Pin the commit now so verifications dispatched together check the same code.

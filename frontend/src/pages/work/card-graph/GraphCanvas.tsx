@@ -4,7 +4,7 @@ import { formatUsage } from '../../../shared/token-usage.js';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { arrange, initialGraphView, nodeHeight, nodeWidth } from './graph-layout.js';
 import { formatTokens, useI18n } from '../../../shared/i18n.js';
-import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge, ReadOnlyBadge } from './labels.js';
+import { gateDecision, nodeTitle, NodeStatus, nodeRingTone, AggregateBadge, WorkspaceBadge } from './labels.js';
 import { elapsed, useClock } from '../../../shared/clock.js';
 import { cardDisplayStatus, displayTopology, dispatchDuration } from './presentation.js';
 import type { Dispatch, GraphNode } from './types.js';
@@ -108,7 +108,7 @@ export function GraphCanvas({ nodes, dispatches, selectedId, sendBacks, select, 
               aria-describedby={`${marker}-${node.id}-state`}
               onClick={() => select(node.id)} onMouseEnter={() => setHovered(node.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setFocused(node.id)} onBlur={() => setFocused(null)}>
               <span className="cg-node-name">{node.type === 'card' ? <AgentMark driver={agents.find(agent => agent.id === (dispatches.find(dispatch => dispatch.id === node.latestDispatchId)?.agentId ?? node.agentId))?.driver} /> : <span className={`spark ${nodeRingTone[node.status] ?? ''}`} aria-hidden="true">✦</span>}<span>{node.type === 'card' && `${ordinal} · `}{nodeTitle(node)}</span></span>
-              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} status={statusOf(node)} />{node.type === 'card' && node.readOnly && <ReadOnlyBadge />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
+              <span className="cg-node-state" id={`${marker}-${node.id}-state`}><NodeStatus node={node} status={statusOf(node)} />{node.type === 'card' && <WorkspaceBadge workspace={node.workspace ?? 'copy'} />}{node.type === 'card' && node.aggregate && <AggregateBadge />}
                 {node.type === 'gate' && node.status === 'pending' && <time dateTime={node.createdAt}>{elapsed(node.createdAt, now)}</time>}
                 {node.type === 'card' && node.status !== 'skipped' && <time>{elapsed(new Date(0).toISOString(), dispatchDuration(dispatches.filter(dispatch => dispatch.cardId === node.id), now))}</time>}
                 {Boolean(sendBacks.get(node.id)) && <span className="cg-rework" aria-label={`${t('graphSendBacks')}: ${sendBacks.get(node.id)}`}>↺ {sendBacks.get(node.id)}</span>}

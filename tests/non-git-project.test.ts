@@ -14,14 +14,14 @@ const draft: FakeStep = { type: 'tool', name: 'draft-work-description', argument
 const saved = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result;
 const ok = (value: unknown) => assert.equal((value as any).ok, true, JSON.stringify(value));
 
-test('非 git 项目从登记、对齐、只读派单到审核可用；写代码和验收的初始化阻塞对调度者可见', async t => {
+test('非 git 项目临时目录派单无需初始化，审核无差异，接受后完成', async t => {
   let projectPath = '', executorStarted = false, rejected = 0;
   let release!: () => void;
   const ready = new Promise<void>(resolve => { release = resolve; });
   const requiresGit = (value: unknown) => {
     const result = value as any;
     assert.equal(result.ok, false);
-    assert.ok(['GIT_INITIALIZATION_PENDING', 'CARD_NOT_DISPATCHABLE'].includes(result.error.code));
+    assert.ok(['GIT_INITIALIZATION_PENDING', 'CARD_NOT_DISPATCHABLE', 'SCRATCH_VERIFICATION_UNSUPPORTED'].includes(result.error.code));
     rejected++;
   };
   const dispatch = (card: string, purpose: 'execution' | 'verification', check = ok): FakeStep => ({
@@ -39,9 +39,9 @@ test('非 git 项目从登记、对齐、只读派单到审核可用；写代码
     [
       { type: 'tool', name: 'create-card', saveAs: 'read', arguments: { key: 'read', content: '分析文件' }, check: ok },
       dispatch('read', 'execution', requiresGit), dispatch('read', 'verification', requiresGit),
-      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, readOnly: true }), check: ok },
+      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, workspace: 'scratch' }), check: ok },
       dispatch('read', 'verification', requiresGit),
-      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, readOnly: true }), check: ok },
+      { type: 'tool', name: 'update-card', arguments: ctx => ({ cardId: saved(ctx, 'read').id, workspace: 'scratch' }), check: ok },
       dispatch('read', 'execution'),
     ],
     ctx => {
@@ -54,10 +54,10 @@ test('非 git 项目从登记、对齐、只读派单到审核可用；写代码
       ];
     },
   ], undefined, { registerProject: false, executorScripts: [ctx => {
-    assert.equal(ctx.options.cwd, projectPath);
-    assert.deepEqual(ctx.options.sandbox, { mode: 'read-only', writableRoots: [] });
+    assert.ok(ctx.options.cwd.startsWith(join(daemon.directory, 'data', 'scratch')));
+    assert.deepEqual(ctx.options.sandbox, { mode: 'workspace-write', writableRoots: [ctx.options.cwd] });
     executorStarted = true;
-    return [{ type: 'hang', until: ready }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '已分析文件' }, check: ok }];
+    return [{ type: 'hang', until: ready }, { type: 'write', path: 'report.txt', content: 'research fact\n' }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '已分析文件' }, check: ok }];
   }] });
   t.after(() => daemon.close());
   projectPath = join(daemon.directory, 'plain');
@@ -105,6 +105,13 @@ test('非 git 项目从登记、对齐、只读派单到审核可用；写代码
   assert.equal(existsSync(join(projectPath, '.git')), false);
   assert.equal(existsSync(join(daemon.directory, 'data', 'worktrees', work.id)), false);
   assert.equal(await readFile(join(projectPath, 'notes.txt'), 'utf8'), '原有文件\n');
+  const artifacts = (await daemon.call('get-dispatch-artifacts', { ...params, dispatchId: dispatches[0].id })).result;
+  assert.equal(artifacts[0].name, 'report.txt');
+  assert.equal((await daemon.call('read-artifact', { ...params, artifactId: artifacts[0].id })).result.content, 'research fact\n');
+  const accepted = await daemon.call('decide-gate', { ...params, gateId: review.id, decision: 'accept' });
+  assert.equal(accepted.ok, true, JSON.stringify(accepted));
+  assert.equal((await daemon.call('get-work', params)).result.status, 'completed');
+
 });
 
 for (const initializeBeforeConfirm of [true, false]) for (const purpose of ['execution', 'verification'] as const) test(`非 git 目录自行初始化后实时识别，${initializeBeforeConfirm ? '确认草稿' : '派单'}时取当前分支，${purpose}`, async t => {

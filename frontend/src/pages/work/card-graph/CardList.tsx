@@ -5,7 +5,7 @@ import { elapsed, useClock } from '../../../shared/clock.js';
 import { useI18n, type MessageKey } from '../../../shared/i18n.js';
 import type { AgentEntry } from '../../settings/types.js';
 import { cardStatusLabels, cardStatusTones } from '../../inbox/presentation.js';
-import { AggregateBadge, nodeTitle, NodeStatus, ReadOnlyBadge } from './labels.js';
+import { AggregateBadge, nodeTitle, NodeStatus, WorkspaceBadge } from './labels.js';
 import { cardDisplayStatus, dispatchDuration, isLiveCardStatus, type CardFilter } from './presentation.js';
 import type { CardNode, Dispatch, GraphNode } from './types.js';
 
@@ -39,7 +39,7 @@ export function CardList({ nodes, dispatches, select, filter }: { nodes: GraphNo
           const ordinal = cards.findIndex(item => item.id === card.id) + 1;
           return <button type="button" key={card.id} className={`work-card-row ${group === 'decision' ? 'blocked' : cardStatusTones[group] ?? ''}`} aria-label={`${t('graphCard')} ${ordinal}：${nodeTitle(card)}`} title={`${nodeTitle(card)} · ${label}`} onClick={() => select(card.id)}>
             <AgentMark driver={driver} /><span className="work-card-number">#{ordinal}</span>
-            <span className="work-card-title">{nodeTitle(card)}{card.aggregate && <AggregateBadge />}{card.readOnly && <ReadOnlyBadge />}</span>
+            <span className="work-card-title">{nodeTitle(card)}{card.aggregate && <AggregateBadge />}<WorkspaceBadge workspace={card.workspace ?? 'copy'} /></span>
             <time>{history?.some(dispatch => dispatch.startedAt) ? elapsed(new Date(0).toISOString(), dispatchDuration(history, now)) : '—'}</time>
             <span className="work-card-detail">{group === 'skipped' ? <NodeStatus node={card} /> : label}</span>
           </button>;

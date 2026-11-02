@@ -273,4 +273,8 @@ export const migrations: readonly string[] = [
   ALTER TABLE dispatches ADD COLUMN read_only_snapshot TEXT;
   ALTER TABLE dispatches ADD COLUMN read_only_check TEXT;
   `,
+  `
+  ALTER TABLE cards ADD COLUMN workspace TEXT NOT NULL DEFAULT 'copy' CHECK(workspace IN ('copy', 'scratch'));
+  ALTER TABLE cards DROP COLUMN read_only;
+  `,
 ];

@@ -124,4 +124,38 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     // The skill body holds beta; the model has occasionally read it yet written the skill name, so its answer counts as proof too.
     const proof = (await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim();
     assert.ok(proof === beta || other.finalAnswer.includes(beta), `必须读到 helm-smoke-beta 的正文：${proof}`);
+});
+
+test('Codex 真实临时目录卡片联网查证并写文件，成果可读且不建 git 副本',
+  { skip: !enabled, timeout: 300_000 }, async t => {
+    const stagedAuth = join(homedir(), '.codex', 'auth.json');
+    assert.ok((await stat(stagedAuth)).isFile(), '先在本机 codex login（文件存储）');
+    const daemon = await codexFixture(t, new CodexExecutorDriver(), { stagedAuth, workspace: 'scratch',
+      content: `这是临时目录联网调研冒烟，不派生子代理、不提交、不推送。
+实际联网 GET https://www.rfc-editor.org/rfc/rfc9110.txt，把响应正文保存为 rfc9110.txt。
+从刚下载的文件查证 RFC 9110 的标题，写入 report.md，包含标题、来源 URL 和简短的原文证据。
+必须在当前目录写这两个文件；最后调用 submit-conclusion completed，并在最终回答里用相对路径引用 report.md。联网或文件写入失败则 blocked。`,
+    });
+    await daemon.confirm();
+    const dispatch = (await daemon.ended(1, 240_000))[0];
+    assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? JSON.stringify(dispatch));
+    assert.equal(dispatch.conclusion, 'completed');
+    assert.equal(dispatch.startCommit, null);
+    assert.equal(dispatch.endCommit, null);
+    const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
+    assert.equal(card.workspace, 'scratch');
+    assert.equal(card.cardBranch, null);
+    assert.equal(card.workPath, join(daemon.dataDir, 'scratch', daemon.work.id, card.id));
+    const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+    assert.equal(work.workBranch, null);
+    const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: dispatch.id })).result;
+    assert.equal(artifacts.some((file: any) => file.kind === 'branch'), false);
+    for (const name of ['rfc9110.txt', 'report.md']) {
+      const file = artifacts.find((item: any) => item.kind === 'file' && item.name === name);
+      assert.ok(file, `缺少文件成果 ${name}`);
+      const saved = (await daemon.call('read-artifact', { workId: daemon.work.id, artifactId: file.id })).result;
+      assert.match(saved.content, /HTTP Semantics/);
+      if (name === 'report.md') assert.match(saved.content, /https:\/\/www\.rfc-editor\.org\/rfc\/rfc9110\.txt/);
+    }
+    assert.match(dispatch.finalAnswer, /report\.md/);
   });
