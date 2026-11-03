@@ -45,7 +45,7 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
   const library = new SkillLibrary(join(dataDir, 'library', 'skills'));
   const store = new TaskStore(dataDir, new AgentCatalog(options.agentDir ?? join(dataDir, 'agents'), Object.keys(drivers),
     library, new McpLibrary(join(library.directory, '..', 'mcp')), join(dataDir, 'prompts')));
-  seedPrompts(store.agents.promptDirectory);
+  seedPrompts(store.agents.promptDirectory, new Set(store.events({ actions: ['prompt-set'] }).map(event => (event.details as { name: string }).name)));
   migrateLegacyAgents(store);
   migrateAgentGlobalConfig(store.agents.directory);
   let scheduler: RoundScheduler;

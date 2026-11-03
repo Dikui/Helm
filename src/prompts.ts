@@ -4,17 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { AgentConfig } from './agents.js';
 
-// Role rules live in <dataDir>/prompts/; the repo's prompts/ only seeds missing files and never overwrites them.
+// Role rules live in <dataDir>/prompts/; parts the user never saved through set-prompt follow the repo's prompts/ on every start.
 export const promptNames = ['coordinator-role', 'coordinator-executing', 'coordinator-runtime', 'executor-role', 'executor-runtime'] as const;
 export type PromptName = typeof promptNames[number];
 export const defaultPromptDir = fileURLToPath(new URL('../../prompts/', import.meta.url));
 
-export function seedPrompts(directory: string) {
+export function seedPrompts(directory: string, edited: ReadonlySet<string>) {
   mkdirSync(directory, { recursive: true });
   // Coordinator rules seeded before the executing split still hold the executing sections; replace them once.
   if (existsSync(join(directory, 'coordinator-role.md')) && !existsSync(join(directory, 'coordinator-executing.md')))
     for (const name of ['coordinator-role', 'coordinator-runtime']) copyFileSync(join(defaultPromptDir, `${name}.md`), join(directory, `${name}.md`));
-  for (const name of promptNames) if (!existsSync(join(directory, `${name}.md`))) copyFileSync(join(defaultPromptDir, `${name}.md`), join(directory, `${name}.md`));
+  for (const name of promptNames) if (!edited.has(name) || !existsSync(join(directory, `${name}.md`))) copyFileSync(join(defaultPromptDir, `${name}.md`), join(directory, `${name}.md`));
 }
 
 // A directory that was never seeded (tests, fixtures) reads the repo defaults.

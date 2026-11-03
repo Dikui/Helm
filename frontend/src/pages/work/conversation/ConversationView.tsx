@@ -119,7 +119,7 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
           {item.type === 'message' && item.withdrawnAt && <span className="pill">{t('conversationWithdrawn')}</span>}
           {item.type === 'message' && reference(item) && <small>{reference(item)}</small>}
         </div>
-        {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
+        {item.type === 'message' ? <><Markdown text={item.body} workId={work.id} files={workFiles} onOpen={preview.open} /><AttachmentList attachments={item.attachments} workId={work.id} onOpen={preview.open} /></> : item.status === 'pending' && !readOnly
           ? <GateDecision gate={item} decisionWorkId={work.id} />
           : <GateHistory gate={item} />}
       </article>)}
