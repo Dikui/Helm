@@ -241,7 +241,8 @@ for (const language of ['zh', 'en'] as const) for (const hasCopy of [false, true
     const branchPending = language === 'zh' ? '第一张写代码卡片执行派单前创建' : 'Created before the first code-writing execution dispatch';
     expect(Boolean(within(brief).queryByText(branchPending))).toBe(!hasCopy);
     const chat = screen.getByRole('region', { name: language === 'zh' ? '对话' : 'Chat' });
-    expect(within(chat).getByText(language === 'zh'
+    // 对话里的提示随对齐轮次读取，晚于工作说明出现
+    expect(await within(chat).findByText(language === 'zh'
       ? hasCopy ? '确认时，工作分支没有提交则跟上基准分支的最新提交；已有提交则保持。' : '首次派出写代码的执行派单前取基准分支的最新提交，确认时不建副本。'
       : hasCopy ? 'On confirmation, a work branch with no commits follows the latest base; existing commits are kept.' : 'The latest base branch commit is used before the first code-writing execution dispatch; confirmation does not create a copy.', { exact: false })).toBeTruthy();
   });

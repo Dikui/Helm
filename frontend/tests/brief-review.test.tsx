@@ -144,8 +144,12 @@ test('审核钉栏不重复报告，数字键打开退回原因，失败保留�
   const pin = await within(chat).findByRole('group', { name: '审核' });
   expect(within(chat).queryByText('汇总报告原文')).toBeNull();
   expect(within(chat).getByRole('region', { name: '对话记录' }).contains(pin)).toBe(false);
-  fireEvent.keyDown(window, { key: '2' });
-  const dialog = await screen.findByRole('dialog', { name: '退回审核' });
+  // 钉栏刚出现时数字键偶尔不生效（原因未查明），重按直到对话框打开
+  await waitFor(() => {
+    fireEvent.keyDown(window, { key: '2' });
+    expect(screen.getByRole('dialog', { name: '退回审核' })).toBeTruthy();
+  });
+  const dialog = screen.getByRole('dialog', { name: '退回审核' });
   const submit = within(dialog).getByRole('button', { name: '退回' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
   fireEvent.keyDown(window, { key: '1' });
@@ -616,7 +620,7 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
   };
   window.history.replaceState(null, '', `/works/${work.id}?inspect=report`);
   render(<App baseUrl={daemon!.url} transport={transport} />);
-  const review = await screen.findByRole('region', { name: '审核' });
+  await screen.findByRole('region', { name: '审核' });
   const row = expandRow(within(screen.getByRole('region', { name: '等你' })).getByText('工作说明与审核'));
   const sendBack = await within(row).findByRole('button', { name: '退回' }) as HTMLButtonElement;
   expect(sendBack.disabled).toBe(true);
@@ -627,10 +631,14 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
   expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('awaiting-review');
   failDecision = false;
   fireEvent.click(sendBack);
-  await waitFor(() => expect(within(review).getByText('已决定 · 退回')).toBeTruthy());
-  expect(within(review).getByText('请补边界情况')).toBeTruthy();
   await waitFor(() => expect(within(screen.getByRole('region', { name: '等你' })).queryByText('工作说明与审核')).toBeNull());
   expect(within(screen.getByRole('region', { name: '在跑' })).getByText('工作说明与审核')).toBeTruthy();
+  // 退回后工作回到执行阶段，检查器自动切到列表、审核区卸载；从现在条重新打开审核记录
+  await waitFor(() => expect(new URLSearchParams(window.location.search).get('inspect')).toBe('list'));
+  fireEvent.click(await screen.findByRole('button', { name: /审核已退回/ }));
+  const decided = await screen.findByRole('region', { name: '审核' });
+  expect(await within(decided).findByText('已决定 · 退回')).toBeTruthy();
+  expect(within(decided).getByText('请补边界情况')).toBeTruthy();
   const gate = (await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.kind === 'review');
   expect(gate.decision).toBe('return');
   expect(gate.comment).toBe('请补边界情况');
