@@ -429,7 +429,7 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   expect(await within(await screen.findByRole('dialog')).findByText('附件原文', { selector: 'pre' })).toBeTruthy();
 });
 
-test('粘贴截图成为附件，同名截图依次编号', async () => {
+test('粘贴截图成为附件并显示缩略图，同名截图依次编号，发出后消息里也有缩略图', async () => {
   const work = await executingWork([[{ type: 'hang' }], [{ type: 'hang' }]]);
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });
@@ -440,6 +440,7 @@ test('粘贴截图成为附件，同名截图依次编号', async () => {
   const attachments = within(chat).getByText('添加附件', { selector: 'summary' }).closest('details')!;
   expect(attachments.open).toBe(true);
   expect(within(attachments).getByText('image-3.png')).toBeTruthy();
+  expect([...attachments.querySelectorAll('img.attachment-thumbnail')].map(image => image.getAttribute('src'))).toEqual(['blob:image.png', 'blob:image-2.png', 'blob:image-3.png']);
   fireEvent.change(input, { target: { value: '看截图' } });
   fireEvent.keyDown(input, { key: 'Enter' });
   const conversation = await until(() => daemon!.call('get-conversation', { workId: work.id }),
@@ -447,6 +448,8 @@ test('粘贴截图成为附件，同名截图依次编号', async () => {
   const message = conversation.result.find((item: any) => item.body === '看截图');
   expect(message.attachments.map((item: any) => item.name)).toEqual(['image.png', 'image-2.png', 'image-3.png']);
   await waitFor(() => expect(attachments.open).toBe(false));
+  const sent = await within(chat).findByRole('list', { name: '附件' });
+  await waitFor(() => expect(sent.querySelectorAll('img[src="data:image/png;base64,iVBORw=="]').length).toBe(3));
 });
 
 test('v2 排队条目的立即操作打断本轮，原消息只提交一次', async () => {

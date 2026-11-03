@@ -5,3 +5,5 @@ configure({ asyncUtilTimeout: 5_000 });
 // Substitute only the native dialog platform API in jsdom.
 HTMLDialogElement.prototype.showModal = function () { this.open = true; };
 HTMLDialogElement.prototype.close = function () { this.open = false; };
+URL.createObjectURL = file => `blob:${(file as File).name}`;
+URL.revokeObjectURL = () => {};

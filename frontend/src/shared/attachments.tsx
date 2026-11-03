@@ -1,5 +1,6 @@
-import { useRef } from 'react';
-import { useResource } from './data.js';
+import { useEffect, useRef, useState } from 'react';
+import { useData, useResource } from './data.js';
+import { extension, imageTypes } from './files.js';
 import { useI18n } from './i18n.js';
 import type { WorkSummary } from './types.js';
 
@@ -52,17 +53,39 @@ export function AttachmentPicker({ files, onChange, disabled, references, onRefe
     {references.map(id => <span key={id} className="pill attachment"><span>{t('referenceWorkPrefix')}{title(id)}</span>
       <button type="button" disabled={disabled} aria-label={`${t('removeAttachment')} ${title(id)}`}
         onClick={() => onReferencesChange(references.filter(item => item !== id))}>×</button></span>)}
-    {files.map(file => <span key={file.name} className="pill attachment"><span>{file.name}</span>
+    {files.map(file => <span key={file.name} className="pill attachment">{file.type.startsWith('image/') && <FileThumbnail file={file} />}<span>{file.name}</span>
       <button type="button" disabled={disabled} aria-label={`${t('removeAttachment')} ${file.name}`}
         onClick={() => onChange(files.filter(item => item !== file))}>×</button></span>)}
   </div>;
 }
 
-export function AttachmentList({ attachments, onOpen }: { attachments?: Attachment[]; onOpen: (path: string, opener: HTMLElement) => void }) {
+function FileThumbnail({ file }: { file: File }) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  return url ? <img className="attachment-thumbnail" src={url} alt="" /> : null;
+}
+
+function SentThumbnail({ workId, path }: { workId: string; path: string }) {
+  const { api } = useData();
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    api.call<{ content: string }>('read-work-file', { workId, path, encoding: 'base64' })
+      .then(file => { if (live) setUrl(`data:${imageTypes[extension(path)]};base64,${file.content}`); }, () => {});
+    return () => { live = false; };
+  }, [api, workId, path]);
+  return url ? <img className="attachment-thumbnail" src={url} alt="" /> : null;
+}
+
+export function AttachmentList({ attachments, workId, onOpen }: { attachments?: Attachment[]; workId: string; onOpen: (path: string, opener: HTMLElement) => void }) {
   const { t } = useI18n();
   if (!attachments?.length) return null;
   return <ul className="attachments" aria-label={t('attachments')}>
     {attachments.map(item => <li key={item.path} className="pill attachment" id={`attachment-${encodeURIComponent(item.path)}`} title={item.path}>
-      <a href={`#attachment-${encodeURIComponent(item.path)}`} onClick={event => { event.preventDefault(); onOpen(item.path, event.currentTarget); }}>{item.name}</a></li>)}
+      <a href={`#attachment-${encodeURIComponent(item.path)}`} onClick={event => { event.preventDefault(); onOpen(item.path, event.currentTarget); }}>{imageTypes[extension(item.path)] && <SentThumbnail workId={workId} path={item.path} />}{item.name}</a></li>)}
   </ul>;
 }
