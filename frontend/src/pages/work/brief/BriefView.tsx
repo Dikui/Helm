@@ -17,8 +17,7 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
   const events = useResource<HelmEvent[]>('get-events', { workId: work.id, actions: ['gate-decided'] }, decidedAffects);
   const [version, setVersion] = useState<number>();
   const versions = descriptions.data ?? [];
-  const active = versions.find(item => item.status === 'active');
-  const shown = version === undefined ? active : versions.find(item => item.version === version);
+  const shown = version === undefined ? versions.at(-1) : versions.find(item => item.version === version);
   const confirmed = events.data?.find(event => event.action === 'gate-decided' && (event.details as { descriptionId?: string })?.descriptionId === shown?.id);
   return <div className="page-body brief-view">
     <section className="brief-document" aria-label={t('brief')}>

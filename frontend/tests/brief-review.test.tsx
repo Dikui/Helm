@@ -351,7 +351,7 @@ async function confirmVersion(workId: string, version: number) {
   expect((await daemon!.call('decide-gate', { workId, gateId: description.gateId, descriptionId: description.id, decision: 'confirm' })).ok).toBe(true);
 }
 
-test('工作说明默认显示生效版本，历史和未确认新版只读，语言切换保留原文', async () => {
+test('工作说明默认显示最新版本，可切换到生效和历史版本，均只读，语言切换保留原文', async () => {
   daemon = await uiFixture([[draft(1)], [draft(2)], [draft(3)]]);
   const work = await createWork();
   await confirmVersion(work.id, 1);
@@ -360,19 +360,21 @@ test('工作说明默认显示生效版本，历史和未确认新版只读，�
   window.history.replaceState(null, '', `/works/${work.id}?inspect=spec`);
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('region', { name: '工作说明' });
-  expect(await within(brief).findByText('需求原文 2')).toBeTruthy();
+  expect(await within(brief).findByText('需求原文 3')).toBeTruthy();
+  expect(within(brief).getByText('未确认')).toBeTruthy();
+  expect(within(brief).queryByRole('button', { name: /确认/ })).toBeNull();
+  const versions = within(brief).getByLabelText('版本');
+  fireEvent.change(versions, { target: { value: '2' } });
+  expect(within(brief).getByText('需求原文 2')).toBeTruthy();
   expect(within(brief).getByText('已确认')).toBeTruthy();
   expect(within(brief).getByText('—')).toBeTruthy();
   expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
-  const versions = within(brief).getByLabelText('版本');
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).getByText('需求原文 1')).toBeTruthy();
   expect(within(brief).getByText('历史版本 · 只读')).toBeTruthy();
   expect(within(brief).queryByRole('textbox')).toBeNull();
   fireEvent.change(versions, { target: { value: '3' } });
   expect(within(brief).getByText('需求原文 3')).toBeTruthy();
-  expect(within(brief).getByText('未确认')).toBeTruthy();
-  expect(within(brief).queryByRole('button', { name: /确认/ })).toBeNull();
   expect(within(brief).getByRole('link', { name: '在对话中提出修改' }).getAttribute('href')).toBe(`/works/${work.id}`);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(brief).getByRole('heading', { name: 'Requirements' })).toBeTruthy();

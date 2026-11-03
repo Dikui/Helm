@@ -90,6 +90,9 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
       </> : gate.kind === 'review' ? <>
         <button aria-keyshortcuts="1" disabled={pending || readOnly} onClick={() => void decide('accept')}><kbd aria-hidden="true">1</kbd>{t(gate.review?.noCodeChanges ? 'pinAcceptComplete' : 'pinAccept')}</button>
         <button aria-keyshortcuts="2" disabled={pending || readOnly} onClick={event => show('return', event.currentTarget)}><kbd aria-hidden="true">2</kbd>{t('pinReturn')}</button>
+      </> : gate.kind === 'work-confirmation' ? <>
+        <button aria-keyshortcuts="1" disabled={pending || readOnly || !gate.descriptionId} onClick={() => void decide('confirm')}><kbd aria-hidden="true">1</kbd>{t('confirm')}</button>
+        <Link aria-keyshortcuts="2" href={`/works/${encodeURIComponent(gate.workId)}?inspect=spec`}><kbd aria-hidden="true">2</kbd>{t('pinViewBrief')}</Link>
       </> : null}
       {error && !dialog && <ErrorNotice error={error} />}
     </GatePin>{returnDialog}{preview.preview}

@@ -58,6 +58,24 @@ test('当前关卡钉在对话记录之外，数字键决定且输入框和组�
   expect((await daemon!.call('get-conversation', { workId: work.id })).result.find((item: any) => item.question === '旧密码保留多久？').decision).toBe('一直保留');
 });
 
+test('执行中重新起草的工作说明钉在顶部，可查看新版并确认', async () => {
+  const work = await executingWork([[{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+    key: 'brief-v2', requirements: '以框架图展示', boundary: '登录页', criteria: '可登录' }) }, { type: 'hang' }]]);
+  const descriptions = await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 2);
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const pin = await within(chat).findByRole('group', { name: '确认工作说明' });
+  fireEvent.click(within(pin).getByRole('link', { name: '查看说明' }));
+  await waitFor(() => expect(window.location.search).toBe('?inspect=spec'));
+  const brief = await screen.findByRole('region', { name: '工作说明' });
+  expect(await within(brief).findByText('以框架图展示')).toBeTruthy();
+  expect(within(brief).getByText('未确认', { selector: 'span span' })).toBeTruthy();
+  fireEvent.keyDown(window, { key: '1' });
+  await waitFor(() => expect(within(chat).queryByRole('group', { name: '确认工作说明' })).toBeNull());
+  const after = (await daemon!.call('get-work-descriptions', { workId: work.id })).result;
+  expect(after.find((item: any) => item.id === descriptions.result[1].id).status).toBe('active');
+});
+
 test('关卡撤回后钉栏提供跳过原因入口，原问题和撤回原因留在对话', async () => {
   const work = await executingWork([[
     { ...gate('withdraw', '旧方向确认'), saveAs: 'choice' },
