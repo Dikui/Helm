@@ -15,6 +15,18 @@ export function encodeFiles(files: File[]): Promise<AttachmentUpload[]> {
   })));
 }
 
+// Pasted screenshots all arrive as image.png, so a clashing name gets a suffix instead of replacing the earlier file.
+export function withPastedFiles(files: File[], pasted: File[]) {
+  const taken = new Set(files.map(file => file.name));
+  return [...files, ...pasted.map(file => {
+    const dot = file.name.lastIndexOf('.') > 0 ? file.name.lastIndexOf('.') : file.name.length;
+    let name = file.name;
+    for (let index = 2; taken.has(name); index++) name = `${file.name.slice(0, dot)}-${index}${file.name.slice(dot)}`;
+    taken.add(name);
+    return name === file.name ? file : new File([file], name, { type: file.type });
+  })];
+}
+
 export function AttachmentPicker({ files, onChange, disabled, references, onReferencesChange, workId, fileLabel }: { files: File[]; onChange: (files: File[]) => void; disabled?: boolean; fileLabel?: string;
   references: string[]; onReferencesChange: (ids: string[]) => void; workId?: string }) {
   const { t } = useI18n();
