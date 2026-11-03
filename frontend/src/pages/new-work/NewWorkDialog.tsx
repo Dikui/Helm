@@ -8,7 +8,7 @@ import { AgentMark } from '../../shared/AgentMark.js';
 import { Link, useRouter } from '../../shared/router.js';
 import type { CoordinatorAgent, Project } from './types.js';
 import { useSendMessage } from './useSendMessage.js';
-import { AttachmentPicker, encodeFiles } from '../../shared/attachments.js';
+import { AttachmentPicker, encodeFiles, withPastedFiles } from '../../shared/attachments.js';
 import { RegisterProjectDialog, RegisterProjectForm } from './RegisterProject.js';
 import { BaseBranchField, type BaseSelection } from './BaseBranchField.js';
 import './new-work.css';
@@ -129,7 +129,7 @@ export function NewWorkDialog({ open, onClose }: { open: boolean; onClose: () =>
       {projects.data?.length === 0 && <div className="new-registration"><RegisterProjectForm onRegistered={registered} /></div>}
       {project && <form noValidate aria-busy={pending} onSubmit={event => { event.preventDefault(); void send(); }}>
         <label className="new-request"><span className="sr">{t('requirements')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('newWorkPlaceholder')}
-          onChange={event => setBody(event.target.value)} onKeyDown={event => {
+          onChange={event => setBody(event.target.value)} onPaste={event => { const pasted = [...event.clipboardData.files]; if (pasted.length) setFiles(current => withPastedFiles(current, pasted)); }} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
           }} /></label>
         <div className="new-tools">
@@ -175,7 +175,7 @@ export function NewWorkDialog({ open, onClose }: { open: boolean; onClose: () =>
           {submission.error && <><ErrorNotice error={submission.error} /><p className="new-notice">{t(submission.uncertain ? 'newWorkRetrySameMessage' : 'newWorkSendFailed')}</p>
             <div className="row"><button type="button" className="btn sm" disabled={pending} onClick={() => void send()}>{t(submission.uncertain ? 'newWorkRetryOriginal' : 'newWorkRetrySend')}</button>
               {submission.uncertain && <button type="button" className="btn sm ghost" disabled={pending} onClick={submission.resumeEditing}>{t('newWorkResumeEditing')}</button>}</div></>}
-          {!locked && <details><summary>{t('newWorkContext')}</summary><div className="new-context-details">
+          {!locked && <details open={files.length > 0 || undefined}><summary>{t('newWorkContext')}</summary><div className="new-context-details">
             <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} fileLabel={t('newWorkAttachments')} />
             <p className="mono">{project.path}</p><p>{t('newWorkBranchPreview')} <code>helm/&lt;{t('newWorkId')}&gt;</code>{t(project.isGit && base?.baseRef ? 'newWorkBranchPreviewGit' : 'newWorkBranchPreviewInit')}</p>
           </div></details>}

@@ -1,8 +1,13 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { App } from '../src/App.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
+// jsdom has no native dialog implementation. Substitute only the platform API.
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
 test('临时目录卡片显示运行位置，派单详情可读成果文件并切换英文', async () => {
@@ -11,7 +16,7 @@ test('临时目录卡片显示运行位置，派单详情可读成果文件并�
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'research', content: '网络调研', workspace: 'scratch' }, saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },
-  ]], undefined, { executorScripts: [[{ type: 'write', path: 'reports/fact.md', content: '查证的事实与来源' }]] });
+  ]], undefined, { executorScripts: [[{ type: 'write', path: 'reports/fact.md', content: '查证的事实与来源' }, { type: 'write', path: 'reports/frame.html', content: '<h1>框架图</h1>' }]] });
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '调研' })).result.work;
   const params = { workId: work.id };
   const description = (await until(() => daemon!.call('get-work-descriptions', params), value => value.result.length > 0)).result[0];
@@ -25,6 +30,13 @@ test('临时目录卡片显示运行位置，派单详情可读成果文件并�
   expect(within(inspector).getAllByText('临时目录').length).toBeGreaterThan(0);
   fireEvent.click(await within(inspector).findByRole('button', { name: '读取成果：reports/fact.md' }));
   expect(await within(inspector).findByText('查证的事实与来源')).toBeTruthy();
+  expect(within(inspector).queryByRole('button', { name: '预览' })).toBeNull();
+  fireEvent.click(within(inspector).getByRole('button', { name: '读取成果：reports/frame.html' }));
+  fireEvent.click(await within(inspector).findByRole('button', { name: '预览' }));
+  const frame = await within(await screen.findByRole('dialog', { name: 'reports/frame.html' })).findByTitle('reports/frame.html');
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+  expect(frame.getAttribute('srcdoc')).toBe('<h1>框架图</h1>');
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(inspector).getByText('Workspace')).toBeTruthy();
   expect(within(inspector).getAllByText('Scratch directory').length).toBeGreaterThan(0);

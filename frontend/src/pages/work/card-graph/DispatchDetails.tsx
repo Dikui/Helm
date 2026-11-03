@@ -1,7 +1,9 @@
 import { stepSummary } from '../../../shared/step-summary.js';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
+import { extension, imageTypes } from '../../../shared/files.js';
+import { ActionDialog } from '../ActionDialog.js';
 import { PlanSteps } from '../../../shared/PlanSteps.js';
 import { useI18n } from '../../../shared/i18n.js';
 import type { HelmEvent } from '../../../shared/types.js';
@@ -9,6 +11,8 @@ import { conclusionLabels, DispatchStatus, endLabels } from './labels.js';
 import type { Artifact, ArtifactContent, Dispatch, DispatchOutput } from './types.js';
 
 const pageSize = 20;
+// The artifact never changes once saved, so the preview does not re-read on events.
+const unchanged = () => false;
 export function DispatchDetails({ workId, dispatchId, lastStep, initialStep, showArtifacts = true }: { workId: string; dispatchId: string; lastStep?: number; initialStep?: number; showArtifacts?: boolean }) {
   const { t } = useI18n();
   const affects = useCallback((event: HelmEvent) => event.workId === workId && (!event.dispatchId || event.dispatchId === dispatchId), [workId, dispatchId]);
@@ -99,12 +103,33 @@ export function ReadArtifact({ workId, artifactId, path }: { workId: string; art
   const { t } = useI18n();
   const [encoding, setEncoding] = useState<'utf8' | 'base64'>('utf8');
   const artifact = useResource<ArtifactContent>('read-artifact', { workId, artifactId, encoding, ...(path ? { path } : {}) });
+  const [previewing, setPreviewing] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
+  const name = artifact.data?.name ?? '';
+  const renderable = artifact.data?.kind !== 'branch' && (Boolean(imageTypes[extension(name)]) || ['html', 'htm'].includes(extension(name)));
   return <div className="cg-artifact-content">
-    {artifact.data && artifact.data.kind !== 'branch' && <div className="row"><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button></div>}
+    {artifact.data && artifact.data.kind !== 'branch' && <div className="row"><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button>
+      {renderable && <button ref={opener} className="btn sm" onClick={() => setPreviewing(true)}>{t('artifactPreview')}</button>}</div>}
+    {previewing && <ArtifactPreview workId={workId} artifactId={artifactId} name={name} onClose={() => setPreviewing(false)} returnFocus={opener} />}
     {artifact.error && <ErrorNotice error={artifact.error} retry={artifact.reload} />}
     {artifact.data ? artifact.data.kind === 'branch' ? path && artifact.data.diff?.status === 'available' && artifact.data.diff.patch ? <>{artifact.data.diff.patch.truncated && <p role="status" className="hint">{t('artifactPatchTruncated').replace('{limit}', String(artifact.data.diff.limits.patchBytes / 1024))}</p>}<pre tabIndex={0} className="cg-file-patch" aria-label={`${t('artifactPatch')}：${path}`}>{artifact.data.diff.patch.text}</pre></> : <><div className="cg-prose"><span>{t('graphBranch')}</span><p><code>{artifact.data.ref}</code></p><code>{artifact.data.commitSha}</code><p className="hint">{t('artifactCardChanges')}</p></div><BranchDiff workId={workId} artifact={artifact.data} retry={artifact.reload} /></>
       : <pre aria-label={artifact.data.name}>{artifact.data.content}</pre> : <p role="status">{artifact.error ? '' : t('loading')}</p>}
   </div>;
+}
+
+// HTML and images are what scratch cards hand to people, so they render like branch files in FilePreview.
+function ArtifactPreview({ workId, artifactId, name, onClose, returnFocus }: { workId: string; artifactId: string; name: string; onClose: () => void; returnFocus: RefObject<HTMLElement | null> }) {
+  const { t } = useI18n();
+  const image = imageTypes[extension(name)];
+  const file = useResource<ArtifactContent>('read-artifact', { workId, artifactId, encoding: image ? 'base64' : 'utf8' }, unchanged);
+  const content = file.data?.content;
+  return <ActionDialog title={name} busy={false} onClose={onClose} returnFocus={returnFocus} className="file-preview">
+    {file.error && <ErrorNotice error={file.error} retry={file.reload} />}
+    {content == null ? !file.error && <p role="status">{t('loading')}</p>
+      : image ? <img src={`data:${image};base64,${content}`} alt={name} />
+      // No allow-same-origin: scripts run, but cannot reach Helm's page or API.
+      : <iframe title={name} sandbox="allow-scripts" srcDoc={content} />}
+  </ActionDialog>;
 }
 
 function BranchDiff({ workId, artifact, retry }: { workId: string; artifact: Artifact; retry?: () => void }) {

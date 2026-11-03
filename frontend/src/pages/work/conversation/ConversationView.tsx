@@ -11,7 +11,7 @@ import { ConversationScroll } from './ConversationScroll.js';
 import { eventSummary } from '../card-graph/event-summary.js';
 import { GateHistory } from './GateHistory.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
-import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
+import { AttachmentList, AttachmentPicker, encodeFiles, withPastedFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview, useWorkFiles } from '../../../shared/files.js';
 import type { GraphNode } from '../card-graph/types.js';
 import type { ConversationItem, Message, Rounds } from './types.js';
@@ -135,7 +135,7 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
     {withdrawError && <ErrorNotice error={withdrawError} />}
     {interruptError && <ErrorNotice error={interruptError} />}
     <form className="conversation-composer" noValidate aria-busy={submission.pending || interrupting} onSubmit={event => { event.preventDefault(); void send(); }}>
-      <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t(work.status === 'paused' ? 'conversationPausedPlaceholder' : 'conversationPlaceholder')} onChange={event => setBody(event.target.value)} onKeyDown={event => {
+      <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t(work.status === 'paused' ? 'conversationPausedPlaceholder' : 'conversationPlaceholder')} onChange={event => setBody(event.target.value)} onPaste={event => { const pasted = [...event.clipboardData.files]; if (pasted.length) setFiles(current => withPastedFiles(current, pasted)); }} onKeyDown={event => {
         if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.metaKey || event.ctrlKey) { event.preventDefault(); void send(true); }
         else if (!event.shiftKey) { event.preventDefault(); void send(); }
@@ -148,7 +148,7 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
         <button type="button" className="conversation-now" disabled={!running || interrupting || withdrawing || submission.pending || readOnly || Boolean(rounds.error)} onClick={() => void interrupt()}>{t('conversationInterrupt')}</button>
         <button className="btn primary send" disabled={readOnly || submission.pending || interrupting || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
       </div>
-      <details className="composer-attachments"><summary>{t('attachFiles')}</summary>
+      <details className="composer-attachments" open={files.length > 0 || undefined}><summary>{t('attachFiles')}</summary>
         <AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={work.id} />
       </details>
       {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}

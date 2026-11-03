@@ -7,7 +7,7 @@ import { ActionDialog } from '../ActionDialog.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { GateHistory } from '../conversation/GateHistory.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
-import { AttachmentList, AttachmentPicker, encodeFiles } from '../../../shared/attachments.js';
+import { AttachmentList, AttachmentPicker, encodeFiles, withPastedFiles } from '../../../shared/attachments.js';
 import { Markdown, useFilePreview } from '../../../shared/files.js';
 import type { ConversationItem, WorkDescription } from './types.js';
 import { Splitter, useStoredSize } from '../../../shared/Splitter.js';
@@ -119,7 +119,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
         {steeringError && <ErrorNotice error={steeringError} />}
         {graph.error && <ErrorNotice error={graph.error} retry={graph.reload} />}
         <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" value={body} disabled={locked} placeholder={t('alignmentReply')}
-          onChange={event => setBody(event.target.value)} onKeyDown={event => {
+          onChange={event => setBody(event.target.value)} onPaste={event => { const pasted = [...event.clipboardData.files]; if (pasted.length) setFiles(current => withPastedFiles(current, pasted)); }} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(event.metaKey || event.ctrlKey); }
           }} /></label>
         <div className="conversation-hints"><span>{t('composerShortcuts')}</span>
@@ -127,7 +127,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
           <button type="button" className="conversation-now" disabled={!running || steering || submission.pending || Boolean(rounds.error)} onClick={() => void steer('interrupt-round')}>{t('conversationInterrupt')}</button>
           <button className="btn primary send" disabled={submission.pending || steering || !body.trim() || (!validScope && !submission.uncertain)}><span className="sr">{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</span><span aria-hidden="true">↑</span></button>
         </div>
-        <details className="composer-attachments"><summary>{t('attachFiles')}</summary><AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={workId} /></details>
+        <details className="composer-attachments" open={files.length > 0 || undefined}><summary>{t('attachFiles')}</summary><AttachmentPicker files={files} onChange={setFiles} disabled={locked} references={references} onReferencesChange={setReferences} workId={workId} /></details>
         {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}

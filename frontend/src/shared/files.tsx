@@ -7,8 +7,8 @@ import { ErrorNotice } from './feedback.js';
 import { useI18n } from './i18n.js';
 import type { HelmEvent } from './types.js';
 
-const imageTypes: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' };
-const extension = (path: string) => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+export const imageTypes: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' };
+export const extension = (path: string) => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 type Open = (path: string, opener: HTMLElement) => void;
 // useResource re-reads whenever its predicate changes identity, so predicates must stay stable.
 const never = () => false;
@@ -28,9 +28,16 @@ export function renderMarkdown(text: string, files: ReadonlySet<string>, base = 
     ...(inline ? { ALLOWED_TAGS: ['strong', 'em', 'code', 'a', 'del', 'br'], ALLOWED_ATTR: ['href', 'title'] } : {}) });
   const find = (target: string) => [resolvePath(base, target), resolvePath('', target)].find(path => path && files.has(path));
   for (const link of fragment.querySelectorAll('a[href]')) {
-    const path = find(link.getAttribute('href')!);
+    const href = link.getAttribute('href')!;
+    const path = find(href);
     if (path) { link.setAttribute('href', '#'); link.setAttribute('data-file', path); }
-    else { link.setAttribute('target', '_blank'); link.setAttribute('rel', 'noopener noreferrer'); }
+    // A server path like /home/... would open as a Helm page, so it stays text with the path on hover.
+    else if (/^\/(?!\/)/.test(href)) {
+      const text = document.createElement('span');
+      text.setAttribute('title', href);
+      text.append(...link.childNodes);
+      link.replaceWith(text);
+    } else { link.setAttribute('target', '_blank'); link.setAttribute('rel', 'noopener noreferrer'); }
   }
   for (const code of fragment.querySelectorAll('code')) {
     const path = !code.closest('pre, a') && find(code.textContent!.trim());

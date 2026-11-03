@@ -393,7 +393,7 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   await writeFile(join(workPath, 'outputs', 'page.html'), '<h1>交互页</h1><script>document.title = "x"</script>');
   execFileSync('git', ['-C', workPath, 'add', 'outputs']);
   execFileSync('git', ['-C', workPath, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'outputs']);
-  await daemon!.call('send-message', { workId: work.id, key: 'files', body: '**结果**见 `outputs/report.md`，`outputs/missing.png` 不存在，[外链](https://example.com)<script>alert(1)</script>',
+  await daemon!.call('send-message', { workId: work.id, key: 'files', body: '**结果**见 `outputs/report.md`，`outputs/missing.png` 不存在，[外链](https://example.com)，[框架图](/home/u/.helm/dispatches/d/artifacts/a.html)<script>alert(1)</script>',
     attachments: [{ name: 'notes.txt', content: Buffer.from('附件原文').toString('base64') }] });
   const fetches = vi.spyOn(globalThis, 'fetch');
   const reads = (name: string) => fetches.mock.calls.filter(([url]) => String(url).endsWith(`/api/${name}`)).length;
@@ -405,6 +405,9 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
   expect(message.querySelector('script')).toBeNull();
   expect(within(message).getByRole('link', { name: '外链' }).getAttribute('target')).toBe('_blank');
   expect(within(message).queryByRole('link', { name: 'outputs/missing.png' })).toBeNull();
+  // A server path would open a Helm page, so it stays text.
+  expect(within(message).queryByRole('link', { name: '框架图' })).toBeNull();
+  expect(within(message).getByText('框架图').getAttribute('title')).toBe('/home/u/.helm/dispatches/d/artifacts/a.html');
 
   fireEvent.click(within(message).getByRole('link', { name: 'outputs/report.md' }));
   const dialog = await screen.findByRole('dialog', { name: 'outputs/report.md' });
@@ -424,6 +427,26 @@ test('消息按 Markdown 显示，工作分支上的文件和附件可在弹窗�
 
   fireEvent.click(within(message).getByRole('link', { name: 'notes.txt' }));
   expect(await within(await screen.findByRole('dialog')).findByText('附件原文', { selector: 'pre' })).toBeTruthy();
+});
+
+test('粘贴截图成为附件，同名截图依次编号', async () => {
+  const work = await executingWork([[{ type: 'hang' }], [{ type: 'hang' }]]);
+  render(<App baseUrl={daemon!.url} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  const input = within(chat).getByLabelText('消息');
+  const shot = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'image.png', { type: 'image/png' });
+  fireEvent.paste(input, { clipboardData: { files: [shot()] } });
+  fireEvent.paste(input, { clipboardData: { files: [shot(), shot()] } });
+  const attachments = within(chat).getByText('添加附件', { selector: 'summary' }).closest('details')!;
+  expect(attachments.open).toBe(true);
+  expect(within(attachments).getByText('image-3.png')).toBeTruthy();
+  fireEvent.change(input, { target: { value: '看截图' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  const conversation = await until(() => daemon!.call('get-conversation', { workId: work.id }),
+    value => value.result.some((item: any) => item.type === 'message' && item.body === '看截图'));
+  const message = conversation.result.find((item: any) => item.body === '看截图');
+  expect(message.attachments.map((item: any) => item.name)).toEqual(['image.png', 'image-2.png', 'image-3.png']);
+  await waitFor(() => expect(attachments.open).toBe(false));
 });
 
 test('v2 排队条目的立即操作打断本轮，原消息只提交一次', async () => {
