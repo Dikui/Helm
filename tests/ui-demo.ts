@@ -240,6 +240,9 @@ async function main() {
   await call('push-work', { workId: failedPush.workId });
   assert.equal((await call('get-work', { workId: failedPush.workId })).delivery.push.status, 'failed');
 
+  const redraft = await create('演示 08c · 执行中：重新起草的工作说明 v2 待确认');
+  await run(redraft, [draft(2)]);
+
   const paused = await create('演示 09 · 已暂停：可恢复的安静工作');
   await call('pause-work', { workId: paused });
   const cancelled = await create('演示 09b · 已取消：安静段历史工作', undefined, false);
@@ -268,7 +271,7 @@ async function main() {
   await wait('等待原生计划', () => call('list-rounds', { workId: active }), value => value.currentPlan.length === 3);
 
   const works = await call('list-works');
-  assert.equal(works.length, 12);
+  assert.equal(works.length, 13);
   console.log(`\n演示数据已就绪：${fixture.url}`);
   for (const work of works) console.log(`${work.status.padEnd(15)} ${work.title}\n  ${fixture.url}/works/${work.id}`);
   console.log('\n所有驱动均为 FakeDriver。Ctrl+C / SIGTERM 停止并删除全部临时数据。');
