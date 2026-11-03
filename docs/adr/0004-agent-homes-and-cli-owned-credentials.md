@@ -8,6 +8,10 @@ Helm 拉起的会话记录混进了用户自己的 `~/.claude/projects/` 等目�
 
 “Helm 不碰凭据”指 Agent CLI 自身的登录和 API key，仍由 CLI 自己的主目录管理。项目运行所需的环境变量不分普通值和机密值，由用户在项目设置中配置，Helm 存入任务库并仅注入执行派单和验收派单的执行者环境，调度轮次不注入。设置读取和调度者简报只提供变量名，值不回显、不进事件和导出包，也不放入派单内容或 Agent 快照。
 
+## 范围补充（2026-11-03）
+
+Helm 只向 CLI 转发环境变量白名单，所以 Codex 的 `env_key` 一类"从 shell 环境变量读 key"的写法在 Helm 里取不到值。key 仍放在 CLI 自己的主目录：Codex 启动时会读 `<CODEX_HOME>/.env`，Claude 读主目录 `settings.json` 的 `env`。Codex 报缺环境变量时，Helm 把 Agent 标为不可用，并提示写入哪个 `.env`。
+
 ## Considered Options
 
 - **沿用用户默认主目录**：不用另登录，但会话记录混进用户历史，这正是要解决的问题。

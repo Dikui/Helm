@@ -24,6 +24,16 @@ function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);
 }
 
+// env_key providers read the key from the process environment, which Helm filters;
+// Codex also loads <CODEX_HOME>/.env itself, so the key stays in the CLI's home.
+function missingVariable(failure: string | undefined, env: Record<string, string>) {
+  const name = failure?.match(/Missing environment variable: `([^`]+)`/)?.[1];
+  if (!name) return {};
+  const dotenv = join(env.CODEX_HOME ?? join(env.HOME ?? homedir(), '.codex'), '.env');
+  return { unavailable: { reason: `Codex 缺少环境变量 ${name}。Helm 不转发 shell 环境变量，请把 ${name}=<值> 写入 ${dotenv}，由 Codex 启动时自己读取，然后对该 Agent 重新检测。`,
+    command: `\${EDITOR:-vi} '${dotenv.replaceAll("'", "'\\''")}'` } };
+}
+
 function quotaExhausted(error: any) {
   if (['usageLimitExceeded', 'unauthorized'].includes(error?.codexErrorInfo)) return true;
   const text = JSON.stringify(error);
@@ -48,7 +58,7 @@ export class CodexDriver implements Driver {
       try {
         if ((await stat(directory)).isDirectory() && (await stat(join(directory, 'config.toml'))).isFile()) return { available: true };
       } catch { /* Only metadata: the CLI owns and validates this configuration. */ }
-      return { available: false, reason: `API Agent 需要主目录 ${directory} 和 config.toml；请按 Codex 格式配置接口和 key。`,
+      return { available: false, reason: `API Agent 需要主目录 ${directory} 和 config.toml；请按 Codex 格式配置接口和 key。Helm 不转发 shell 环境变量，env_key 引用的变量请写入该目录的 .env。`,
         command: `mkdir -p ${quoted} && \${EDITOR:-vi} ${quoted}/config.toml` };
     }
     try {
@@ -195,9 +205,12 @@ export class CodexDriver implements Driver {
                 const turn = params.turn;
                 const completed = turn.status === 'completed';
                 const answer = turn.items?.filter((item: any) => item.type === 'agentMessage' && item.phase !== 'commentary').at(-1)?.text ?? finalAnswer;
+                const error = turn.error ?? terminalError;
+                const failure = completed ? undefined : [error?.message, error?.additionalDetails].filter(item => typeof item === 'string' && item).join(': ') || undefined;
                 yield { type: 'end', step: ++step, reason: completed ? 'completed' : turn.status === 'interrupted' ? 'aborted'
-                  : quotaExhausted(turn.error ?? terminalError) ? 'quota-exhausted' : 'error',
-                  ...(completed ? { finalAnswer: answer } : {}), usage, ...(context ? { context } : {}) };
+                  : quotaExhausted(error) ? 'quota-exhausted' : 'error',
+                  ...(completed ? { finalAnswer: answer } : {}), ...(failure ? { failure } : {}), ...missingVariable(failure, env),
+                  usage, ...(context ? { context } : {}) };
                 return;
               }
             }
