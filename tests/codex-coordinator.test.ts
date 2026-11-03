@@ -67,3 +67,26 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
   assert.equal((await daemon.events()).filter(e => e.action === 'round-started').length, before);
   assert.equal(starts, 1);
 });
+
+test('调度轮次记录驱动给出的失败原因，并按驱动的恢复提示标记 Agent 不可用', async t => {
+  const driver = new CodexDriver({ command: { file: process.execPath,
+    args: ['-e', 'process.exit(process.argv.slice(1).join(" ") === "login status" ? 0 : 1)'] } });
+  const unavailable = { reason: 'Codex 缺少环境变量 MOONSHOT_API_KEY。', command: 'vi .env' };
+  const daemon = await coordinatorFixture(t, {
+    capabilities: driver.capabilities,
+    checkAvailability: agent => driver.checkAvailability(agent),
+    async start() {
+      return { id: 'session', send: async () => {}, cancel() {}, events: (async function* () {
+        yield { type: 'end' as const, step: 1, reason: 'error' as const, failure: 'Missing environment variable: `MOONSHOT_API_KEY`.',
+          unavailable, usage: { inputTokens: null, outputTokens: null } };
+      })() };
+    },
+  });
+  await daemon.confirm();
+  const events = await until(daemon.events, values => values.some(e => e.action === 'round-ended' && e.details.reason === 'error'));
+  assert.equal(events.find(e => e.action === 'round-ended' && e.details.reason === 'error').details.failure, 'Missing environment variable: `MOONSHOT_API_KEY`.');
+  const agent = (await daemon.call('list-agents')).find((item: any) => item.id === 'codex-coordinator');
+  assert.equal(agent.available, false);
+  assert.equal(agent.reason, unavailable.reason);
+  assert.equal(agent.command, unavailable.command);
+});

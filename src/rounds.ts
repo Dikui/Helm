@@ -211,7 +211,7 @@ export class RoundScheduler {
     let idleTimer = setTimeout(() => stop('timed-out'), Number(settings.round_idle_timeout_ms));
     try {
       const result = await Promise.race([consume.call(this), cancellation]);
-      if (result) { reason = result.reason; usage = result.usage; finalAnswer = result.finalAnswer; }
+      if (result) { reason = result.reason; usage = result.usage; finalAnswer = result.finalAnswer; failure = result.failure; }
     } catch (error) {
       reason = 'error'; finalAnswer = undefined; failure = error instanceof Error ? error.message : String(error);
       if (error instanceof RuleError) ruleFailure = { code: error.code, reason: error.message, details: error.details };
@@ -339,7 +339,8 @@ export class RoundScheduler {
           // Keep reported usage even if closing the iterator stalls or fails.
           usage = event.usage;
           context = event.context;
-          return { reason: event.reason, usage: event.usage, finalAnswer: event.reason === 'completed' ? event.finalAnswer : undefined };
+          if (event.unavailable && !controller.signal.aborted) this.store.agents.markUnavailable(configuredAgent, event.unavailable);
+          return { reason: event.reason, usage: event.usage, finalAnswer: event.reason === 'completed' ? event.finalAnswer : undefined, failure: event.failure };
         }
       }
     }

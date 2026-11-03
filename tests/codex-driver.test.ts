@@ -232,6 +232,23 @@ for (const role of ['executor', 'coordinator'] as const) for (const sample of co
   }
 });
 
+test('Codex 失败带回 CLI 原因；env_key 变量缺失时提示写入主目录 .env', async t => {
+  const error = { message: 'Missing environment variable: `MOONSHOT_API_KEY`.', codexErrorInfo: 'other' };
+  const ctx = await fixture(t, [notification('error', { error, willRetry: false }), completed('failed', error)]);
+  ctx.options.agent = { ...ctx.options.agent, home: 'dedicated' };
+  const session = await ctx.driver.start(ctx.options);
+  await session.send('执行');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.equal(end.type, 'end');
+  if (end.type !== 'end') return;
+  assert.equal(end.reason, 'error');
+  assert.equal(end.failure, error.message);
+  const dotenv = join(ctx.directory, '.helm', 'agent-homes', 'codex-executor', '.env');
+  assert.match(end.unavailable!.reason, /MOONSHOT_API_KEY/);
+  assert.ok(end.unavailable!.reason.includes(dotenv));
+  assert.equal(end.unavailable!.command, `\${EDITOR:-vi} '${dotenv}'`);
+});
+
 test('Codex 成功优先于重试中的额度错误；普通回答中的额度词不改变结束方式，忽略其他 turn 的通知', async t => {
   const ctx = await fixture(t, [
     notification('error', { error: codexErrors[0].error, willRetry: true }),
