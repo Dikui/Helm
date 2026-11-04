@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { App } from '../src/App.js';
 import type { FakeScript } from '../../src/driver.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
@@ -230,7 +231,85 @@ test('删除已结束的工作须确认，删除后回到收件箱，工作不�
   expect((await daemon!.call('get-work', { workId: work.id })).error.code).toBe('NOT_FOUND');
 });
 
-test('删除工作后逐项显示保留的工作及卡片分支和原因，返回后回到收件箱', async () => {
+// Issue #14 · medium regression: real HTTP/helmd, with CLI drivers replaced by FakeDriver.
+test('暂停工作可从删除入口取消后删除', async () => {
+  const work = await startWork();
+  render(<App baseUrl={daemon!.url} />);
+  await screen.findByRole('heading', { level: 1, name: '管理输出的工作' });
+  fireEvent.click(screen.getByRole('button', { name: '暂停工作' }));
+  await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已暂停');
+  const remove = within(actions()).getByRole('button', { name: '删除工作' }) as HTMLButtonElement;
+  expect(remove.disabled).toBe(false);
+  fireEvent.click(remove);
+  const dialog = await screen.findByRole('dialog', { name: '删除工作' });
+  expect(dialog.textContent).toContain('会先取消这项已暂停的工作');
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认删除工作' }));
+  const confirm = await within(dialog).findByRole('button', { name: '仍然删除' });
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('cancelled');
+  expect((within(dialog).getByRole('button', { name: '先导出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(confirm);
+  await waitFor(() => expect(window.location.pathname).toBe('/'));
+  expect((await daemon!.call('get-work', { workId: work.id })).error.code).toBe('NOT_FOUND');
+});
+
+// Issue #14 · medium regression: opening a destructive dialog must not change work state.
+test('暂停工作关闭删除确认框仍保持暂停', async () => {
+  const work = await startWork();
+  await daemon!.call('pause-work', { workId: work.id });
+  render(<App baseUrl={daemon!.url} />);
+  await screen.findByRole('heading', { level: 1, name: '管理输出的工作' });
+  fireEvent.click(within(actions()).getByRole('button', { name: '删除工作' }));
+  const dialog = await screen.findByRole('dialog', { name: '删除工作' });
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '操作' }));
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('paused');
+});
+
+// Issue #14 · medium regression: the transport substitutes only a failed HTTP operation.
+test.each([
+  { operation: 'cancel-work', statusAfterFailure: 'paused' },
+  { operation: 'delete-work', statusAfterFailure: 'cancelled' },
+])('暂停删除在 $operation 失败后可重试', async ({ operation, statusAfterFailure }) => {
+  const work = await startWork();
+  await daemon!.call('pause-work', { workId: work.id });
+  let requests = 0;
+  let rejectRequest: (error: Error) => void = () => {};
+  const transport: typeof fetch = (input, init) => {
+    if (String(input).endsWith(`/api/${operation}`) && ++requests === 1) {
+      return new Promise<Response>((_resolve, reject) => { rejectRequest = reject; });
+    }
+    return fetch(input, init);
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  await screen.findByRole('heading', { level: 1, name: '管理输出的工作' });
+  fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete work' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Delete work' });
+  expect(dialog.textContent).toContain('This paused work will be cancelled first');
+  const confirm = within(dialog).getByRole('button', { name: 'Confirm work deletion' }) as HTMLButtonElement;
+  fireEvent.click(confirm);
+  await waitFor(() => expect(confirm.disabled).toBe(true));
+  await waitFor(() => expect(requests).toBe(1));
+  fireEvent.click(confirm);
+  expect(requests).toBe(1);
+  expect((within(dialog).getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(true);
+  rejectRequest(new Error('模拟操作失败'));
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('模拟操作失败');
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe(statusAfterFailure);
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  fireEvent.click(confirm);
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete anyway' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/'));
+  expect((await daemon!.call('get-work', { workId: work.id })).error.code).toBe('NOT_FOUND');
+});
+
+// Issue #14 · medium regression: paused deletion must reuse cancellation's copy cleanup.
+test.each([
+  { stop: 'cancel-work', label: '已取消' },
+  { stop: 'pause-work', label: '已暂停' },
+])('$label工作删除后逐项显示保留的工作及卡片分支和原因，返回后回到收件箱', async ({ stop }) => {
   const work = await startWork([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       key: 'draft', requirements: '保留分支', boundary: '本机', criteria: '逐项列出' }) },
@@ -245,7 +324,9 @@ test('删除工作后逐项显示保留的工作及卡片分支和原因，返�
   await until(() => daemon!.call('get-events', params), value => value.result.some((event: any) => event.action === 'dispatch-step' && event.details.summary === 'Wrote progress.txt'));
   const card = (await daemon!.call('get-card-graph', params)).result.find((node: any) => node.type === 'card');
   Object.assign(work, (await daemon!.call('get-work', params)).result);
-  expect((await daemon!.call('cancel-work', params)).ok).toBe(true);
+  expect(existsSync(work.workPath)).toBe(true);
+  expect(existsSync(card.workPath)).toBe(true);
+  expect((await daemon!.call(stop, params)).ok).toBe(true);
   const git = (...args: string[]) => execFileSync('git', ['-C', daemon!.repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
   const workCommit = git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid',
     'commit-tree', `${work.workBranch}^{tree}`, '-p', work.workBranch, '-m', 'unmerged work');
@@ -260,6 +341,8 @@ test('删除工作后逐项显示保留的工作及卡片分支和原因，返�
   expect(within(dialog).getByText(work.workBranch)).toBeTruthy();
   expect(within(dialog).getByText(card.cardBranch)).toBeTruthy();
   expect(within(dialog).getAllByText(/尚未合入基准分支 main/)).toHaveLength(2);
+  expect(existsSync(work.workPath)).toBe(false);
+  expect(existsSync(card.workPath)).toBe(false);
   expect(within(dialog).queryByRole('button', { name: '仍然删除' })).toBeNull();
   fireEvent.click(within(dialog).getAllByRole('button', { name: '关闭' })[0]!);
   await waitFor(() => expect(window.location.pathname).toBe('/'));
