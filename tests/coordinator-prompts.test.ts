@@ -5,8 +5,8 @@ import { defaultPromptDir, readPrompt, roleRules } from '../src/prompts.js';
 test('默认调度者规则缩减固定输入并保留跨轮与派单约定', () => {
   const rules = roleRules('coordinator');
   const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
-  assert.ok(Buffer.byteLength(rules.role) <= 6_150, '角色规则预算 6150 字节（含项目路径与新会话读取规则）');
-  assert.ok(Buffer.byteLength(executing) <= 10_100, '执行阶段规则预算 10100 字节（精简前 13265）');
+  assert.ok(Buffer.byteLength(rules.role) <= 6_650, '角色规则预算 6650 字节（含跑完交审核原则）');
+  assert.ok(Buffer.byteLength(executing) <= 10_450, '执行阶段规则预算 10450 字节（含先诊断、停卡交付）');
   for (const convention of ['helm MCP', 'resumed', 'phaseRules', 'write-coordinator-notes', 'send-message', 'projectPath', 'projectInstructionPaths', '新会话先读'])
     assert.ok(rules.role.includes(convention), `角色规则保留 ${convention}`);
   for (const convention of ['submit-conclusion', 'complete-card', 'request-review', 'outdated', 'autoFlow'])
@@ -20,7 +20,23 @@ test('默认执行阶段规则明确自动派票、无效验收和停止返工�
   assert.match(executing, /\| 执行 completed \| [^\n]*autoFlow[^\n]*未预写[^\n]*派票/);
   assert.match(executing, /自动操作在 newEvents 中，actor=runtime/);
   assert.match(executing, /\| 验收 failed 缺少可复现证据[^|\n]*命令与失败输出[^|\n]*\| 无效票：新开对话重派一次验收[^|\n]*不计打回/);
-  assert.match(executing, /无进展或同问题反复时不再返工，提关卡④/);
+  assert.match(executing, /\| 普通卡验收 failed \| 原因不明先诊断；按根因[^\n]*返工两次仍不过，停卡交付 \|/);
+});
+
+test('失败先自行诊断，卡住带保留意见交审核，不中途让用户抉择', () => {
+  const { role } = roleRules('coordinator');
+  const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
+  const executor = readPrompt(defaultPromptDir, 'executor-role');
+  assert.match(role, /目标是把工作跑完交审核/);
+  assert.match(role, /先一两句写要做的具体动作/);
+  assert.match(role, /核心条件和查不清可记为限制的部分/);
+  assert.match(role, /④ 无可用 Agent 可派。\n返工失败、验收无效、受阻、证据不足按执行阶段规则自行处理，不提关卡。/);
+  assert.doesNotMatch(role + executing, /⑤/);
+  assert.match(executing, /失败先找原因：[^\n]*派诊断用的调研卡[^\n]*不因证据不足问用户/);
+  assert.match(executing, /停卡交付：[^\n]*needsVerification=false 后 complete-card[^\n]*verdict=reservations/);
+  assert.match(executing, /检查量按标准原定/);
+  assert.match(executor, /验收只按卡片标准检查，不加检查/);
+  assert.match(executor, /自己写调试脚本、加日志或可视化补证据/);
 });
 
 
