@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { configureTestAgent, copyAgents } from './helmd-fixture.js';
+import { configureTestAgent, copyAgents, removeUnlessFailed } from './helmd-fixture.js';
 
 // CLI metadata and project files stay in a temporary HOME. Real smokes link
 // only the CLI-owned login; the coordinator itself uses the supplied driver.
 export async function acpCoordinatorFixture(t: TestContext, kind: 'grok' | 'deepseek', driver: Driver,
-  config: { stagedAuth?: string; model?: string } = {}) {
+  config: { stagedAuth?: string; model?: string; effort?: string } = {}) {
   // Real sandboxes may allow all of /tmp; keep the project outside that grant.
   const directory = await realpath(await mkdtemp(join(config.stagedAuth ? homedir() : tmpdir(), `.helm-${kind}-coordinator-`)));
   const home = join(directory, 'home');
@@ -20,7 +20,7 @@ export async function acpCoordinatorFixture(t: TestContext, kind: 'grok' | 'deep
   t.after(async () => {
     await daemon?.close();
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-    await rm(directory, { recursive: true, force: true });
+    await removeUnlessFailed(t, directory);
   });
   const cliHome = join(home, kind === 'grok' ? '.grok' : '.dsh');
   await mkdir(cliHome, { recursive: true });
@@ -37,7 +37,7 @@ export async function acpCoordinatorFixture(t: TestContext, kind: 'grok' | 'deep
   const agentId = `${kind}-coordinator`;
   await cp(join(agentDir, `${kind}-executor`), join(agentDir, agentId), { recursive: true });
   await configureTestAgent(agentDir, agentId, { role: 'coordinator', loadGlobalConfig: false,
-    model: config.model ?? (kind === 'grok' ? 'grok-4.5' : 'deepseek-flash'), reasoningEffort: 'low', fast: false });
+    model: config.model ?? (kind === 'grok' ? 'grok-4.5' : 'deepseek-flash'), reasoningEffort: config.effort ?? 'low', fast: false });
   const executor = new FakeDriver([[
     { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: 'README.md 基线检查完成' },
       check: value => assert.equal((value as any).ok, true) },

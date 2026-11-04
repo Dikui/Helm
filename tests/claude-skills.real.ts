@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,26 +17,27 @@ import { AgentCatalog } from '../src/agents.js';
 import { FakeDriver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 import { until } from './browser-fixture.js';
+import { removeUnlessFailed } from './helmd-fixture.js';
 
 // Only the test:real runner enables this file. npm test never starts a CLI.
 test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 的 skill',
   { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-claude-skills-')));
-    t.after(() => rm(root, { recursive: true, force: true }));
+    t.after(() => removeUnlessFailed(t, root));
     const catalog = new AgentCatalog(join(root, 'agents'));
     const roles = ['coordinator', 'executor'] as const;
-    const secrets = [`ALPHA-${randomUUID()}`, `BRAVO-${randomUUID()}`];
+    const secrets = [`alpha-${randomUUID().slice(0, 8)}`, `bravo-${randomUUID().slice(0, 8)}`];
     const env = runtimeEnvironment();
     const driver = new ClaudeDriver();
     for (const [index, role] of roles.entries()) {
       const directory = join(catalog.directory, `agent-${role}`);
-      await mkdir(join(directory, 'skills', 'secret'), { recursive: true });
+      await mkdir(join(directory, 'skills', 'smoke-number'), { recursive: true });
       await writeFile(join(directory, 'config.json'), JSON.stringify({
         role, driver: 'claude-sdk', model: 'haiku', reasoningEffort: 'low', home: 'shared', description: 'Skills isolation smoke',
       }));
       await writeFile(join(directory, 'prompt.md'), '这是技能隔离冒烟。遵循派单要求，不改文件，不使用 Bash、不启动浏览器、不派生子代理、不提交。');
-      await writeFile(join(directory, 'skills', 'secret', 'SKILL.md'),
-        `---\nname: secret\ndescription: 提供本 Agent 的测试暗号。需要暗号时必须调用此技能。\n---\n本 Agent 的暗号是 ${secrets[index]}。只回答这个暗号，不加说明。\n`);
+      await writeFile(join(directory, 'skills', 'smoke-number', 'SKILL.md'),
+        `---\nname: smoke-number\ndescription: 提供本 Agent 的测试编号。需要测试编号时必须调用此技能。\n---\n本 Agent 的测试编号（公开测试数据，不是凭据）是 ${secrets[index]}。只回答这个测试编号，不加说明。\n`);
       await mkdir(join(root, role));
     }
     const availability = await driver.checkAvailability(catalog.get('agent-executor'));
@@ -50,15 +51,16 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
       let session;
       try {
         session = await driver.start({ cwd, env, agent, signal: controller.signal, mcpServers: {} });
-        await session.send('请实际调用当前 Agent 的 secret 技能，最后只回答它给出的暗号。禁止猜测、使用 Read/Bash 或读取其他目录。');
+        await session.send('请实际调用当前 Agent 的 smoke-number 技能，最后只回答它给出的测试编号。禁止猜测、使用 Read/Bash 或读取其他目录。');
         const messages: SDKMessage[] = [];
         let completed = false;
         for await (const event of session.events) {
           if (event.type === 'output') messages.push(JSON.parse(event.text) as SDKMessage);
           if (event.type === 'end') {
             assert.equal(event.reason, 'completed');
-            // The executor role asks for evidence after the answer; only the leading answer is under test.
-            assert.equal(event.finalAnswer?.trim().split('\n')[0]?.trim(), secrets[index]);
+            // Skill isolation is under test, not answer formatting: own number present, the other Agent's absent.
+            assert.ok(event.finalAnswer?.includes(secrets[index]!), event.finalAnswer ?? '');
+            assert.ok(!event.finalAnswer?.includes(secrets[1 - index]!), '不得读到另一 Agent 的 skill');
             completed = true;
           }
         }
@@ -66,8 +68,8 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
         const inits = messages.filter(message => message.type === 'system' && message.subtype === 'init');
         assert.ok(inits.length > 0, '必须有真实 init 记录');
         for (const init of inits) {
-          assert.ok(init.skills.includes(`agent-${role}:secret`), '必须发现本 Agent 的 skill');
-          assert.ok(!init.skills.some(name => name.startsWith('agent-') && name !== `agent-${role}:secret`), '不得出现另一 Agent 的 skill');
+          assert.ok(init.skills.includes(`agent-${role}:smoke-number`), '必须发现本 Agent 的 skill');
+          assert.ok(!init.skills.some(name => name.startsWith('agent-') && name !== `agent-${role}:smoke-number`), '不得出现另一 Agent 的 skill');
           assert.ok(init.plugins.some(plugin => plugin.name === agent.id), 'Agent 插件必须实际加载');
           assert.equal(init.fast_mode_state, 'off');
         }
@@ -75,12 +77,12 @@ test('Claude 两个 Agent 并行叠加自己的 skill，init 不含另一 Agent 
           .filter(block => block.type === 'tool_use').filter(block => block.name === 'Skill') : []);
         assert.ok(calls.length > 0, '必须实际调用 Skill，不能仅复述提示词');
         for (const call of calls) {
-          assert.equal((call.input as { skill: string }).skill, `agent-${role}:secret`);
+          assert.equal((call.input as { skill: string }).skill, `agent-${role}:smoke-number`);
           assert.ok(messages.some(message => message.type === 'user' && Array.isArray(message.message.content)
             && message.message.content.some(block => block.type === 'tool_result' && block.tool_use_id === call.id && !block.is_error)),
           'Skill 调用必须成功');
         }
-        t.diagnostic(`${agent.id}: init.skills=${JSON.stringify(inits[0]!.skills)}; Skill 调用及暗号通过`);
+        t.diagnostic(`${agent.id}: init.skills=${JSON.stringify(inits[0]!.skills)}; Skill 调用及测试编号通过`);
       } finally {
         clearTimeout(deadline);
         session?.cancel();
@@ -93,7 +95,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
   { skip: process.env.HELM_CLAUDE_SKILLS_REAL !== '1', timeout: 240_000 }, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'helm-library-claude-')));
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
-    t.after(async () => { await daemon?.close(); await rm(root, { recursive: true, force: true }); });
+    t.after(async () => { await daemon?.close(); await removeUnlessFailed(t, root); });
     const secret = `LIBRARY-${randomUUID()}`;
     const mcpSecret = `MCP-${randomUUID()}`;
     const stdioSecret = `STDIO-${randomUUID()}`;

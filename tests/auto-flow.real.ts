@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -18,11 +18,11 @@ import type { StartupBrief } from '../src/rounds.js';
 import { startHelmd } from '../src/server.js';
 import type { HelmEvent } from '../src/store.js';
 import { until } from './claude-coordinator-fixture.js';
-import { configureTestAgent, copyAgents } from './helmd-fixture.js';
+import { configureTestAgent, copyAgents, removeUnlessFailed } from './helmd-fixture.js';
 
 const enabled = process.env.HELM_AUTO_FLOW_REAL === '1';
 type TestEvent = Omit<HelmEvent, 'details'> & { details: Record<string, any> };
-const restrictions = '不启动浏览器、不安装、不派生子代理、不推送、不部署。工具失败就停止并报告，不寻找绕过方法。';
+const restrictions = '不启动浏览器、不安装、不派生子代理、不推送、不部署。工具返回结果就算成功，接着做下一步；只有返回明确的错误时才停止并报告，不寻找绕过方法。';
 const verification = `这是 Helm 自动验收冒烟。在当前验收副本中读取 auto-flow-result.txt，确认内容恰为 auto-flow-ok 加一个换行。
 不得修改文件。确认后必须调用 helm MCP 的 submit-conclusion，conclusion=passed，reason 写实际读到的内容；不符则提交 failed。${restrictions}`;
 const execution = `这是 Helm 自动流程执行冒烟。在当前卡片副本的根目录写入 auto-flow-result.txt，内容恰为 auto-flow-ok 加一个换行。
@@ -36,7 +36,7 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
     let events: (() => Promise<TestEvent[]>) | undefined;
     t.after(async () => {
       try { await daemon?.close(); }
-      finally { await rm(directory, { recursive: true, force: true }); }
+      finally { await removeUnlessFailed(t, directory); }
     });
     try {
       const repo = join(directory, 'project');
@@ -51,7 +51,7 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       git('add', 'README.md');
       git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
       const agentDir = await copyAgents(directory);
-      await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
+      await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'medium' });
       const codex = new CodexExecutorDriver();
       const catalog = new AgentCatalog(agentDir, ['claude-sdk', 'codex']);
       const codexAvailable = await codex.checkAvailability(catalog.get('codex-executor'));
@@ -63,7 +63,7 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       const briefs: StartupBrief[] = [];
       const coordinator = new ClaudeCoordinatorDriver({ query: args => {
         assert.equal(args.options?.model, 'haiku');
-        assert.equal(args.options.effort, 'low');
+        assert.equal(args.options.effort, 'medium');
         const brief = JSON.parse(args.prompt as string) as StartupBrief;
         const attempt = briefs.push(brief);
         const instructions = attempt === 1

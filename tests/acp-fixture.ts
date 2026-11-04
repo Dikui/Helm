@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { AcpDriver } from '../src/acp-driver.js';
 import type { DriverEvent, SessionOptions } from '../src/driver.js';
 import { agentEnvironment, type AgentConfig } from '../src/agents.js';
 import { roleRules } from '../src/prompts.js';
+import { removeUnlessFailed } from './helmd-fixture.js';
 
 export async function acpFixture(t: TestContext, script: object = {}, manageHome = true, kind: 'grok' | 'deepseek' = 'grok') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-acp-')));
@@ -18,7 +19,7 @@ export async function acpFixture(t: TestContext, script: object = {}, manageHome
   if (manageHome) process.env.HOME = home;
   t.after(async () => {
     if (manageHome) { if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome; }
-    await rm(directory, { recursive: true, force: true });
+    await removeUnlessFailed(t, directory);
   });
   const record = join(directory, 'requests.jsonl');
   const path = join(directory, 'script.json');

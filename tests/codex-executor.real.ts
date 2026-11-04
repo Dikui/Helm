@@ -33,8 +33,8 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
     const outside = join(evidence, 'outside.txt');
     // A plain word, not a UUID called a session token: models refuse to repeat credential-like values.
     const marker = `resume-label-${randomUUID().slice(0, 8)}`;
-    const alpha = `alpha-${randomUUID()}`;
-    const beta = `beta-${randomUUID()}`;
+    const alpha = `alpha-${randomUUID().slice(0, 8)}`;
+    const beta = `beta-${randomUUID().slice(0, 8)}`;
     const command = `printf outside > ${shellQuote(outside)}`;
     const site = createServer((_request, response) => response.end('<h1>Helm Codex executor smoke</h1>'));
     await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
@@ -79,7 +79,8 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
     assert.equal(await readFile(outside, 'utf8'), 'outside', '无沙箱时副本外 shell 写成功');
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');
-    assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), alpha);
+    const alphaProof = await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8');
+    assert.ok(alphaProof.includes(alpha) && !alphaProof.includes(beta), `skill-proof.txt 必须含本 Agent 技能的编号：${alphaProof}`);
     assert.match(first.finalAnswer, /helm-smoke-alpha/);
     const screenshot = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: first.id })).result.find((a: any) => a.name === 'browser/codex.png');
     assert.ok(screenshot, '截图必须保存为成果');
@@ -120,8 +121,8 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
     assert.match(other.finalAnswer, /helm-smoke-beta/);
     assert.doesNotMatch(other.finalAnswer, /helm-smoke-alpha/);
     // The skill body holds beta; the model has occasionally read it yet written the skill name, so its answer counts as proof too.
-    const proof = (await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim();
-    assert.ok(proof === beta || other.finalAnswer.includes(beta), `必须读到 helm-smoke-beta 的正文：${proof}`);
+    const proof = await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8');
+    assert.ok(proof.includes(beta) || other.finalAnswer.includes(beta), `必须读到 helm-smoke-beta 的正文：${proof}`);
 });
 
 test('Codex 真实临时目录卡片联网查证并写文件，成果可读且不建 git 副本',

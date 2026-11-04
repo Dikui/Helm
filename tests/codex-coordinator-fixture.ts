@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
-import { copyAgents, configureTestAgent, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent, removeUnlessFailed, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 
 // All Codex metadata and credentials live in a temporary HOME. A real smoke may
@@ -21,7 +21,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   t.after(async () => {
     await daemon?.close();
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-    await rm(directory, { recursive: true, force: true });
+    await removeUnlessFailed(t, directory);
   });
   await mkdir(join(home, '.codex'), { recursive: true });
   if (config.stagedAuth) {
@@ -37,7 +37,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   git('add', 'README.md');
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const agentDir = await copyAgents(directory);
-  await configureTestAgent(agentDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'low' });
+  await configureTestAgent(agentDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'medium' });
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       key: 'draft', requirements: 'Codex 调度者冒烟', boundary: '临时项目', criteria: 'MCP、只读、重投和额度处理' }),

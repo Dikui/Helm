@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { cp, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -16,7 +16,7 @@ import { FakeDriver, type Driver, type FakeStep } from '../src/driver.js';
 import { defaultPromptDir } from '../src/prompts.js';
 import type { HelmEvent } from '../src/store.js';
 import { until } from './claude-coordinator-fixture.js';
-import { configureTestAgent, fixtureAgentDir, startTestHelmd } from './helmd-fixture.js';
+import { configureTestAgent, fixtureAgentDir, removeUnlessFailed, startTestHelmd } from './helmd-fixture.js';
 
 const enabled = process.env.HELM_INVALID_VERIFICATION_REAL === '1';
 const invalidReason = '材料多，没查完';
@@ -119,7 +119,7 @@ async function fixture(t: TestContext, repeatedInvalid: boolean) {
   let daemon: Awaited<ReturnType<typeof startTestHelmd>> | undefined;
   t.after(async () => {
     try { await daemon?.close(); }
-    finally { await rm(directory, { recursive: true, force: true }); }
+    finally { await removeUnlessFailed(t, directory); }
   });
   const repo = join(directory, 'project');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
@@ -132,7 +132,7 @@ async function fixture(t: TestContext, repeatedInvalid: boolean) {
   for (const id of ['claude-coordinator', 'claude-executor']) {
     await cp(join(fixtureAgentDir, id), join(agentDir, id), { recursive: true });
   }
-  await configureTestAgent(agentDir, 'claude-coordinator', { model: 'sonnet', reasoningEffort: 'low' });
+  await configureTestAgent(agentDir, 'claude-coordinator', { model: 'sonnet', reasoningEffort: 'medium' });
   const ok = (value: unknown) => assert.equal((value as { ok: boolean }).ok, true, JSON.stringify(value));
   const saved = (ctx: { results: Map<string, unknown> }, key: string) => (ctx.results.get(key) as { result: { id: string } }).result.id;
   // As in claude-coordinator-fixture, prepare alignment without consuming a real CLI turn.
@@ -167,7 +167,7 @@ draft、smoke-implementation、smoke-overall
   const messages: SDKMessage[] = [];
   const real = new ClaudeCoordinatorDriver({ query: args => {
     assert.equal(args.options!.model, 'sonnet');
-    assert.equal(args.options!.effort, 'low');
+    assert.equal(args.options!.effort, 'medium');
     // Do not append the expected recovery/escalation behavior to the model's input.
     const stream = query({ ...args, options: { ...args.options, maxTurns: 32 } });
     const deadline = setTimeout(() => args.options!.abortController!.abort(), 180_000);

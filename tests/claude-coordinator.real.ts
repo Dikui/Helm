@@ -42,7 +42,7 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number, cwd
     assert.equal(Object.hasOwn(sdk.env!, 'CLAUDE_CONFIG_DIR'), false);
     const brief = JSON.parse(args.prompt as string) as StartupBrief;
     assert.equal(sdk.model, 'haiku');
-    assert.equal(sdk.effort, 'low');
+    assert.equal(sdk.effort, 'medium');
     assert.ok(sdk.cwd);
     assert.ok(sdk.cwd.endsWith(`/coordinator/${brief.work.id}`));
     assert.notEqual(sdk.cwd, brief.projectPath);
@@ -112,7 +112,7 @@ function successfulTool(round: Observation, name: string, count: number) {
   }
 }
 
-const restrictions = '只用当前 helm MCP 端点和指定工具；不启动浏览器、不安装、不派生子代理、不推送、不部署。工具失败就停止并报告，不寻找绕过方法。';
+const restrictions = '只用当前 helm MCP 端点和指定工具；不启动浏览器、不安装、不派生子代理、不推送、不部署。工具返回结果就算成功，接着做下一步；只有返回明确的错误时才停止并报告，不寻找绕过方法。';
 
 test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MCP 建卡、改依赖、派单后建立副本，无 needs-auth 且记录 token',
   { skip: !enabled, timeout: 600_000 }, async t => {
@@ -143,8 +143,9 @@ test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MC
       for (const [name, count] of [['create-card', 2], ['add-dependency', 2], ['remove-dependency', 1], ['create-dispatch', 1]] as const) successfulTool(round, name, count);
       const cards = (await daemon.call('get-card-graph', daemon.params)).filter((node: any) => node.type === 'card');
       assert.equal(cards.length, 2);
-      const upstream = cards.find((card: any) => card.key === 'smoke-upstream');
-      const downstream = cards.find((card: any) => card.key === 'smoke-downstream');
+      // Identify cards by the graph Helm stored, not by the keys the model was asked to type.
+      const downstream = cards.find((card: any) => card.dependencies.length > 0);
+      const upstream = cards.find((card: any) => card !== downstream);
       assert.equal(upstream.workspace, 'copy');
       assert.equal(downstream.status, 'waiting');
       assert.deepEqual(downstream.dependencies, [{ type: 'card', id: upstream.id }]);

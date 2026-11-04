@@ -98,7 +98,7 @@ for (const loadGlobalConfig of [false, true]) test(`Codex 全局配置 ${loadGlo
       assert.deepEqual((await ctx.requests()).find(request => request.method === 'skills/extraRoots/set').params.extraRoots,
         [ctx.options.agent.skillsPath]);
       assert.deepEqual(thread.params.config.memories, { generate_memories: false, use_memories: false });
-      assert.equal(thread.params.config.features.memories, false);
+      assert.deepEqual(thread.params.config.features, { memories: false, apps: false, remote_plugin: false }, '会话的 features 会整体替换 -c 的设置，必须重复关闭连接器和远程插件');
     }
     assert.equal(await readFile(join(codexDir, 'config.toml'), 'utf8'), config);
     assert.equal(await readFile(join(codexDir, 'memories', 'MEMORY.md'), 'utf8'), '用户已有记忆');
@@ -207,6 +207,7 @@ for (const role of ['coordinator', 'executor'] as const) test(`Codex ${role} 默
     assert.deepEqual(requests.filter(r => r.method === 'turn/start').at(-1).params.input, [{ type: 'text', text: '保留输入原文' }]);
     const prompt = requests.filter(r => r.method === 'thread/start' || r.method === 'thread/resume').at(-1).params.developerInstructions;
     for (const rule of Object.values(roleRules(role))) assert.ok(prompt.includes(rule.trim()));
+    assert.ok(prompt.includes(role === 'coordinator' ? 'mcp__helm__create_card' : 'mcp__helm__submit_conclusion'), 'Codex 里的 helm 工具名带前缀且连字符换成下划线，提示词必须写明');
   }
 });
 

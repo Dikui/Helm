@@ -30,7 +30,7 @@ function observedDriver() {
     async start(options) {
       assert.equal(options.resumeSessionId, undefined);
       assert.equal(options.agent?.model, 'gpt-6-luna');
-      assert.equal(options.agent?.reasoningEffort, 'low');
+      assert.equal(options.agent?.reasoningEffort, 'medium');
       // Exercise the driver's loopback bypass even when callers supply none.
       const env = { ...options.env };
       delete env.NO_PROXY;
@@ -46,7 +46,7 @@ function observedDriver() {
           record.brief = brief;
           record.command = `printf outside > ${shellQuote(join(options.cwd, '..', 'coordinator-outside.txt'))}`;
           await session.send(`这是低消耗 Helm 调度者冒烟。只执行下列步骤，不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。
-所有 MCP 操作只用注入的 helm 端点，工作由轮次令牌确定，调用不传 workId。工具失败即报告退出，不寻找绕过方式。
+所有 MCP 操作只用注入的 helm 端点，工作由轮次令牌确定，调用不传 workId。工具返回结果就算成功，接着做下一步；只有返回明确的错误时才停止并报告，不寻找绕过方法。
 ${attempt === 1 ? `先用 shell 原样执行一次命令：${record.command}
 再用 shell 执行 printf allowed > ${shellQuote(join(options.cwd, 'coordinator-notes.txt'))}，再用 shell 执行 cat ${shellQuote(join(brief.projectPath, 'README.md'))} 并继续以下操作。` : ''}
 无论简报是否已有对象，每轮都必须按顺序实际重放：
