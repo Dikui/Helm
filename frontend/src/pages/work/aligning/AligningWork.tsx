@@ -3,7 +3,6 @@ import { useData, useResource } from '../../../shared/data.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { useI18n } from '../../../shared/i18n.js';
 import { GatePin } from '../GatePin.js';
-import { ActionDialog } from '../ActionDialog.js';
 import { GateDecision } from '../../inbox/GateActions.js';
 import { GateHistory } from '../conversation/GateHistory.js';
 import { useSendMessage } from '../../new-work/useSendMessage.js';
@@ -41,6 +40,12 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
   const [references, setReferences] = useState<string[]>([]);
   const preview = useFilePreview(workId);
   const submission = useSendMessage();
+  const amendmentSubmission = useSendMessage();
+  const closeAmendment = () => {
+    if (amendmentSubmission.pending) return;
+    setAmending(false);
+    amendOpener.current?.focus();
+  };
   const [scope, setScope] = useState('work');
   const [steering, setSteering] = useState(false);
   const [steeringError, setSteeringError] = useState<Error>();
@@ -67,7 +72,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
   const previous = versions.find(item => item.version === (shown?.version ?? 0) - 1);
   const gate = conversation.data?.find(item => item.type === 'gate' && item.kind === 'work-confirmation' && item.status === 'pending');
   const canConfirm = Boolean(shown && gate?.type === 'gate' && gate.descriptionId === shown.id && latest?.id === shown.id
-    && rounds.data && !rounds.error && !running && !confirming && !conversation.error && !descriptions.error);
+    && rounds.data && !rounds.error && !running && !confirming && !amending && !conversation.error && !descriptions.error);
   // 确认始终对应说明中正在查看的最新草稿。
   const confirm = async () => {
     if (!canConfirm || !shown || !gate || confirmationBusy.current) return;
@@ -91,13 +96,13 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
   const [composerHeight, setComposerHeight] = useStoredSize('helm.aligning-composer-height');
   const copyNotice = <p className="warn"><span>!</span><span>{t(shown && !shown.baseRef ? 'projectWithoutGitHint' : workBranch ? 'alignmentCopyReady' : 'alignmentCopyPending')}</span></p>;
   return <div className="aligning-work">
-    <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || confirming} ref={chat}>
+    <section className="aligning-chat" aria-label={t('chat')} aria-busy={submission.pending || amendmentSubmission.pending || confirming} ref={chat}>
       {gates.some(item => item.status === 'pending' && item.kind !== 'work-confirmation') || gate && rounds.data && !running ? <div className="gate-pins">
         {gates.filter(item => item.status === 'pending' && item.kind !== 'work-confirmation').map(item => <GateDecision key={item.id} gate={item} pinned />)}
         {!gates.some(item => item.status === 'pending' && item.kind !== 'work-confirmation') && gate && rounds.data && !running && <GatePin label={t('alignmentConfirmBrief')} source={t('nowAwaitingConfirmation')} title={t('pinSpec').replace('{version}', String(shown?.version ?? '—'))}
-          busy={confirming} reason={<p>{t('alignmentBranchFrom')} <span className="ref">{shown?.baseRef}{shown?.baseCommit ? `@${shown.baseCommit.slice(0, 7)}` : ''}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}>
+          busy={confirming || amendmentSubmission.pending} reason={<p>{t('alignmentBranchFrom')} <span className="ref">{shown?.baseRef}{shown?.baseCommit ? `@${shown.baseCommit.slice(0, 7)}` : ''}</span> {t(workBranch ? 'alignmentCopyRefresh' : 'alignmentCopyOnDemand')}</p>}>
           <button disabled={!canConfirm} aria-keyshortcuts="1" onClick={() => void confirm()}><kbd aria-hidden="true">1</kbd>{t('pinConfirm')}</button>
-          <button aria-keyshortcuts="2" onClick={event => { amendOpener.current = event.currentTarget; setAmending(true); }}><kbd aria-hidden="true">2</kbd>{t('alignmentNeedsChanges')}</button>
+          <button aria-keyshortcuts="2" aria-expanded={amending} disabled={submission.pending || confirming || amendmentSubmission.pending} onClick={event => { amendOpener.current = event.currentTarget; setAmending(true); }}><kbd aria-hidden="true">2</kbd>{t('alignmentNeedsChanges')}</button>
           {confirmError && <ErrorNotice error={confirmError} />}
         </GatePin>}
       </div> : null}
@@ -113,7 +118,19 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
       </ConversationScroll>
       <Splitter label={t('resizeComposer')} orientation="horizontal" grow={-1} min={96} onResize={setComposerHeight}
         max={() => (chat.current?.getBoundingClientRect().height ?? 600) * .75} measure={() => composer.current?.getBoundingClientRect().height ?? 160} />
-      <form className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
+      {amending ? <form key="amendment" className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} aria-label={t('alignmentNeedsChanges')} aria-busy={amendmentSubmission.pending} noValidate
+        onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); closeAmendment(); } }}
+        onSubmit={async event => {
+          event.preventDefault();
+          if (!amendment.trim()) return;
+          if (await amendmentSubmission.send({ workId, body: amendment.trim() })) { setAmendment(''); closeAmendment(); }
+        }}>
+        <div className="conversation-hints"><b>{t('alignmentNeedsChanges')}</b><button type="button" className="btn sm" disabled={amendmentSubmission.pending} onClick={closeAmendment}>{t('dialogClose')}</button></div>
+        <label><span className="sr">{t('alignmentMessage')}</span><textarea className="resize-none" rows={4} autoFocus value={amendment} disabled={amendmentSubmission.pending || amendmentSubmission.uncertain} onChange={event => setAmendment(event.target.value)} /></label>
+        <div className="conversation-hints"><button className="btn primary" disabled={!amendment.trim() || amendmentSubmission.pending}>{t(amendmentSubmission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button></div>
+        {amendmentSubmission.error && <ErrorNotice error={amendmentSubmission.error} />}
+        {amendmentSubmission.uncertain && <p className="hint">{t('alignmentRetrySameMessage')}</p>}
+      </form> : <form key="message" className="aligning-composer" ref={composer} style={composerHeight ? { height: composerHeight } : undefined} noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
         <RoundSteering active={Boolean(running)} queue={rounds.data?.queuedMessages ?? []} reference={reference} pauseReason={null}
           busy={steering || submission.pending || Boolean(rounds.error)} interrupt={() => void steer('interrupt-round')} withdraw={id => void steer('withdraw-message', id)} />
         {steeringError && <ErrorNotice error={steeringError} />}
@@ -131,7 +148,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
         {!validScope && <p className="hint">{t('conversationScopeUnavailable')}</p>}
         {submission.error && <ErrorNotice error={submission.error} />}
         {submission.uncertain && <p className="hint">{t('newWorkRetrySameMessage')}</p>}
-      </form>
+      </form>}
     </section>
     {showBrief && <Inspector title={inspectorTitle}><aside className="aligning-brief brief-document" aria-label={t('brief')} aria-busy={confirming}>
       <header>{shown && <><span className="muted">{t('brief')} · v{shown.version} · {t(latest?.id !== shown.id ? 'alignmentHistory' : running ? 'alignmentUpdating' : 'alignmentDraftStatus')}</span><label><span className="sr">{t('alignmentVersion')}</span><select value={shown.version} onChange={event => setVersion(Number(event.target.value))}>
@@ -160,13 +177,6 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
         </>}
       </div>
     </aside></Inspector>}
-    {amending && <ActionDialog title={t('alignmentNeedsChanges')} busy={submission.pending} returnFocus={amendOpener} onClose={() => setAmending(false)}>
-      <form noValidate onSubmit={async event => { event.preventDefault(); if (await submission.send({ workId, body: amendment.trim() })) { setAmending(false); setAmendment(''); } }}>
-        <label>{t('alignmentMessage')}<textarea className="resize-none" rows={4} value={amendment} disabled={submission.pending || submission.uncertain} onChange={event => setAmendment(event.target.value)} /></label>
-        <button className="btn primary" disabled={!amendment.trim() || submission.pending}>{t(submission.error ? 'newWorkRetrySend' : 'alignmentSend')}</button>
-        {submission.error && <ErrorNotice error={submission.error} />}
-      </form>
-    </ActionDialog>}
     {preview.preview}
   </div>;
 }
