@@ -8,7 +8,8 @@ const reviewEvents = ['operation-rejected', 'gate-decided'];
 
 export function useWorkReview(workId: string) {
   const conversationAffects = useCallback((event: HelmEvent) => event.workId === workId
-    && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted'), [workId]);
+    // 撤回接受把审核关卡改回待决定，事件名不带 gate- 前缀
+    && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted' || event.action === 'acceptance-withdrawn'), [workId]);
   const eventsAffects = useCallback((event: HelmEvent) => event.workId === workId && reviewEvents.includes(event.action), [workId]);
   const conversation = useResource<(ReviewGate & { type: string })[]>('get-conversation', { workId }, conversationAffects);
   const events = useResource<HelmEvent[]>('get-events', { workId, actions: reviewEvents }, eventsAffects);

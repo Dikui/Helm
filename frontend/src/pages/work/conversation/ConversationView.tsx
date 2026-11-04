@@ -30,7 +30,8 @@ export function ConversationView({ work, report, deliveryPin }: { work: Work; re
   const { t, language } = useI18n();
   const params = { workId: work.id };
   const conversationAffects = useCallback((event: HelmEvent) => event.workId === work.id
-    && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted'), [work.id]);
+    // 撤回接受把审核关卡改回待决定，事件名不带 gate- 前缀
+    && (event.action.startsWith('message-') || event.action.startsWith('gate-') || event.action === 'work-description-drafted' || event.action === 'acceptance-withdrawn'), [work.id]);
   const cardsAffects = useCallback((event: HelmEvent) => event.workId === work.id && event.action.startsWith('card-'), [work.id]);
   const conversation = useResource<ConversationItem[]>('get-conversation', params, conversationAffects);
   const eventsAffects = useCallback((event: HelmEvent) => event.workId === work.id && conversationEvents.includes(event.action), [work.id]);
