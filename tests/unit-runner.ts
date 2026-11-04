@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { mkdtemp, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cleanupWorktreeProcesses, processTargetExists } from '../src/processes.js';
 
@@ -23,6 +23,16 @@ export async function sweepStaleRuns(base: string) {
   return pids;
 }
 
+// Positional arguments pick test files by module name (graph, graph.test.ts, tests/graph.test.ts);
+// options such as --test-name-pattern=... go to node --test. No positional argument runs every file.
+export function testArguments(directory: string, args: string[]) {
+  const all = readdirSync(directory).filter(name => name.endsWith('.test.js')).sort();
+  const names = args.filter(arg => !arg.startsWith('-')).map(arg => `${basename(arg).replace(/(\.test)?\.[cm]?[jt]s$/, '')}.test.js`);
+  const unknown = names.filter(name => !all.includes(name));
+  if (unknown.length) throw new Error(`没有这些测试文件：${unknown.join(', ')}`);
+  return [...args.filter(arg => arg.startsWith('-')), ...(names.length ? names : all).map(name => join(directory, name))];
+}
+
 async function main() {
   const base = join(tmpdir(), 'helm-test-runs');
   mkdirSync(base, { recursive: true });
@@ -30,8 +40,7 @@ async function main() {
   if (stale.length) console.error(`已结束上次测试残留的进程：${stale.join(', ')}`);
   const run = await realpath(await mkdtemp(join(base, `${process.pid}-`)));
   const directory = fileURLToPath(new URL('.', import.meta.url));
-  const files = readdirSync(directory).filter(name => name.endsWith('.test.js')).map(name => join(directory, name));
-  const child = spawn(process.execPath, ['--test', '--test-concurrency=4', ...files], { stdio: 'inherit', env: { ...process.env, TMPDIR: run } });
+  const child = spawn(process.execPath, ['--test', '--test-concurrency=4', ...testArguments(directory, process.argv.slice(2))], { stdio: 'inherit', env: { ...process.env, TMPDIR: run } });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => child.kill(signal));
   const [code, signal] = await once(child, 'exit') as [number | null, NodeJS.Signals | null];
   const left = (await cleanupWorktreeProcesses(run)).pids;

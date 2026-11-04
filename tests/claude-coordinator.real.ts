@@ -114,19 +114,16 @@ function successfulTool(round: Observation, name: string, count: number) {
 
 const restrictions = '只用当前 helm MCP 端点和指定工具；不启动浏览器、不安装、不派生子代理、不推送、不部署。工具返回结果就算成功，接着做下一步；只有返回明确的错误时才停止并报告，不寻找绕过方法。';
 
-test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MCP 建卡、改依赖、派单后建立副本，无 needs-auth 且记录 token',
+// 改依赖、key 去重等卡片图逻辑由 graph / alignment / claude-coordinator 单元测试覆盖；这里只验证真实 CLI 接得上 Helm。
+test('冒烟①⑤：两轮真实调度者从调度者目录经带令牌 HTTP MCP 建卡、派单后建立副本，无 needs-auth 且记录 token',
   { skip: !enabled, timeout: 600_000 }, async t => {
     const sessions: string[] = [];
     const tokens: string[] = [];
-    for (const index of [1, 2, 3]) await t.test(`新会话 ${index}`, async subtest => {
+    for (const index of [1, 2]) await t.test(`新会话 ${index}`, async subtest => {
       const observed = observedDriver(() => `这是调度者驱动冒烟，工作由轮次令牌确定，MCP 调用不传 workId。${restrictions}
 按顺序调用：
 1. create-card，key=smoke-upstream，content=上游卡片，workspace=copy（写代码卡片）。
-2. create-card，key=smoke-downstream，content=下游卡片。
-3. add-dependency，上游为第一张卡片，下游为第二张卡片（节点 type 均为 card）。
-4. remove-dependency，删除同一条依赖。
-5. add-dependency，重新加回同一条依赖。
-6. create-dispatch，key=smoke-dispatch，cardId 为上游卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false。
+2. create-dispatch，key=smoke-dispatch，cardId 为上一步卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false。
 每个步骤必须实际成功，最后简短回答后退出。`);
       const daemon = await fixture(subtest, observed.driver);
       const events = await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length >= 2, 180_000);
@@ -140,20 +137,16 @@ test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MC
       assert.equal(round.brief.work.workPath, null);
       assert.equal(round.brief.work.workBranch, null);
       connected(round);
-      for (const [name, count] of [['create-card', 2], ['add-dependency', 2], ['remove-dependency', 1], ['create-dispatch', 1]] as const) successfulTool(round, name, count);
+      for (const [name, count] of [['create-card', 1], ['create-dispatch', 1]] as const) successfulTool(round, name, count);
       const cards = (await daemon.call('get-card-graph', daemon.params)).filter((node: any) => node.type === 'card');
-      assert.equal(cards.length, 2);
-      // Identify cards by the graph Helm stored, not by the keys the model was asked to type.
-      const downstream = cards.find((card: any) => card.dependencies.length > 0);
-      const upstream = cards.find((card: any) => card !== downstream);
+      assert.equal(cards.length, 1);
+      const upstream = cards[0];
       assert.equal(upstream.workspace, 'copy');
-      assert.equal(downstream.status, 'waiting');
-      assert.deepEqual(downstream.dependencies, [{ type: 'card', id: upstream.id }]);
       const dispatches = await daemon.call('list-dispatches', daemon.params);
       assert.equal(dispatches.length, 1);
       assert.equal(dispatches[0].cardId, upstream.id);
       assert.equal(dispatches[0].key, 'smoke-dispatch');
-      assert.equal(events.filter(event => event.action === 'card-created').length, 2);
+      assert.equal(events.filter(event => event.action === 'card-created').length, 1);
       assert.equal(events.filter(event => event.action === 'dispatch-created').length, 1);
       const work = await daemon.call('get-work', daemon.params);
       assert.equal(work.workPath, join(daemon.directory, 'data', 'worktrees', work.id, '_work'));
@@ -163,8 +156,8 @@ test('冒烟①⑤：三轮真实调度者从调度者目录经带令牌 HTTP MC
       sessions.push(round.sessionId);
       tokens.push(round.token);
     });
-    assert.equal(new Set(sessions).size, 3);
-    assert.equal(new Set(tokens).size, 3);
+    assert.equal(new Set(sessions).size, 2);
+    assert.equal(new Set(tokens).size, 2);
   });
 
 test('冒烟②：真实调度者操作后被用户打断，新轮次重投同批事件，用原 key 不重复建卡和派单',

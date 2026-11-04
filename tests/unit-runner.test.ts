@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { processTargetExists, signalProcess } from '../src/processes.js';
-import { sweepStaleRuns } from './unit-runner.js';
+import { sweepStaleRuns, testArguments } from './unit-runner.js';
 
 test('测试入口只结束所属运行已退出的残留进程，并删除其临时目录', async t => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'helm-runs-')));
@@ -26,4 +26,13 @@ test('测试入口只结束所属运行已退出的残留进程，并删除其�
   assert.equal(existsSync(stale), false);
   assert.equal(await processTargetExists(concurrent.pid!), true);
   assert.equal(existsSync(live), true);
+});
+
+test('测试入口按模块名只选指定的测试文件，选项原样交给 node --test，不指定时选全部', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-select-')));
+  for (const name of ['graph.test.js', 'store.test.js', 'helper.js']) writeFileSync(join(directory, name), '');
+  assert.deepEqual(testArguments(directory, ['tests/graph.test.ts', '--test-name-pattern=依赖']), ['--test-name-pattern=依赖', join(directory, 'graph.test.js')]);
+  assert.deepEqual(testArguments(directory, ['store']), [join(directory, 'store.test.js')]);
+  assert.deepEqual(testArguments(directory, []), [join(directory, 'graph.test.js'), join(directory, 'store.test.js')]);
+  assert.throws(() => testArguments(directory, ['missing']), /missing\.test\.js/);
 });

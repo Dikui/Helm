@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runtimeEnvironment } from '../src/environment.js';
@@ -53,8 +53,22 @@ export function pruneOld(root: string, prefix: string, maxAgeMs: number, now = D
   }
 }
 
+// Real smokes start real Claude sessions; their transcripts land in the user's ~/.claude/projects under
+// the encoded temp project path (runner runs under /tmp/hs-*, single groups under $TMPDIR/helm-*).
+export function claudeTranscriptPrefixes(temp: string) {
+  const encode = (path: string) => path.replace(/[^A-Za-z0-9]/g, '-');
+  return [encode('/private/tmp/hs-'), `${encode(temp)}-helm-`];
+}
+
+const week = 7 * 24 * 3600_000;
 const defaults: Required<Omit<RunnerContext, 'groups'>> = {
-  prune: () => pruneOld('/tmp', 'hs-', 7 * 24 * 3600_000),
+  prune: () => {
+    pruneOld('/tmp', 'hs-', week);
+    const projects = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects');
+    for (const prefix of claudeTranscriptPrefixes(realpathSync(tmpdir()))) {
+      try { pruneOld(projects, prefix, week); } catch { /* no transcripts directory yet */ }
+    }
+  },
   // Short paths: Playwright's Unix socket under a long TMPDIR exceeds the 104-byte macOS limit.
   tmpdir: () => mkdtempSync('/tmp/hs-'),
   history: {

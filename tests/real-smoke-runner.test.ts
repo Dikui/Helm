@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { firstFailure, groups, pruneOld, runRealSmoke, type HistoryEntry } from './real-smoke-runner.js';
+import { claudeTranscriptPrefixes, firstFailure, groups, pruneOld, runRealSmoke, type HistoryEntry } from './real-smoke-runner.js';
 
 const parent = { PATH: '/bin', HOME: '/home/test', USER: 'test', LANG: 'C.UTF-8', DISPLAY: ':42',
   CLAUDE_CODE_DESKTOP_SESSION: 'desktop', ARBITRARY: 'secret', NODE_OPTIONS: '--inspect',
@@ -123,4 +123,8 @@ test('真实冒烟启动时只删除超过保留期的同前缀临时目录', ()
   for (const name of ['hs-old', 'other-old']) utimesSync(join(root, name), old, old);
   pruneOld(root, 'hs-', 7 * 24 * 3600_000);
   assert.deepEqual(['hs-old', 'hs-new', 'other-old'].map(name => existsSync(join(root, name))), [false, true, true]);
+});
+
+test('只清理真实冒烟临时项目对应的 Claude 会话记录目录', () => {
+  assert.deepEqual(claudeTranscriptPrefixes('/private/var/folders/ab/c1/T'), ['-private-tmp-hs-', '-private-var-folders-ab-c1-T-helm-']);
 });
