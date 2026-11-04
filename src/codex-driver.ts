@@ -18,6 +18,11 @@ import { helmVersion } from './version.js';
 // Disable only remote plugins to avoid connector reinstalls; Codex loads local plugins natively.
 // ChatGPT connectors (codex_apps) add enough tools that Codex defers them behind search and agents miss helm's tools.
 const appServer = { file: 'codex', args: ['app-server', '-c', 'features.remote_plugin=false', '-c', 'features.apps=false'] };
+// A thread's config.features replaces the whole table from -c, so each thread repeats these flags.
+const threadFeatures = { memories: false, apps: false, remote_plugin: false };
+// Codex exposes MCP tools as mcp__<server>__<name> with hyphens turned into underscores; searching for the
+// name the role prompts use ("submit-conclusion") finds nothing, and the model may then give up.
+const toolNames = (example: string) => `Helm 的 MCP 工具在 Codex 里名为 mcp__helm__<工具名>，工具名中的连字符换成下划线，例如 ${example} 是 mcp__helm__${example.replaceAll('-', '_')}。按这个名字查找和调用；按名字查不到时，先列出全部可用工具再判断。`;
 
 function codexHome(agent: AgentConfig, home = homedir()) {
   return join(home, '.helm', 'agent-homes', agent.id);
@@ -126,12 +131,12 @@ export class CodexDriver implements Driver {
       await rpc.request('skills/extraRoots/set', { extraRoots: agent.skillsPath ? [agent.skillsPath] : [] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
         ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: 'danger-full-access', approvalPolicy: 'never',
-        ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
+        ...(agent.model ? { model: agent.model } : {}), developerInstructions: `${agentPrompt(agent)}\n\n${toolNames(coordinator ? 'create-card' : 'submit-conclusion')}`,
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
           // Opt out of future extraction and disable startup consolidation as well as injection.
           // https://github.com/openai/codex/blob/main/codex-rs/memories/write/src/start.rs
-          features: { memories: false },
+          features: threadFeatures,
           memories: { generate_memories: false, use_memories: false },
           // The app-server environment is already filtered by Helm. Forward it
           // to shell commands, including project KEY/SECRET/TOKEN variables.
