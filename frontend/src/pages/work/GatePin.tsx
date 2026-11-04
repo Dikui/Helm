@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useI18n } from '../../shared/i18n.js';
 import './gate-pin.css';
 
@@ -7,7 +7,7 @@ export function GatePin({ label, source, title, reason, busy = false, tone = 'at
 }) {
   const { t } = useI18n();
   const pin = useRef<HTMLElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const key = (event: KeyboardEvent) => {
       const target = event.target instanceof Element ? event.target : document.activeElement;
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.metaKey || event.ctrlKey || event.altKey

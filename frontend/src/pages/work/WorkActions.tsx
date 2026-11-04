@@ -35,6 +35,7 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
   const ended = work.status === 'completed' || work.status === 'cancelled';
+  const removable = ended || work.status === 'paused';
   const allowed = restriction?.status === work.status ? restriction.operations : work.allowedOperations;
   const mutable = !ended && !['accepted', 'merge-queued', 'merging'].includes(work.status);
   const enabled = (operation: string, state = mutable) => !busy && state && (!allowed || allowed.includes(operation));
@@ -44,6 +45,10 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
     pending.current = true;
     setBusy(true); setError(undefined);
     try {
+      if (operation === 'delete-work' && work.status === 'paused') {
+        await api.call('cancel-work', { workId: work.id });
+        reload();
+      }
       const result = await api.call<{ requiresConfirmation?: boolean; targetPath?: string; keptBranches?: { branch: string; reason: string }[] }>(operation, { workId: work.id, ...params });
       if (result.requiresConfirmation) { setDeletePrompt(true); return; }
       if (operation === 'delete-work') { if (result.keptBranches?.length) setKeptBranches(result.keptBranches); else navigate('/'); return; }
@@ -69,7 +74,7 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
       {!inline && <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>}
       {(!inline || ended) && <button ref={inline && ended ? trigger : undefined} className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={event => { if (inline) trigger.current = event.currentTarget; setError(undefined); setOpen(false); setPanel('export'); }}>{t(inline ? 'exportAction' : 'exportOutputs')}</button>}
       {(!inline || ended) && <button className="btn sm work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={event => { if (inline) trigger.current = event.currentTarget; setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('delete'); }}>{t('deleteOutputs')}</button>}
-      {!inline && <button className="btn sm work-danger" disabled={!enabled('delete-work', ended)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('remove'); }}>{t('deleteWork')}</button>}
+      {!inline && <button className="btn sm work-danger" disabled={!enabled('delete-work', removable)} onClick={() => { setError(undefined); setDeletePrompt(false); setOpen(false); setPanel('remove'); }}>{t('deleteWork')}</button>}
       {!inline && <p className="muted">{t(ended ? 'endedWorkActions' : 'outputsWhenEnded')}</p>}
       {!inline && <button className="btn sm" onClick={() => { setOpen(false); trigger.current?.focus(); }}>{t('closeWorkMenu')}</button>}
       {error && !panel && <ErrorNotice error={error} />}
@@ -87,11 +92,11 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
       {deletePrompt && <><p role="status">{t('outputsNotExported')}</p><button className="btn" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setPanel('export'); }}>{t('exportFirst')}</button></>}
       <button className="btn work-danger" disabled={!enabled('delete-outputs', ended && !work.outputsDeletedAt)} onClick={() => void run('delete-outputs', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteOutputs')}</button>
     </ActionDialog>}
-    {panel === 'remove' && <ActionDialog key="remove" title={t('deleteWork')} description={`${work.title} · ${t('deleteWorkConsequence')}`} busy={busy} onClose={keptBranches.length ? () => navigate('/') : close} returnFocus={trigger}>
+    {panel === 'remove' && <ActionDialog key="remove" title={t('deleteWork')} description={`${work.title} · ${work.status === 'paused' ? `${t('deletePausedWorkConsequence')} ` : ''}${t('deleteWorkConsequence')}`} busy={busy} onClose={keptBranches.length ? () => navigate('/') : close} returnFocus={trigger}>
       {error && <ErrorNotice error={error} />}
       {keptBranches.length ? <><div role="status"><p>{t('workDeletedBranchKept')}</p><ul>{keptBranches.map(({ branch, reason }) => <li key={branch}><span className="mono">{branch}</span> — {reason}</li>)}</ul></div><button className="btn" onClick={() => navigate('/')}>{t('actionBack')}</button></> : <>
         {deletePrompt && <><p role="status">{t('outputsNotExported')}</p><button className="btn" disabled={!enabled('export-outputs', ended)} onClick={() => { setError(undefined); setPanel('export'); }}>{t('exportFirst')}</button></>}
-        <button className="btn work-danger" disabled={!enabled('delete-work', ended)} onClick={() => void run('delete-work', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteWork')}</button>
+        <button className="btn work-danger" disabled={!enabled('delete-work', removable)} onClick={() => void run('delete-work', deletePrompt ? { confirm: true } : {})}>{t(deletePrompt ? 'deleteAnyway' : 'confirmDeleteWork')}</button>
       </>}
     </ActionDialog>}
     {panel === 'agent' && <ActionDialog title={t('changeCoordinator')} busy={busy} onClose={close} returnFocus={trigger}>
