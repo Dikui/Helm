@@ -40,6 +40,44 @@ const gate = (key: string, question: string, body = ''): Extract<FakeStep, { typ
   workId: JSON.parse(ctx.input).work.id, key, question, body, options: ['保留一周', '一直保留'],
 }) });
 
+// regression, medium — #21。只在 HTTP 边界暂缓用量读取，驱动由 uiFixture 替代。
+test.each(['执行', '对齐'])('%s中收件箱用量刷新缓慢时，发送的消息仍立即出现在当前工作的对话中', async phase => {
+  if (phase === '执行') await executingWork([[{ type: 'hang' }]]);
+  else {
+    daemon = await uiFixture([[{ type: 'hang' }]]);
+    const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对话与引导', key: 'start' })).result.work;
+    window.history.replaceState(null, '', `/works/${work.id}`);
+  }
+  let slow = false;
+  let blocked = false;
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    if (slow && String(input).endsWith('/api/get-settings')) {
+      blocked = true;
+      await hold;
+    }
+    return fetch(input, init);
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  const chat = await screen.findByRole('region', { name: '对话' });
+  await within(chat).findByText('对话与引导', { selector: 'article p' });
+  await screen.findByText('实时更新已连接');
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 10'));
+  slow = true;
+  await daemon!.call('set-concurrency', { limit: 3 });
+  await waitFor(() => expect(blocked).toBe(true));
+  try {
+    const input = within(chat).getByLabelText('消息') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '无需切换工作就能看到这条消息' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(input.value).toBe(''));
+    expect(await within(chat).findByText('无需切换工作就能看到这条消息', { selector: 'article p' })).toBeTruthy();
+    expect(await within(chat).findByRole('region', { name: '下一轮处理' })).toBeTruthy();
+  } finally { slow = false; release(); }
+  await waitFor(() => expect(screen.getByLabelText('执行者并发').textContent).toBe('0 / 3'));
+});
+
 test('当前关卡钉在对话记录之外，数字键决定且输入框和组合输入不触发', async () => {
   const work = await executingWork([[gate('shortcut', '旧密码保留多久？', '需要兼容旧版客户端。'), { type: 'hang' }]]);
   render(<App baseUrl={daemon!.url} />);
