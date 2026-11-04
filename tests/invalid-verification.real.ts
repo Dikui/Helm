@@ -46,27 +46,23 @@ test('真实调度者：无证据的不通过重派验收，第二票通过后�
       'invalid-verification-smoke\n');
   });
 
-test('真实调度者：同一原因再次出现无效票，提关卡④并用依赖阻塞卡片',
+test('真实调度者：同一原因再次出现无效票，停卡交付并继续，不提关卡',
   { skip: !enabled, timeout: 600_000 }, async t => {
     const daemon = await fixture(t, true);
-    const state = await daemon.settled('gate');
+    const state = await daemon.settled('completed');
     const verifications = assertRetry(state);
     assert.equal(verifications.length, 2, '同理由第二次无效后不能继续重派');
     assert.equal(verifications[1]!.conclusion, 'failed');
     assert.equal(verifications[1]!.conclusionReason, invalidReason);
-    assert.equal(verifications[1]!.finalAnswer, invalidReason);
-    const gates = state.events.filter(event => event.action === 'gate-created' && event.details.kind === 'general');
-    assert.equal(gates.length, 1);
-    const gate = gates[0]!;
-    assert.equal(gate.actor.type, 'coordinator-round');
-    assert.match(String(gate.details.body), /④/);
-    assert.match(String(gate.details.body), /材料多.*没查完/s);
-    assert.ok(gate.id > endedEvent(state, verifications[1]!.id).id, '关卡必须在第二次无效后提出');
-    assert.ok(daemon.calls('propose-gate').length >= 1, '真实 Claude 必须调用 propose-gate');
-    assert.deepEqual(state.target.dependencies, [{ type: 'gate', id: gate.object.id }]);
-    assert.equal(state.target.status, 'waiting');
-    assert.equal(state.events.some(event => event.action === 'card-completed' && event.object.id === state.target.id), false);
-    assert.ok(state.pending.some(item => item.id === gate.object.id && item.kind === 'general'));
+    assert.equal(state.events.some(event => event.action === 'gate-created' && event.details.kind === 'general'), false,
+      '无效票不得让用户抉择');
+    assert.equal(daemon.calls('propose-gate').length, 0);
+    assert.ok(daemon.calls('update-card').some(call => (call as { input: { needsVerification?: boolean } }).input.needsVerification === false),
+      '停卡交付须先关掉验收');
+    const completed = state.events.find(event => event.action === 'card-completed' && event.object.id === state.target.id);
+    assert.ok(completed && completed.id > endedEvent(state, verifications[1]!.id).id, '第二次无效后完成原卡保留成果');
+    assert.equal(execFileSync('git', ['-C', daemon.repo, 'show', `helm/${daemon.workId}:smoke.txt`], { encoding: 'utf8' }),
+      'invalid-verification-smoke\n');
   });
 
 interface GraphNode {
@@ -99,7 +95,7 @@ function assertRetry(state: State) {
   assert.equal(verifications[0]!.conclusion, 'failed');
   assert.equal(verifications[0]!.conclusionReason, invalidReason);
   assert.equal(verifications[0]!.finalAnswer, invalidReason, '第一票不能含标准或证据');
-  assert.match(verifications[1]!.content, /核查清单/);
+  assert.match(verifications[1]!.content, /核查清单|无效/, '重派须说明上一票为何无效');
   const retry = state.events.find(event => event.action === 'dispatch-created' && event.object.id === verifications[1]!.id);
   assert.ok(retry && retry.id > endedEvent(state, verifications[0]!.id).id, '第二票必须在第一票结束后新派');
   const sessions = [executions[0]!, ...verifications].map(dispatch => dispatch.sessionId);
