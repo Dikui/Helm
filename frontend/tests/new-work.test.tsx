@@ -286,7 +286,8 @@ test('对齐对话经 SSE 更新草稿、逐版标出新增条目，草稿入口
   expect((await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'message' && item.sender === 'user')).toHaveLength(2);
 });
 
-test('更新草稿时不可确认，还要改弹窗保留输入并发送修改要求，英文钉栏和新增标记同步', async () => {
+// #10 regression (medium): fake coordinator; editing feedback keeps the brief interactive.
+test('还要改在页内编辑并可参照说明，更新中不可确认', async () => {
   let finish!: () => void;
   daemon = await uiFixture([[draft('first', '保留登录')], [draft('second', '保留登录\n增加验证码'), { type: 'hang', until: new Promise<void>(resolve => { finish = resolve; }) }]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐修改', key: 'start' })).result.work;
@@ -294,15 +295,32 @@ test('更新草稿时不可确认，还要改弹窗保留输入并发送修改�
   render(<App baseUrl={daemon.url} />);
   const confirm = await screen.findByRole('button', { name: '确认，开始拆卡片' });
   await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('消息'), { target: { value: '普通消息草稿' } });
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   fireEvent.keyDown(window, { key: '2' });
-  const dialog = await screen.findByRole('dialog', { name: 'Needs changes' });
-  fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: '增加验证码' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  const editor = await screen.findByRole('form', { name: 'Needs changes' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.documentElement.style.overflow).not.toBe('hidden');
+  const message = within(editor).getByLabelText('Message');
+  expect(document.activeElement).toBe(message);
+  fireEvent.change(message, { target: { value: '增加验证码' } });
+  const version = within(screen.getByRole('complementary', { name: 'Brief' })).getByLabelText('Version');
+  version.focus();
+  expect(document.activeElement).toBe(version);
+  expect((screen.getByRole('button', { name: 'Confirm and start planning cards' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(editor).getByRole('button', { name: 'Close' }));
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Needs changes' }));
+  expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe('普通消息草稿');
   fireEvent.keyDown(window, { key: '2' });
-  const reopened = await screen.findByRole('dialog', { name: 'Needs changes' });
+  const reopened = await screen.findByRole('form', { name: 'Needs changes' });
   expect((within(reopened).getByLabelText('Message') as HTMLTextAreaElement).value).toBe('增加验证码');
-  fireEvent.click(within(reopened).getByRole('button', { name: 'Send' }));
+  fireEvent.keyDown(within(reopened).getByLabelText('Message'), { key: 'Escape', isComposing: true, keyCode: 229 });
+  expect(screen.getByRole('form', { name: 'Needs changes' })).toBe(reopened);
+  fireEvent.keyDown(within(reopened).getByLabelText('Message'), { key: 'Escape' });
+  expect(screen.queryByRole('form', { name: 'Needs changes' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Needs changes' }));
+  fireEvent.keyDown(window, { key: '2' });
+  fireEvent.click(within(screen.getByRole('form', { name: 'Needs changes' })).getByRole('button', { name: 'Send' }));
   try {
     const brief = screen.getByRole('complementary', { name: 'Brief' });
     expect(await within(brief).findByRole('listitem', { name: '增加验证码 New' })).toBeTruthy();
@@ -310,6 +328,79 @@ test('更新草稿时不可确认，还要改弹窗保留输入并发送修改�
     expect(screen.queryByRole('button', { name: 'Confirm and start planning cards' })).toBeNull();
   } finally { finish(); }
   await screen.findByRole('button', { name: 'Confirm and start planning cards' });
+  expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe('普通消息草稿');
+});
+
+// #10 regression (medium): fake drivers; real HTTP records expose duplicate/mixed requests.
+test('修改意见与普通消息独立保留草稿及重试请求', async () => {
+  daemon = await uiFixture([[draft('first', '旧版需求'), draft('second', '新版需求')]]);
+  const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '参照说明修改', key: 'start' })).result.work;
+  const realFetch = fetch;
+  const submissions: any[] = [];
+  let release!: () => void;
+  const firstResponse = new Promise<void>(resolve => { release = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    if (!String(input).endsWith('/api/send-message')) return realFetch(input, init);
+    submissions.push(JSON.parse(String(init?.body)));
+    const response = await realFetch(input, init);
+    if (submissions.length === 1) {
+      await response.text();
+      await firstResponse;
+      throw new Error('修改意见响应丢失');
+    }
+    return response;
+  };
+  window.history.replaceState(null, '', `/works/${work.id}`);
+  render(<App baseUrl={daemon.url} transport={transport} />);
+  await screen.findByRole('button', { name: '还要改' });
+  fireEvent.change(screen.getByLabelText('消息'), { target: { value: '另一条普通消息' } });
+  fireEvent.click(screen.getByRole('button', { name: '还要改' }));
+  const editor = screen.getByRole('form', { name: '还要改' });
+  const message = within(editor).getByLabelText('消息') as HTMLTextAreaElement;
+  const send = within(editor).getByRole('button', { name: '发送' }) as HTMLButtonElement;
+  expect(send.disabled).toBe(true);
+  fireEvent.change(message, { target: { value: '   ' } });
+  expect(send.disabled).toBe(true);
+  const brief = screen.getByRole('complementary', { name: '工作说明' });
+  const version = within(brief).getByLabelText('版本');
+  fireEvent.change(version, { target: { value: '1' } });
+  expect(within(brief).getByText('旧版需求')).toBeTruthy();
+  fireEvent.change(message, { target: { value: '  请补充边界  ' } });
+  fireEvent.change(version, { target: { value: '2' } });
+  expect(within(brief).getByRole('listitem', { name: '新版需求 新增' })).toBeTruthy();
+  expect(message.value).toBe('  请补充边界  ');
+  try {
+    fireEvent.click(send);
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(send.disabled).toBe(true);
+    expect((within(editor).getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(editor);
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(screen.getByRole('form', { name: '还要改' })).toBe(editor);
+    release();
+    expect((await within(editor).findByRole('alert')).textContent).toContain('修改意见响应丢失');
+    expect(submissions).toHaveLength(1);
+    expect(message.value).toBe('  请补充边界  ');
+    expect(message.disabled).toBe(true);
+    fireEvent.click(within(editor).getByRole('button', { name: '关闭' }));
+    expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe('另一条普通消息');
+    fireEvent.click(within(screen.getByRole('region', { name: '对话' })).getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    await waitFor(() => expect((screen.getByLabelText('消息') as HTMLTextAreaElement).value).toBe(''));
+    expect(submissions[1].body).toBe('另一条普通消息');
+    expect(submissions[1].key).not.toBe(submissions[0].key);
+    fireEvent.click(await screen.findByRole('button', { name: '还要改' }));
+    const retryEditor = screen.getByRole('form', { name: '还要改' });
+    expect((within(retryEditor).getByLabelText('消息') as HTMLTextAreaElement).value).toBe('  请补充边界  ');
+    fireEvent.click(within(retryEditor).getByRole('button', { name: '重试发送' }));
+    await waitFor(() => expect(screen.queryByRole('form', { name: '还要改' })).toBeNull());
+    expect(submissions).toHaveLength(3);
+    expect(submissions[2]).toEqual(submissions[0]);
+    const messages = (await daemon.call('get-conversation', { workId: work.id })).result.filter((item: any) => item.type === 'message' && item.sender === 'user');
+    expect(messages.map((item: any) => item.body)).toEqual(['参照说明修改', '请补充边界', '另一条普通消息']);
+    fireEvent.click(await screen.findByRole('button', { name: '还要改' }));
+    expect((within(screen.getByRole('form', { name: '还要改' })).getByLabelText('消息') as HTMLTextAreaElement).value).toBe('');
+  } finally { release(); }
 });
 
 test('对话确认入口确认所查看的草稿版本，运行层只记录一次决定', async () => {
