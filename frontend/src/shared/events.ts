@@ -9,7 +9,7 @@ const pause = (signal: AbortSignal) => new Promise<void>(resolve => {
   if (signal.aborted) done();
 });
 
-// Cursor advances only after consumers have refreshed. A failed read is replayed on reconnect.
+// Cursor advances after consumers accept the notification; resources retry failed reads independently.
 export async function readEvents(api: ApiClient, signal: AbortSignal,
   receive: (event: HelmEvent) => Promise<void>, connection: (value: Connection) => void) {
   let lastId: string | undefined;

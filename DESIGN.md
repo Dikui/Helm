@@ -32,7 +32,7 @@ Agent 字母标志由 `shared/AgentMark.tsx` 统一提供：Claude 为 C / 玫�
 
 - 路由：`shared/router.tsx` 管理路径、查询参数和浏览器历史，`routes.tsx` 注册页面。工作页统一为 `/works/:id`，`?inspect=` 选择列表、依赖图、时间线、调度轮次、事件、卡片、调度者、说明、报告或交付。旧 chat / structure / graph / brief 路径通过 replace 重定向，分别保留阶段默认 / 依赖图 / 依赖图 / 说明入口；设置分区与 Agent id 支持深链接。
 - 读取：`shared/api.ts` 调用现有 POST 操作，保留运行层错误的 code、reason、allowedOperations；`shared/data.tsx` 负责初始读取、重读、取消过时请求。
-- 实时：`shared/events.ts` 使用 fetch 读取 POST SSE，重读相关资源成功后推进游标；断线使用 Last-Event-ID 补读。
+- 实时：`shared/events.ts` 使用 fetch 读取 POST SSE，通知相关资源后推进游标；断线使用 Last-Event-ID 补读。`shared/data.tsx` 中各资源独立重读，慢请求不阻塞后续事件；同一资源保持一个在途请求，期间的连续事件合并为补读，读取失败自行退避重试。
 - 语言：`shared/i18n.tsx` 管理中文 / 英文和 localStorage。仅翻译界面文字，用户和 Agent 内容原样显示。
 - 反馈：`shared/feedback.tsx` 提供可读取原始原因的行内错误；保留输入，按钮提交中禁用并标记忙碌。
 - 删除工作：已暂停工作可以从工作页“删除工作”入口打开确认框，明确说明先取消工作；关闭确认框仍保持暂停。确认后串行完成既有取消与删除操作，未导出时保留先导出 / 仍然删除的提醒。失败保留确认框并显示原始原因供重试，成功后回收件箱；存在未合入的保留分支时先逐项列出分支和原因。后端仍只允许删除已结束工作。
