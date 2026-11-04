@@ -58,7 +58,7 @@ function attachmentPath(brief: StartupBrief, fixture: ReturnType<typeof attachme
   return file.path;
 }
 
-// Keep the actual CLI, sandbox and tools; only record the driver's input boundary.
+// Keep the actual CLI and tools; only record the driver's input boundary.
 function observedDriver(base: Driver) {
   const inputs: { options: SessionOptions; content: string }[] = [];
   const driver: Driver = {

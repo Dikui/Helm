@@ -24,7 +24,7 @@ export function resolvingConflict(store: TaskStore, workId: string) {
   return deliveryDetails(store, workId).resolution?.status === 'solving';
 }
 
-// Executors can edit their copy, but cannot write Git metadata outside the sandbox.
+// Helm starts the merge itself; the executor only resolves the conflicted files in its copy.
 export function prepareConflictCardMerge(store: TaskStore, dispatch: Dispatch, path: string) {
   const resolution = deliveryDetails(store, dispatch.workId).resolution;
   if (dispatch.purpose !== 'execution' || resolution?.status !== 'solving') return undefined;

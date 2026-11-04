@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { test, type TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { CanUseTool, Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeDriver, ClaudeCoordinatorDriver, ClaudeExecutorDriver, type ClaudeQuery } from '../src/claude-driver.js';
-import { credentialPaths, type Driver, type DriverEvent, type SessionOptions } from '../src/driver.js';
+import type { Driver, DriverEvent, SessionOptions } from '../src/driver.js';
 import { AgentCatalog } from '../src/agents.js';
 import { roleRules } from '../src/prompts.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
@@ -22,9 +22,17 @@ async function fixture(t: TestContext, role: 'executor' | 'coordinator' = 'execu
   return {
     cwd, env: { HOME: cwd, PATH: '/test/bin', HTTPS_PROXY: 'http://proxy.invalid', no_proxy: 'example.test', HELM_PORT_START: '4500' },
     agent: { ...new AgentCatalog(fixtureAgentDir).get(`claude-${role}`), model: 'haiku', reasoningEffort: 'low' },
-    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer dispatch-token' } } },
   };
+}
+
+// Claude runs every Helm agent without its sandbox or permission prompts (ADR 0025).
+function assertFullAccess(sdk: Options) {
+  assert.equal(sdk.permissionMode, 'bypassPermissions');
+  assert.equal(sdk.allowDangerouslySkipPermissions, true);
+  assert.equal(sdk.canUseTool, undefined);
+  assert.equal(sdk.sandbox, undefined);
+  assert.equal((sdk.settings as Exclude<NonNullable<Options['settings']>, string>).permissions, undefined);
 }
 
 function result(overrides: Partial<SDKResultMessage> = {}): SDKResultMessage {
@@ -74,19 +82,8 @@ for (const role of ['coordinator', 'executor'] as const) for (const home of ['sh
     assert.equal(settings.autoMemoryEnabled, false);
     assert.equal(settings.fastMode, false);
     assert.equal(sdk.env!.CLAUDE_CONFIG_DIR, home === 'dedicated' ? join(base.cwd, '.helm', 'agent-homes', base.agent.id) : undefined);
-    assert.equal(sdk.permissionMode, 'default');
-    assert.deepEqual(settings.permissions?.ask, ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
-    assert.deepEqual(settings.permissions?.deny, credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]));
-    assert.deepEqual(sdk.sandbox, {
-      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-      filesystem: { disabled: false, allowWrite: [base.cwd], denyRead: credentialPaths() },
-      network: { allowLocalBinding: true },
-    });
-    const context = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'tool' };
-    for (const tool of ['Agent', 'Task']) assert.ok(!(sdk.tools as string[]).includes(tool));
-    assert.equal((await sdk.canUseTool!('Write', { file_path: join(base.cwd, '..', 'outside') }, context))?.behavior, 'deny');
-    assert.equal((await sdk.canUseTool!('Bash', { dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
-    assert.equal((await sdk.canUseTool!('Read', { file_path: 'README.md' }, context))?.behavior, 'allow');
+    assertFullAccess(sdk);
+    for (const tool of ['Agent', 'Task', 'AskUserQuestion', 'ExitPlanMode']) assert.ok(!(sdk.tools as string[]).includes(tool));
   });
 }
 
@@ -118,7 +115,6 @@ test('Claude 两种角色将 HTTP 和 stdio MCP 映射到 SDK，保留命令参�
 
 test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent、用户和内置 skill', async t => {
   const base = await fixture(t);
-  const context = { signal: new AbortController().signal, toolUseID: 'skill', requestId: 'skill' };
   await Promise.all((['coordinator', 'executor'] as const).map(async role => {
     const id = `agent-${role}`;
     const directory = join(base.cwd, id);
@@ -144,14 +140,10 @@ test('Claude Agent 叠加本地 skills 插件，两个角色均可调用 Agent�
         assert.deepEqual(sdk.plugins, [{ type: 'local', path: runtimeDirectory, skipMcpDiscovery: true }]);
         assert.equal(sdk.skills, 'all');
         assert.ok((sdk.tools as string[]).includes('Skill'));
-        assert.equal((await sdk.canUseTool!('Skill', { skill: `${id}:passphrase` }, context))?.behavior, 'allow');
-        for (const skill of ['user-skill', 'loop']) {
-          assert.equal((await sdk.canUseTool!('Skill', { skill }, context))?.behavior, 'allow');
-        }
+        assertFullAccess(sdk);
         yield result();
       } }) });
-    await collect(driver, { ...base, agent,
-      sandbox: base.sandbox });
+    await collect(driver, { ...base, agent });
     assert.equal(inspected, true);
   }));
 });
@@ -193,9 +185,7 @@ test('Claude 订阅 Agent 沿用默认主目录，API 使用 Agent 主目录并�
         const settings = args.options!.settings as Exclude<NonNullable<Options['settings']>, string>;
         assert.equal(settings.fastMode, false);
         assert.equal(settings.autoMemoryEnabled, false);
-        // Ask rules precede loaded allow rules, keeping the path checks reachable.
-        assert.deepEqual(settings.permissions?.ask, ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
-        assert.equal(args.options!.permissionMode, 'default');
+        assertFullAccess(args.options!);
       }) }), { ...options, agent });
   }
 });
@@ -319,65 +309,37 @@ test('同一个 Claude 驱动按 Agent 角色注入规则，两种角色都使�
   }
 });
 
-test('Claude 调度者只写调度者目录，允许联网并保留轮次 MCP 与单次权限', async t => {
+test('Claude 调度者在调度者目录运行，无沙箱并保留轮次 MCP', async t => {
   const base = await fixture(t);
   const cwd = join(base.cwd, 'coordinator');
   await mkdir(cwd);
   const options: SessionOptions = { ...base, cwd,
     agent: { ...new AgentCatalog(fixtureAgentDir).get('claude-coordinator'), model: 'haiku', reasoningEffort: 'low' },
-    sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
     mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: 'Bearer round-token' } } },
   };
-  let permission: CanUseTool | undefined;
   const driver = new ClaudeCoordinatorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
     query: fakeQuery([result()], args => {
       const sdk = args.options!;
       assert.equal(sdk.cwd, cwd);
       assert.deepEqual(sdk.settingSources, [], '调度者不加载用户的全局插件、hooks、CLAUDE.md');
       assert.equal((sdk.settings as Exclude<NonNullable<Options['settings']>, string>).disableClaudeAiConnectors, true);
-      assert.equal(sdk.permissionMode, 'default');
+      assertFullAccess(sdk);
       assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
-      assert.deepEqual(sdk.sandbox, {
-        enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        filesystem: { disabled: false, allowWrite: [cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
-      });
       assert.equal(sdk.strictMcpConfig, true);
       assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
       assert.equal(sdk.env?.NO_PROXY, 'example.test,127.0.0.1,localhost');
       assert.equal(sdk.model, 'haiku');
       assert.equal(sdk.effort, 'low');
       assert.equal(sdk.resume, undefined);
-      permission = sdk.canUseTool;
     }) });
   const first = await collect(driver, options);
   const next = await collect(driver, options);
   assert.notEqual(first.session.id, next.session.id);
   assert.equal(first.end?.reason, 'completed');
-  assert.ok(permission);
-  const context: Parameters<CanUseTool>[2] = { signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
-    suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' }] };
-  for (const tool of ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'mcp__helm__create-card', 'mcp__helm__create-dispatch', 'mcp__helm__add-dependency', 'mcp__user__query', 'mcp__other__write', 'Skill']) {
-    const input = { command: 'cat README.md' };
-    assert.deepEqual(await permission(tool, input, context), { behavior: 'allow', updatedInput: input });
-  }
-  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
-    const key = tool === 'NotebookEdit' ? 'notebook_path' : 'file_path';
-    assert.equal((await permission(tool, { [key]: join(cwd, 'file') }, context))?.behavior, 'allow', tool);
-    assert.equal((await permission(tool, { [key]: join(base.cwd, 'project', 'file') }, context))?.behavior, 'deny', tool);
-  }
-  for (const tool of ['AskUserQuestion', 'ExitPlanMode']) assert.equal((await permission(tool, {}, context))?.behavior, 'deny');
-  assert.equal((await permission('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, context))?.behavior, 'deny');
-  assert.equal((await permission('Bash', { command: 'touch file' }, { ...context, blockedPath: base.cwd }))?.behavior, 'deny');
-  assert.equal((await permission('Read', {}, { ...context, signal: AbortSignal.abort() }))?.behavior, 'deny');
-  for (const invalid of [
-    { ...options, sandbox: { mode: 'read-only' as const, writableRoots: [] } },
-    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [cwd, base.cwd] } },
-    { ...options, sandbox: { mode: 'workspace-write' as const, writableRoots: [base.cwd] } },
-    { ...options, agent: base.agent },
-  ]) await assert.rejects(driver.start(invalid), /coordinator/);
+  await assert.rejects(driver.start({ ...options, agent: base.agent }), /coordinator/);
 });
 
-test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和新开/续跑选项', async t => {
+test('Claude 执行者组装本机 CLI、无沙箱权限、单端点令牌、 Agent 和新开/续跑选项', async t => {
   const options = await fixture(t);
   for (const resumeSessionId of [undefined, 'previous-session']) {
     let requestedId: string | undefined;
@@ -388,16 +350,9 @@ test('Claude 执行者组装本机 CLI、沙箱、单端点令牌、 Agent 和�
         assert.equal(sdk.pathToClaudeCodeExecutable, '/test/bin/claude');
         assert.equal(sdk.cwd, options.cwd);
         assert.deepEqual(sdk.settingSources, ['user', 'project', 'local']);
-        assert.deepEqual(sdk.settings, { autoMemoryEnabled: false, fastMode: false,
-          permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'],
-            deny: credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]) } });
-        assert.ok(credentialPaths().includes(join(homedir(), '.ssh')), '执行者不能读 SSH 私钥等凭据');
+        assert.deepEqual(sdk.settings, { autoMemoryEnabled: false, fastMode: false });
         assert.deepEqual(sdk.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
-        assert.equal(sdk.permissionMode, 'default');
-        assert.deepEqual(sdk.sandbox, {
-          enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-          filesystem: { disabled: false, allowWrite: [options.cwd], denyRead: credentialPaths() }, network: { allowLocalBinding: true },
-        });
+        assertFullAccess(sdk);
         assert.deepEqual(sdk.mcpServers, { helm: { type: 'http', ...options.mcpServers.helm } });
         assert.equal(Object.hasOwn(sdk, 'strictMcpConfig'), false);
         assert.equal(sdk.model, 'haiku');
@@ -433,43 +388,7 @@ for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordina
   });
 }
 
-test('Claude canUseTool 只单次批准副本内写入，拒绝路径穿越、符号链接越界及沙箱逃逸', async t => {
-  const options = await fixture(t);
-  const outside = await fixture(t);
-  await symlink(outside.cwd, join(options.cwd, 'escape'));
-  await symlink(join(outside.cwd, 'not-created'), join(options.cwd, 'dangling'));
-  await mkdir(join(options.cwd, 'nested'));
-  await symlink(join(options.cwd, 'nested'), join(options.cwd, 'safe-link'));
-  let canUseTool: CanUseTool | undefined;
-  await collect(new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude',
-    query: fakeQuery([result()], args => { canUseTool = args.options?.canUseTool; }) }), options);
-  assert.ok(canUseTool);
-  const permission = (extra: Partial<Parameters<CanUseTool>[2]> = {}): Parameters<CanUseTool>[2] => ({
-    signal: new AbortController().signal, toolUseID: 'tool', requestId: 'request',
-    suggestions: [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'userSettings' }], ...extra,
-  });
-  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
-    const key = tool === 'NotebookEdit' ? 'notebook_path' : 'file_path';
-    for (const path of ['new/deep/file.txt', join(options.cwd, 'inside.txt'), 'safe-link/new.txt']) {
-      const input = { [key]: path };
-      const decision = await canUseTool(tool, input, permission());
-      assert.deepEqual(decision, { behavior: 'allow', updatedInput: input });
-    }
-    for (const path of [join(outside.cwd, 'outside.txt'), '../outside.txt', `${options.cwd}-sibling/file`,
-      'escape/deep/file.txt', 'dangling', 'dangling/deep/file.txt', '', undefined]) {
-      const decision = await canUseTool(tool, { [key]: path }, permission());
-      assert.equal(decision?.behavior, 'deny', `${tool}: ${path}`);
-    }
-  }
-  assert.equal((await canUseTool('Bash', { command: 'touch file', dangerouslyDisableSandbox: true }, permission()))?.behavior, 'deny');
-  assert.equal((await canUseTool('Bash', { command: 'touch file' }, permission({ blockedPath: outside.cwd })))?.behavior, 'deny');
-  for (const [tool, input] of [['Bash', { command: 'npm test' }], ['mcp__helm__submit-conclusion', { conclusion: 'completed' }]] as const) {
-    assert.deepEqual(await canUseTool(tool, input, permission()), { behavior: 'allow', updatedInput: input });
-  }
-  assert.equal((await canUseTool('Write', { file_path: 'inside' }, permission({ signal: AbortSignal.abort() })))?.behavior, 'deny');
-});
-
-test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI 和扩大的可写范围', async t => {
+test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI', async t => {
   const options = await fixture(t);
   const bin = join(options.cwd, 'bin');
   await mkdir(bin);
@@ -482,8 +401,6 @@ test('Claude 在 PATH 查找本机 CLI，拒绝缺失 CLI 和扩大的可写范�
   assert.equal(path, executable);
   const driver = new ClaudeExecutorDriver({ query: fakeQuery([]) });
   await assert.rejects(driver.start({ ...options, env: { PATH: join(bin, 'missing') } }), /Local claude executable not found/);
-  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'read-only', writableRoots: [options.cwd] } }), /executor card copy/);
-  await assert.rejects(driver.start({ ...options, sandbox: { mode: 'workspace-write', writableRoots: [options.cwd, bin] } }), /only its card copy/);
 });
 
 for (const [role, DriverType] of [['executor', ClaudeExecutorDriver], ['coordinator', ClaudeCoordinatorDriver]] as const) {
@@ -819,11 +736,8 @@ test('Claude 调度者可续跑，结束时报告最后一次主会话请求的�
 });
 
 
-for (const loadGlobalConfig of [false, true]) test(`Claude 全局配置 ${loadGlobalConfig} 时执行者新建和续跑都拒绝只读启动`, async t => {
-  const options = await fixture(t);
+test('Claude 执行者驱动拒绝调度者 Agent', async t => {
+  const options = await fixture(t, 'coordinator');
   const driver = new ClaudeExecutorDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([]) });
-  for (const resumeSessionId of [undefined, 'previous']) {
-    await assert.rejects(driver.start({ ...options, agent: { ...options.agent, loadGlobalConfig }, resumeSessionId,
-      sandbox: { mode: 'read-only', writableRoots: [] } }), /executor card copy/);
-  }
+  await assert.rejects(driver.start(options), /executor Agent/);
 });

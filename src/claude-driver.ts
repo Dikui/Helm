@@ -1,12 +1,12 @@
 import { normalizePlan } from './plans.js';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { lstat, realpath, stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { query, type CanUseTool, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { credentialPaths, type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
+import { query, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
 import { driverEnvironment, findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import { managedProcess } from './processes.js';
@@ -41,44 +41,6 @@ function quotaExhausted(text: string) {
   return /you['’]ve hit your (?:(?:usage|session) )?limit|you['’]re out of extra usage|weekly (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded)/i.test(text)
     || /credit balance (?:is )?too low/i.test(text)
     || /invalid (?:api key|x-api-key|bearer token)/i.test(text);
-}
-
-function inside(root: string, path: string) {
-  const suffix = relative(root, path);
-  return suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
-}
-
-async function writablePath(cwd: string, path: unknown): Promise<boolean> {
-  if (typeof path !== 'string' || !path || path.includes('\0')) return false;
-  let ancestor = resolve(cwd, path);
-  if (!inside(cwd, ancestor)) return false;
-  for (;;) {
-    try { return inside(cwd, await realpath(ancestor)); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
-      // A dangling symlink is not a new file: writing it would follow its target.
-      try { if ((await lstat(ancestor)).isSymbolicLink()) return false; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false; }
-      const parent = dirname(ancestor);
-      if (parent === ancestor) return false;
-      ancestor = parent;
-    }
-  }
-}
-
-function workspacePermission(cwd: string): CanUseTool {
-  return async (tool, input, context) => {
-    const deny = { behavior: 'deny' as const, message: 'Helm agents may write only inside their writable root and must keep Bash sandboxed.' };
-    if (context.signal.aborted) return deny;
-    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
-      if (!await writablePath(cwd, tool === 'NotebookEdit' ? input.notebook_path : input.file_path)) return deny;
-    }
-    if (tool === 'Bash' && (input.dangerouslyDisableSandbox || (context.blockedPath && !await writablePath(cwd, context.blockedPath)))) return deny;
-    if (tool === 'AskUserQuestion' || tool === 'ExitPlanMode') return { behavior: 'deny', message: 'Report blockers through the Helm tools.' };
-    // SDK allow is allow_once. Never echo suggestions as updatedPermissions:
-    // they can persist allow_always rules in the user's or project's settings.
-    return { behavior: 'allow', updatedInput: input };
-  };
 }
 
 type AuthStatus = (executable: string, options: { cwd: string; env: Record<string, string> }) => Promise<boolean>;
@@ -136,18 +98,10 @@ export class ClaudeDriver implements Driver {
   async start(options: SessionOptions): Promise<DriverSession> {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
-    if (coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1
-      || options.agent?.role === 'executor')) {
-      throw new Error('ClaudeCoordinatorDriver requires a writable coordinator directory');
-    }
-    if (!coordinator && (options.agent?.role === 'coordinator' || options.sandbox.mode !== 'workspace-write')) {
-      throw new Error('ClaudeExecutorDriver requires an executor card copy');
+    if (options.agent?.role === (coordinator ? 'executor' : 'coordinator')) {
+      throw new Error(coordinator ? 'ClaudeCoordinatorDriver requires a coordinator Agent' : 'ClaudeExecutorDriver requires an executor Agent');
     }
     const cwd = await realpath(options.cwd);
-    if (options.sandbox.writableRoots.length !== 1 || await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
-      throw new Error(coordinator ? 'Claude coordinator writable roots must contain only its coordinator directory'
-        : 'Claude executor writable roots must contain only its card copy');
-    }
     const executable = this.config.pathToClaudeCodeExecutable ?? await localClaude(options.env);
     const agent = options.agent;
     const loadGlobalConfig = agent.loadGlobalConfig;
@@ -178,19 +132,12 @@ export class ClaudeDriver implements Driver {
       cwd, env, pathToClaudeCodeExecutable: executable,
       settingSources: agent.home === 'dedicated' ? ['user'] : loadGlobalConfig ? ['user', 'project', 'local'] : [],
       ...(!loadGlobalConfig ? { strictMcpConfig: true } : {}),
-      settings: { autoMemoryEnabled: false, fastMode: false, ...(!loadGlobalConfig ? { disableClaudeAiConnectors: true } : {}),
-        // Ask rules precede settings allow rules; otherwise they can skip our
-        // path and sandbox checks in canUseTool, even in default mode.
-        // https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated
-        permissions: { ask: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'],
-          deny: credentialPaths().flatMap(path => [`Read(/${path})`, `Read(/${path}/**)`]) },
-      },
+      settings: { autoMemoryEnabled: false, fastMode: false, ...(!loadGlobalConfig ? { disableClaudeAiConnectors: true } : {}) },
       // Claude discovers skills/ under this dispatch or coordinator round's copy.
       ...(agent.skillsPath ? { plugins: [{ type: 'local', path: resolve(agent.skillsPath, '..'), skipMcpDiscovery: true }] } : {}),
       skills: 'all',
       systemPrompt: agentPrompt(agent),
-      permissionMode: 'default', abortController: controller,
-      canUseTool: workspacePermission(cwd),
+      permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true, abortController: controller,
       // Fix built-ins rather than inheriting the CLI's evolving defaults.
       // An explicit tools list hides Skill unless it is listed, even with `skills` set.
       tools: ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill'],
@@ -203,13 +150,6 @@ export class ClaudeDriver implements Driver {
         child.stderr.on('data', chunk => sdkOptions.stderr?.(String(chunk)));
         if (child.pid) options.onProcess?.(managedProcess(child.pid));
         return child;
-      },
-      sandbox: {
-        enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false,
-        // The CLI still merges user-scope excludedCommands and allowWrite;
-        // these session settings cannot remove those user sandbox exceptions.
-        filesystem: { disabled: false, allowWrite: [cwd], denyRead: credentialPaths() },
-        network: { allowLocalBinding: true },
       },
       mcpServers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) =>
         [name, server.type === 'stdio' ? server : { ...server, type: 'http' }])),

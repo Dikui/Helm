@@ -54,7 +54,6 @@ for (const agent of ['claude-executor', 'codex-executor', 'grok-executor', 'deep
     let expected = '', attempts = 0;
     const ctx = fixture(t, (options, input) => {
       assert.equal(options.cwd, expected);
-      assert.deepEqual(options.sandbox, { mode: 'workspace-write', writableRoots: [expected] });
       assert.equal(input.workspace, 'scratch');
       assert.equal('readOnly' in input, false);
       assert.equal(existsSync(join(options.cwd, 'notes.txt')), false);
@@ -141,7 +140,6 @@ test('临时目录验收在一次性复制中可写，结束删除复制且保�
     }
     verification = options.cwd;
     assert.notEqual(verification, original);
-    assert.deepEqual(options.sandbox, { mode: 'workspace-write', writableRoots: [verification] });
     assert.equal(readFileSync(join(verification, 'reports', 'report.txt'), 'utf8'), 'original research\n');
     assert.equal(existsSync(join(verification, 'linked-reports')), false);
     writeFileSync(join(verification, 'reports', 'report.txt'), 'reviewer edit\n');

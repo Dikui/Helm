@@ -53,14 +53,13 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
   const end = events.filter(e => e.action === 'round-ended').at(-1);
   assert.equal(end.details.reason, 'quota-exhausted');
   assert.equal(end.details.processed, false);
-  assert.deepEqual(observed!.sandbox, { mode: 'workspace-write', writableRoots: [join(daemon.dataDir, 'coordinator', daemon.work.id)] });
+  assert.equal(observed!.cwd, join(daemon.dataDir, 'coordinator', daemon.work.id));
   assert.equal(observed!.resumeSessionId, undefined);
   assert.equal(observed!.dataDir, join(daemon.dataDir, 'rounds', end.object.id));
   const requests = (await readFile(join(observed!.dataDir!, 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const thread = requests.find(r => r.method === 'thread/start').params;
-  assert.equal(thread.permissions, 'helm');
-  assert.deepEqual(thread.config.permissions.helm.network, { enabled: true });
-  assert.equal(thread.config.permissions.helm.filesystem[':workspace_roots'], 'write');
+  assert.equal(thread.sandbox, 'danger-full-access');
+  assert.equal(thread.config.permissions, undefined);
   const before = (await daemon.events()).filter(e => e.action === 'round-started').length;
   // A read operation yields to the scheduler without introducing a wake event.
   for (let i = 0; i < 3; i++) await daemon.call('list-works');

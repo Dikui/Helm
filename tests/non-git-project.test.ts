@@ -33,7 +33,6 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
     ctx => {
       assert.equal(ctx.options.cwd, join(daemon.directory, 'data', 'coordinator', JSON.parse(ctx.input).work.id));
       assert.equal(JSON.parse(ctx.input).projectPath, projectPath);
-      assert.deepEqual(ctx.options.sandbox, { mode: 'workspace-write', writableRoots: [ctx.options.cwd] });
       assert.equal(JSON.parse(ctx.input).work.baseRef, null);
       return [draft];
     },
@@ -55,7 +54,6 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
     },
   ], undefined, { registerProject: false, executorScripts: [ctx => {
     assert.ok(ctx.options.cwd.startsWith(join(daemon.directory, 'data', 'scratch')));
-    assert.deepEqual(ctx.options.sandbox, { mode: 'workspace-write', writableRoots: [ctx.options.cwd] });
     executorStarted = true;
     return [{ type: 'hang', until: ready }, { type: 'write', path: 'report.txt', content: 'research fact\n' }, { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '已分析文件' }, check: ok }];
   }] });

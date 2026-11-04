@@ -69,7 +69,7 @@ const coordinatorDetailOmits = ['agent', 'sqlitePath', 'outputPath', 'browserPgi
 const coordinatorListOmits = [...coordinatorDetailOmits, 'content', 'cardContentSnapshot', 'finalAnswer'];
 const omit = (value: object, keys: string[]) => Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
 
-// Each of these can make a later agent run arbitrary commands outside its sandbox, so helmd
+// Each of these changes what later agents run, so helmd
 // refuses them from agent processes even without a token (ADR 0016).
 export const escapeOperations = new Set(['register-mcp', 'install-skill', 'save-agent', 'set-prompt', 'set-project-environment', 'install-tool']);
 

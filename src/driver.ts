@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AgentConfig } from './agents.js';
@@ -12,12 +11,6 @@ export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' 
 // null means the driver has not reported that count; a reported zero stays zero.
 // incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
 // cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
-// Credentials no agent task needs. A prompt-injected agent that can read them could send them
-// out through any web tool, so drivers that support read denial block them for every role.
-export function credentialPaths(home = homedir()) {
-  return ['.ssh', '.aws', '.gnupg', '.kube', '.config/gh', '.git-credentials', '.netrc', '.docker/config.json'].map(path => join(home, path));
-}
-
 export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
 // Session size after the turn; drivers reporting it use the coordinator's context threshold (ADR 0017).
 export interface ContextSize { tokens: number; window?: number }
@@ -31,7 +24,6 @@ export interface SessionOptions {
   projectEnvironmentNames?: string[];
   // Per-dispatch storage outside the writable card copy (CLI state, not code).
   dataDir?: string;
-  sandbox: { mode: 'read-only' | 'workspace-write'; writableRoots: string[] };
   // The reserved Helm endpoint always uses authenticated HTTP.
   mcpServers: Record<string, McpServerConfig> & { helm?: HttpMcpServer };
   resumeSessionId?: string;
@@ -143,21 +135,6 @@ export class FakeDriver implements Driver {
               yield { type: 'output', step: ++step, text: JSON.stringify({ tool: instruction.name, result: result.structuredContent }) };
             } else if (instruction.type === 'write') {
               const path = resolve(options.cwd, instruction.path);
-              if (options.sandbox.mode === 'read-only') throw new Error('Sandbox rejects writes for coordinator rounds');
-              // Resolve parents and existing targets to reject symlink escapes as well as ../ paths.
-              const inside = (root: string, target: string) => {
-                const suffix = relative(root, target);
-                return suffix !== '..' && !suffix.startsWith('../') && !isAbsolute(suffix);
-              };
-              const roots = await Promise.all(options.sandbox.writableRoots.map(root => realpath(root)));
-              let ancestor = dirname(path);
-              for (;;) {
-                const existing = await existingPath(ancestor);
-                if (existing) { ancestor = existing; break; }
-                ancestor = dirname(ancestor);
-              }
-              const target = await existingPath(path) ?? path;
-              if (!roots.some(root => inside(root, path) && inside(root, ancestor) && inside(root, target))) throw new Error('Sandbox rejects write outside writable roots');
               await mkdir(dirname(path), { recursive: true });
               await writeFile(path, instruction.content);
               yield { type: 'output', step: ++step, text: `Wrote ${instruction.path}` };
@@ -185,15 +162,4 @@ export class FakeDriver implements Driver {
       })(),
     };
   }
-}
-
-async function existingPath(path: string): Promise<string | undefined> {
-  try { return await realpath(path); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const entry = await lstat(path).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return undefined;
-  });
-  if (entry?.isSymbolicLink()) throw new Error('Sandbox rejects unresolved symbolic link');
-  return undefined;
 }

@@ -4,7 +4,7 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { credentialPaths, type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
+import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
 
 interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
   supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
@@ -16,7 +16,6 @@ import { helmVersion } from './version.js';
 
 // Upstream defect workaround: https://github.com/openai/codex/issues/47483
 // Disable only remote plugins to avoid connector reinstalls; Codex loads local plugins natively.
-const helmProfile = 'helm';
 // ChatGPT connectors (codex_apps) add enough tools that Codex defers them behind search and agents miss helm's tools.
 const appServer = { file: 'codex', args: ['app-server', '-c', 'features.remote_plugin=false', '-c', 'features.apps=false'] };
 
@@ -96,16 +95,9 @@ export class CodexDriver implements Driver {
     options.signal?.throwIfAborted();
     const coordinator = (this.role ?? options.agent?.role) === 'coordinator';
     const agent = options.agent;
-    if (coordinator && (agent.role !== 'coordinator' || options.sandbox.mode !== 'workspace-write'
-      || options.sandbox.writableRoots.length !== 1)) {
-      throw new Error('CodexCoordinatorDriver requires a writable coordinator directory');
-    }
-    if (!coordinator && (agent.role !== 'executor' || options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
-      throw new Error('CodexExecutorDriver requires an executor card copy');
-    }
+    if (agent.role !== (coordinator ? 'coordinator' : 'executor')) throw new Error(coordinator
+      ? 'CodexCoordinatorDriver requires a coordinator Agent' : 'CodexExecutorDriver requires an executor Agent');
     const cwd = await realpath(options.cwd);
-    if (await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error(coordinator
-      ? 'Codex coordinator writable roots must contain only its coordinator directory' : 'Codex executor writable roots must contain only its card copy');
     if (!options.dataDir) throw new Error('Codex requires a dispatch or round data directory');
     const sqlitePath = join(resolve(options.dataDir), 'codex-sqlite');
     await mkdir(sqlitePath, { recursive: true, mode: 0o700 });
@@ -133,7 +125,7 @@ export class CodexDriver implements Driver {
       rpc.notify('initialized', {});
       await rpc.request('skills/extraRoots/set', { extraRoots: agent.skillsPath ? [agent.skillsPath] : [] });
       const thread = await rpc.request(options.resumeSessionId ? 'thread/resume' : 'thread/start', {
-        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, permissions: helmProfile, approvalPolicy: 'never',
+        ...(options.resumeSessionId ? { threadId: options.resumeSessionId } : {}), cwd, sandbox: 'danger-full-access', approvalPolicy: 'never',
         ...(agent.model ? { model: agent.model } : {}), developerInstructions: agentPrompt(agent),
         serviceTier: agent.fast ? 'fast' : 'default',
         config: {
@@ -146,11 +138,6 @@ export class CodexDriver implements Driver {
           ...(!coordinator ? { shell_environment_policy: { inherit: 'all', ignore_default_excludes: true,
             exclude: [], include_only: [], set: {}, experimental_use_profile: false } } : {}),
           ...(agent.fast ? { service_tier: 'fast' } : {}),
-          // A permissions profile rather than sandbox_workspace_write, which cannot deny reads. Writes
-          // stay limited to the thread cwd (its only workspace root); /tmp and TMPDIR stay read-only.
-          default_permissions: helmProfile,
-          permissions: { [helmProfile]: { filesystem: { ':root': 'read', ':workspace_roots': 'write',
-            ...Object.fromEntries(credentialPaths().map(path => [path, 'none'])) }, network: { enabled: true } } },
           mcp_servers: Object.fromEntries(Object.entries(options.mcpServers).map(([name, server]) => [name, {
             ...(server.type === 'stdio' ? { command: server.command, args: server.args, env: server.env }
               : { url: server.url, http_headers: server.headers }),
@@ -168,7 +155,7 @@ export class CodexDriver implements Driver {
           if (sent || cancelled) throw new Error('Codex session already received input or was cancelled');
           sent = true;
           const response = await rpc.request('turn/start', { threadId: id, input: [{ type: 'text', text: content }],
-            approvalPolicy: 'never', permissions: helmProfile,
+            approvalPolicy: 'never',
             ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) });
           turnId = response?.turn?.id;
         },

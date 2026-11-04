@@ -113,8 +113,8 @@ helm get-events --workId <工作id>
 - **端口**：每次派单分到 20 个连续本机端口（`HELM_PORT_START`、`HELM_PORT_END`），从 20000 起。
 - **进程清理**：派单和轮次结束时，按工作目录找出残留进程，`SIGTERM`，5 秒后 `SIGKILL`（macOS 用 `lsof`，Linux 用 `/proc`）；切到副本外目录的进程可能找不到。Helm 启动的进程组和组长在副本里的进程组整组结束；组长在副本外的（如编辑器）只结束当前目录在副本里的那个进程。不要在副本里开终端，`helmd` 重启时会结束它；要看代码请检出工作分支。
 - **环境**：Agent 子进程的环境变量按白名单构造，逐项说明见 [src/environment.ts](src/environment.ts)；运行层再注入禁止推送的 git 配置和无效的 `GH_TOKEN`。Claude 会话关闭自动记忆。
-- **沙箱**：执行者只能写自己的卡片副本，调度者只读工作副本，Bash 禁止退出沙箱。Claude、Codex、Grok 的 Agent 读不到 `~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.kube`、`~/.config/gh`、`~/.git-credentials`、`~/.netrc`、`~/.docker/config.json`（见 `credentialPaths`）：Claude 用 Bash 沙箱 `denyRead` 加 `Read(...)` 拒绝规则；Codex 用权限配置档 `helm`；Grok 用 `helm` / `helm-read-only` 沙箱配置档，Helm 每次启动 Grok 前在 `~/.grok/sandbox.toml` 末尾维护一段带标记的配置（只改标记段，不动你自己的配置）。DeepSeek 的沙箱只限制写、没有按路径禁读的设置，仍读得到。执行者能联网，禁止推送的 git 配置只防误操作，不是安全边界。**已知缺口**：`~/.claude/settings.json` 里的 `sandbox.filesystem.allowWrite`、`sandbox.excludedCommands` 和 `Edit(...)` 放行路径会话里覆盖不掉，对 Helm 的 Agent 同样生效（[官方说明](https://code.claude.com/docs/en/sandboxing#repository-settings-under-an-admin-required-sandbox)）。
-- **浏览器检查**：调度者派单时加 `needsBrowser: true`，运行层在执行者沙箱外为这次派单启动无头、隔离的 Playwright MCP（固定 `@playwright/mcp@0.0.83` 自带的 Chromium），只转发白名单里的工具。用 `npm run browser:install` 安装浏览器。
+- **沙箱**：没有。四家 CLI 都以无沙箱模式启动，调度者和执行者能读写本机任何文件（包括 `~/.ssh` 等凭据）、联网、启动服务（[ADR 0026](docs/adr/0026-agents-run-without-sandbox.md)）。禁止推送的 git 配置、环境变量白名单和进程清理只防误操作，不是安全边界；只在信任所用模型和项目内容的机器上运行 Helm。以前版本在 `~/.grok/sandbox.toml` 末尾写过一段 `Helm sandbox profiles` 标记段，现在不再使用，可以手动删除。
+- **浏览器检查**：调度者派单时加 `needsBrowser: true`，运行层为这次派单启动无头、隔离的 Playwright MCP（固定 `@playwright/mcp@0.0.83` 自带的 Chromium），只转发白名单里的工具。用 `npm run browser:install` 安装浏览器。
 
 ## 开发
 

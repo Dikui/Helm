@@ -52,7 +52,6 @@ test('调度轮次在首轮前创建自己的可写目录，各轮复用并在�
   await ended(1);
   const cwd = join(directory, 'data', 'coordinator', work.id);
   assert.equal(rounds[0]!.options.cwd, cwd);
-  assert.deepEqual(rounds[0]!.options.sandbox, { mode: 'workspace-write', writableRoots: [cwd] });
   assert.equal(rounds[0]!.brief.projectPath, repo);
   assert.deepEqual(rounds[0]!.brief.projectInstructionPaths, [join(repo, 'AGENTS.md')]);
   await writeFile(join(cwd, 'notes.txt'), '跨轮文件\n');

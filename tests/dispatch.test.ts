@@ -361,8 +361,6 @@ test('执行派单经 MCP 写卡片副本和提交结论，保存步骤、结果
   };
   const daemon = await fixture(t, [create, dispatch()], [ctx => {
     token = ctx.options.mcpServers.helm!.headers.Authorization!;
-    assert.equal(ctx.options.sandbox.mode, 'workspace-write');
-    assert.deepEqual(ctx.options.sandbox.writableRoots, [ctx.options.cwd]);
     return [
       { type: 'write', path: 'result.txt', content: '实现完成\n' },
       { type: 'output', text: '检查结果\n第二行' },

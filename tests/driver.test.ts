@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -29,7 +29,7 @@ async function fixture(t: TestContext): Promise<SessionOptions> {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'helm-driver-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   return { agent: { id: 'test', role: 'executor', driver: 'claude-sdk', model: null, reasoningEffort: null, fast: false, home: 'shared', loadGlobalConfig: true,
-    description: '测试', prompt: '', rules: { role: '', runtime: '' }, directory: cwd, skillsPath: null }, cwd, env: { HELM_TEST: 'scripted' }, sandbox: { mode: 'workspace-write', writableRoots: [cwd] }, mcpServers: {} };
+    description: '测试', prompt: '', rules: { role: '', runtime: '' }, directory: cwd, skillsPath: null }, cwd, env: { HELM_TEST: 'scripted' }, mcpServers: {} };
 }
 
 test('假驱动接受新开或续跑及任意输入，按 cwd 写文件，逐条报告输出、压缩和结束', async t => {
@@ -82,23 +82,4 @@ test('假驱动按指定方式结束，挂住时可取消，崩溃通过驱动�
   const crashed = await driver.start(options);
   await crashed.send('崩溃');
   await assert.rejects(crashed.events[Symbol.asyncIterator]().next(), /模拟崩溃退出/);
-});
-
-test('假驱动遵守只读和可写目录边界，拒绝路径穿越与符号链接越界', async t => {
-  const options = await fixture(t);
-  const outside = await fixture(t);
-  await symlink(outside.cwd, join(options.cwd, 'escape'));
-  await symlink(join(outside.cwd, 'forbidden.txt'), join(options.cwd, 'dangling'));
-  const driver = new FakeDriver([
-    [{ type: 'write', path: 'forbidden.txt', content: '不能写' }],
-    [{ type: 'write', path: '../forbidden.txt', content: '不能写' }],
-    [{ type: 'write', path: 'escape/forbidden.txt', content: '不能写' }],
-    [{ type: 'write', path: 'dangling', content: '不能写' }],
-  ]);
-  for (let index = 0; index < 4; index++) {
-    const session = await driver.start(index === 0 ? { ...options, sandbox: { mode: 'read-only', writableRoots: [] } } : options);
-    await session.send('写文件');
-    await assert.rejects(session.events[Symbol.asyncIterator]().next(), /Sandbox rejects/);
-  }
-  await assert.rejects(readFile(join(outside.cwd, 'forbidden.txt')), { code: 'ENOENT' });
 });

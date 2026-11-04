@@ -3,7 +3,6 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { acpAgents } from '../src/acp-agents.js';
-import { credentialPaths } from '../src/driver.js';
 import { roleRules } from '../src/prompts.js';
 import { acpFixture, collect } from './acp-fixture.js';
 import { acpCoordinatorFixture } from './acp-coordinator-fixture.js';
@@ -16,7 +15,7 @@ const configOptions = [
     options: [{ value: 'low', name: 'Low' }] },
 ];
 
-for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调度者目录以可写权限启动，保留轮次 MCP 和结束事件`, async t => {
+for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调度者目录以无沙箱权限启动，保留轮次 MCP 和结束事件`, async t => {
   const ctx = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions,
     permissions: Array.from({ length: 3 }, () => ['allow_once', 'reject_once'].map(kind => ({ kind, name: kind, optionId: kind }))),
     permissionToolCalls: ['read-only', 'workspace-write', 'danger-full-access'].map(mode => ({
@@ -33,7 +32,6 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调�
   for (const resumeSessionId of [undefined, 'previous']) {
     const session = await ctx.driver.start({ ...ctx.options, agent, cwd, resumeSessionId,
       env: { ...ctx.options.env, DSH_PERMISSION_MODE: 'read-only', GROK_SANDBOX: 'helm-read-only' },
-      sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
       mcpServers: { helm: { url: 'http://127.0.0.1:4242/mcp', headers: { Authorization: `Bearer round-${resumeSessionId ?? 'new'}` } } } });
     t.after(() => session.cancel());
     await session.send('处理本轮事件');
@@ -45,7 +43,7 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调�
   }
   const requests = await ctx.requests();
   for (const spawn of requests.filter(request => request.method === 'fixture/spawn')) {
-    assert.equal(kind === 'grok' ? spawn.env.GROK_SANDBOX : spawn.env.DSH_PERMISSION_MODE, kind === 'grok' ? 'helm' : 'workspace-write');
+    assert.equal(kind === 'grok' ? spawn.env.GROK_SANDBOX : spawn.env.DSH_PERMISSION_MODE, kind === 'grok' ? 'off' : 'danger-full-access');
   }
   const sessions = requests.filter(request => ['session/new', 'session/resume'].includes(request.method) && request.params.mcpServers.length);
   assert.ok(sessions.every(request => request.params.cwd === cwd));
@@ -61,24 +59,12 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者在调�
     assert.deepEqual(request.params.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
   }
   if (kind === 'deepseek') assert.deepEqual(requests.filter(request => String(request.id).startsWith('agent-')).map(request => request.result.outcome.optionId),
-    ['allow_once', 'allow_once', 'reject_once', 'allow_once', 'allow_once', 'reject_once'], '调度者可写当前目录，不能提到完全访问');
-  if (kind === 'grok') {
-    const profiles = await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8');
-    assert.match(profiles, /\[profiles\.helm\]\nextends = "workspace"/);
-    assert.ok(profiles.includes(`deny = ${JSON.stringify(credentialPaths(ctx.home))}`));
-  }
+    Array(6).fill('allow_once'), '调度者的权限请求一律单次批准');
 });
 
-for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝错误可写根与未开放的调度者能力，不启动 CLI`, async t => {
+for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝未开放的调度者能力，不启动 CLI`, async t => {
   const ctx = await acpFixture(t, {}, true, kind);
   const agent = { ...ctx.agent, role: 'coordinator' as const };
-  for (const sandbox of [{ mode: 'read-only' as const, writableRoots: [] },
-    { mode: 'workspace-write' as const, writableRoots: [] }, { mode: 'workspace-write' as const, writableRoots: [join(ctx.cwd, '..')] },
-    { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, join(ctx.cwd, '..')] }, { mode: 'read-only' as const, writableRoots: [ctx.cwd] }]) {
-    await assert.rejects(ctx.driver.start({ ...ctx.options, agent, sandbox }).then(session => {
-      t.after(() => session.cancel()); return session;
-    }), /coordinator/);
-  }
   const capabilities = acpAgents[kind].capabilities;
   const previous = capabilities.coordinator;
   const reason = `${kind} 调度者真实冒烟未通过。`;

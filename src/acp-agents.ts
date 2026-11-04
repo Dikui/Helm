@@ -1,16 +1,12 @@
 import type { InitializeResponse, PromptResponse, SessionConfigOption } from '@agentclientprotocol/sdk';
-import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { deepseekUsage } from './deepseek-usage.js';
-import { credentialPaths, type DriverCapabilities, type ModelOption, type TokenUsage, type SessionOptions } from './driver.js';
+import type { DriverCapabilities, ModelOption, TokenUsage } from './driver.js';
 import type { AgentConfig } from './agents.js';
 import type { EnvironmentOverrides } from './environment.js';
-
-// Grok sandbox profiles Helm defines in ~/.grok/sandbox.toml (see ensureGrokSandboxProfiles).
-export const grokProfiles = { write: 'helm' } as const;
 
 // Only agent differences belong here; ACP sequencing stays in AcpDriver.
 interface AcpAgentProfile {
@@ -23,7 +19,6 @@ interface AcpAgentProfile {
   environment: EnvironmentOverrides;
   homeVariable?: string;
   homeConfigFiles?: string[];
-  permissionAllowed?(input: unknown, mode: SessionOptions['sandbox']['mode']): boolean;
   unavailable(agent: AgentConfig): string | undefined;
   initializationUnavailable(agent: AgentConfig, response: InitializeResponse): string | undefined;
   sessionSettings(agent: AgentConfig, options: SessionConfigOption[] | null | undefined): { id: string; value: string; apply: boolean; optional?: boolean }[];
@@ -88,15 +83,9 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
         return { args: ['--patch', path], cleanup };
       } catch (error) { await cleanup(); throw error; }
     },
-    environment: { set: { DSH_PERMISSION_MODE: 'workspace-write' }, unset: ['DEEPSEEK_API_KEY', 'DSH_HOME'] },
+    environment: { set: { DSH_PERMISSION_MODE: 'danger-full-access' }, unset: ['DEEPSEEK_API_KEY', 'DSH_HOME'] },
     homeVariable: 'DSH_HOME',
     homeConfigFiles: ['.credentials.yaml', '.env', 'cordis.patch.yml'],
-    permissionAllowed(input, mode) {
-      // dsh's bash/fs tools can request a per-call sandbox escalation. Never
-      // auto-approve a wider boundary than the standing session sandbox.
-      if (!input || typeof input !== 'object' || !('sandbox_permissions' in input)) return true;
-      return input.sandbox_permissions === 'read-only' || (mode === 'workspace-write' && input.sandbox_permissions === 'workspace-write');
-    },
     unavailable(agent) {
       if (agent.role === 'coordinator' && !this.capabilities.coordinator) return this.capabilities.coordinatorUnavailableReason ?? `${this.name} 当前驱动能力不支持调度者。`;
       if (!agent.model) return 'DeepSeek Agent 必须指定模型 id 与路由，请在设置页选择 dsh 公布的模型。';
@@ -147,12 +136,11 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
       autoMemory: { status: 'disabled', mechanism: 'GROK_MEMORY=0 与 --no-leader，按独立进程关闭；组织 requirements.toml/MDM 强制启用时仍可能读写个人记忆。' },
     },
     name: 'Grok', command: 'grok', authentication: 'cached_token',
-    async prepare(_agent, _names, env) { await ensureGrokSandboxProfiles(env.HOME ?? homedir()); return undefined; },
     // A shared leader ignores process settings and plugins, including GROK_MEMORY=0.
     arguments: agent => ['agent', ...(agent.reasoningEffort ? ['--effort', agent.reasoningEffort] : []), '--no-leader',
       ...(agent.skillsPath ? ['--plugin-dir', resolve(agent.skillsPath, '..')] : []), 'stdio'],
-    // Subagents and background workflows run outside Helm's usage, sandbox and process cleanup.
-    environment: { set: { GROK_SANDBOX: grokProfiles.write, GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0', GROK_MEMORY: '0',
+    // Subagents and background workflows run outside Helm's usage and process cleanup.
+    environment: { set: { GROK_SANDBOX: 'off', GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0', GROK_MEMORY: '0',
       // Grok's allowlisted config overlay changes filters, never embeds values.
       GROK_CONFIG: JSON.stringify({ shell_environment_policy: { inherit: 'all', ignore_default_excludes: true, exclude: [], include_only: [] },
         toolset: { bash: { login_shell_capture: false } } }),
@@ -195,32 +183,6 @@ export const acpAgents: Record<'grok' | 'deepseek', AcpAgentProfile> = {
     installCommand: 'curl -fsSL https://x.ai/cli/install.sh | bash', loginCommand: 'grok login',
   },
 };
-
-// Grok defines sandbox profiles only in sandbox.toml, so Helm keeps this marked block in the
-// shared ~/.grok/sandbox.toml (the user approved it) and leaves the rest of the file alone.
-// Grok sandboxes its whole process, so denied paths cover its file tools as well as shell.
-const grokBlockStart = '# >>> Helm sandbox profiles (managed by Helm; rewritten when Helm starts Grok)';
-const grokBlockEnd = '# <<< Helm sandbox profiles';
-
-export async function ensureGrokSandboxProfiles(home: string) {
-  const path = join(home, '.grok', 'sandbox.toml');
-  // JSON string arrays are valid TOML inline arrays.
-  const deny = `deny = ${JSON.stringify(credentialPaths(home))}`;
-  const block = [grokBlockStart, `[profiles.${grokProfiles.write}]`, 'extends = "workspace"', deny, grokBlockEnd].join('\n');
-  let current = '';
-  try { current = await readFile(path, 'utf8'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const start = current.indexOf(grokBlockStart);
-  const stop = start < 0 ? -1 : current.indexOf(grokBlockEnd, start);
-  const next = stop >= 0 ? current.slice(0, start) + block + current.slice(stop + grokBlockEnd.length)
-    : `${current}${current && !current.endsWith('\n') ? '\n' : ''}${current ? '\n' : ''}${block}\n`;
-  if (next === current) return;
-  await mkdir(dirname(path), { recursive: true });
-  // Concurrent Grok starts write the same content; rename keeps every reader on a whole file.
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, next, { mode: 0o600 });
-  await rename(temporary, path);
-}
 
 export function deepseekEnvironmentPlugin(names: string[]) {
   return `export const name = 'helm-project-environment';

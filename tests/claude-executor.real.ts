@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeExecutorDriver } from '../src/claude-driver.js';
 import { AgentCatalog } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
@@ -25,7 +25,6 @@ test('Claude 订阅 Agent 在临时 HOME 的默认主目录已登录', { skip: !
 // Observe the real SDK boundary without replacing its CLI, tools or messages.
 function observedDriver() {
   const messages: SDKMessage[] = [];
-  const permissions: { tool: string; input: Record<string, unknown>; behavior: PermissionResult['behavior'] }[] = [];
   const endpoints: string[] = [];
   const helmTools: string[] = [];
   const driver = new ClaudeExecutorDriver({ query: args => {
@@ -37,16 +36,9 @@ function observedDriver() {
     assert.ok('url' in endpoint && endpoint.type === 'http');
     assert.match(endpoint.headers?.Authorization ?? '', /^Bearer .+/);
     endpoints.push(endpoint.url);
-    const canUseTool = args.options.canUseTool!;
-    const stream = query({ ...args, options: { ...args.options, maxTurns: 12,
-      canUseTool: async (tool, input, context) => {
-        const decision = await canUseTool(tool, input, context);
-        assert.ok(decision);
-        if (decision.behavior === 'allow') assert.equal(decision.updatedPermissions, undefined);
-        permissions.push({ tool, input, behavior: decision.behavior });
-        return decision;
-      },
-    } });
+    assert.equal(args.options.permissionMode, 'bypassPermissions');
+    assert.equal(args.options.sandbox, undefined);
+    const stream = query({ ...args, options: { ...args.options, maxTurns: 12 } });
     const deadline = setTimeout(() => args.options!.abortController!.abort(), 150_000);
     return {
       close() { clearTimeout(deadline); stream.close(); },
@@ -59,7 +51,7 @@ function observedDriver() {
       },
     };
   } });
-  return { driver, messages, permissions, endpoints, helmTools };
+  return { driver, messages, endpoints, helmTools };
 }
 
 function toolCalls(messages: SDKMessage[]) {
@@ -134,10 +126,9 @@ test('冒烟①⑤：三次真实派单在同端点使用结论与浏览器工�
     }
   });
 
-test('冒烟③执行者：宽松项目设置不能放行副本外 Write 或 Bash 写，副本内写入和本机绑定成功',
+test('冒烟③执行者：无沙箱，副本外 Write 和 Bash 写、副本内写入和本机绑定都成功',
   { skip: !enabled, timeout: 240_000 }, async t => {
-    // The disposable HOME must sit outside Claude's writable temp roots.
-    // Never create the protected destination in the user's actual home.
+    // A fresh directory outside the card copy; removed after the test.
     const outside = await realpath(await mkdtemp(join(homedir(), '.helm-executor-smoke-')));
     t.after(() => rm(outside, { recursive: true, force: true }));
     const outsideWrite = join(outside, 'write-outside.txt');
@@ -146,24 +137,18 @@ test('冒烟③执行者：宽松项目设置不能放行副本外 Write 或 Bas
     const insideCommand = `node -e ${shellQuote('require("fs").writeFileSync("inside-bash.txt","inside"); const s=require("http").createServer(); s.listen(0,"127.0.0.1",()=>s.close(()=>console.log("local-binding-ok")));')}`;
     const observed = observedDriver();
     const daemon = await fixture(t, [], { executorDriver: observed.driver, model: 'haiku',
-      projectSettings: {
-        permissions: { defaultMode: 'acceptEdits', allow: ['Write', `Write(${outside}/**)`, `Edit(${outside}/**)`, 'Bash(*)'] },
-        sandbox: { enabled: false, allowUnsandboxedCommands: true, excludedCommands: ['printf *', 'node *'], filesystem: { allowWrite: [outside] } },
-        fastMode: true,
-      },
       content: `这是隔离冒烟，只对下面的全新临时文件操作，不读凭据、不安装、不派生子代理、不提交、不推送、不部署。
-按顺序各尝试一次：
-1. 用 Write 向 ${outsideWrite} 写 outside，预期被 canUseTool 拒绝。
-2. 用 Bash 原样执行 ${outsideCommand}，预期被沙箱拦下。必须实际调用 Bash，不使用 dangerouslyDisableSandbox，不重试或寻找绕过方法。
+按顺序各执行一次：
+1. 用 Write 向 ${outsideWrite} 写 outside。
+2. 用 Bash 原样执行 ${outsideCommand}。
 3. 用 Write 向当前副本的 inside-write.txt 写 inside。
 4. 用 Bash 原样执行 ${insideCommand}，验证副本内写入及 127.0.0.1 监听成功。
-拒绝是预期结果，继续完成剩余检查。最后调用 helm MCP 的 submit-conclusion，符合预期时 conclusion 为 completed，否则为 blocked。`,
+最后调用 helm MCP 的 submit-conclusion，符合预期时 conclusion 为 completed，否则为 blocked。`,
     });
     const dispatch = await daemon.ended();
     connected(observed);
     assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? dispatch.endReason);
     assert.equal(dispatch.conclusion, 'completed');
-    assert.ok(observed.permissions.some(item => item.tool === 'Write' && item.input.file_path === outsideWrite && item.behavior === 'deny'), '必须实际触发 canUseTool 的副本外 Write 拒绝');
     // The model may requote the command; match on its target file instead of the exact string.
     const bash = toolCalls(observed.messages).find(call => call.name === 'Bash' && String((call.input as Record<string, unknown>).command).includes(outsideBash));
     if (!bash) {
@@ -171,15 +156,10 @@ test('冒烟③执行者：宽松项目设置不能放行副本外 Write 或 Bas
       await writeFile(saved, JSON.stringify(observed.messages, null, 2));
       assert.fail(`必须实际尝试副本外 Bash 写入，模型消息见 ${saved}`);
     }
-    const denied = toolResult(observed.messages, bash.id);
-    assert.equal(denied?.is_error, true);
-    assert.match(JSON.stringify(denied?.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
-    assert.ok(!observed.permissions.some(item => item.tool === 'Bash' && item.input.command === (bash.input as Record<string, unknown>).command && item.behavior === 'deny'), 'Bash 越界必须由真实沙箱拒绝');
-    await assert.rejects(readFile(outsideWrite), { code: 'ENOENT' });
-    await assert.rejects(readFile(outsideBash), { code: 'ENOENT' });
+    assert.notEqual(toolResult(observed.messages, bash.id)?.is_error, true);
+    assert.equal((await readFile(outsideWrite, 'utf8')).trim(), 'outside', '无沙箱时副本外 Write 成功');
+    assert.equal(await readFile(outsideBash, 'utf8'), 'outside', '无沙箱时副本外 Bash 写成功');
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
-    assert.match(execFileSync('git', ['-C', card.workPath, 'show', `${dispatch.startCommit}:.claude/settings.json`], { encoding: 'utf8' }), /excludedCommands/,
-      '宽松设置必须已提交并随卡片副本加载');
     assert.equal((await readFile(join(card.workPath, 'inside-write.txt'), 'utf8')).trim(), 'inside');
     assert.equal(await readFile(join(card.workPath, 'inside-bash.txt'), 'utf8'), 'inside');
     // The model may requote the command; match on its marker instead of the exact string.

@@ -13,8 +13,6 @@ test('创建工作只固定基准分支，调度者使用独立目录且不建�
   let cwd: string | undefined;
   const daemon = await uiFixture([ctx => {
     cwd = ctx.options.cwd;
-    assert.equal(ctx.options.sandbox.mode, 'workspace-write');
-    assert.deepEqual(ctx.options.sandbox.writableRoots, [cwd]);
     assert.equal(JSON.parse(ctx.input).projectPath, daemon.repo);
     return [];
   }]);

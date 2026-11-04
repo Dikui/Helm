@@ -197,25 +197,14 @@ export class AcpDriver implements Driver {
     const profile = this.profile;
     const reason = this.profile.unavailable(agent);
     if (reason) throw new Error(reason);
-    const coordinator = agent.role === 'coordinator';
-    if (coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1)) {
-      throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
-    }
-    if (agent.driver !== this.agent || (!coordinator && (options.sandbox.mode !== 'workspace-write' || options.sandbox.writableRoots.length !== 1))) {
-      throw new Error('ACP executor requires an executor card copy');
-    }
+    if (agent.driver !== this.agent) throw new Error(`ACP driver ${this.agent} cannot start a ${agent.driver} Agent`);
     const cwd = await realpath(options.cwd);
-    if (coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) {
-      throw new Error('ACP coordinator writable roots must contain only its coordinator directory');
-    }
-    if (!coordinator && await realpath(options.sandbox.writableRoots[0]!) !== cwd) throw new Error('ACP executor writable roots must contain only its card copy');
     options.signal?.throwIfAborted();
     const queue: DriverEvent[] = [];
     let wake: (() => void) | undefined;
     let step = 0;
     let id: string | undefined;
     let finalAnswer = '';
-    const toolInputs = new Map<string, unknown>();
     let sent = false;
     let finished = false;
     let settling = false;
@@ -256,13 +245,11 @@ export class AcpDriver implements Driver {
           const entries = normalizePlan(update.entries);
           if (entries) push({ type: 'plan', entries });
         }
-        if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.rawInput !== undefined) toolInputs.set(update.toolCallId, update.rawInput);
         if (update.sessionUpdate === 'tool_call') finalAnswer = '';
         if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') finalAnswer += update.content.text;
       },
       permission(request) {
-        const input = request.toolCall.rawInput ?? toolInputs.get(request.toolCall.toolCallId);
-        const allowed = request.sessionId === id && (profile.permissionAllowed?.(input, options.sandbox.mode) ?? true);
+        const allowed = request.sessionId === id;
         const option = allowed ? request.options.find(option => option.kind === 'allow_once') : undefined;
         // Selecting a persistent rejection can also mutate the user's settings.
         const reject = request.options.find(option => option.kind === 'reject_once');

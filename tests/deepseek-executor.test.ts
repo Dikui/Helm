@@ -213,10 +213,10 @@ test('DeepSeek 续跑保持 id，仅计本次新增用量，使用新进程和�
   assert.equal(requests.filter(r => r.method === 'session/set_config_option').length, 2);
 });
 
-for (const loadGlobalConfig of [false, true]) test(`DeepSeek 全局配置 ${loadGlobalConfig} 时核对模型路线、强度并保持卡片沙箱及禁止推送`, async t => {
+for (const loadGlobalConfig of [false, true]) test(`DeepSeek 全局配置 ${loadGlobalConfig} 时核对模型路线、强度并关闭沙箱、保持禁止推送`, async t => {
   const ctx = await acpFixture(t, { configOptions }, true, 'deepseek');
   ctx.options.env.DSH_HOME = '/must-not-inherit';
-  ctx.options.env.DSH_PERMISSION_MODE = 'danger-full-access';
+  ctx.options.env.DSH_PERMISSION_MODE = 'read-only';
   ctx.options.env.DEEPSEEK_API_KEY = 'must-not-inherit';
   const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig } });
   await session.send('执行派单');
@@ -228,7 +228,7 @@ for (const loadGlobalConfig of [false, true]) test(`DeepSeek 全局配置 ${load
   assert.equal(spawn.env.HOME, ctx.home);
   assert.equal(spawn.env.DSH_HOME, undefined);
   assert.equal(spawn.env.DEEPSEEK_API_KEY, undefined);
-  assert.equal(spawn.env.DSH_PERMISSION_MODE, 'workspace-write');
+  assert.equal(spawn.env.DSH_PERMISSION_MODE, 'danger-full-access');
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
   assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
   assert.equal(spawn.env.GIT_CONFIG_COUNT, undefined);
@@ -294,7 +294,7 @@ test('DeepSeek API Agent 使用各自专用 DSH_HOME，凭据只由 CLI 读取�
   const requests = await ctx.requests();
   const spawns = requests.filter(r => r.method === 'fixture/spawn');
   assert.deepEqual([...new Set(spawns.map(r => r.env.DSH_HOME))], ['deepseek-api-one', 'deepseek-api-two'].map(id => join(ctx.home, '.helm', 'agent-homes', id)));
-  assert.ok(spawns.every(r => r.env.HOME === ctx.home && r.env.DEEPSEEK_API_KEY === undefined && r.env.DSH_PERMISSION_MODE === 'workspace-write'));
+  assert.ok(spawns.every(r => r.env.HOME === ctx.home && r.env.DEEPSEEK_API_KEY === undefined && r.env.DSH_PERMISSION_MODE === 'danger-full-access'));
   const settings = requests.filter(r => r.method === 'session/set_config_option').map(r => r.params.value);
   assert.deepEqual(settings, Array.from({ length: 4 }, () => ['["deepseek-official","deepseek-v4-flash"]', 'max']).flat());
 });
@@ -525,7 +525,7 @@ test(`DeepSeek 中止派单等待会话刷盘，保存本轮非零用量和 stdo
   assert.throws(() => process.kill(running.pgid, 0), { code: 'ESRCH' });
 });
 
-test('DeepSeek 普通权限只放行一次，拒绝工具通过 sandbox_permissions 扩大卡片沙箱', async t => {
+test('DeepSeek 权限请求一律只放行一次，包括 sandbox_permissions 提权', async t => {
   const kinds = ['allow_always', 'allow_once', 'reject_once'];
   const permissions = Array.from({ length: 3 }, () => kinds.map(kind => ({ kind, name: kind, optionId: kind })));
   const ctx = await acpFixture(t, { configOptions, permissions, permissionToolCalls: [
@@ -538,7 +538,7 @@ test('DeepSeek 普通权限只放行一次，拒绝工具通过 sandbox_permissi
   await collect(session.events);
   const responses = (await ctx.requests()).filter(r => String(r.id).startsWith('agent-'));
   assert.deepEqual(responses.map(r => r.result.outcome), [
-    { outcome: 'selected', optionId: 'allow_once' }, { outcome: 'selected', optionId: 'reject_once' }, { outcome: 'selected', optionId: 'allow_once' },
+    { outcome: 'selected', optionId: 'allow_once' }, { outcome: 'selected', optionId: 'allow_once' }, { outcome: 'selected', optionId: 'allow_once' },
   ]);
 });
 

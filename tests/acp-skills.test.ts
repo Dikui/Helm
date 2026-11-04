@@ -38,8 +38,7 @@ test('Grok Agent skills 通过进程插件加载，两个并行 Agent 及续跑�
   }
   assert.deepEqual(spawns[4].args, ['agent', '--effort', 'low', '--no-leader', '--plugin-dir', agents[0]!.directory, 'stdio']);
   assert.equal(spawns[5].args.includes('--plugin-dir'), false);
-  assert.deepEqual(await readdir(ctx.home), ['.grok'], '不写 .claude 或 .helm 全局位置');
-  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '.grok 下只有 Helm 的沙箱配置档');
+  assert.deepEqual(await readdir(ctx.home), [], '不写 .claude、.grok 或 .helm 全局位置');
 });
 
 for (const home of ['shared', 'dedicated'] as const) test(`DeepSeek ${home} Agent 独立进程补丁叠加 skills，并行及续跑隔离且退出清理补丁`, async t => {
@@ -92,7 +91,7 @@ for (const home of ['shared', 'dedicated'] as const) test(`DeepSeek ${home} Agen
       } }] }], '增加独立提供者，不覆盖用户原有 skill-filesystem 配置和默认来源');
     assert.equal(spawn.env.HOME, ctx.home);
     if (home === 'shared') assert.equal(spawn.env.DSH_HOME, undefined);
-    assert.equal(spawn.env.DSH_PERMISSION_MODE, 'workspace-write');
+    assert.equal(spawn.env.DSH_PERMISSION_MODE, 'danger-full-access');
     assert.equal(spawn.env.DEEPSEEK_API_KEY, undefined);
     await assert.rejects(stat(spawn.patches[0].path), { code: 'ENOENT' });
   }

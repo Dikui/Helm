@@ -65,8 +65,8 @@ export class AcpClient {
       .onNotification('session/update', ({ params }) => handlers.update(params))
       .onNotification('*', ({ method, params }) => handlers.output({ method, params }))
       .onRequest('session/request_permission', ({ params }) => handlers.permission(params));
-    // Do not expose client filesystem or terminal handlers: all writes must go
-    // through the agent's own sandbox, never through unsandboxed helmd.
+    // Do not expose client filesystem or terminal handlers: agent writes stay
+    // in the agent's own process, never in helmd.
     // @types/node 22 and lib.dom describe the same Web Streams differently.
     const input = protocolStdout(Readable.toWeb(this.child.stdout) as ReadableStream<Uint8Array>,
       text => handlers.output({ method: 'agent/stdout-log', params: { text } }));

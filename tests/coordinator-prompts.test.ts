@@ -37,6 +37,7 @@ test('规则按是否需要项目代码选择运行位置，临时目录交付�
   assert.doesNotMatch(runtime, /readOnly/);
 });
 
-test('调度者运行约定只允许写调度者目录', () => {
-  assert.match(roleRules('coordinator').runtime, /只能写调度者目录/);
+test('调度者运行约定在调度者目录工作，改代码交给卡片', () => {
+  assert.match(roleRules('coordinator').runtime, /在调度者目录工作/);
+  assert.match(roleRules('coordinator').runtime, /项目代码改动交给卡片执行/);
 });

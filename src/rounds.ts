@@ -298,7 +298,6 @@ export class RoundScheduler {
         cwd,
         env: agentEnvironment(agent),
         dataDir: join(this.store.dataDir, 'rounds', id),
-        sandbox: { mode: 'workspace-write', writableRoots: [cwd] },
         mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
         ...(resume ? { resumeSessionId: resume.sessionId } : {}),
         signal: controller.signal,

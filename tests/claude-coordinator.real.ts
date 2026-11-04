@@ -7,9 +7,8 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCoordinatorDriver } from '../src/claude-driver.js';
-import { credentialPaths } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { fixture, until } from './claude-coordinator-fixture.js';
 import { assertInitialization, helmToolNames } from './claude-init.js';
@@ -31,7 +30,6 @@ function toolResult(messages: SDKMessage[], id: string) {
 interface Observation {
   brief: StartupBrief; cwd: string; sessionId: string; resumeSessionId?: string; token: string; endpoint: string; holding: boolean;
   messages: SDKMessage[]; helmTools: string[];
-  permissions: { tool: string; input: Record<string, unknown>; behavior: PermissionResult['behavior'] }[];
 }
 
 // Keep the real CLI, tools and messages. The optional hold stops consumption
@@ -50,24 +48,16 @@ function observedDriver(instructions: (brief: StartupBrief, attempt: number, cwd
     assert.notEqual(sdk.cwd, brief.projectPath);
     assert.deepEqual(sdk.settingSources, []);
     assert.equal(sdk.strictMcpConfig, true);
-    assert.deepEqual(sdk.sandbox?.filesystem, { disabled: false, allowWrite: [sdk.cwd], denyRead: credentialPaths() });
+    assert.equal(sdk.sandbox, undefined);
+    assert.equal(sdk.permissionMode, 'bypassPermissions');
     assert.deepEqual(Object.keys(sdk.mcpServers ?? {}), ['helm']);
     const endpoint = sdk.mcpServers!.helm!;
     assert.ok('url' in endpoint && endpoint.type === 'http');
     assert.match(endpoint.headers?.Authorization ?? '', /^Bearer .+/);
     const record: Observation = { brief, cwd: sdk.cwd, sessionId: sdk.resume ?? sdk.sessionId!, resumeSessionId: sdk.resume, token: endpoint.headers!.Authorization!,
-      endpoint: endpoint.url, holding: false, messages: [], helmTools: [], permissions: [] };
+      endpoint: endpoint.url, holding: false, messages: [], helmTools: [] };
     const attempt = rounds.push(record);
-    const canUseTool = sdk.canUseTool!;
-    const stream = query({ ...args, prompt: `${instructions(brief, attempt, sdk.cwd)}\n\n启动简报：\n${args.prompt}`, options: { ...sdk, maxTurns: 16,
-      canUseTool: async (tool, input, context) => {
-        const decision = await canUseTool(tool, input, context);
-        assert.ok(decision);
-        if (decision.behavior === 'allow') assert.equal(decision.updatedPermissions, undefined);
-        record.permissions.push({ tool, input, behavior: decision.behavior });
-        return decision;
-      },
-    } });
+    const stream = query({ ...args, prompt: `${instructions(brief, attempt, sdk.cwd)}\n\n启动简报：\n${args.prompt}`, options: { ...sdk, maxTurns: 16 } });
     const signal = sdk.abortController!.signal;
     const deadline = setTimeout(() => sdk.abortController!.abort(), 150_000);
     return {
@@ -229,18 +219,17 @@ test('冒烟②：真实调度者操作后被用户打断，新轮次重投同�
     }
   });
 
-test('冒烟③调度者：项目写入被拒、调度者目录可写，项目读取正常且代码不变',
+test('冒烟③调度者：无沙箱，可写调度者目录之外，项目读取正常且代码不变',
   { skip: !enabled, timeout: 240_000 }, async t => {
     let command = '';
     const observed = observedDriver((brief, _attempt, cwd) => {
       assert.equal(brief.work.status, 'aligning');
-      command = `printf forbidden > ${shellQuote(join(brief.projectPath, 'coordinator-write.txt'))}`;
-      return `这是调度者目录沙箱冒烟。${restrictions}
-1. 必须用 Bash 原样尝试一次：${command}
-预期写入被沙箱拦下。禁止使用 dangerouslyDisableSandbox，禁止重试或其他写法。
-2. 拒绝是预期结果，继续用 Bash 执行：printf allowed > ${shellQuote(join(cwd, 'coordinator-notes.txt'))}
+      command = `printf outside > ${shellQuote(join(cwd, '..', 'coordinator-outside.txt'))}`;
+      return `这是调度者无沙箱冒烟。${restrictions}
+1. 必须用 Bash 原样执行一次：${command}
+2. 继续用 Bash 执行：printf allowed > ${shellQuote(join(cwd, 'coordinator-notes.txt'))}
 3. 用 Read 读取 ${join(brief.projectPath, 'README.md')}。
-4. 简短回答实际读到的内容和写入错误，然后退出。`;
+4. 简短回答实际读到的内容，然后退出。`;
     });
     const daemon = await fixture(t, observed.driver, 1, { realFirstRound: true, roundTimeout: 180_000 });
     const events = await daemon.events();
@@ -254,12 +243,10 @@ test('冒烟③调度者：项目写入被拒、调度者目录可写，项目�
     assert.equal(existsSync(join(daemon.directory, 'data', 'worktrees', daemon.work.id, '_work')), false);
     connected(round);
     const bash = toolCalls(round.messages).find(call => call.name === 'Bash' && (call.input as any).command === command);
-    assert.ok(bash, '必须实际尝试项目目录内 Bash 写入');
-    const denied = toolResult(round.messages, bash.id);
-    assert.equal(denied?.is_error, true);
-    assert.match(JSON.stringify(denied.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
+    assert.ok(bash, '必须实际执行调度者目录外的 Bash 写入');
+    assert.notEqual(toolResult(round.messages, bash.id)?.is_error, true);
+    assert.equal(await readFile(join(round.cwd, '..', 'coordinator-outside.txt'), 'utf8'), 'outside', '无沙箱时调度者目录外可写');
     assert.equal(await readFile(join(round.cwd, 'coordinator-notes.txt'), 'utf8'), 'allowed');
-    await assert.rejects(readFile(join(daemon.repo, 'coordinator-write.txt')), { code: 'ENOENT' });
     assert.equal(await readFile(join(daemon.repo, 'README.md'), 'utf8'), 'coordinator read-only baseline\n');
     const read = toolCalls(round.messages).find(call => call.name === 'Read');
     assert.ok(read);
@@ -272,7 +259,6 @@ test('冒烟③调度者：项目写入被拒、调度者目录可写，项目�
 test('冒烟④：调度者目录保持不变，首次写代码派单取最新基准建副本，后续简报引用副本并续跑',
   { skip: !enabled, timeout: 600_000 }, async t => {
     const git = (path: string, ...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
-    let command = '';
     let original = '';
     let latest = '';
     const observed = observedDriver((brief, attempt, cwd) => {
@@ -285,13 +271,10 @@ test('冒烟④：调度者目录保持不变，首次写代码派单取最新�
         assert.equal(brief.work.workBranch, null);
         assert.equal(git(codePath, 'branch', '--show-current'), 'main');
         original = git(codePath, 'rev-parse', 'HEAD');
-        command = `printf forbidden > ${shellQuote(join(codePath, 'alignment-write.txt'))}`;
         return `这是按需副本的首个对齐轮次冒烟。${restrictions}
 1. 用 Bash 执行 pwd，再用 Bash 执行 git -C ${shellQuote(codePath)} branch --show-current。
 2. 用 Read 读取 ${join(codePath, 'README.md')}。
-3. 必须用 Bash 原样尝试一次：${command}
-预期写入被沙箱拒绝；禁止 dangerouslyDisableSandbox、重试或其他写法。拒绝后继续。
-4. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=调度者只能写自己的目录，首次写代码执行派单前才建立副本。
+3. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=首次写代码执行派单前才建立副本。
 然后简短回答读到的内容并退出。`;
       }
       if (attempt === 2) {
@@ -353,13 +336,6 @@ test('冒烟④：调度者目录保持不变，首次写代码派单取最新�
       assert.doesNotMatch(JSON.stringify(result.content), /user checkout modified/);
     };
     assertReadLocation(alignment, daemon.repo);
-    const write = toolCalls(alignment.messages).find(call => call.name === 'Bash' && (call.input as any).command === command);
-    assert.ok(write);
-    const denied = toolResult(alignment.messages, write.id);
-    assert.equal(denied?.is_error, true);
-    assert.match(JSON.stringify(denied.content), /operation not permitted|permission denied|read-only file system|sandbox/i);
-    assert.ok(!alignment.permissions.some(item => item.tool === 'Bash' && item.input.command === command && item.behavior === 'deny'));
-    assert.equal(existsSync(join(daemon.repo, 'alignment-write.txt')), false);
     assert.equal(daemon.git('status', '--porcelain'), '');
     successfulTool(alignment, 'draft-work-description', 1);
 

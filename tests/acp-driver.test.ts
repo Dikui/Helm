@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AcpDriver } from '../src/acp-driver.js';
-import { ensureGrokSandboxProfiles } from '../src/acp-agents.js';
-import { credentialPaths } from '../src/driver.js';
 import { RuleError } from '../src/store.js';
 import { AgentCatalog, type AgentConfig } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
@@ -231,10 +228,7 @@ for (const loadGlobalConfig of [false, true]) test(`Grok 全局配置 ${loadGlob
   assert.deepEqual(processes, [spawn.pid]);
   assert.deepEqual(spawn.args, ['agent', '--effort', 'low', '--no-leader', 'stdio']);
   assert.equal(spawn.env.HOME, ctx.home);
-  assert.equal(spawn.env.GROK_SANDBOX, 'helm');
-  const profiles = await readFile(join(ctx.home, '.grok', 'sandbox.toml'), 'utf8');
-  assert.match(profiles, /\[profiles\.helm\]\nextends = "workspace"\n/);
-  assert.ok(profiles.includes(`deny = ${JSON.stringify(credentialPaths(ctx.home))}`), 'Grok 配置档禁止读写凭据目录');
+  assert.equal(spawn.env.GROK_SANDBOX, 'off');
   assert.equal(spawn.env.GROK_SUBAGENTS, '0');
   assert.equal(spawn.env.GROK_WORKFLOWS, '0');
   assert.equal(spawn.env.GROK_MEMORY, '0');
@@ -314,7 +308,7 @@ test('Grok 原样下发 CLI 的推理强度；每次派单新开进程，默认�
     assert.equal(spawn.env.HOME, ctx.home);
   }
   await assert.rejects(stat(join(ctx.home, '.helm')), { code: 'ENOENT' });
-  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '只写 Helm 的沙箱配置档，不复制登录');
+  await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' }, '不复制登录，也不写 Grok 配置');
 });
 
 test('Grok Agent 拒绝未指定模型或推理强度、fast 和 API 主目录', async t => {
@@ -344,7 +338,7 @@ test('Grok 可用性只完成 initialize 并检查 cached_token / HTTP MCP，不
   const [spawn, ...requests] = await ctx.requests();
   assert.equal(spawn.env.HOME, ctx.home);
   assert.deepEqual(requests.map(r => r.method), ['initialize']);
-  assert.deepEqual(await readdir(join(ctx.home, '.grok')), ['sandbox.toml'], '只写 Helm 的沙箱配置档，不复制登录');
+  await assert.rejects(stat(join(ctx.home, '.grok')), { code: 'ENOENT' }, '不复制登录，也不写 Grok 配置');
 });
 
 for (const initialize of [
@@ -376,17 +370,6 @@ test('Grok CLI 不存在、initialize 拒绝或超时均不可用并收尾；第
     assert.equal((await auth.driver.checkAvailability(auth.agent)).available, true);
     await assert.rejects(auth.driver.start(auth.options), /scripted ACP failure/);
   });
-});
-
-for (const kind of ['grok', 'deepseek'] as const) for (const loadGlobalConfig of [false, true]) test(`${kind} 全局配置 ${loadGlobalConfig} 时可写根仍必须恰为卡片副本`, async t => {
-  const ctx = await acpFixture(t, {}, false, kind);
-  for (const sandbox of [
-    { mode: 'read-only' as const, writableRoots: [] },
-    { mode: 'read-only' as const, writableRoots: [ctx.cwd] },
-    { mode: 'workspace-write' as const, writableRoots: [ctx.cwd, ctx.home] },
-    { mode: 'workspace-write' as const, writableRoots: [ctx.home] },
-  ]) await assert.rejects(ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, sandbox }).then(session => session.cancel()), /card copy/);
-  assert.deepEqual(await ctx.requests(), []);
 });
 
 test('Grok 续跑在新进程用 session/resume，保持会话 id 并更新本次派单的 HTTP MCP 令牌', async t => {
@@ -606,17 +589,18 @@ test('Grok 按字段保留未知用量，明确零用量不丢失', async t => {
 });
 
 
-for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGlobalConfig} 时执行者覆盖调用方沙箱并允许目录写入权限`, async t => {
+for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGlobalConfig} 时执行者覆盖调用方沙箱并批准全部权限请求`, async t => {
   for (const kind of ['grok', 'deepseek'] as const) {
     const permissions = [
       { optionId: 'allow', name: '允许一次', kind: 'allow_once' },
       { optionId: 'reject', name: '拒绝一次', kind: 'reject_once' },
     ];
     const ctx = await acpFixture(t, {
-      permissions: [permissions, permissions],
+      permissions: [permissions, permissions, permissions],
       permissionToolCalls: [
         { toolCallId: 'read', title: '读取', rawInput: { sandbox_permissions: 'read-only' } },
         { toolCallId: 'write', title: '写入', rawInput: { sandbox_permissions: 'workspace-write' } },
+        { toolCallId: 'full', title: '完全访问', rawInput: { sandbox_permissions: 'danger-full-access' } },
       ],
       ...(kind === 'deepseek' ? { configOptions: [
         { id: 'model', name: 'Model', type: 'select', currentValue: '["deepseek-account","deepseek-flash"]', options: [{ value: '["deepseek-account","deepseek-flash"]', name: 'Flash' }] },
@@ -624,38 +608,17 @@ for (const loadGlobalConfig of [false, true]) test(`ACP 全局配置 ${loadGloba
       ] } : {}),
     }, false, kind);
     const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig },
-      env: { ...ctx.options.env, GROK_SANDBOX: 'off', DSH_PERMISSION_MODE: 'danger-full-access' } });
+      env: { ...ctx.options.env, GROK_SANDBOX: 'read-only', DSH_PERMISSION_MODE: 'read-only' } });
     await session.send('联网调研并写报告');
     const events = await collect(session.events);
     session.cancel();
     const spawn = (await ctx.requests()).find(request => request.method === 'fixture/spawn');
-    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], kind === 'grok' ? 'helm' : 'workspace-write');
+    assert.equal(spawn.env[kind === 'grok' ? 'GROK_SANDBOX' : 'DSH_PERMISSION_MODE'], kind === 'grok' ? 'off' : 'danger-full-access');
     if (kind === 'deepseek') {
       const decisions = events.filter(event => event.type === 'output').map(event => JSON.parse(event.text))
         .filter(message => message.method === 'session/request_permission');
-      assert.deepEqual(decisions.map(message => message.allowed), [true, true]);
+      assert.deepEqual(decisions.map(message => message.allowed), [true, true, true]);
     }
   }
 });
 
-test('Grok 沙箱标记段只保留可写 profile，移除旧只读 profile，保留用户配置且内容不变时不重写', async t => {
-  const home = await mkdtemp(join(tmpdir(), 'helm-grok-home-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  const path = join(home, '.grok', 'sandbox.toml');
-  await mkdir(join(home, '.grok'));
-  const user = '[profiles.executor]\nextends = "workspace"\ndeny = ["/x"]';
-  await writeFile(path, user);
-  await ensureGrokSandboxProfiles(home);
-  const first = await readFile(path, 'utf8');
-  assert.ok(first.startsWith(`${user}\n\n# >>> Helm sandbox profiles`));
-  assert.match(first, /\[profiles\.helm\]\nextends = "workspace"\n/);
-  assert.doesNotMatch(first, /helm-read-only/);
-  const written = (await stat(path)).mtimeMs;
-  await ensureGrokSandboxProfiles(home);
-  assert.equal((await stat(path)).mtimeMs, written, '内容不变不重写');
-  // An outdated block is replaced in place; text after it stays.
-  await writeFile(path, first.replace('# <<< Helm sandbox profiles',
-    '[profiles.helm-read-only]\nextends = "read-only"\ndeny = []\n# <<< Helm sandbox profiles') + '\n[profiles.mine]\nextends = "read-only"\n');
-  await ensureGrokSandboxProfiles(home);
-  assert.equal(await readFile(path, 'utf8'), first + '\n[profiles.mine]\nextends = "read-only"\n');
-});

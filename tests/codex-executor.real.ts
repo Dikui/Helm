@@ -8,14 +8,14 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
-import { codexFixture, ok, sandboxDenied } from './codex-executor-fixture.js';
+import { codexFixture, ok } from './codex-executor-fixture.js';
 import { configureTestAgent } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 const enabled = process.env.HELM_CODEX_EXECUTOR_REAL === '1';
 const shellQuote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 
-test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目录、token、续跑和两 Agent skills 隔离',
+test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主目录、token、续跑和两 Agent skills 隔离',
   { skip: !enabled, timeout: 720_000 }, async t => {
     // Only this smoke links the real login into a temporary default CLI home; never write to the real home.
     const realHome = homedir();
@@ -46,7 +46,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
       content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交、不推送。
 记住本次冒烟的测试标签 ${marker}（公开测试数据，不是凭据），后续续跑派单会问你，不要写入文件。
 使用你可用的 helm-smoke- 开头的 skill，照技能要求写 skill-proof.txt，并列出可用的这些技能名。
-实际执行一次原样命令 ${command}，预期副本外写入被沙箱拒绝；不得重试、提权或寻找绕过方式，拒绝后继续。
+实际执行一次原样命令 ${command}。
 在副本中写 inside.txt（内容 inside）。
 只用 helm MCP 的 browser_navigate 打开 http://127.0.0.1:${address.port}，browser_snapshot 读取标题，browser_take_screenshot 保存 codex.png。
 最后在同一 helm MCP 调用 submit-conclusion，符合预期用 completed，否则 blocked，并给出最终回答。`,
@@ -76,8 +76,7 @@ test('Codex 真实执行者：同端点结论/浏览器、沙箱、默认主目�
     for (const tool of ['browser_navigate', 'browser_snapshot', 'browser_take_screenshot', 'submit-conclusion']) {
       assert.ok(items.some((item: any) => item.type === 'mcpToolCall' && item.server === 'helm' && item.tool === tool && item.status === 'completed'), `必须实际调用 helm/${tool}`);
     }
-    assert.ok(await sandboxDenied(items, join(daemon.home, '.codex'), outside), '必须由真实沙箱拒绝副本外 shell 写入');
-    await assert.rejects(readFile(outside), { code: 'ENOENT' });
+    assert.equal(await readFile(outside, 'utf8'), 'outside', '无沙箱时副本外 shell 写成功');
     const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');
     assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), alpha);

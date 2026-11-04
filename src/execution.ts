@@ -240,7 +240,6 @@ export class ExecutionRunner {
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls), ...environment,
             HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
           projectEnvironmentNames: Object.keys(environment),
-          sandbox: { mode: 'workspace-write', writableRoots: [workPath] },
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),
           signal: stop.signal,

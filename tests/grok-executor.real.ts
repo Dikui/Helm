@@ -14,7 +14,7 @@ import { until } from './browser-fixture.js';
 const enabled = process.env.HELM_GROK_EXECUTOR_REAL === '1';
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱、token、模型/推理强度、两派单同时会合、续跑与取消',
+test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、token、模型/推理强度、两派单同时会合、续跑与取消',
   { skip: !enabled, timeout: 720_000 }, async t => {
     const realHome = homedir();
     const stagedAuth = join(realHome, '.grok', 'auth.json');
@@ -27,7 +27,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
     });
     const evidence = await realpath(await mkdtemp(join(tmpdir(), 'helm-grok-smoke-evidence-')));
     console.log(`Grok 冒烟证据目录：${evidence}`);
-    // The protected destination must be outside the sandbox's writable temp roots.
+    // A fresh directory outside the card copy; removed after the test.
     const outsideDirectory = await realpath(await mkdtemp(join(homedir(), '.helm-grok-smoke-')));
     t.after(() => rm(outsideDirectory, { recursive: true, force: true }));
     const outside = join(outsideDirectory, 'outside.txt');
@@ -81,7 +81,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
       content: `这是低消耗隔离冒烟，不安装、不派生子代理、不提交；只允许下面一次指定的本地远端推送探针，不得向其他目标推送；不得切模型或推理强度。
 第一步只执行一次原样命令 ${rendezvous('one')}，等待另一派单到达；不得提前结束、重试或绕过。成功应输出 parallel-ok。
 在卡片副本原样执行一次命令 ${executorGitProbe}，git status 必须成功，git push 必须因 /dev/null/helm-push-disabled/ 失败；不得 unset 环境、覆盖 git 配置或重试，保留工具输出。本地裸远端由测试保留检查，不要清理。
-随后实际执行一次原样命令 ${boundaryCommand}，预期由真实沙箱拒绝副本外写入；不得提权、重试或绕过，拒绝后继续。
+随后实际执行一次原样命令 ${boundaryCommand}。
 在卡片副本写 inside.txt，内容 ${marker}。
 使用已加载的 helm-smoke-grok Agent 技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他 Agent 查找技能。
 只在会话里记住暗号 ${memory}，不得写入文件、日志或本轮最终回答；下一轮会追问。
@@ -124,10 +124,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、卡片沙箱�
         assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(tool)
           && JSON.stringify(entries).includes('helm') && entries.some(e => e.status === 'completed')), `必须实际调用 helm/${tool}`);
       }
-      // The model may append commands (e.g. `echo "exit:$?"`), so the tool's exit code is not reliable evidence.
-      assert.ok([...tools.values()].some(entries => JSON.stringify(entries).includes(boundaryCommand)
-        && /operation not permitted|permission denied|read-only file system|sandbox/i.test(JSON.stringify(entries))), '副本外写入必须失败，并有真实沙箱拒绝证据');
-      await assert.rejects(readFile(outside), { code: 'ENOENT' });
+      assert.equal(await readFile(outside, 'utf8'), 'outside', '无沙箱时副本外写入成功');
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
       assertExecutorGitProbe(tools, card.workPath);
       assert.match(first.finalAnswer, /helm-smoke-grok/);
