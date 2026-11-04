@@ -134,7 +134,11 @@ npm run dev:ui  # 界面开发服务器
 npm run test:real --cache /private/tmp/helm-npm-cache
 ```
 
-它依次跑浏览器、各驱动的调度者与执行者和界面几组测试，某组失败也会跑完其余组，最后汇总失败组。需要本机已登录的 CLI 和 Playwright 自带的 Chromium，浏览器以无头模式运行、不弹窗抢焦点，不用系统 Chrome。输出的截图要打开核对。`test:browser`、`test:claude-executor` 等可单独跑其中一组。
+它依次跑浏览器、各驱动的调度者与执行者和界面几组测试，某组失败也会跑完其余组，最后汇总失败组。需要本机已登录的 CLI 和 Playwright 自带的 Chromium，浏览器以无头模式运行、不弹窗抢焦点，不用系统 Chrome。输出的截图要打开核对。
+
+- **只跑受影响的组**：`npm run test:real --cache /private/tmp/helm-npm-cache -- codex-executor ui`。开发中跑受影响的组，合入 main 前跑全量。
+- **失败重跑**：失败的组自动重跑一次，汇总分为首跑通过、重跑后通过、两次都失败。每次结果记在 `~/.cache/helm-tests/smoke-history.jsonl`；同一测试在最近十次首跑中失败两次以上会提示按缺陷排查，不要再判为偶发。
+- **失败现场**：测试失败时不删临时目录（任务库、派单输出、CLI 会话记录都在里面），路径打印在输出里。临时文件都在 runner 建的 `/tmp/hs-*` 下；必须建在主目录下的测试失败时，现场也会复制到这里。runner 启动时删除 7 天前的 `/tmp/hs-*`。
 
 **代码结构**：`src/` 是后端，主要有任务库与事务（`store.ts`）、操作表（`operations.ts`）、对齐（`alignment.ts`）、调度轮次（`rounds.ts`）、派单（`dispatch.ts`）、验收（`verification.ts`）、审核与合入（`review.ts`、`delivery.ts`）、驱动（`driver.ts` 及各 `*-driver.ts`）、HTTP/SSE（`server.ts`）、MCP（`mcp.ts`）和 CLI（`cli.ts`）。`frontend/` 是 React 界面，构建到 `dist/ui/` 由 `helmd` 直接提供。新增业务操作只需在操作表里登记。
 

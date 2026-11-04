@@ -14,7 +14,7 @@ import { ClaudeDriver } from '../src/claude-driver.js';
 import { startHelmd } from '../src/server.js';
 import { AgentCatalog } from '../src/agents.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
-import { configureTestAgent } from './helmd-fixture.js';
+import { configureTestAgent, removeUnlessFailed } from './helmd-fixture.js';
 import { uiFixture, until } from './ui-fixture.js';
 import { reviewReport } from './fixtures/review-report.js';
 import { gitInitializationFixture } from './fixtures/git-initialization.js';
@@ -194,14 +194,14 @@ test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审
       try { await browser?.close(); }
       finally {
         try { await daemon?.close(); }
-        finally { await rm(directory, { recursive: true, force: true }); }
+        finally { await removeUnlessFailed(t, directory); }
       }
     });
 
     const agentDir = join(directory, 'agents');
     for (const id of ['claude-coordinator', 'claude-executor']) {
       await cp(join(fixtureAgentDir, id), join(agentDir, id), { recursive: true });
-      await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared' });
+      await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: id === 'claude-coordinator' ? 'medium' : 'low', fast: false, home: 'shared' });
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), coordinatorPrompt);
     const claude = new ClaudeDriver();

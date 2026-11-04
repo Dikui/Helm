@@ -2,7 +2,7 @@
 // HELM_MERGE_CONFLICT_REAL=1 node --test dist/tests/merge-conflict.real.js
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import type { Browser } from 'playwright';
 import { AgentCatalog } from '../src/agents.js';
 import { ClaudeDriver } from '../src/claude-driver.js';
 import { startHelmd } from '../src/server.js';
-import { configureTestAgent, fixtureAgentDir } from './helmd-fixture.js';
+import { configureTestAgent, fixtureAgentDir, removeUnlessFailed } from './helmd-fixture.js';
 
 test('真实合入冲突：本地检测、调度者卡片解决与验收、查看改动、再次合入',
   { skip: process.env.HELM_MERGE_CONFLICT_REAL !== '1', timeout: 600_000 }, async t => {
@@ -22,12 +22,12 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
     let browser: Browser | undefined;
     t.after(async () => {
       try { await browser?.close(); }
-      finally { try { await daemon?.close(); } finally { await rm(directory, { recursive: true, force: true }); } }
+      finally { try { await daemon?.close(); } finally { await removeUnlessFailed(t, directory); } }
     });
     const agentDir = join(directory, 'agents');
     for (const id of ['claude-coordinator', 'claude-executor']) {
       await cp(join(fixtureAgentDir, id), join(agentDir, id), { recursive: true });
-      await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: 'low', fast: false, home: 'shared' });
+      await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: id === 'claude-coordinator' ? 'medium' : 'low', fast: false, home: 'shared' });
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), `这是合入冲突真实冒烟。
 对齐时 draft-work-description：需求是解决 shared.txt 的合并冲突，边界只改 shared.txt，标准是解决后 shared.txt 只有一行字面文本 RESOLVED-BOTH 加一个换行，基准提交是工作分支的祖先。

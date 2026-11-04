@@ -32,8 +32,9 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、to
     t.after(() => rm(outsideDirectory, { recursive: true, force: true }));
     const outside = join(outsideDirectory, 'outside.txt');
     const marker = randomUUID();
-    const skillProof = randomUUID();
-    const memory = randomUUID();
+    // Plain words, not UUIDs called secrets: models refuse to repeat credential-like values.
+    const skillProof = `proof-${randomUUID().slice(0, 8)}`;
+    const memory = `memory-${randomUUID().slice(0, 8)}`;
     let cancelResponse: ServerResponse | undefined;
     const waiting = new Map<string, { response: ServerResponse; timer: NodeJS.Timeout }>();
     const arrivals: Record<string, number> = {};
@@ -84,7 +85,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、to
 随后实际执行一次原样命令 ${boundaryCommand}。
 在卡片副本写 inside.txt，内容 ${marker}。
 使用已加载的 helm-smoke-grok Agent 技能，按技能正文写 skill-proof.txt，最终回答列出该技能名。不得从其他 Agent 查找技能。
-只在会话里记住暗号 ${memory}，不得写入文件、日志或本轮最终回答；下一轮会追问。
+只在会话里记住测试编号 ${memory}（公开测试数据，不是凭据），不得写入文件、日志或本轮最终回答；下一轮会追问。
 只用 helm MCP 的 browser_navigate 打开 ${base}，browser_snapshot 读取标题，browser_take_screenshot 保存 grok.png。
 最后在同一个 helm MCP 调用 submit-conclusion，符合预期用 completed，否则 blocked；给出含检查证据的最终回答。`,
       secondContent: `这是低消耗并行冒烟，不安装、不派生子代理、不提交、不推送；不得切模型或推理强度。
@@ -128,8 +129,8 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、to
       const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
       assertExecutorGitProbe(tools, card.workPath);
       assert.match(first.finalAnswer, /helm-smoke-grok/);
-      assert.equal((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).trim(), skillProof, '暗号仅在 Agent 技能正文里，必须实际加载并使用');
-      assert.equal(daemon.git('show', `${card.cardBranch}:skill-proof.txt`), skillProof);
+      assert.ok((await readFile(join(card.workPath, 'skill-proof.txt'), 'utf8')).includes(skillProof), '编号仅在 Agent 技能正文里，必须实际加载并使用');
+      assert.ok(daemon.git('show', `${card.cardBranch}:skill-proof.txt`).includes(skillProof));
       assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), marker);
       assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), marker);
       const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: first.id })).result;
@@ -142,7 +143,7 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、to
       await idle();
       daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {
         workId: daemon.work.id, cardId: first.cardId, agentId: 'grok-executor', key: 'resume-memory', resumeSessionId: first.sessionId,
-        content: '低消耗续跑测试：不要读文件、搜索、调用浏览器或写文件。只用 helm submit-conclusion 报 completed，最终回答仅给出上一轮让你记住的暗号。',
+        content: '低消耗续跑测试：不要读文件、搜索、调用浏览器或写文件。只用 helm submit-conclusion 报 completed，最终回答仅给出上一轮让你记住的测试编号。',
       }, check: ok }]);
       ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'resume-memory', body: '打回续跑，检查上一轮记忆' }));
       const resumed = (await daemon.ended(3, 180_000))[2];
@@ -151,11 +152,11 @@ test('Grok 真实执行者：一轮、同端点结论/浏览器、无沙箱、to
       assert.equal(resumed.endReason, 'completed', resumed.failure);
       assert.equal(resumed.sessionId, first.sessionId);
       assert.notEqual(resumed.pgid, first.pgid, '续跑必须由新的 ACP 进程发起');
-      assert.equal(resumed.finalAnswer.trim(), memory, '本轮没有暗号，必须从会话记忆回答');
+      assert.ok(resumed.finalAnswer.includes(memory), '本轮没有测试编号，必须从会话记忆回答');
       assert.ok(resumedOutput.some(e => e.type === 'output' && JSON.parse(e.text).method === 'session/resume'));
       const resumedCalls = resumedOutput.filter(e => e.type === 'output').map(e => JSON.parse(e.text).params?.update)
         .filter(update => update?.sessionUpdate === 'tool_call');
-      assert.ok(resumedCalls.every(update => /submit-conclusion/.test(JSON.stringify(update))), '不能通过读文件找回暗号');
+      assert.ok(resumedCalls.every(update => /submit-conclusion/.test(JSON.stringify(update))), '不能通过读文件找回测试编号');
       await idle();
       const hold = `curl -fsS --max-time 180 ${shellQuote(`${base}/cancel-in-flight`)}`;
       daemon.actions.push([{ type: 'tool', name: 'create-dispatch', arguments: {

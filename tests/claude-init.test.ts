@@ -5,7 +5,7 @@ import { assertInitialization } from './claude-init.js';
 
 test('初始化断言允许用户 MCP 和 Skill，拒绝额外内置工具、伪装的 Helm 工具、fast 和缺失记录', () => {
   const init = { type: 'system', subtype: 'init', tools: ['Read', 'Skill', 'mcp__helm__get-work', 'mcp__user__read'],
-    mcp_servers: [{ name: 'helm', status: 'connected' }, { name: 'user', status: 'connected' }], fast_mode_state: 'off', permissionMode: 'default' };
+    mcp_servers: [{ name: 'helm', status: 'connected' }, { name: 'user', status: 'connected' }], fast_mode_state: 'off', permissionMode: 'bypassPermissions' };
   const check = (value: object, role: 'coordinator' | 'executor' = 'executor') =>
     assertInitialization([value as SDKMessage], role, ['get-work']);
   check(init);

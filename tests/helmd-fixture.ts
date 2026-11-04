@@ -1,5 +1,7 @@
-import { cp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import type { TestContext } from 'node:test';
+import { join, relative } from 'node:path';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +32,21 @@ export async function shareCodexCaches(codexHome: string, realHome: string) {
 export interface FirstMessage {
   body: string;
   attachments?: { name: string; content: string }[];
+}
+
+// Call from t.after: a failed real-CLI test keeps its whole run (task database, dispatch output,
+// CLI transcripts under the test HOME) so the failure can be diagnosed instead of rerun blindly.
+export async function removeUnlessFailed(t: TestContext, directory: string) {
+  // Node 26 sets passed before after-hooks run; @types/node does not declare it yet.
+  if ((t as TestContext & { passed: boolean }).passed) return rm(directory, { recursive: true, force: true });
+  let kept = directory;
+  // Some real smokes must live under HOME; keep their evidence in the temporary root, never in the user's home.
+  if (relative(await realpath(tmpdir()), directory).startsWith('..')) {
+    kept = await mkdtemp(join(tmpdir(), 'helm-failed-'));
+    await cp(directory, kept, { recursive: true, verbatimSymlinks: true });
+    await rm(directory, { recursive: true, force: true });
+  }
+  console.error(`测试失败，现场保留在 ${kept}（任务库、派单输出、CLI 会话记录）`);
 }
 
 // Existing scenarios have independent scripts for each role. Register both at

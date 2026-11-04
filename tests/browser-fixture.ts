@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, removeUnlessFailed, type FirstMessage } from './helmd-fixture.js';
 
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 const workIdOf = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
@@ -58,7 +58,7 @@ export async function fixture(t: TestContext, executors: FakeScript[], config: {
     ], ...(config.after ? [config.after] : [])]),
   } satisfies Parameters<typeof startHelmd>[0];
   const daemon = await startHelmd(options);
-  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await daemon.close(); await removeUnlessFailed(t, directory); });
   const call = async (name: string, params: object = {}, token?: string) => {
     const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { Authorization: token } : {}) }, body: JSON.stringify(params) });
     return { status: response.status, ...await response.json() as any };

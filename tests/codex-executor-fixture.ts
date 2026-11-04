@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { startHelmd } from '../src/server.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { copyAgents, configureTestAgent, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
+import { copyAgents, configureTestAgent, removeUnlessFailed, shareCodexCaches, type FirstMessage } from './helmd-fixture.js';
 import { until } from './browser-fixture.js';
 
 export const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -34,7 +34,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   t.after(async () => {
     await daemon?.close();
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-    await rm(directory, { recursive: true, force: true });
+    await removeUnlessFailed(t, directory);
   });
   const repo = join(directory, 'project');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });

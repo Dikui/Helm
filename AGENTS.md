@@ -22,4 +22,4 @@ single-context：根目录 `GLOSSARY.md` 加 `docs/adr/`。涉及业务或架构
 
 ### Real smoke
 
-改动驱动、浏览器、进程清理、子进程环境或 `helm serve` 后，须在沙箱外运行 `npm run test:real --cache /private/tmp/helm-npm-cache`。需要本机已登录的真实 Claude CLI 和 Playwright 自带的 Chromium；浏览器一律无头运行，避免弹窗抢用户焦点；查看测试输出的截图。这是全局“浏览器只用 ego lite”规则的例外：真实冒烟用自己隔离的 Chrome for Testing，不碰用户登录态；其余界面验收仍用 ego lite。沙箱内只跑 `npm run check`、`npm test`，浏览器使用工具替身，不启动真实浏览器。
+改动驱动、浏览器、进程清理、子进程环境或 `helm serve` 后，须在沙箱外运行 `npm run test:real --cache /private/tmp/helm-npm-cache`。需要本机已登录的真实 Claude CLI 和 Playwright 自带的 Chromium；浏览器一律无头运行，避免弹窗抢用户焦点；查看测试输出的截图。开发中只跑受影响的组（命令末尾加 `-- <组名>`），合入 main 前跑全量；失败组会自动重跑一次，出现“反复失败”提示时按缺陷排查，不当偶发。这是全局“浏览器只用 ego lite”规则的例外：真实冒烟用自己隔离的 Chrome for Testing，不碰用户登录态；其余界面验收仍用 ego lite。沙箱内只跑 `npm run check`、`npm test`，浏览器使用工具替身，不启动真实浏览器。

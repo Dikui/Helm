@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FakeDriver, type Driver } from '../src/driver.js';
 import type { HelmEvent } from '../src/store.js';
-import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, type FirstMessage } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, removeUnlessFailed, type FirstMessage } from './helmd-fixture.js';
 
 type TestEvent = Omit<HelmEvent, 'details'> & { details: Record<string, any> };
 
@@ -43,7 +43,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
   const drain = new FakeDriver();
   let started = 0;
   const agentDir = await copyAgents(directory);
-  await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'low' });
+  await configureTestAgent(agentDir, 'claude-coordinator', { model: 'haiku', reasoningEffort: 'medium' });
   const daemon = await startHelmd({ agentDir, port: 0, dataDir: join(directory, 'data'),
     driver: { capabilities: driver.capabilities, start(options) {
       const round = started++;
@@ -53,7 +53,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
     executorDriver: new FakeDriver([[{ type: 'hang' }]]),
     browserCommand: { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/browser-mcp.js', import.meta.url)), '--test-process-pid', String(process.pid)] },
   });
-  t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await daemon.close(); await removeUnlessFailed(t, directory); });
   const call = async (name: string, params: object = {}) => {
     const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });

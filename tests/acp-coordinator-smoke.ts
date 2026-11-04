@@ -50,7 +50,7 @@ criteria=[{criterion: "README 基线保持原样", status: "passed", evidence: [
 cards=[{cardId: "实际卡片 id", title: "README 检查", result: "已完成只读检查", verification: "not-applicable", evidence: [{label: "派单结果", kind: "dispatch", ref: "实际派单 id"}], dispatches: [{agentId: "claude-executor", dispatchId: "实际派单 id"}]}]。
 报告中的实际 id 必须取自工具结果，不能照抄占位文字。审核只交给用户，本轮退出。`;
           await session.send(`这是低消耗 Helm 调度者冒烟。工作由轮次令牌确定，MCP 调用不传 workId；业务操作只用注入的 helm 端点。
-不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。工具失败即报告退出。若有原生计划工具，可用它展示本轮步骤。
+不安装、不派生子代理、不启动浏览器、不提交、不推送、不部署。工具返回结果就算成功，接着做下一步；只有返回明确的错误时才报告退出。若有原生计划工具，可用它展示本轮步骤。
 ${instructions}\n\n启动简报：\n${content}`);
         },
         events: (async function* () {
@@ -66,7 +66,8 @@ ${instructions}\n\n启动简报：\n${content}`);
   };
   let daemon: Awaited<ReturnType<typeof acpCoordinatorFixture>> | undefined;
   try {
-    daemon = await acpCoordinatorFixture(t, kind, driver, { stagedAuth });
+    // Coordinator smokes test Helm's plumbing; low effort made the model skip scripted steps. DeepSeek has no medium.
+    daemon = await acpCoordinatorFixture(t, kind, driver, { stagedAuth, effort: kind === 'deepseek' ? 'high' : 'medium' });
     const idle = () => until(daemon!.events, events => events.some(event => event.action === 'round-ended')
       && events.filter(event => event.action === 'round-started').length === events.filter(event => event.action === 'round-ended').length, 240_000);
     await idle();
