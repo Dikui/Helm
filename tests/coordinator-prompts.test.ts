@@ -5,8 +5,9 @@ import { defaultPromptDir, readPrompt, roleRules } from '../src/prompts.js';
 test('默认调度者规则缩减固定输入并保留跨轮与派单约定', () => {
   const rules = roleRules('coordinator');
   const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
-  assert.ok(Buffer.byteLength(rules.role) <= 6_650, '角色规则预算 6650 字节（含跑完交审核原则）');
-  assert.ok(Buffer.byteLength(executing) <= 10_450, '执行阶段规则预算 10450 字节（含先诊断、停卡交付）');
+  // Issue #24 adds delivery usability guidance; retain explicit prompt size limits.
+  assert.ok(Buffer.byteLength(rules.role) <= 7_000, '角色规则预算 7000 字节（含用户实际使用目标）');
+  assert.ok(Buffer.byteLength(executing) <= 11_500, '执行阶段规则预算 11500 字节（含交付缺口处理）');
   for (const convention of ['helm MCP', 'resumed', 'phaseRules', 'write-coordinator-notes', 'send-message', 'projectPath', 'projectInstructionPaths', '新会话先读'])
     assert.ok(rules.role.includes(convention), `角色规则保留 ${convention}`);
   for (const convention of ['submit-conclusion', 'complete-card', 'request-review', 'outdated', 'autoFlow'])

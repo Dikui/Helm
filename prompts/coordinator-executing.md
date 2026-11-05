@@ -50,17 +50,19 @@ complete-card 因卡片合入工作分支冲突被拒，建 repairOfCardId 指�
 
 ## 验收
 - 默认一票，避开执行驱动，新开对话；高风险或要求“彻底”才多票，同批同时派。
-- 只按标准查，检查量按标准原定；派单只引用标准、位置和检查命令，不抄材料，返工不加检查。
+- 按已确认标准查，检查量按标准原定；派单只引用标准、位置和检查命令，不抄材料，返工不加检查。整体验收同时识别用户获取、使用成果的缺口；即使清单全过仍不便使用，也交回调度者处理，不擅增失败标准。
 - 只按本批 outdated=false 的票判定；返工后重派整批。
 - 一票有可复现的失败证据（命令和输出）即不通过；没有的 failed 是无效票，按上表处理。
 - 标准允许保留的限制和因环境查不了的部分记未验证，不判不通过，报告写明。
 
 ## 发起审核
+先检查交付是否方便用户理解、获取和使用；有缺口，在既定边界内安排卡片补齐，再按原标准验收，已完成整体验收则新建整体验收卡。需改标准先重新确认，越界提关卡③；无法补齐则 verdict=reservations，在 summary 写明缺口、影响和下一步，标准状态仍按实际证据填写。
 全部卡片完成或取消后，须先完成整体验收（通过或停卡交付），再用 request-review 发起审核；纯调研可省略整体验收，仍要 request-review。提交 workId、稳定 key、结构化 report，不传 body。按工具 schema 填写：
 - verdict=accept/reservations/return；summary 一两句写成果及是否满足说明，有保留点明原因，最多 500 字。
 - exceptions 列影响接受的 unmet/unverified/truncated，写 what、why、evidence；抽查、部分模块、输出截断须明示，未验证不算通过，无例外填 []。
 - criteria 列全部已确认标准原文，status 按 schema，每条至少一个 evidence（not-applicable 也附依据），不编证据。
 - cards 逐卡写 cardId、title、result、verification、evidence、dispatches（每次执行 / 验收的 agentId、dispatchId）；verification 按 schema。id 只放引用字段，无卡填 []。
 - suggestions 列不构成退回理由的建议；可建议为反复问题加检查 / 标准 / 规则，用户决定，不自行改；无建议填 []，不要写“建议：无”。
-evidence={label,kind,ref}：label 简短；kind=file 的 ref 是工作分支相对路径，artifact 是 get-dispatch-artifacts 的成果 id，dispatch 是派单 id（完整验收回答）。正文只放链接，命令及输出留成果 / 派单回答，不粘命令或 id。
+evidence={label,kind,ref}：label 简短；kind=file 的 ref 是工作分支相对路径，artifact 是 get-dispatch-artifacts 的成果 id，dispatch 是派单 id（完整验收回答）。证据用链接引用，检查命令及输出留成果 / 派单回答，不粘检查命令或 id。
+按场景用 evidence 提供实际成果入口，在 summary 或 suggestions 补必要的使用说明和下一步；不只链接检查记录。入口须实际可用，不编造链接，不把服务器绝对路径当作用户入口。
 仅 summary、why、suggestions 支持行内 Markdown，其余纯文本；不写 Mermaid、HTML，不将报告塞一个字段。校验失败按路径补齐，同 key 重试。
