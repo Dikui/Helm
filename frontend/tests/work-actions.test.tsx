@@ -68,6 +68,73 @@ test('页头直接暂停和恢复经 HTTP 生效，暂停仍可留言；取消�
   expect((within(menu).getByRole('button', { name: '换调度者 Agent' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
+// Issue #26 · medium regression: real HTTP/SSE with only the cancellation response delayed.
+test.each([
+  { response: '成功', fail: false },
+  { response: '失败', fail: true },
+])('工作已取消时自动关闭取消确认框，不等待迟到的$response响应', async ({ fail }) => {
+  await startWork();
+  let release!: () => void;
+  let delivered = false;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (String(input).endsWith('/api/cancel-work')) {
+      await hold;
+      delivered = true;
+      if (fail) throw new Error('模拟取消后的响应丢失');
+    }
+    return response;
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  await screen.findByRole('heading', { level: 1, name: '管理输出的工作' });
+  fireEvent.click(within(actions()).getByRole('button', { name: '取消工作' }));
+  const dialog = await screen.findByRole('dialog', { name: '取消工作' });
+  try {
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认取消工作' }));
+    await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已取消');
+    expect(delivered).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消工作' })).toBeNull());
+    expect(document.documentElement.style.overflow).not.toBe('hidden');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '操作' }));
+  } finally { release(); }
+  await waitFor(() => expect(delivered).toBe(true));
+  if (fail) expect((await screen.findByRole('alert')).textContent).toContain('模拟取消后的响应丢失');
+  expect(screen.queryByRole('dialog', { name: '取消工作' })).toBeNull();
+});
+
+// Issue #26 · medium regression: substitute a failed HTTP request before cancellation takes effect.
+test('取消工作尚未生效时请求失败保留确认框供重试，提交期间禁止重复操作', async () => {
+  const work = await startWork();
+  let requests = 0;
+  let rejectRequest!: (error: Error) => void;
+  const transport: typeof fetch = (input, init) => {
+    if (String(input).endsWith('/api/cancel-work') && ++requests === 1) {
+      return new Promise<Response>((_resolve, reject) => { rejectRequest = reject; });
+    }
+    return fetch(input, init);
+  };
+  render(<App baseUrl={daemon!.url} transport={transport} />);
+  await screen.findByRole('heading', { level: 1, name: '管理输出的工作' });
+  fireEvent.click(within(actions()).getByRole('button', { name: '取消工作' }));
+  const dialog = await screen.findByRole('dialog', { name: '取消工作' });
+  const confirm = within(dialog).getByRole('button', { name: '确认取消工作' }) as HTMLButtonElement;
+  fireEvent.click(confirm);
+  expect(confirm.disabled).toBe(true);
+  expect((within(dialog).getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(confirm);
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(screen.getByRole('dialog', { name: '取消工作' })).toBe(dialog);
+  expect(requests).toBe(1);
+  rejectRequest(new Error('模拟取消前的网络错误'));
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('模拟取消前的网络错误');
+  expect((await daemon!.call('get-work', { workId: work.id })).result.status).toBe('aligning');
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消工作' })).toBeNull());
+  await within(screen.getByRole('heading', { level: 1 }).closest('header')!).findByText('已取消');
+});
+
 test('换调度者列出全部调度者 Agent，不可用的显示原因且不能应用，选择后经 HTTP 更新且从下一轮生效', async () => {
   const work = await startWork();
   const saved = await daemon!.call('save-agent', {
