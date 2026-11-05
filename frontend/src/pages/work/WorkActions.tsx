@@ -29,6 +29,10 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    // Cancellation is published before process/copy cleanup and its HTTP response finish.
+    if (panel === 'cancel' && work.status === 'cancelled') setPanel(undefined);
+  }, [panel, work.status]);
+  useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => { if (!container.current?.contains(event.target as Node)) setOpen(false); };
     document.addEventListener('pointerdown', outside);
