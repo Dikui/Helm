@@ -55,7 +55,7 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   git(repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), executorDriver: new FakeDriver(executors),
     driver: new FakeDriver([[
-      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '验收派单', boundary: '本机', criteria: '验收改动全部丢弃' }), check: ok },
+      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '验收派单', boundary: '本机', criteria: '验收改动全部丢弃', deliverables: '交付物及查看入口' }), check: ok },
     ], [...steps, { type: 'end', reason: 'completed', finalAnswer: 'verification-script-finished' }]]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
@@ -128,7 +128,7 @@ test('验收新开对话并保存派单时快照，结论按用途校验且最�
   let executionPath = '';
   let executionSession = '';
   const daemon = await fixture(t, [card(), dispatch('execute', 'execution'), { type: 'hang', until: executed.promise },
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'unconfirmed-revision', requirements: '尚未确认的新要求', boundary: '本机', criteria: '尚未生效的新标准' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'unconfirmed-revision', requirements: '尚未确认的新要求', boundary: '本机', criteria: '尚未生效的新标准', deliverables: '交付物及查看入口' }), check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'resume-verification', purpose: 'verification', agentId: 'claude-executor', resumeSessionId: executionSession }), check: code('INVALID_RESUME') },
     dispatch('verify'),
     { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '派单后修改的说明' }), check: ok },

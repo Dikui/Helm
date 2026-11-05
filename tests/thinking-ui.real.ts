@@ -24,7 +24,7 @@ test('现在条与调度者检查器：思考、计划、原始步骤与结束�
   const plan = [{ content: '读取验收结果', status: 'completed' as const }, { content: '安排后续卡片', status: 'in_progress' as const }, { content: '汇报进度', status: 'pending' as const }];
   const daemon = await uiFixture([[
     alignOutput.step, { type: 'output', text: '正在将验证码有效期补进工作说明\n保留原文第二行' }, alignFinish.step,
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '邮箱验证码登录', boundary: '登录页', criteria: '有效期十分钟' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '邮箱验证码登录', boundary: '登录页', criteria: '有效期十分钟', deliverables: '交付物及查看入口' }) },
   ], [
     firstOutput.step, { type: 'plan', entries: plan },
     { type: 'output', text: '读取卡片 3 的派单结果' }, { type: 'output', text: '安排卡片 3 验收' },

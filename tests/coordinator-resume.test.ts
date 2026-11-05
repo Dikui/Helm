@@ -245,7 +245,7 @@ test('执行阶段规则在确认后的那一轮附上一次，续跑会话不�
   const round = (...steps: FakeStep[]) => (context: FakeContext): FakeStep[] => { briefs.push(JSON.parse(context.input)); return steps; };
   const daemon = await startTestHelmd({ port: 0, dataDir: join(directory, 'data'), agentDir: await copyAgents(directory), driver: new FakeDriver([
     round({ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', key: 'draft' }) }, small),
+      requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', deliverables: '交付物及查看入口', key: 'draft' }) }, small),
     round(small),
     round(small),
     round({ type: 'compaction' }, small),

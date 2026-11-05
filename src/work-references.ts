@@ -61,7 +61,7 @@ export function referenceSnapshot(store: TaskStore, workId: string, referencedId
   if (description) {
     lines.push('', `## 工作说明（第 ${description.version} 版${description.status === 'active' ? '' : '，未生效'}）`, '',
       '### 需求', '', description.requirements, '', '### 边界', '', description.boundary, '', '### 验收', '', description.criteria,
-      '', '### 交付', '', description.deliverables || '未单独记录交付要求');
+      '', '### 交付', '', description.deliverables);
   }
   if (report) lines.push('', '## 汇总报告', '', reportText(report));
   return { name: `引用工作-${work.id.slice(0, 8)}.md`, content: Buffer.from(lines.join('\n') + '\n').toString('base64') };

@@ -37,7 +37,7 @@ export async function fixture(t: TestContext, driver: Driver, rounds = 1, config
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'draft', requirements: '调度者驱动冒烟', boundary: '本机临时项目', criteria: 'MCP 操作成功、重投去重、代码只读' }),
+      key: 'draft', requirements: '调度者驱动冒烟', boundary: '本机临时项目', criteria: 'MCP 操作成功、重投去重、代码只读', deliverables: '交付物及查看入口' }),
       check: value => assert.equal((value as any).ok, true) },
   ]]);
   const drain = new FakeDriver();

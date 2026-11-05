@@ -41,7 +41,7 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
   // Separate drivers keep executor scripts independent of coordinator wake timing.
   const agentDir = await copyAgents(directory);
   const options = { agentDir, port: 0, dataDir, executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: new FakeDriver([[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '执行派单', boundary: '本机', criteria: '成果可读' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '执行派单', boundary: '本机', criteria: '成果可读', deliverables: '交付物及查看入口' }), check: ok },
     ...(config.alignment ?? []),
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'dispatch-script-finished' }], ...(config.after ? [config.after] : []), ...(config.additionalRounds ?? [])]) };
   const daemon = await startHelmd(options);
@@ -104,7 +104,7 @@ test('不同工作的执行者共享同一个全局并发上限', async t => {
   const hold = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
   const round: FakeScript = ctx => (JSON.parse(ctx.input) as StartupBrief).work.status === 'aligning'
-    ? [{ type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '共享并发' }, check: ok }]
+    ? [{ type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '共享并发', deliverables: '交付物及查看入口' }, check: ok }]
     : [create, dispatch()];
   const daemon = await fixture(t, [create, dispatch()], [[{ type: 'hang', until: hold }], []], {
     beforeConfirm: async call => { ok(await call('set-concurrency', { limit: 1 })); }, additionalRounds: Array(10).fill(round),

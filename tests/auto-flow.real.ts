@@ -98,7 +98,7 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       const executor = observed(new ClaudeExecutorDriver({ query: args => query({ ...args, options: { ...args.options, maxTurns: 12 } }) }));
       const setup = new FakeDriver([[
         { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-          key: 'draft', requirements: '自动流程真实冒烟', boundary: '临时项目，无浏览器', criteria: '写文件、自动验收和完成后唤醒' }),
+          key: 'draft', requirements: '自动流程真实冒烟', boundary: '临时项目，无浏览器', criteria: '写文件、自动验收和完成后唤醒', deliverables: '交付物及查看入口' }),
           check: value => assert.equal((value as any).ok, true) },
       ]]);
       let started = 0;

@@ -29,7 +29,7 @@ test('卡片合计包含执行和失败验收，工作合计另加所有调度�
     ] : [];
   };
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: 'Token', boundary: '本机', criteria: '用量可查' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: 'Token', boundary: '本机', criteria: '用量可查', deliverables: '交付物及查看入口' }), check: ok },
     { type: 'end', reason: 'completed', usage: { inputTokens: 100, outputTokens: 20 } },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '用量卡片' }), saveAs: 'card', check: ok },

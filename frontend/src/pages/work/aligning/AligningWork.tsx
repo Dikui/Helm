@@ -163,7 +163,7 @@ export function AligningWork({ workId, title, workBranch, showBrief, inspectorTi
         {shown && <>
           {(['requirements', 'boundary', 'criteria', 'deliverables'] as const).map(field => {
             const oldLines = previous?.[field].split(/\r?\n/) ?? [];
-            return <section key={field}><h3>{t(field)}</h3>{field === 'deliverables' && !shown[field].trim() && <p className="muted">{t('deliverablesMissing')}</p>}<ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
+            return <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) =>
               <li key={index} aria-label={previous && !oldLines.includes(line) ? `${line} ${t('alignmentNew')}` : undefined}>{previous && !oldLines.includes(line) ? <mark>{line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')}<span className="brief-new">{t('alignmentNew')}</span></mark> : line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')}</li>)}</ul></section>;
           })}
           {shown.baseCommit && <div className="brief-branches" aria-label={t('deliveryBranchFlow')}><span className="ref" title={shown.baseCommit}>{shown.baseRef}@{shown.baseCommit.slice(0, 7)}</span><span aria-hidden="true">→</span><span className="ref">{workBranch || `helm/${workId}`}</span>{!workBranch && <small className="muted">{t('alignmentBranchPending')}</small>}</div>}

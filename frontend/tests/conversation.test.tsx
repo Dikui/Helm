@@ -25,7 +25,7 @@ afterEach(async () => {
 async function executingWork(scripts: FakeScript[]) {
   daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '登录功能', boundary: '登录页', criteria: '可登录' }) },
+      key: 'brief', requirements: '登录功能', boundary: '登录页', criteria: '可登录', deliverables: '交付物及查看入口' }) },
   ], ...scripts]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对话与引导', key: 'start' })).result.work;
   const descriptions = await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 1);
@@ -98,7 +98,7 @@ test('当前关卡钉在对话记录之外，数字键决定且输入框和组�
 
 test('执行中重新起草的工作说明钉在顶部，可查看新版并确认', async () => {
   const work = await executingWork([[{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-    key: 'brief-v2', requirements: '以框架图展示', boundary: '登录页', criteria: '可登录' }) }, { type: 'hang' }]]);
+    key: 'brief-v2', requirements: '以框架图展示', boundary: '登录页', criteria: '可登录', deliverables: '交付物及查看入口' }) }, { type: 'hang' }]]);
   const descriptions = await until(() => daemon!.call('get-work-descriptions', { workId: work.id }), value => value.result.length === 2);
   render(<App baseUrl={daemon!.url} />);
   const chat = await screen.findByRole('region', { name: '对话' });

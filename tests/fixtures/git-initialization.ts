@@ -6,7 +6,7 @@ import { uiFixture, until } from '../ui-fixture.js';
 // Real HTTP/store/SSE, fake agents; also used by the headless screenshot case.
 export async function gitInitializationFixture(existingIgnore = false, staticDir?: string) {
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '修改项目', boundary: '项目目录', criteria: '保留现有文件' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '修改项目', boundary: '项目目录', criteria: '保留现有文件', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'write', content: '修改现有文件' }, saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: (ctx.results.get('card') as any).result.id, key: 'write', agentId: 'claude-executor' }),

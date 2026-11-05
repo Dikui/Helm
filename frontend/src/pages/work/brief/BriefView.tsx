@@ -33,7 +33,7 @@ export function BriefView({ work }: { work: Work & { workBranch?: string | null 
       {!descriptions.data && !descriptions.error && <p role="status">{t('loading')}</p>}
       {descriptions.data && !shown && <p>{t('briefNoActive')}</p>}
       {shown && <>
-        {(['requirements', 'boundary', 'criteria', 'deliverables'] as const).map(field => <section key={field}><h3>{t(field)}</h3>{field === 'deliverables' && !shown[field].trim() && <p className="muted">{t('deliverablesMissing')}</p>}<ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) => <li key={index}><Markdown inline text={line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')} workId={work.id} files={files} onOpen={preview.open} /></li>)}</ul></section>)}
+        {(['requirements', 'boundary', 'criteria', 'deliverables'] as const).map(field => <section key={field}><h3>{t(field)}</h3><ul>{shown[field].split(/\r?\n/).filter(line => line.trim()).map((line, index) => <li key={index}><Markdown inline text={line.replace(/^\s*[-*+]\s+|^\s*\d+[.)]\s+/, '')} workId={work.id} files={files} onOpen={preview.open} /></li>)}</ul></section>)}
         {preview.preview}
         {shown.baseCommit ? <div className="brief-branches" aria-label={t('deliveryBranchFlow')}><span className="ref">{shown.baseRef}</span><span className="ref" title={shown.baseCommit}>{shown.baseCommit.slice(0, 7)}</span><span aria-hidden="true">→</span><span className="ref">{work.workBranch || '—'}</span></div> : <p className="muted">{t('projectWithoutGitHint')}</p>}
       </>}

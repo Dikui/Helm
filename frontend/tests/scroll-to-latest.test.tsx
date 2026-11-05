@@ -49,7 +49,7 @@ afterEach(async () => {
 
 async function openWork(phase: string, script: FakeScript = [{ type: 'hang' }]) {
   const draft: FakeScript = [{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-    workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '登录', boundary: '登录页', criteria: '可登录',
+    workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '登录', boundary: '登录页', criteria: '可登录', deliverables: '交付物及查看入口',
   }) }];
   daemon = await uiFixture(phase === '执行' ? [draft, script] : [script]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '历史消息', key: 'start' })).result.work;

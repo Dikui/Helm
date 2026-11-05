@@ -9,7 +9,7 @@ import { uiFixture, until } from './ui-fixture.js';
 import { reviewReport } from './fixtures/review-report.js';
 
 const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: {
-  key: 'brief', requirements: '分析已有文件', boundary: '只读', criteria: '给出结论',
+  key: 'brief', requirements: '分析已有文件', boundary: '只读', criteria: '给出结论', deliverables: '交付物及查看入口',
 }, check: value => assert.equal((value as any).ok, true) };
 const saved = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result;
 const ok = (value: unknown) => assert.equal((value as any).ok, true, JSON.stringify(value));

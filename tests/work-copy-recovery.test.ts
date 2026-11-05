@@ -107,7 +107,7 @@ test('修复路径不得跟随 Helm 数据目录中的父目录链接删除外�
 test('项目切到游离 HEAD 后起草和确认工作说明，保留之前已固定的基准分支', t => {
   const ctx = fixture(t);
   git(ctx.project, 'checkout', '--detach');
-  const draft = draftDescription(ctx.store, actor, { workId: 'work', key: 'draft', requirements: '分析', boundary: '只读', criteria: '报告' });
+  const draft = draftDescription(ctx.store, actor, { workId: 'work', key: 'draft', requirements: '分析', boundary: '只读', criteria: '报告', deliverables: '分析报告' });
   assert.equal(draft.baseRef, 'main');
   const confirmed = confirmDescription(ctx.store, { type: 'user', id: 'user' },
     { workId: 'work', gateId: draft.gateId, descriptionId: draft.id, decision: 'confirm' });

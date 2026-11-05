@@ -9,7 +9,7 @@ const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await i
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
 afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; localStorage.clear(); window.history.replaceState(null, '', '/'); });
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
-const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: 'Inspect changes', boundary: 'Local', criteria: 'Readable patch' }, check: ok };
+const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: 'Inspect changes', boundary: 'Local', criteria: 'Readable patch', deliverables: '交付物及查看入口' }, check: ok };
 async function setup(executor: FakeScript) {
   daemon = await uiFixture([[draft], [
     { type: 'tool', name: 'create-card', arguments: { key: 'card', content: 'Card changes' }, saveAs: 'card', check: ok },

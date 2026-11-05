@@ -84,7 +84,7 @@ test('执行和验收的 shell 读取项目变量，调度者只见名字；值�
     for (const value of [original, replacement]) assert.ok(!JSON.stringify({ input: ctx.input, agent: ctx.options.agent }).includes(value));
     const workId = brief.work.id;
     if (brief.work.status === 'aligning') return [{ type: 'tool', name: 'draft-work-description', arguments: {
-      workId, key: 'draft', requirements: '项目环境变量', boundary: '测试项目', criteria: '执行和验收读取环境变量',
+      workId, key: 'draft', requirements: '项目环境变量', boundary: '测试项目', criteria: '执行和验收读取环境变量', deliverables: '交付物及查看入口',
     }, check: ok }];
     if (!dispatched) {
       dispatched = true;

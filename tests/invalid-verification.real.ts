@@ -135,7 +135,7 @@ async function fixture(t: TestContext, repeatedInvalid: boolean) {
   // Also seed the current plan, so this smoke measures result handling rather than planning variability.
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '新建 smoke.txt，写入指定文本。',
-      boundary: '轻量；只改 smoke.txt，不增依赖。', criteria: `${criteria}\n运行 ${checkCommand}，输出 smoke.txt: PASS 才通过。` }, check: ok },
+      boundary: '轻量；只改 smoke.txt，不增依赖。', criteria: `${criteria}\n运行 ${checkCommand}，输出 smoke.txt: PASS 才通过。`, deliverables: '交付物及查看入口' }, check: ok },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'smoke-implementation', content: `新建 smoke.txt\n${criteria}\n检查命令：${checkCommand}\n执行后由新上下文验收。`,
       needsVerification: true, writeScopes: ['smoke.txt'] }, saveAs: 'target', check: ok },

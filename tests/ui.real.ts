@@ -92,7 +92,7 @@ test('临时目录工作审核显示无代码改动，接受即完成且没有�
   const executionEnded = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '分析项目', boundary: '只读', criteria: '给出分析结论' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '分析项目', boundary: '只读', criteria: '给出分析结论', deliverables: '交付物及查看入口' }) },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'research', content: '分析项目', workspace: 'scratch' }), saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },
@@ -142,7 +142,7 @@ test('临时目录工作审核显示无代码改动，接受即完成且没有�
 const coordinatorPrompt = `这是界面真实冒烟，使用真实 Helm 工具，所有 key 稳定复用，不重复建对象。
 只用 helm MCP 工具；不启动浏览器、不安装、不派生子代理、不推送、不部署、不用 shell 写代码。
 对齐：立即 draft-work-description（key=ui-brief），需求为新增 smoke.txt，边界为仅一个文件，
-标准为文件内容恰好是 helm-ui-smoke 加一个换行；不追问。未确认前退出等待。
+标准为文件内容恰好是 helm-ui-smoke 加一个换行，交付为项目根目录下的 smoke.txt；不追问。未确认前退出等待。
 确认后：先 propose-gate（key=ui-execution-gate，question 原样为「${executionQuestion}」，options=["继续执行","暂缓执行"]），退出等待。
 只有该关卡决定为「继续执行」后才创建以下两张卡片；每轮先读关卡状态，不重复提问：
 1. key=ui-change，content 首行必须是「${changeTitle}」，needsVerification=false；

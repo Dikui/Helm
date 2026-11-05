@@ -80,7 +80,7 @@ for (const kind of ['grok', 'deepseek'] as const) test(`${kind} 调度者拒绝�
 
 for (const kind of ['grok', 'deepseek'] as const) test(`${kind} ACP 调度者仅获得调度工具，不能经客户端写代码，续跑更换且结束后撤销轮次令牌`, async t => {
   const acp = await acpFixture(t, { ...(kind === 'deepseek' ? { configOptions } : {}), mcpTools: [
-    { name: 'draft-work-description', arguments: { key: 'draft', requirements: '只读检查 README', boundary: '临时项目', criteria: '基线内容保持原样' } },
+    { name: 'draft-work-description', arguments: { key: 'draft', requirements: '只读检查 README', boundary: '临时项目', criteria: '基线内容保持原样', deliverables: '交付物及查看入口' } },
   ], clientRequests: [{ method: 'fs/write_text_file', params: { path: 'coordinator-write.txt', content: 'forbidden' } }],
   }, false, kind);
   const daemon = await acpCoordinatorFixture(t, kind, acp.driver);

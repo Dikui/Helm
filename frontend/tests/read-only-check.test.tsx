@@ -9,7 +9,7 @@ afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; lo
 
 test('派单详情忽略旧只读检查字段，中英文都不显示只读标识或违规', async () => {
   daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: 'Research', boundary: 'Scratch directory', criteria: 'Report findings' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: 'Research', boundary: 'Scratch directory', criteria: 'Report findings', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'research', content: 'Research', workspace: 'scratch' }, saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },

@@ -26,7 +26,7 @@ async function fixture(t: TestContext, initial: Record<string, AgentAvailability
     if (ctx.options.agent!.role === 'executor') return executors.shift() ?? [];
     const work = JSON.parse(ctx.input).work;
     if (work.status === 'aligning') return [{ type: 'tool', name: 'draft-work-description', arguments: {
-      workId: work.id, key: 'draft', requirements: '可用性检查', boundary: '假驱动', criteria: '拒绝不可用 Agent 并恢复',
+      workId: work.id, key: 'draft', requirements: '可用性检查', boundary: '假驱动', criteria: '拒绝不可用 Agent 并恢复', deliverables: '交付物及查看入口',
     }, check: ok }];
     return actions.shift()?.(ctx) ?? [];
   }), agent => probes.get(agent.id)?.() ?? states.get(agent.id) ?? { available: true });

@@ -35,7 +35,7 @@ async function fixture(t: TestContext, executor: FakeScript, after: FakeScript =
   execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline'], { stdio: 'ignore' });
   const dataDir = join(directory, 'data');
   const scripts = (): FakeScript[] => [[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '保存输出', boundary: '本机', criteria: '内容不丢' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '保存输出', boundary: '本机', criteria: '内容不丢', deliverables: '交付物及查看入口' }), check: ok },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '生成输出' }), saveAs: 'card', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'dispatch', agentId: 'claude-executor' }), check: ok },
@@ -79,7 +79,7 @@ test('已结束工作导出全部输出、成果和完整任务库记录，归�
   ], [
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '第一版调度笔记' }), check: ok },
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '导出时保留调度笔记' }), check: ok },
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '修订后的说明', boundary: '本机', criteria: '仍保留旧版本' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '修订后的说明', boundary: '本机', criteria: '仍保留旧版本', deliverables: '交付物及查看入口' }), check: ok },
     { type: 'plan', entries: [{ content: '导出前核对', status: 'completed' }] },
     { type: 'output', text: '调度者输出' },
   ]);

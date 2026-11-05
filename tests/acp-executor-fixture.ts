@@ -79,7 +79,7 @@ export async function acpExecutorFixture(t: TestContext, executor: Driver, confi
   const coordinator = new FakeDriver(Array(40).fill((ctx: FakeContext): FakeStep[] => {
     const work = JSON.parse(ctx.input).work;
     if (work.status === 'aligning') return [{ type: 'tool', name: 'draft-work-description', arguments: {
-      workId: work.id, key: 'draft', requirements: `${agent} 执行与验收派单`, boundary: '卡片副本', criteria: '保存结果和证据',
+      workId: work.id, key: 'draft', requirements: `${agent} 执行与验收派单`, boundary: '卡片副本', criteria: '保存结果和证据', deliverables: '交付物及查看入口',
     }, check: ok }];
     if (created) { const action = actions.shift() ?? []; return typeof action === 'function' ? action(ctx) : action; }
     created = true;

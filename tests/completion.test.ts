@@ -47,7 +47,7 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   git(repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), executorDriver: new FakeDriver(executors),
     driver: new FakeDriver([[
-      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '合并卡片', boundary: '本机', criteria: '成果进入工作分支' }), check: ok },
+      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '合并卡片', boundary: '本机', criteria: '成果进入工作分支', deliverables: '交付物及查看入口' }), check: ok },
     ], [...steps, { type: 'end', reason: 'completed', finalAnswer: 'completion-script-finished' }]]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {

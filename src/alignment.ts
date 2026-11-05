@@ -137,7 +137,7 @@ export function confirmationDetails<T extends object>(store: TaskStore, gate: T)
 }
 
 export function draftDescription(store: TaskStore, actor: Actor, params: {
-  workId: string; key: string; requirements: string; boundary: string; criteria: string; deliverables?: string; baseRef?: string;
+  workId: string; key: string; requirements: string; boundary: string; criteria: string; deliverables: string; baseRef?: string;
 }) {
   const work = store.work(params.workId);
   const versions = store.descriptions(work.id);
@@ -158,7 +158,7 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   }
   const description: WorkDescription = {
     id: randomUUID(), workId: work.id, version: versions.length + 1, status: 'draft', key: params.key,
-    requirements: params.requirements, boundary: params.boundary, criteria: params.criteria, deliverables: params.deliverables ?? '',
+    requirements: params.requirements, boundary: params.boundary, criteria: params.criteria, deliverables: params.deliverables,
     gateId: String(gate.id), baseRef, baseCommit,
   };
   store.db.prepare(`INSERT INTO work_descriptions

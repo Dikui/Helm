@@ -114,7 +114,7 @@ async function fixture(t: TestContext, rounds: FakeScript[], executors: FakeScri
   const baseline = git(repo, 'rev-parse', 'main');
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), executorDriver: new FakeDriver(executors),
     driver: new FakeDriver([[
-      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '审核成果', boundary: '本机', criteria: '接受后合并推送' }), check: ok },
+      { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '审核成果', boundary: '本机', criteria: '接受后合并推送', deliverables: '交付物及查看入口' }), check: ok },
     ], ...rounds]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
@@ -599,7 +599,7 @@ test('基准已包含工作分支时直接完成，不要求推送', async t => 
 
 for (const conflict of [false, true]) test(`同项目合入串行，第二项基于第一项的新基准${conflict ? '报告冲突' : '合入'}`, async t => {
   const daemon = await fixture(t, [[review()], [
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '独立合入' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '独立合入', deliverables: '交付物及查看入口' }), check: ok },
   ], [review()]]);
   const firstGate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
@@ -830,7 +830,7 @@ for (const oldStatus of ['cancelled', 'completed'] as const) test(`旧整体验�
 
 test('审核未关闭时确认新版工作说明仍待审核；暂停恢复保持关卡，退回后恢复执行', async t => {
   const daemon = await fixture(t, [[review(),
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '新版需求', boundary: '本机', criteria: '新版标准' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'revision', requirements: '新版需求', boundary: '本机', criteria: '新版标准', deliverables: '交付物及查看入口' }), check: ok },
   ]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);

@@ -12,7 +12,7 @@ afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; lo
 
 test('临时目录卡片显示运行位置，派单详情可读成果文件并切换英文', async () => {
   daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '调研', boundary: '临时目录', criteria: '报告' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '调研', boundary: '临时目录', criteria: '报告', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'research', content: '网络调研', workspace: 'scratch' }, saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },

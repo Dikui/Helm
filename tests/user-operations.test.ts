@@ -41,7 +41,7 @@ async function fixture(t: TestContext, script: FakeStep[] = [], executors: FakeS
   git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline');
   const briefs: StartupBrief[] = [];
   const driver = new FakeDriver([[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '用户操作', boundary: '本机', criteria: '状态正确' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '用户操作', boundary: '本机', criteria: '状态正确', deliverables: '交付物及查看入口' }), check: ok },
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'setup-finished' }], ...after]);
   const daemon = await startHelmd({ port: 0, dataDir: join(directory, 'data'), executorDriver: config.executorDriver ?? new FakeDriver(executors), driver: {
     async start(options) {

@@ -40,7 +40,7 @@ export async function coordinatorFixture(t: TestContext, driver: Driver, config:
   await configureTestAgent(agentDir, 'codex-coordinator', { model: 'gpt-6-luna', reasoningEffort: 'medium' });
   const setup = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'draft', requirements: 'Codex 调度者冒烟', boundary: '临时项目', criteria: 'MCP、只读、重投和额度处理' }),
+      key: 'draft', requirements: 'Codex 调度者冒烟', boundary: '临时项目', criteria: 'MCP、只读、重投和额度处理', deliverables: '交付物及查看入口' }),
       check: value => assert.equal((value as any).ok, true) },
   ]]);
   const drain = new FakeDriver();

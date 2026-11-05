@@ -379,7 +379,7 @@ test.each([
 ])('$label工作删除后逐项显示保留的工作及卡片分支和原因，返回后回到收件箱', async ({ stop }) => {
   const work = await startWork([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'draft', requirements: '保留分支', boundary: '本机', criteria: '逐项列出' }) },
+      key: 'draft', requirements: '保留分支', boundary: '本机', criteria: '逐项列出', deliverables: '交付物及查看入口' }) },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '保留卡片进度' }), saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,

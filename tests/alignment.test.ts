@@ -49,11 +49,11 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 
 const workIdOf = (context: FakeContext) => (JSON.parse(context.input) as StartupBrief).work.id;
 
-const description = { requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开' };
+const description = { requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', deliverables: '本地游戏页面及打开入口' };
 
 test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，用户确认后仍不建工作分支和副本', async t => {
   const daemon = await fixture(t, [[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, deliverables: '本地游戏页面及打开入口', key: 'description-1' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'description-1' }) },
     { type: 'tool', name: 'send-message', arguments: ctx => ({ workId: workIdOf(ctx), body: '请确认工作说明', key: 'reply-1' }) },
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '确认后开始拆分卡片' }) },
     { type: 'output', text: '对齐完成' },

@@ -16,7 +16,7 @@ const round: FakeScript = ctx => {
   const brief = JSON.parse(ctx.input);
   process.send?.({ type: 'round', token: ctx.options.mcpServers.helm!.headers.Authorization });
   if (brief.work.status === 'aligning') return [
-    { type: 'tool', name: 'draft-work-description', arguments: { workId: brief.work.id, key: 'draft', requirements: '启动对账', boundary: '本机', criteria: '崩溃后可接续' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { workId: brief.work.id, key: 'draft', requirements: '启动对账', boundary: '本机', criteria: '崩溃后可接续', deliverables: '交付物及查看入口' } },
   ];
   if (purpose === 'delivery') return [
     { type: 'tool', name: 'request-review', arguments: { workId: brief.work.id, key: 'review', report: reviewReport('检查合入顺序') } },

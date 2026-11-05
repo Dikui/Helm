@@ -30,7 +30,7 @@ test('真实合入冲突：本地检测、调度者卡片解决与验收、查�
       await configureTestAgent(agentDir, id, { model: 'haiku', reasoningEffort: id === 'claude-coordinator' ? 'medium' : 'low', fast: false, home: 'shared' });
     }
     await writeFile(join(agentDir, 'claude-coordinator', 'prompt.md'), `这是合入冲突真实冒烟。
-对齐时 draft-work-description：需求是解决 shared.txt 的合并冲突，边界只改 shared.txt，标准是解决后 shared.txt 只有一行字面文本 RESOLVED-BOTH 加一个换行，基准提交是工作分支的祖先。
+对齐时 draft-work-description：需求是解决 shared.txt 的合并冲突，边界只改 shared.txt，标准是解决后 shared.txt 只有一行字面文本 RESOLVED-BOTH 加一个换行，基准提交是工作分支的祖先，交付是工作分支上解决后的 shared.txt。
 首次确认后（没有 delivery.resolution），先 create-card，key=seed，content 首行“准备 shared.txt 的工作分支改动”，workspace=copy，needsVerification=false。
 给这张卡片派 claude-executor 执行，key=seed-execute，purpose=execution，needsBrowser=false，content 要求用 Write 把 shared.txt 改为一行字面文本 work 加一个换行，不提交不推送，必须 submit-conclusion(completed)。
 派单结束且 conclusion=completed 后 complete-card；必须等这张卡片完成后才 request-review，key=initial-review，按工具 schema 提交 report：verdict=accept，summary 写“冲突冒烟的起始审核”，exceptions=[]，criteria 填工作说明标准、status=passed、evidence=[{label:"初始代码",kind:"file",ref:"shared.txt"}]，cards 列出 seed 卡片的实际结果和执行派单证据，suggestions=[]。不提交 body。

@@ -110,7 +110,7 @@ test('泳道显示并行及打回，事件经接口筛选后跳到历史派单�
 const workId = (ctx: FakeContext): string => JSON.parse(ctx.input).work.id;
 const ok = (value: unknown) => expect((value as { ok: boolean }).ok).toBe(true);
 const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'brief',
-  requirements: '追溯调度结构', boundary: '本机', criteria: '时间、轮次、事件可查' }), check: ok };
+  requirements: '追溯调度结构', boundary: '本机', criteria: '时间、轮次、事件可查', deliverables: '交付物及查看入口' }), check: ok };
 async function executeWork() {
   const work = (await daemon!.call('send-message', { projectId: daemon!.project.id, body: '调度结构工作', key: 'start' })).result.work;
   const pending = await until(() => daemon!.call('list-pending'), value => value.result[0]?.description);

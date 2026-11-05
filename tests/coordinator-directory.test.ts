@@ -70,7 +70,7 @@ test('调度轮次在首轮前创建自己的可写目录，各轮复用并在�
 for (const outcome of ['completed', 'cancelled'] as const) test(`工作 ${outcome} 后删除调度者目录，删除工作时再次清理残留`, async t => {
   const daemon = await uiFixture([[
     { type: 'write', path: 'notes.txt', content: '调度文件' },
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '调研', boundary: '不改代码', criteria: '报告' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '调研', boundary: '不改代码', criteria: '报告', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport('调研完成') },
       check: value => assert.equal((value as any).ok, true) },

@@ -23,7 +23,7 @@ test('对齐与执行对话滚动跟随、阅读历史、回到最新与切换�
     { type: 'output', text: '正在整理工作说明' },
     { type: 'hang', until: new Promise<void>(resolve => { finishAlignment = resolve; }) },
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-      workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '登录', boundary: '登录页', criteria: '可登录',
+      workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '登录', boundary: '登录页', criteria: '可登录', deliverables: '交付物及查看入口',
     }) },
   ], [
     { type: 'output', text: '检查邮件模板' },

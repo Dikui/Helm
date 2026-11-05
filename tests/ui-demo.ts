@@ -29,7 +29,7 @@ const end = (known = true): FakeStep => ({ type: 'end', reason: 'completed', fin
 const draft = (version = 1): FakeStep => tool('draft-work-description', ctx => ({ workId: workIdOf(ctx), key: `brief-${version}`,
   requirements: `- 展示本机演示工作的真实状态\n- 所有 Agent 使用 FakeDriver${version > 1 ? '\n- 新增：支持深浅主题和窄屏检查' : ''}`,
   boundary: '只修改临时项目；不调用付费 Agent，不启动浏览器。',
-  criteria: `- 状态、历史和证据可读取${version > 1 ? '\n- 新增：检查工作说明新增条目高亮' : ''}`,
+  criteria: `- 状态、历史和证据可读取${version > 1 ? '\n- 新增：检查工作说明新增条目高亮' : ''}`, deliverables: '交付物及查看入口',
 }));
 
 // Replenish the same queue consumed by FakeDriver, so all future rounds remain scripted.

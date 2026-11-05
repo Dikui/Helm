@@ -116,7 +116,7 @@ test('派单可读摘要覆盖 Claude、Codex 和 ACP，噪声保留上一摘要
   const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '可读摘要', boundary: '本机', criteria: '不显示 JSON' }), check: ok },
+      key: 'brief', requirements: '可读摘要', boundary: '本机', criteria: '不显示 JSON', deliverables: '交付物及查看入口' }), check: ok },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '摘要卡片' }), saveAs: 'card', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,

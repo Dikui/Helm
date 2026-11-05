@@ -9,7 +9,7 @@ import { uiFixture, until } from './ui-fixture.js';
 test('HTTP 读取工作分支上的文件和本工作的附件，拒绝范围外和不存在的路径', async t => {
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '出图', boundary: '仓库内', criteria: '有图' }) },
+      key: 'brief', requirements: '出图', boundary: '仓库内', criteria: '有图', deliverables: '交付物及查看入口' }) },
   ], [{ type: 'hang' }]]);
   t.after(() => daemon.close());
   const sent = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '见附件',

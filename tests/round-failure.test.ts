@@ -57,7 +57,7 @@ async function fixture(t: TestContext, scripts: FakeScript[], executors: FakeScr
 }
 
 const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft',
-  requirements: '测试可靠性', boundary: '本机', criteria: '失败可恢复' }), check: ok };
+  requirements: '测试可靠性', boundary: '本机', criteria: '失败可恢复', deliverables: '交付物及查看入口' }), check: ok };
 const create: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '实现卡片' }), saveAs: 'card', check: ok };
 const dispatch: FakeStep = { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id,
   key: 'dispatch', agentId: 'claude-executor' }), check: ok };

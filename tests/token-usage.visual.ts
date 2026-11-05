@@ -14,7 +14,7 @@ await mkdir(output, { recursive: true });
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
 const daemon = await uiFixture([[
   { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-    key: 'brief', requirements: 'Token 用量展示', boundary: '本机', criteria: '节点和明细可查' }), check: ok },
+    key: 'brief', requirements: 'Token 用量展示', boundary: '本机', criteria: '节点和明细可查', deliverables: '交付物及查看入口' }), check: ok },
   { type: 'end', reason: 'completed', usage: { inputTokens: 10000, outputTokens: 2000 } },
 ], [
   { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: 'Token 示例卡片' }), saveAs: 'card', check: ok },

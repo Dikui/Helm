@@ -876,7 +876,7 @@ test('换调度者 Agent 只影响下一轮，当前运行或启动中的轮次�
 });
 
 const alignment = (ctx: FakeContext): FakeStep[] => [
-  { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: 'Agent 文件生效', boundary: '本机', criteria: '快照和驱动一致' }, check: ok },
+  { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'draft', requirements: 'Agent 文件生效', boundary: '本机', criteria: '快照和驱动一致', deliverables: '交付物及查看入口' }, check: ok },
 ];
 
 test('有全局重名警告的 Agent 仍可进入调度轮次并接受派单', async t => {

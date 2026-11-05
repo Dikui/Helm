@@ -145,7 +145,7 @@ test('库 skill 与 HTTP、stdio MCP 经 Agent 引用后由真实 Claude 派单�
     execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline'], { stdio: 'ignore' });
     const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
     const coordinator = new FakeDriver([ctx => [{ type: 'tool', name: 'draft-work-description',
-      arguments: { workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '加载库 skill', boundary: '不改文件', criteria: '返回 skill 中的暗号' }, check: ok }],
+      arguments: { workId: JSON.parse(ctx.input).work.id, key: 'brief', requirements: '加载库 skill', boundary: '不改文件', criteria: '返回 skill 中的暗号', deliverables: '交付物及查看入口' }, check: ok }],
     ctx => [
       { type: 'tool', name: 'create-card', arguments: { workId: JSON.parse(ctx.input).work.id, key: 'probe', content: '实际调用 helm-library-probe 技能、library-probe MCP 和 stdio-probe MCP 的 read_secret 工具。最后只回答三行：第一行是 skill 暗号，第二行是 HTTP MCP 暗号，第三行是 stdio MCP 暗号。禁止猜测、使用 Read/Bash、修改文件或派生子代理。' }, saveAs: 'card', check: ok },
       { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,

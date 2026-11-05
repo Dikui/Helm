@@ -150,7 +150,7 @@ const savedId = (ctx: FakeContext, key: string): string => (ctx.results.get(key)
 const ok = (value: unknown) => expect((value as { ok: boolean }).ok).toBe(true);
 const draft: FakeStep = {
   type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-    workId: workId(ctx), key: 'brief', requirements: '查看卡片图', boundary: '本机', criteria: '结构和派单可追溯',
+    workId: workId(ctx), key: 'brief', requirements: '查看卡片图', boundary: '本机', criteria: '结构和派单可追溯', deliverables: '交付物及查看入口',
   }), check: ok,
 };
 const card = (key: string, content: string): FakeStep => ({

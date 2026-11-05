@@ -9,7 +9,7 @@ afterEach(async () => { cleanup(); await daemon?.close(); daemon = undefined; lo
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
 const workId = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
 const id = (ctx: FakeContext, key: string) => (ctx.results.get(key) as any).result.id;
-const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'draft', requirements: 'Requirements', boundary: 'Local', criteria: 'Works' }), check: ok };
+const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'draft', requirements: 'Requirements', boundary: 'Local', criteria: 'Works', deliverables: '交付物及查看入口' }), check: ok };
 const card = (key: string): FakeStep => ({ type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workId(ctx), key, content: key, workspace: 'copy' }), saveAs: key, check: ok });
 const dispatch = (key: string, purpose = 'execution'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workId(ctx), key: `dispatch-${key}`, cardId: id(ctx, key), agentId: 'claude-executor', purpose }), check: ok });
 async function create(confirm = true) {
@@ -181,7 +181,7 @@ test('对齐草稿更新时第二格替换为更新中，完成后回确认格�
   let finish!: () => void;
   daemon = await uiFixture([[draft], [
     { type: 'hang', until: new Promise<void>(resolve => { finish = resolve; }) },
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'v2', requirements: 'Updated requirements', boundary: 'Local', criteria: 'Works' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'v2', requirements: 'Updated requirements', boundary: 'Local', criteria: 'Works', deliverables: '交付物及查看入口' }), check: ok },
   ]]);
   const work = await create(false);
   render(<App baseUrl={daemon.url} />);

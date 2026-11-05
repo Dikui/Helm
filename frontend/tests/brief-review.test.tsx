@@ -43,7 +43,7 @@ afterEach(async () => {
 const draft = (version: number): FakeStep => ({
   type: 'tool', name: 'draft-work-description', arguments: ctx => ({
     workId: JSON.parse(ctx.input).work.id, key: `v${version}`, requirements: `需求原文 ${version}`, boundary: '仅本机', criteria: '原有功能可用',
-    ...(version > 1 ? { deliverables: `交付原文 ${version}：工作页入口` } : {}),
+    deliverables: `交付原文 ${version}：工作页入口`,
   }), check: value => expect((value as any).ok).toBe(true),
 });
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
@@ -379,7 +379,7 @@ test('工作说明默认显示最新版本，可切换到生效和历史版本�
   expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).getByText('需求原文 1')).toBeTruthy();
-  expect(within(brief).getByText('未单独记录交付要求')).toBeTruthy();
+  expect(within(brief).getByText('交付原文 1：工作页入口')).toBeTruthy();
   expect(within(brief).getByText('历史版本 · 只读')).toBeTruthy();
   expect(within(brief).queryByRole('textbox')).toBeNull();
   fireEvent.change(versions, { target: { value: '3' } });

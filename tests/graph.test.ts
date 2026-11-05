@@ -33,7 +33,7 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript, a
   const dataDir = join(directory, 'data');
   const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver([[
     ...aligning,
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '卡片图', boundary: '本机', criteria: '依赖约束成立' }), check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '卡片图', boundary: '本机', criteria: '依赖约束成立', deliverables: '交付物及查看入口' }), check: ok },
   ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'graph-script-finished' }], ...(after ? [after] : [])]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
@@ -316,7 +316,7 @@ test('关卡链的前置都满足后才放行卡片，修订工作说明的固�
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'second').id }, downstream: { type: 'card', id: saved(ctx, 'card').id } }), check: ok },
   ], ctx => [
     { type: 'hang', until: barrier },
-    { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'revision', requirements: '修订后的卡片图', boundary: '本机', criteria: '链上的前置都满足' }, saveAs: 'revision', check: ok },
+    { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'revision', requirements: '修订后的卡片图', boundary: '本机', criteria: '链上的前置都满足', deliverables: '交付物及查看入口' }, saveAs: 'revision', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'revision').gateId }, downstream: { type: 'card', id: cardId } }), check: ok },
     { type: 'tool', name: 'update-gate', arguments: { workId: workIdOf(ctx), gateId: firstGateId, body: '后续轮次继续修改同一调度者的关卡' }, check: ok },
     { type: 'end', reason: 'completed', finalAnswer: 'revision-ready' },

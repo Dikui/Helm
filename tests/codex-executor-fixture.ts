@@ -54,7 +54,7 @@ export async function codexFixture(t: TestContext, executor: Driver, config: {
   const coordinator = new FakeDriver(Array(40).fill((ctx: FakeContext): FakeStep[] => {
     const workId = JSON.parse(ctx.input).work.id;
     if (JSON.parse(ctx.input).work.status === 'aligning') return [{ type: 'tool', name: 'draft-work-description', arguments: {
-      workId, key: 'draft', requirements: 'Codex 执行派单', boundary: '卡片副本', criteria: '保存结果和改动',
+      workId, key: 'draft', requirements: 'Codex 执行派单', boundary: '卡片副本', criteria: '保存结果和改动', deliverables: '交付物及查看入口',
     }, check: ok }];
     if (!created) {
       created = true;

@@ -268,7 +268,7 @@ test('冒烟④：调度者目录保持不变，首次写代码派单取最新�
         return `这是按需副本的首个对齐轮次冒烟。${restrictions}
 1. 用 Bash 执行 pwd，再用 Bash 执行 git -C ${shellQuote(codePath)} branch --show-current。
 2. 用 Read 读取 ${join(codePath, 'README.md')}。
-3. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=首次写代码执行派单前才建立副本。
+3. 调用 draft-work-description，key=alignment-copy，requirements=按需建立工作副本，boundary=临时项目，criteria=首次写代码执行派单前才建立副本，deliverables=工作分支上的改动。
 然后简短回答读到的内容并退出。`;
       }
       if (attempt === 2) {

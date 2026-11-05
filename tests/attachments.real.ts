@@ -23,7 +23,7 @@ const enabled = process.env.HELM_ATTACHMENTS_REAL === '1';
 const restrictions = '低消耗：不派生子代理、不安装、不开浏览器、不提交、不推送。不重试、不提权；读取失败就报告受阻并退出。';
 const coordinatorBody = `读取本消息 spec.md 附件（recentConversation.attachments 中的绝对路径），
 用自己的读文件工具读取，随后只调用 helm MCP 的 draft-work-description：key=attachment-description，
-requirements 原样填写文件中的测试编号，boundary=附件读取，criteria=测试编号一致。工作由令牌确定，不传 workId。
+requirements 原样填写文件中的测试编号，boundary=附件读取，criteria=测试编号一致，deliverables=写入测试编号的工作说明。工作由令牌确定，不传 workId。
 不创建卡片、不派单。完成后立即退出。${restrictions}`;
 
 function attachment(body: string) {

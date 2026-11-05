@@ -109,7 +109,7 @@ for (const hasDraft of [false, true]) test(`旧对齐工作${hasDraft ? '已有�
   let resumedCwd: string | undefined;
   const daemon = await uiFixture([
     hasDraft ? [{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-      workId: JSON.parse(ctx.input).work.id, key: 'legacy-draft', requirements: '旧工作', boundary: '本机', criteria: '可接续',
+      workId: JSON.parse(ctx.input).work.id, key: 'legacy-draft', requirements: '旧工作', boundary: '本机', criteria: '可接续', deliverables: '交付物及查看入口',
     }) }] : [],
     ctx => { resumedCwd = ctx.options.cwd; return []; },
   ]);
@@ -185,7 +185,7 @@ for (const [differentBranch, dirty] of [[false, false], [true, false], [false, t
       check: value => assert.equal((value as any).ok, true) });
     const record = (steps: FakeStep[]) => (ctx: FakeContext) => { rounds.push(ctx); return [...steps, small]; };
     const daemon = await uiFixture([
-      record([{ type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '按需建副本', boundary: '本机', criteria: '最新基准' } }]),
+      record([{ type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '按需建副本', boundary: '本机', criteria: '最新基准', deliverables: '交付物及查看入口' } }]),
       record([{ type: 'hang', until: ready }, card('first'), dispatch('first')]),
       record([card('second'), dispatch('second')]),
       record([]),
@@ -272,7 +272,7 @@ test('首次执行派单建工作副本失败时回滚，重试原派单可成�
     key: 'execute', cardId: (ctx.results.get('card') as any).result.id, agentId: 'claude-executor',
   }), check: value => assert.equal((value as any).ok, true) };
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '重试', boundary: '本机', criteria: '无残留' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '重试', boundary: '本机', criteria: '无残留', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'card', content: '实现' }, saveAs: 'card' },
     { ...dispatch, check: value => assert.equal((value as any).error.code, 'GIT_ERROR') },
@@ -304,7 +304,7 @@ test('尚无工作分支的验收派单固定基准分支最新提交，不建�
   const ready = new Promise<void>(resolve => { release = resolve; });
   t.after(() => release());
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '验收', boundary: '本机', criteria: '最新基准' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '验收', boundary: '本机', criteria: '最新基准', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'hang', until: ready },
     { type: 'tool', name: 'create-card', arguments: { key: 'card', content: '验收', needsVerification: true }, saveAs: 'card' },

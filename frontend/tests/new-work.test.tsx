@@ -157,7 +157,7 @@ test('基准加载与失败时不能开始，空分支可先对齐，刷新后�
 
 const draft = (key: string, requirements: string): import('../../src/driver.js').FakeStep => ({
   type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-    workId: JSON.parse(ctx.input).work.id, key, requirements, boundary: '仅登录页', criteria: '旧登录仍可用',
+    workId: JSON.parse(ctx.input).work.id, key, requirements, boundary: '仅登录页', criteria: '旧登录仍可用', deliverables: '交付物及查看入口',
   }), check: value => expect((value as any).ok).toBe(true),
 });
 
@@ -634,7 +634,7 @@ test('CLI 未安装时提示去 Agent 页，就地安装后显示已安装', asy
 
 test('对齐输入卡保留排队、撤回、关于关卡和快捷键打断', async () => {
   daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'draft', requirements: '输入卡', boundary: '本机', criteria: '可沟通' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'draft', requirements: '输入卡', boundary: '本机', criteria: '可沟通', deliverables: '交付物及查看入口' }) },
     { type: 'hang' },
   ], [{ type: 'output', text: '已收到立即消息' }, { type: 'hang' }]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐输入卡', key: 'start' })).result.work;

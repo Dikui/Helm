@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
 const workId = (ctx: FakeContext) => JSON.parse(ctx.input).work.id;
-const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'draft', requirements: 'Requirements', boundary: 'Local', criteria: 'Works' }), check: ok };
+const draft: FakeStep = { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workId(ctx), key: 'draft', requirements: 'Requirements', boundary: 'Local', criteria: 'Works', deliverables: 'Deliverable entry' }), check: ok };
 async function create() {
   return (await daemon!.call('send-message', { projectId: daemon!.project.id, body: 'Inspector work', key: 'start' })).result.work;
 }

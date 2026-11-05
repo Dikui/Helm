@@ -350,7 +350,7 @@ for (const target of ['card', 'work'] as const) test(`运行中取消${target}�
   const { uiFixture, until } = await import('./ui-fixture.js');
   let path = '';
   const daemon = await uiFixture([[
-    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '调研', boundary: '临时目录', criteria: '文件' } },
+    { type: 'tool', name: 'draft-work-description', arguments: { key: 'brief', requirements: '调研', boundary: '临时目录', criteria: '文件', deliverables: '交付物及查看入口' } },
   ], [
     { type: 'tool', name: 'create-card', arguments: { key: 'research', content: '调研', workspace: 'scratch' }, saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: (ctx.results.get('card') as any).result.id, key: 'run', agentId: 'claude-executor' }) },

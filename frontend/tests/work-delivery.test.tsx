@@ -41,7 +41,7 @@ async function prepare(options: { scratch?: boolean; resolution?: FakeScript } =
     const id = workId(ctx);
     if (!seen.has(id)) {
       seen.add(id);
-      return [tool('draft-work-description', { workId: id, key: 'draft', requirements: 'Deliver', boundary: 'Local', criteria: 'Works' })];
+      return [tool('draft-work-description', { workId: id, key: 'draft', requirements: 'Deliver', boundary: 'Local', criteria: 'Works', deliverables: '交付物及查看入口' })];
     }
     const stage = stages.get(id);
     if (stage) { stages.delete(id); return typeof stage === 'function' ? stage(ctx) : stage; }

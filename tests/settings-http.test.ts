@@ -7,7 +7,7 @@ import { uiFixture, until } from './ui-fixture.js';
 test('Agent 使用数只统计运行中派单和未结束的调度者工作，结束后归零', async t => {
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '需求', boundary: '边界', criteria: '标准' }) },
+      key: 'brief', requirements: '需求', boundary: '边界', criteria: '标准', deliverables: '交付物及查看入口' }) },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '卡片' }), saveAs: 'card' },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,

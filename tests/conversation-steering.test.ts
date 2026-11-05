@@ -9,7 +9,7 @@ test('针对卡片的消息校验工作归属、幂等保存，并在调度者�
   const ready = new Promise<void>(resolve => { release = resolve; });
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '实现登录', boundary: '登录页', criteria: '登录可用' }) },
+      key: 'brief', requirements: '实现登录', boundary: '登录页', criteria: '登录可用', deliverables: '交付物及查看入口' }) },
   ], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '实现验证码', needsVerification: false }) },
     { type: 'hang', until: ready },

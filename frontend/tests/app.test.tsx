@@ -54,7 +54,7 @@ test('整页读取真实 helmd：收件箱分组、搜索、SSE 更新及语言�
 // These scripts use the same MCP boundary as real coordinators.
 const draft = (key: string): import('../../src/driver.js').FakeStep => ({
   type: 'tool', name: 'draft-work-description', arguments: ctx => ({
-    workId: JSON.parse(ctx.input).work.id, key, requirements: `用户需求 ${key}`, boundary: '本机', criteria: '显示正确',
+    workId: JSON.parse(ctx.input).work.id, key, requirements: `用户需求 ${key}`, boundary: '本机', criteria: '显示正确', deliverables: '交付物及查看入口',
   }), check: value => expect((value as any).ok).toBe(true),
 });
 

@@ -544,7 +544,7 @@ export const operations: readonly Operation[] = [
   operation({
     name: 'draft-work-description', description: '按需求、边界、验收、交付四部分起草工作说明新版本，并请求用户确认', callers: ['coordinator-round'], keyed: true, mutates: true,
     schema: z.object({ workId: z.string().min(1), key: z.string().min(1), requirements: z.string().trim().min(1),
-      boundary: z.string().trim().min(1), criteria: z.string().trim().min(1), deliverables: z.string().trim().optional(),
+      boundary: z.string().trim().min(1), criteria: z.string().trim().min(1), deliverables: z.string().trim().min(1),
       baseRef: z.string().min(1).optional() }).strict(),
     execute: ({ store, actor }, params) => draftDescription(store, actor, params),
   }),
