@@ -45,14 +45,16 @@ test('工作说明允许空基准的迁移保留旧基准和派单引用，升�
   try {
     assert.equal(store.descriptions('work')[0]!.baseRef, 'main');
     assert.equal(store.descriptions('work')[0]!.baseCommit, 'old-commit');
+    assert.equal(store.descriptions('work')[0]!.deliverables, '');
     assert.equal(store.db.prepare('SELECT work_description_id AS id FROM dispatches').get()!.id, 'description');
     assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
-    store.db.exec("INSERT INTO work_descriptions VALUES ('plain', 'work', 2, 'draft', 'plain', '只读', '本机', '结论', 'gate', NULL, NULL)");
+    store.db.exec("INSERT INTO work_descriptions (id, work_id, version, status, key, requirements, boundary, criteria, gate_id, base_ref, base_commit, deliverables) VALUES ('plain', 'work', 2, 'draft', 'plain', '只读', '本机', '结论', 'gate', NULL, NULL, '报告中的结论')");
   } finally { store.close(); }
   store = new TaskStore(directory, agents);
   try {
     assert.equal(store.descriptions('work')[1]!.baseRef, null);
     assert.equal(store.descriptions('work')[1]!.baseCommit, null);
+    assert.equal(store.descriptions('work')[1]!.deliverables, '报告中的结论');
   } finally { store.close(); }
 });
 

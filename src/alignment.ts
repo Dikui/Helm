@@ -137,7 +137,7 @@ export function confirmationDetails<T extends object>(store: TaskStore, gate: T)
 }
 
 export function draftDescription(store: TaskStore, actor: Actor, params: {
-  workId: string; key: string; requirements: string; boundary: string; criteria: string; baseRef?: string;
+  workId: string; key: string; requirements: string; boundary: string; criteria: string; deliverables?: string; baseRef?: string;
 }) {
   const work = store.work(params.workId);
   const versions = store.descriptions(work.id);
@@ -158,12 +158,14 @@ export function draftDescription(store: TaskStore, actor: Actor, params: {
   }
   const description: WorkDescription = {
     id: randomUUID(), workId: work.id, version: versions.length + 1, status: 'draft', key: params.key,
-    requirements: params.requirements, boundary: params.boundary, criteria: params.criteria,
+    requirements: params.requirements, boundary: params.boundary, criteria: params.criteria, deliverables: params.deliverables ?? '',
     gateId: String(gate.id), baseRef, baseCommit,
   };
-  store.db.prepare('INSERT INTO work_descriptions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+  store.db.prepare(`INSERT INTO work_descriptions
+    (id, work_id, version, status, key, requirements, boundary, criteria, gate_id, base_ref, base_commit, deliverables)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     description.id, work.id, description.version, description.status, params.key, params.requirements, params.boundary,
-    params.criteria, description.gateId, baseRef, baseCommit,
+    params.criteria, description.gateId, baseRef, baseCommit, description.deliverables,
   );
   store.db.prepare('UPDATE gates SET description_id = ? WHERE id = ?').run(description.id, description.gateId);
   store.appendEvent(actor, { type: 'work-description', id: description.id }, 'work-description-drafted', description, { workId: work.id });

@@ -29,7 +29,7 @@ export interface HelmEvent {
 }
 export interface Gate {
   id: string; workId: string; createdAt?: string; kind: string; status: string; question: string; body: string; options: string[]; multiSelect?: boolean;
-  descriptionId: string | null; description?: { id: string; requirements: string; boundary: string; criteria: string };
+  descriptionId: string | null; description?: { id: string; requirements: string; boundary: string; criteria: string; deliverables: string };
   report?: import('../../../src/review-report.js').ReviewReport | null;
   gitInitialization?: import('../../../src/git-initialization.js').GitInitialization | null;
   comment?: string | null;

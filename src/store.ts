@@ -19,7 +19,7 @@ export interface Work {
 }
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string; key: string;
-  requirements: string; boundary: string; criteria: string; gateId: string;
+  requirements: string; boundary: string; criteria: string; deliverables: string; gateId: string;
   baseRef: string | null; baseCommit: string | null;
 }
 export interface Gate {
@@ -166,7 +166,7 @@ COMMIT;`);
 
   descriptions(workId: string): WorkDescription[] {
     this.work(workId);
-    return this.db.prepare(`SELECT id, work_id AS workId, version, status, key, requirements, boundary, criteria,
+    return this.db.prepare(`SELECT id, work_id AS workId, version, status, key, requirements, boundary, criteria, deliverables,
       gate_id AS gateId, base_ref AS baseRef, base_commit AS baseCommit
       FROM work_descriptions WHERE work_id = ? ORDER BY version`).all(workId) as unknown as WorkDescription[];
   }

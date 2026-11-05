@@ -84,7 +84,7 @@ test('references 把其他工作的说明和成果提交写成快照附件，拒
   const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
   const daemon = await uiFixture([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'brief', requirements: '调研', boundary: '本机', criteria: '有结论' }), check: ok },
+      key: 'brief', requirements: '调研', boundary: '本机', criteria: '有结论', deliverables: 'research.md 调研报告' }), check: ok },
   ], [], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'card', content: '写结论' }), saveAs: 'card', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
@@ -114,6 +114,8 @@ test('references 把其他工作的说明和成果提交写成快照附件，拒
   assert.equal(snapshot.name, `引用工作-${source.id.slice(0, 8)}.md`);
   const text = await readFile(snapshot.path, 'utf8');
   assert.match(text, /^# 引用的工作：调研缓存方案/);
+  assert.match(text, /### 验收\n\n有结论/);
+  assert.match(text, /### 交付\n\nresearch\.md 调研报告/);
   assert.match(text, new RegExp(`成果提交：${commit}`));
   assert.match(text, /- A research\.md/);
   assert.ok(text.includes(`git -C ${daemon.repo} show ${commit}:<路径>`));

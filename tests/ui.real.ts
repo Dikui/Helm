@@ -301,7 +301,7 @@ test('界面真实冒烟：新建 → 对齐确认 → 关卡 → 执行 → 审
     const workPath = join(evidence, 'data', 'worktrees', workId, '_work');
     assert.equal(existsSync(workPath), false, '对齐阶段不建立工作副本');
     assert.equal(git('branch', '--list', `helm/${workId}`), '', '对齐阶段不建立工作分支');
-    await screenshot('03-aligning-spec-and-confirmation-pin', workHeader(page).getByText(/^对齐中(?:\s*·|$)/), brief.getByRole('heading', { name: '标准', exact: true }), confirm);
+    await screenshot('03-aligning-spec-and-confirmation-pin', workHeader(page).getByText(/^对齐中(?:\s*·|$)/), brief.getByRole('heading', { name: '验收', exact: true }), confirm);
     await click(confirm);
     await visible(workHeader(page).getByText(/^执行中(?:\s*·|$)/));
     const executionGate = conversation.getByRole('group', { name: executionQuestion, exact: true });

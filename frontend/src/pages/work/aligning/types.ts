@@ -3,7 +3,7 @@ import type { Attachment } from '../../../shared/attachments.js';
 
 export interface WorkDescription {
   id: string; workId: string; version: number; status: string;
-  requirements: string; boundary: string; criteria: string;
+  requirements: string; boundary: string; criteria: string; deliverables: string;
   gateId: string; baseRef: string | null; baseCommit: string | null;
 }
 export type ConversationItem = (Gate & { type: 'gate'; createdAt: string; decision: string | null; withdrawalReason: string | null }) | {

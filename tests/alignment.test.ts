@@ -53,7 +53,7 @@ const description = { requirements: '网页版游戏', boundary: '只做本地�
 
 test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，用户确认后仍不建工作分支和副本', async t => {
   const daemon = await fixture(t, [[
-    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, key: 'description-1' }) },
+    { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), ...description, deliverables: '本地游戏页面及打开入口', key: 'description-1' }) },
     { type: 'tool', name: 'send-message', arguments: ctx => ({ workId: workIdOf(ctx), body: '请确认工作说明', key: 'reply-1' }) },
     { type: 'tool', name: 'write-coordinator-notes', arguments: ctx => ({ workId: workIdOf(ctx), body: '确认后开始拆分卡片' }) },
     { type: 'output', text: '对齐完成' },
@@ -65,6 +65,7 @@ test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，
   await until(() => daemon.events(work.id), events => events.some(event => event.action === 'round-ended'));
   const pending = (await daemon.call('list-pending')).result[0];
   assert.deepEqual(pending.description.requirements, description.requirements);
+  assert.equal(pending.description.deliverables, '本地游戏页面及打开入口');
   assert.equal(pending.description.status, 'draft');
   assert.equal(pending.baseRef, 'main');
   assert.equal(pending.baseCommit, head);
@@ -83,6 +84,7 @@ test('调度者经真实 MCP 起草工作说明、发消息和写调度笔记，
   assert.equal(await readFile(join(daemon.repo, 'uncommitted.txt'), 'utf8'), '用户的未提交改动');
   const versions = (await daemon.call('get-work-descriptions', { workId: work.id })).result;
   assert.equal(versions[0].status, 'active');
+  assert.equal(versions[0].deliverables, '本地游戏页面及打开入口');
   assert.ok((await daemon.events(work.id)).some(event => event.action === 'coordinator-notes-written' && event.details.body === '确认后开始拆分卡片'));
 });
 

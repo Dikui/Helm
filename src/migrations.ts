@@ -281,4 +281,7 @@ export const migrations: readonly string[] = [
   ALTER TABLE dispatches DROP COLUMN read_only_snapshot;
   ALTER TABLE dispatches DROP COLUMN read_only_check;
   `,
+  `
+  ALTER TABLE work_descriptions ADD COLUMN deliverables TEXT NOT NULL DEFAULT '';
+  `,
 ];

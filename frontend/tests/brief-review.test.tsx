@@ -43,6 +43,7 @@ afterEach(async () => {
 const draft = (version: number): FakeStep => ({
   type: 'tool', name: 'draft-work-description', arguments: ctx => ({
     workId: JSON.parse(ctx.input).work.id, key: `v${version}`, requirements: `需求原文 ${version}`, boundary: '仅本机', criteria: '原有功能可用',
+    ...(version > 1 ? { deliverables: `交付原文 ${version}：工作页入口` } : {}),
   }), check: value => expect((value as any).ok).toBe(true),
 });
 const ok = (value: unknown) => expect((value as any).ok).toBe(true);
@@ -365,16 +366,20 @@ test('工作说明默认显示最新版本，可切换到生效和历史版本�
   render(<App baseUrl={daemon.url} />);
   const brief = await screen.findByRole('region', { name: '工作说明' });
   expect(await within(brief).findByText('需求原文 3')).toBeTruthy();
+  for (const name of ['需求', '边界', '验收', '交付']) expect(within(brief).getByRole('heading', { name })).toBeTruthy();
+  expect(within(brief).getByText('交付原文 3：工作页入口')).toBeTruthy();
   expect(within(brief).getByText('未确认')).toBeTruthy();
   expect(within(brief).queryByRole('button', { name: /确认/ })).toBeNull();
   const versions = within(brief).getByLabelText('版本');
   fireEvent.change(versions, { target: { value: '2' } });
   expect(within(brief).getByText('需求原文 2')).toBeTruthy();
+  expect(within(brief).getByText('交付原文 2：工作页入口')).toBeTruthy();
   expect(within(brief).getByText('已确认')).toBeTruthy();
   expect(within(brief).getByText('—')).toBeTruthy();
   expect(within(brief).queryByText(`helm/${work.id}`)).toBeNull();
   fireEvent.change(versions, { target: { value: '1' } });
   expect(within(brief).getByText('需求原文 1')).toBeTruthy();
+  expect(within(brief).getByText('未单独记录交付要求')).toBeTruthy();
   expect(within(brief).getByText('历史版本 · 只读')).toBeTruthy();
   expect(within(brief).queryByRole('textbox')).toBeNull();
   fireEvent.change(versions, { target: { value: '3' } });
@@ -382,6 +387,9 @@ test('工作说明默认显示最新版本，可切换到生效和历史版本�
   expect(within(brief).getByRole('link', { name: '在对话中提出修改' }).getAttribute('href')).toBe(`/works/${work.id}`);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(brief).getByRole('heading', { name: 'Requirements' })).toBeTruthy();
+  expect(within(brief).getByRole('heading', { name: 'Acceptance' })).toBeTruthy();
+  expect(within(brief).getByRole('heading', { name: 'Deliverables' })).toBeTruthy();
+  expect(within(brief).getByText('交付原文 3：工作页入口')).toBeTruthy();
   expect(within(brief).getByText('需求原文 3')).toBeTruthy();
   expect((await daemon.call('get-work-descriptions', { workId: work.id })).result.map((item: any) => item.status)).toEqual(['superseded', 'active', 'draft']);
 });

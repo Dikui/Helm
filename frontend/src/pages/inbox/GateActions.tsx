@@ -110,6 +110,7 @@ export function GateDecision({ gate, workStatus, decisionWorkId = gate.workId, d
       <dt>{t('requirements')}</dt><dd>{gate.description.requirements}</dd>
       <dt>{t('boundary')}</dt><dd>{gate.description.boundary}</dd>
       <dt>{t('criteria')}</dt><dd>{gate.description.criteria}</dd>
+      <dt>{t('deliverables')}</dt><dd>{gate.description.deliverables || t('deliverablesMissing')}</dd>
     </dl>}
     {gate.kind === 'work-confirmation' && !gate.descriptionId && <p>{t('noDescription')}</p>}
     {ended && <p className="pill">{t(workStatus)}</p>}
