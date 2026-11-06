@@ -128,13 +128,14 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       const cards = (await call('get-card-graph', params)).filter((node: any) => node.type === 'card');
       assert.equal(cards.length, 1);
       const card = cards[0];
-      assert.equal(card.key, 'auto-flow-card');
+      // The role prompt asks for numbered keys, so a real model may append a sequence number.
+      assert.match(card.key, /^auto-flow-card/);
       assert.equal(card.workspace, workspace);
       assert.equal(card.needsVerification, true);
       assert.deepEqual(card.autoFlow, { verifications: [{ agentId: verifierId, content: verificationContent, needsBrowser: false }] });
       const dispatches = await call('list-dispatches', params) as Dispatch[];
       assert.equal(dispatches.length, 2);
-      const run = dispatches.find(item => item.key === 'auto-flow-execution');
+      const run = dispatches.find(item => item.key.startsWith('auto-flow-execution'));
       assert.ok(run);
       assert.equal(run.purpose, 'execution');
       assert.equal(run.agentId, 'claude-executor');
