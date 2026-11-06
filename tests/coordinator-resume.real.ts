@@ -31,7 +31,7 @@ async function assertResumed(daemon: { call(name: string, params?: object): Prom
   const first = await until(daemon.events, values => values.filter(e => e.action === 'round-ended').length >= ended + 1, 240_000);
   assert.equal(first.filter(e => e.action === 'round-ended').at(-1).details.reason, 'completed');
   assert.ok(!JSON.stringify(first).includes(secret), '测试编号不能进入任务库');
-  await daemon.call('send-message', { ...daemon.params, key: 'resume-probe', body: '续跑第二轮' });
+  // The first round does nothing, so the runtime's stall nudge starts the second one.
   const events = await until(daemon.events, values => values.filter(e => e.action === 'round-ended').length >= ended + 2, 240_000);
   const end = events.filter(e => e.action === 'round-ended').at(-1);
   assert.equal(end.details.reason, 'completed', JSON.stringify(end.details));
@@ -43,7 +43,7 @@ async function assertResumed(daemon: { call(name: string, params?: object): Prom
   assert.equal(two.sessionId, one.sessionId);
   assert.equal(two.brief.resumed, true);
   assert.equal(two.brief.coordinatorNotes, undefined);
-  assert.ok(two.brief.wakeEvents.some(e => (e.details as any).body === '续跑第二轮'));
+  assert.deepEqual(two.brief.wakeEvents.map(e => e.action), ['work-stall-nudged']);
   assert.match(end.details.finalAnswer, new RegExp(secret), '续跑的会话必须记得上一轮的测试编号');
 }
 
