@@ -30,10 +30,11 @@ export class BrowserProcess {
   private endpoint: Promise<string>;
   private closing?: Promise<void>;
   private tools: Tool[] = [];
+  private exitError?: Error;
   readonly pgid: number;
   readonly startedAt: string;
 
-  constructor(command: BrowserCommand, readonly outputDir: string, onExit: () => void) {
+  constructor(command: BrowserCommand, readonly outputDir: string, onExit: (error: Error) => void) {
     mkdirSync(outputDir, { recursive: true });
     const configPath = join(outputDir, 'config.json');
     writeFileSync(configPath, JSON.stringify({
@@ -65,8 +66,9 @@ export class BrowserProcess {
       this.child.once('error', error => { finish(); reject(error); });
       this.child.once('exit', (code, signal) => {
         finish();
-        reject(new Error(`Browser MCP exited (${code ?? signal}): ${output}`));
-        if (!this.controller.signal.aborted) onExit();
+        this.exitError = new Error(`Browser MCP exited (${code ?? signal}): ${output}`);
+        reject(this.exitError);
+        if (!this.controller.signal.aborted) onExit(this.exitError);
       });
     });
     // Rejections can arrive while the owner is still recording the process identity.
@@ -82,14 +84,18 @@ export class BrowserProcess {
       requestInit: { signal: this.controller.signal },
     }));
     this.tools = (await this.client.listTools()).tools.filter(tool => inspectionTools.has(tool.name));
+    if (this.exitError) throw this.exitError;
     this.controller.signal.throwIfAborted();
   }
 
   listTools() { return this.tools; }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (this.exitError) throw this.exitError;
     this.controller.signal.throwIfAborted();
-    const result = await this.client.callTool({ name, arguments: args }, undefined, { signal: this.controller.signal }) as CallToolResult;
+    let result: CallToolResult;
+    try { result = await this.client.callTool({ name, arguments: args }, undefined, { signal: this.controller.signal }) as CallToolResult; }
+    catch (error) { throw this.exitError ?? error; }
     // Playwright links saved files relative to its cwd (outputDir), which the executor never sees.
     for (const block of result.content ?? []) if (block.type === 'text') block.text = block.text.replaceAll('](./', `](${this.outputDir}/`);
     return result;

@@ -179,7 +179,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.match(thread.developerInstructions, /测试策略/);
   assert.match(thread.developerInstructions, /submit-conclusion/);
   assert.match(thread.developerInstructions, /不要 git commit 或改 git 配置/);
-  assert.match(thread.developerInstructions, /不要自己安装或启动浏览器/);
+  assert.match(thread.developerInstructions, /优先用注入的浏览器工具/);
   assert.equal(Object.hasOwn(requests[4].params, 'permissions'), false);
   assert.equal(Object.hasOwn(requests[4].params, 'sandboxPolicy'), false);
   assert.equal(requests[4].params.effort, 'low');

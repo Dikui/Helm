@@ -103,6 +103,12 @@ export function committedFile(path: string, commit: string, name: string) {
   return execFileSync('git', ['-C', path, 'show', `${commit}:${name}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+export function copyGitRecovery(path: string, branch: string | undefined, details = '') {
+  const head = dispatchGit(path, 'rev-parse', '--symbolic-full-name', 'HEAD');
+  const commit = dispatchGit(path, 'rev-parse', 'HEAD');
+  return `副本：${path}；期望分支：${branch ?? '未指定'}；当前 HEAD：${head} (${commit})。${details}\n可以用 shell 在这个副本里修复：先看内容，再切回分支、中止合并、保留或清理改动，然后重试。`;
+}
+
 export function abortCardGit(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch?: string) {
   const gitPath = (name: string) => resolve(workPath, dispatchGit(workPath, 'rev-parse', '--git-path', name));
   const record = (action: string, details: object) => store.transaction(() => store.appendEvent(
@@ -132,9 +138,10 @@ export function abortCardGit(store: TaskStore, dispatch: Dispatch, workPath: str
     record('dispatch-git-aborted', { operation });
   }
   if (cardBranch && dispatchGit(workPath, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${cardBranch}`) {
-    throw new RuleError('CARD_BRANCH_CHANGED', '卡片副本未处于卡片分支，拒绝提交游离或其他分支上的改动。');
+    throw new RuleError('CARD_BRANCH_CHANGED', `卡片副本未处于卡片分支，拒绝提交游离或其他分支上的改动。${copyGitRecovery(workPath, cardBranch)}`);
   }
-  if (dispatchGit(workPath, 'ls-files', '--unmerged')) throw new RuleError('UNMERGED_CARD', '卡片副本仍有冲突，拒绝提交。');
+  const conflicts = dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=U');
+  if (conflicts) throw new RuleError('UNMERGED_CARD', `卡片副本仍有冲突，拒绝提交。${copyGitRecovery(workPath, cardBranch, `冲突文件：\n${conflicts.slice(0, 2000)}`)}`);
 }
 
 export function prepareCardCopy(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch: string) {
@@ -164,9 +171,14 @@ function cardCopy(store: TaskStore, workId: string, cardId: string) {
   if (!existsSync(workPath)) {
     mkdirSync(dirname(workPath), { recursive: true });
     dispatchGit(project, 'worktree', 'add', workPath, cardBranch);
-  } else if (dispatchGit(workPath, 'rev-parse', '--show-toplevel') !== workPath
-    || dispatchGit(workPath, 'symbolic-ref', '--short', 'HEAD') !== cardBranch) {
-    throw new RuleError('CARD_PATH_CONFLICT', '卡片副本路径已被其他目录或分支占用。');
+  } else {
+    let root: string;
+    try { root = dispatchGit(workPath, 'rev-parse', '--show-toplevel'); }
+    catch { throw new RuleError('CARD_PATH_CONFLICT', `卡片副本路径已被其他目录占用：${workPath}`); }
+    if (root !== workPath) throw new RuleError('CARD_PATH_CONFLICT', `卡片副本路径已被其他目录占用：${workPath}`);
+    if (dispatchGit(workPath, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${cardBranch}`) {
+      throw new RuleError('CARD_BRANCH_CHANGED', `卡片副本未处于卡片分支。${copyGitRecovery(workPath, cardBranch)}`);
+    }
   }
   return { workPath, cardBranch };
 }
@@ -176,7 +188,7 @@ export async function createDispatch(store: TaskStore, actor: Actor, params: {
 }) {
   const existing = listDispatches(store, params.workId).find(item => item.key === params.key);
   if (existing) return existing;
-  const agent = await store.agents.check(params.agentId, 'executor');
+  const agent = await store.agents.check(params.agentId, 'executor', true);
   // The probe yields to other requests. Recheck idempotency, actor and work/card
   // state before any filesystem action or dispatch publication.
   const repeated = listDispatches(store, params.workId).find(item => item.key === params.key);

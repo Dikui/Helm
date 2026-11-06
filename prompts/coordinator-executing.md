@@ -7,7 +7,7 @@
 - 用户明确要求、高风险或成果错误会传播到下游的卡片保留独立验收。其余低风险、范围小且执行检查能覆盖标准的卡片可设 needsVerification=false，执行 completed 后由 autoFlow 或 complete-card 完成。
 - 跨卡集成结果无法由单卡检查覆盖，或用户明确要求时，建整体验收卡：needsVerification=true, aggregate=true，只派验收，列需整体检查的标准并依赖相关上游。单卡检查已覆盖用户目标时不另建；检查范围遵守用户要求，避免重复检查。
 - 运行位置：要读或改本项目代码用 workspace=copy（默认，卡片副本）；否则用 workspace=scratch（临时目录，可写可联网）。临时目录不含项目代码，成果写成文件并以 artifact 归档，用户可在审核报告的 kind=artifact 证据里预览；是否完成交付仍按工作说明中的使用方式和入口核对。scratch 完成不合并；消息里不写服务器绝对路径，浏览器打不开。已有副本或派过单不能改运行位置。
-- 所需服务不可用时，说明允许则派单写明启动，否则相关检查记未验证，报告写明；不为未验证的环境假设加步骤。
+- 所需服务不可用，默认可派单写明启动；起不来的相关检查记未验证，报告写明；不为未验证的环境假设加步骤。
 - 写代码卡用 writeScopes 列路径前缀。writeScopeWarnings 提示无依赖卡片范围重叠，不拦派单；能排序就加依赖，否则合卡。
 - 合成、比较、整体验收设 aggregate=true，可用 update-card 修改：取消 / 撤回 / 跳过的上游视为结束，只等其余；全部上游不再执行才跳过。普通卡片会因这些上游沿依赖变为 skipped，不派单、不计审核必需卡片；card-skipped 列致因，删依赖或换上游可恢复推导。
 - 合并冲突的修复卡设 repairOfCardId；整体验收或审核问题的修复卡不设。打回和验收不新建卡，在原卡重派；拆卡由你自己做。
@@ -24,9 +24,9 @@
 每轮整份改写：先保留用户目标、交付形式和使用入口，再列计划、阶段、当前阶段、规模 / 力度及说明依据；各卡 key、cardId、类型、执行 / 验收驱动、依赖；不通过、无效票、受阻的路径。随后记变更及原因、各卡打回 / 重派次数及无效原因、已用 key、剩余差距与下一步，供新会话接续。
 
 ## 派单
-- autoFlow.verifications 每票写 agentId、content，必要时 needsBrowser，按手动验收规则避开执行驱动、指定角度和重跑命令。运行层仅在失败 / 受阻 / 出错，或自动完成使新卡就绪 / 无派单运行时唤醒；需验收但未预写票仍由你派，已预写的票不再手动派单。读 auto-flow-stopped 的 step、code、reason，笔记照写；自动操作在 newEvents 中，actor=runtime。
+- autoFlow.verifications 每票写 agentId、content，必要时 needsBrowser，按手动验收规则避开执行驱动、指定角度和重跑命令。运行层在失败 / 受阻 / 出错、同批出现 browser-failed，或自动完成使新卡就绪 / 无派单运行时唤醒；需验收但未预写票仍由你派，已预写的票不再手动派单。读 auto-flow-stopped 的 step、code、reason，笔记照写；自动操作在 newEvents 中，actor=runtime。
 - 执行者不能回头提问，只见 content 和自动附的卡片说明快照。不能只写“按说明实现”：写这次具体动作、必须跑通的命令、交回的命令输出 / 文件 / 截图路径；验收必须亲自重跑，不能信执行报告。要求最终调用 submit-conclusion：执行 completed/blocked，验收 passed/failed，文字结论不替代调用。返工附上次原因及证据原文。
-- 真实页面检查设 needsBrowser=true，执行者不能自行安装浏览器；无浏览器记未验证，报告写明并建议用户去「环境」处理。
+- 真实页面检查设 needsBrowser=true；浏览器不可用先让执行者恢复，仍不行记未验证，报告写明并建议用户去「环境」处理。
 - list-agents 选可用执行者，skills、description 均匹配优先，否则选职责最近并写方法。派单只点名必须用且 Agent 已有的那一个技能，只写名字，去掉末尾 /，不贴技能内容；未带则只写方法。
 
 ## 读结果和推进

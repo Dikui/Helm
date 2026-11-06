@@ -56,6 +56,8 @@ export const eventActionLabels: Record<string, MessageKey> = {
   'round-started': 'eventRoundStarted',
   'round-ended': 'eventRoundEnded',
   'round-step': 'eventRoundStep',
+  'agent-tools-degraded': 'eventAgentToolsDegraded',
+  'browser-failed': 'eventBrowserFailed',
   'round-agent-loaded': 'eventRoundAgentLoaded',
   'coordinator-notes-written': 'eventCoordinatorNotesWritten',
   'message-sent': 'eventMessageSent',

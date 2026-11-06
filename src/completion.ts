@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { removeScratchDirectory } from './scratch.js';
 import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
-import { dispatchGit, listDispatches, markOutdated, revokeDispatch, verificationCommit } from './dispatch.js';
+import { copyGitRecovery, dispatchGit, listDispatches, markOutdated, revokeDispatch, verificationCommit } from './dispatch.js';
 import { cancelCard as recordCancellation, cardDetails, refreshCardReadiness, type Card } from './graph.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent } from './store.js';
 
@@ -86,8 +86,11 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   const executed = dispatches.some(item => item.purpose === 'execution');
   if ((work.workBranch && !work.workPath) || (executed && (!work.workBranch || !card.cardBranch))) throw new RuleError('GIT_ERROR', '找不到卡片分支或工作分支。');
   const workPath = work.workPath ?? projectPath(store, work.id);
-  if (work.workBranch && (dispatchGit(workPath, 'symbolic-ref', '--short', 'HEAD') !== work.workBranch || dispatchGit(workPath, 'status', '--porcelain'))) {
-    throw new RuleError('WORK_COPY_DIRTY', '工作分支的 _work 必须干净且检出工作分支。');
+  if (work.workBranch) {
+    const status = dispatchGit(workPath, 'status', '--short');
+    if (dispatchGit(workPath, 'rev-parse', '--symbolic-full-name', 'HEAD') !== `refs/heads/${work.workBranch}` || status) {
+      throw new RuleError('WORK_COPY_DIRTY', `工作分支的 _work 必须干净且检出工作分支。${copyGitRecovery(workPath, work.workBranch, `git status --short：\n${status.slice(0, 2000)}`)}`);
+    }
   }
   // A retry after cleanup can still merge the saved commit; the branch may already be gone.
   const branchExists = executed && dispatchGit(workPath, 'for-each-ref', '--format=%(refname)', `refs/heads/${card.cardBranch}`);

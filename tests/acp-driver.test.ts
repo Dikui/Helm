@@ -249,7 +249,7 @@ for (const loadGlobalConfig of [false, true]) test(`Grok 全局配置 ${loadGlob
   assert.match(prompt[0].text, /^你是 Helm 执行者.*\n\n测试策略\n\n/s);
   assert.match(prompt[0].text, /submit-conclusion/);
   assert.match(prompt[0].text, /不要 git commit 或改 git 配置/);
-  assert.match(prompt[0].text, /不要自己安装或启动浏览器/);
+  assert.match(prompt[0].text, /优先用注入的浏览器工具/);
   assert.deepEqual(prompt[1], { type: 'text', text: '实现派单' });
 });
 

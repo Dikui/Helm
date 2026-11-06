@@ -28,9 +28,12 @@ export const saveAgentSchema = z.object({
   mode: z.enum(['update', 'create']), baseRevision: z.string().min(1).optional(),
 }).strict();
 
+export interface ToolProblem { type: 'skill' | 'mcp'; name: string; reason: string }
+
 export interface AgentConfig extends Omit<z.infer<typeof agentSettings>, 'skills' | 'mcp' | 'loadGlobalConfig'> {
   id: string; prompt: string; directory: string; skillsPath: string | null; skills?: string[]; mcp?: string[];
   loadGlobalConfig: boolean;
+  toolProblems?: ToolProblem[];
   // Role rules from the prompt directory, read with the Agent so each snapshot records them.
   rules: { role: string; runtime: string };
 }
@@ -150,8 +153,8 @@ export class AgentCatalog {
     return this.list().find(agent => agent.id === id);
   }
 
-  async check(id: string, role?: AgentConfig['role']): Promise<AgentConfig> {
-    const check = this.checkAgent(id, role);
+  async check(id: string, role?: AgentConfig['role'], allowToolProblems = false): Promise<AgentConfig> {
+    const check = this.checkAgent(id, role, allowToolProblems);
     this.checks.add(check);
     try { return await check; }
     finally { this.checks.delete(check); }
@@ -159,10 +162,10 @@ export class AgentCatalog {
 
   async settleChecks() { await Promise.allSettled([...this.checks]); }
 
-  private async checkAgent(id: string, role?: AgentConfig['role']): Promise<AgentConfig> {
+  private async checkAgent(id: string, role: AgentConfig['role'] | undefined, allowToolProblems: boolean): Promise<AgentConfig> {
     let agent: AgentConfig;
     let result: AgentAvailability;
-    try { agent = this.get(id); }
+    try { agent = this.get(id, undefined, allowToolProblems); }
     catch (error) {
       // Config errors are re-derived on every list(); caching one would outlive the fix until the next probe.
       if (error instanceof RuleError) { this.report?.(id, { available: false, reason: error.message }); this.availability.delete(id); }
@@ -171,7 +174,7 @@ export class AgentCatalog {
     if (role && agent.role !== role) throw new RuleError('AGENT_UNAVAILABLE', `Agent 角色必须为 ${role}。`, 409, { agentId: id });
     try { result = this.runtimeAvailability(agent) ?? await this.checker?.(agent) ?? { available: true }; }
     catch { result = { available: false, reason: '驱动无法检查 Agent 可用性，请检查 CLI 安装和主目录。' }; }
-    if (this.availabilityContext(this.get(id)) !== this.availabilityContext(agent)) return this.checkAgent(id, role);
+    if (this.availabilityContext(this.get(id, undefined, allowToolProblems)) !== this.availabilityContext(agent)) return this.checkAgent(id, role, allowToolProblems);
     // A dispatch may have failed while this probe was in flight.
     result = this.runtimeAvailability(agent) ?? result;
     this.record(id, result);
@@ -218,15 +221,17 @@ export class AgentCatalog {
       skillsPath: existsSync(skillsPath) && statSync(skillsPath).isDirectory() ? skillsPath : null };
   }
 
-  private unavailable(agent: AgentConfig) {
+  private unavailable(agent: AgentConfig, allowToolProblems = false) {
     if (agent.driver === 'claude-sdk' && agent.fast) return 'Claude fast 在订阅下要开 extra usage 并计入 extra usage';
     if (!this.drivers.includes(agent.driver)) return `驱动 ${agent.driver} 未登记。`;
-    for (const name of agent.skills ?? []) {
-      try { this.library.read(name); }
-      catch (error) { return `库 skill ${name} 不可用：${error instanceof Error ? error.message : String(error)}`; }
+    if (!allowToolProblems) {
+      for (const name of agent.skills ?? []) {
+        try { this.library.read(name); }
+        catch (error) { return `库 skill ${name} 不可用：${error instanceof Error ? error.message : String(error)}`; }
+      }
+      try { this.mcpServers(agent); }
+      catch (error) { return error instanceof Error ? error.message : '库 MCP 不可用。'; }
     }
-    try { this.mcpServers(agent); }
-    catch (error) { return error instanceof Error ? error.message : '库 MCP 不可用。'; }
     return acpAgents[agent.driver as keyof typeof acpAgents]?.unavailable(agent) ?? null;
   }
 
@@ -273,7 +278,7 @@ export class AgentCatalog {
     });
   }
 
-  get(id: string, role?: AgentConfig['role']): AgentConfig {
+  get(id: string, role?: AgentConfig['role'], allowToolProblems = false): AgentConfig {
     let agent: AgentConfig;
     try { agent = this.read(id); }
     catch (error) {
@@ -282,58 +287,75 @@ export class AgentCatalog {
       }
       throw new RuleError('AGENT_UNAVAILABLE', `Agent ${id} 不可用（config.json / prompt.md）：${error instanceof Error ? error.message : String(error)}`, 409, { agentId: id });
     }
-    const reason = this.unavailable(agent) ?? (role && agent.role !== role ? `Agent 角色必须为 ${role}。` : null);
+    const reason = this.unavailable(agent, allowToolProblems) ?? (role && agent.role !== role ? `Agent 角色必须为 ${role}。` : null);
     if (reason) throw new RuleError('AGENT_UNAVAILABLE', reason, 409, { agentId: id });
     return agent;
   }
 
   // Credentials live only in driver startup options, never in the Agent snapshot.
-  mcpServers(agent: AgentConfig): SessionOptions['mcpServers'] {
-    try {
-      return Object.fromEntries((agent.mcp ?? []).map(name => {
+  mcpServers(agent: AgentConfig, problems?: ToolProblem[]): SessionOptions['mcpServers'] {
+    const servers: SessionOptions['mcpServers'] = {};
+    for (const name of agent.mcp ?? []) {
+      try {
         // Keep Helm's authenticated endpoint and the browser MCP names reserved.
         if (['helm', 'browser', 'playwright'].includes(name)) throw new Error(`库 MCP ${name} 与 Helm 内置 MCP 或浏览器工具名字冲突。`);
         const config = this.mcpLibrary.read(name);
         if (config.type === 'stdio') {
           if (Object.hasOwn(acpAgents, agent.driver)) throw new Error(`ACP 驱动 ${agent.driver} 不支持 stdio MCP：${name}。`);
-          return [name, config];
+          servers[name] = config;
+        } else {
+          const { url, headers = {} } = config;
+          servers[name] = { url, headers };
         }
-        const { url, headers = {} } = config;
-        return [name, { url, headers }];
-      }));
-    } catch (error) {
-      throw new RuleError('AGENT_UNAVAILABLE', `Agent ${agent.id} 的 MCP 不可用：${error instanceof Error ? error.message : '无法读取库 MCP'}`, 409, { agentId: agent.id });
+      } catch (error) {
+        const reason = `Agent ${agent.id} 的 MCP ${name} 不可用：${error instanceof Error ? error.message : '无法读取库 MCP'}`;
+        if (!problems) throw new RuleError('AGENT_UNAVAILABLE', reason, 409, { agentId: agent.id });
+        problems.push({ type: 'mcp', name, reason });
+      }
     }
+    return servers;
   }
 
-  // Each dispatch or coordinator round owns a fixed copy, assembled only at startup.
-  snapshot(agent: AgentConfig, dataDir: string): AgentConfig {
+  // Keep the selected configuration intact; only the assembled copy degrades.
+  snapshot(agent: AgentConfig, dataDir: string): AgentConfig & { toolProblems: ToolProblem[] } {
     const skillsPath = join(dataDir, 'skills');
-    try {
-      const ownEntries = agent.skillsPath ? readdirSync(agent.skillsPath) : [];
-      const selected = [...new Set(agent.skills ?? [])].filter(name => !ownEntries.includes(name))
-        .map(name => ({ name, path: this.library.read(name) }));
-      if (!ownEntries.length && !selected.length) return { ...agent, skillsPath: null };
-      mkdirSync(dataDir, { recursive: true });
-      if (ownEntries.length) cpSync(agent.skillsPath!, skillsPath, { recursive: true, dereference: true });
-      else mkdirSync(skillsPath);
-      for (const { name, path } of selected) cpSync(path, join(skillsPath, name), { recursive: true, dereference: true });
-      return { ...agent, skillsPath };
-    } catch (error) {
-      rmSync(skillsPath, { recursive: true, force: true });
-      throw new RuleError('AGENT_UNAVAILABLE', `Agent ${agent.id} 的 skill 无法组装：${error instanceof Error ? error.message : String(error)}`, 409, { agentId: agent.id });
+    const toolProblems: ToolProblem[] = [];
+    let ownEntries: string[] = [];
+    try { ownEntries = agent.skillsPath ? readdirSync(agent.skillsPath) : []; }
+    catch (error) { toolProblems.push({ type: 'skill', name: '自带 skills', reason: String(error) }); }
+    const selected = [...new Set(agent.skills ?? [])].filter(name => !ownEntries.includes(name));
+    let copied = false;
+    for (const name of [...ownEntries, ...selected]) {
+      // Publish only complete skills, so failed copies cannot leave tools visible.
+      const temporary = join(dataDir, `.skill-${randomUUID()}`);
+      try {
+        const source = ownEntries.includes(name) ? join(agent.skillsPath!, name) : this.library.read(name);
+        mkdirSync(dataDir, { recursive: true });
+        cpSync(source, temporary, { recursive: true, dereference: true });
+        mkdirSync(skillsPath, { recursive: true });
+        renameSync(temporary, join(skillsPath, name));
+        copied = true;
+      } catch (error) {
+        let reason = error instanceof Error ? error.message : String(error);
+        try { rmSync(temporary, { recursive: true, force: true }); }
+        catch (cleanup) { reason += `; ${String(cleanup)}`; }
+        toolProblems.push({ type: 'skill', name, reason });
+      }
     }
+    return { ...agent, skillsPath: copied ? skillsPath : null, toolProblems };
   }
 
-  list() {
+  // allowToolProblems: dispatching skips a broken skill or MCP, so the coordinator sees those as warnings; settings keep the strict result.
+  list(allowToolProblems = false) {
     if (!existsSync(this.directory)) return [];
     return readdirSync(this.directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort().map(id => {
       try {
         const agent = this.read(id);
-        const reason = this.unavailable(agent);
+        const reason = this.unavailable(agent, allowToolProblems);
+        const toolProblem = allowToolProblems && !reason ? this.unavailable(agent) : null;
         const availability = this.runtimeAvailability(agent) ?? this.availability.get(id);
         return { ...agent, billing: agent.home === 'shared' ? 'subscription' : 'api',
-          warnings: this.warnings(agent),
+          warnings: [...this.warnings(agent), ...(toolProblem ? [toolProblem] : [])],
           skills: agent.skillsPath ? readdirSync(agent.skillsPath, { withFileTypes: true })
             .map(entry => entry.name + (entry.isDirectory() ? '/' : '')).sort() : [],
           available: reason === null && availability?.available !== false, reason: reason ?? availability?.reason ?? null,
@@ -401,7 +423,8 @@ export function migrateAgentGlobalConfig(directory: string) {
 const coordinatorOmits = new Set(['config', 'prompt', 'rules', 'revision', 'directory', 'skillsPath']);
 export async function listAgents(store: TaskStore, actor: Actor) {
   const coordinator = actor.type === 'coordinator-round';
-  const agents = coordinator ? await store.agents.refresh() : store.agents.cached();
+  if (coordinator) await store.agents.refresh();
+  const agents = coordinator ? store.agents.list(true) : store.agents.cached();
   const dispatches = new Map(store.db.prepare(`SELECT agent_id AS id, count(*) AS count FROM dispatches
     WHERE status = 'running' GROUP BY agent_id`).all().map(row => [String(row.id), Number(row.count)]));
   const works = new Map(store.db.prepare(`SELECT coordinator_agent_id AS id, count(*) AS count FROM works

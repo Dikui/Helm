@@ -19,6 +19,22 @@ import { createScratchDirectory, saveScratchArtifacts, scratchPath } from './scr
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 
+function verificationBrowserFailed(store: TaskStore, dispatch: Dispatch) {
+  const votes = new Set(listDispatches(store, dispatch.workId, dispatch.cardId).filter(item => item.purpose === 'verification').map(item => item.id));
+  const active = new Set<string>();
+  let failed = false;
+  // A batch spans overlapping queued/running votes, including votes that ended first.
+  for (const event of store.events({ cardId: dispatch.cardId, actions: ['dispatch-created', 'dispatch-ended', 'browser-failed'] })) {
+    if (!event.dispatchId || !votes.has(event.dispatchId)) continue;
+    if (event.action === 'dispatch-created') {
+      if (!active.size) failed = false;
+      active.add(event.dispatchId);
+    } else if (event.action === 'dispatch-ended') active.delete(event.dispatchId);
+    else failed = true;
+  }
+  return failed;
+}
+
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const aborted = () => reject(signal.reason);
@@ -154,7 +170,8 @@ export class ExecutionRunner {
     let usage: TokenUsage = { inputTokens: null, outputTokens: null };
     let failure: string | null = null;
     let ruleFailure: { code: string; reason: string; details?: Record<string, unknown> } | undefined;
-    let browserFailed = false;
+    let browserFailure: string | undefined;
+    let allocatedBrowser: BrowserProcess | undefined;
     let startCommit: string | null = null;
     let endCommit: string | null = null;
     let redact = (text: string) => text;
@@ -195,10 +212,13 @@ export class ExecutionRunner {
       const protection = protectDispatchEnvironment(this.store, dispatch.id, environment);
       redact = protection.redact;
       releaseEnvironment = protection.release;
-      const configuredAgent = await abortable(this.store.agents.check(dispatch.agentId, 'executor'), stop.signal);
+      const configuredAgent = await abortable(this.store.agents.check(dispatch.agentId, 'executor', true), stop.signal);
       if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(dispatch.outputPath, '..'));
-      const mcpServers = this.store.agents.mcpServers(agent);
+      const mcpServers = this.store.agents.mcpServers(agent, agent.toolProblems);
+      for (const problem of agent.toolProblems) problem.reason = redact(problem.reason);
+      if (agent.toolProblems.length) this.store.transaction(() => this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id },
+        'agent-tools-degraded', { toolProblems: agent.toolProblems }, scope));
       if (dispatch.resumeSessionId && (dispatch.agent.driver ?? 'claude-sdk') !== agent.driver) {
         throw new RuleError('INVALID_RESUME', 'Agent 的驱动已更改，不能续跑原驱动会话。');
       }
@@ -219,17 +239,27 @@ export class ExecutionRunner {
       const conflictResolution = !scratch && prepareConflictCardMerge(this.store, dispatch, workPath);
       if (!getDispatch(this.store, dispatch.workId, dispatch.id).abortReason && !this.stopping) {
         if (dispatch.needsBrowser) {
-          const browser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), () => {
-            browserFailed = true;
-            failure = 'Browser MCP exited unexpectedly';
-            this.sessions.get(dispatch.id)?.cancel();
-          });
-          this.browsers.set(dispatch.id, browser);
-          this.store.transaction(() => {
-            this.store.db.prepare('UPDATE dispatches SET browser_pgid = ?, browser_started_at = ? WHERE id = ?').run(browser.pgid, browser.startedAt, dispatch.id);
-            this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-started', { pgid: browser.pgid, startedAt: browser.startedAt }, scope);
-          });
-          await abortable(browser.connect(), stop.signal);
+          let connected = false;
+          const failed = (error: unknown) => {
+            if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) return;
+            browserFailure = redact(error instanceof Error ? error.message : String(error));
+            this.store.transaction(() => this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-failed', { reason: browserFailure }, scope));
+          };
+          try {
+            const browser = allocatedBrowser = new BrowserProcess(this.browserCommand, join(dispatch.outputPath, '..', 'browser'), error => { if (connected) failed(error); });
+            this.browsers.set(dispatch.id, browser);
+            this.store.transaction(() => {
+              this.store.db.prepare('UPDATE dispatches SET browser_pgid = ?, browser_started_at = ? WHERE id = ?').run(browser.pgid, browser.startedAt, dispatch.id);
+              this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'browser-started', { pgid: browser.pgid, startedAt: browser.startedAt }, scope);
+            });
+            await abortable(browser.connect(), stop.signal);
+            connected = true;
+          } catch (error) {
+            if (stop.signal.aborted || this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) throw error;
+            failed(error);
+            this.browsers.delete(dispatch.id);
+            await allocatedBrowser?.close();
+          }
         }
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason || this.stopping) return;
         this.tokens.set(token, { type: 'dispatch', id: dispatch.id, workId: dispatch.workId });
@@ -262,6 +292,8 @@ export class ExecutionRunner {
         if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) stop.abort();
         const conclusions = dispatch.purpose === 'verification' ? 'passed 或 failed' : 'completed 或 blocked';
         await abortable(session.send(JSON.stringify({ dispatchId: dispatch.id, cardId: card.id, purpose: dispatch.purpose, workspace: card.workspace, content: dispatch.content,
+          ...(browserFailure ? { browserFailure } : {}),
+          ...(agent.toolProblems?.length ? { toolProblems: agent.toolProblems } : {}),
           ...(conflictResolution ? { conflictResolution } : {}),
           conclusionInstruction: `本次派单结束前必须调用 submit-conclusion 并附一句理由，结论只能是 ${conclusions}。` })), stop.signal);
         let previousStep = 0;
@@ -320,7 +352,7 @@ export class ExecutionRunner {
       this.sessions.get(dispatch.id)?.cancel();
       this.sessions.delete(dispatch.id);
       void events?.return?.().catch(() => {});
-      const browser = this.browsers.get(dispatch.id);
+      const browser = allocatedBrowser;
       if (browser) {
         try {
           await browser.close();
@@ -345,7 +377,6 @@ export class ExecutionRunner {
           reason = 'error';
         }
       }
-      if (browserFailed) reason = 'error';
       if (this.stopping || getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
       try {
         // An aborted verification may never have created its copy, and then started no process.
@@ -383,13 +414,15 @@ export class ExecutionRunner {
           .run(new Date().toISOString(), reason, finalAnswer, JSON.stringify(usage), failure, endCommit, reason, reason, dispatch.id);
         const result = getDispatch(this.store, dispatch.workId, dispatch.id);
         refreshCardReadiness(this.store, dispatch.workId);
-        const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', { ...result, ...(ruleFailure ? { error: ruleFailure } : {}) }, scope);
+        const event = this.store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', { ...result,
+          ...(browserFailure ? { browserFailure } : {}), ...(ruleFailure ? { error: ruleFailure } : {}) }, scope);
         // A vote batch is judged together: only the last verification to end wakes the coordinator; earlier ones reach it as recent events.
         const batchOpen = dispatch.purpose === 'verification' && this.store.db.prepare(`SELECT 1 FROM dispatches WHERE card_id = ?
           AND purpose = 'verification' AND status IN ('queued', 'running')`).get(dispatch.cardId);
         const currentCard = cardDetails(this.store, dispatch.workId, card.id);
         const flow = currentCard.autoFlow;
         const automatic = !batchOpen && flow && this.store.work(dispatch.workId).status === 'executing'
+          && !(dispatch.purpose === 'verification' && verificationBrowserFailed(this.store, dispatch))
           && !['completed', 'cancelled', 'paused'].includes(currentCard.status)
           && (dispatch.purpose === 'verification' || (result.endReason === 'completed' && result.conclusion === 'completed'
             && (!currentCard.needsVerification || flow.verifications.length > 0)));

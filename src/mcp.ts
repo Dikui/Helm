@@ -8,6 +8,7 @@ import { RuleError, type Actor, type TaskStore } from './store.js';
 import type { BrowserProcess } from './browser.js';
 import type { UserOperations } from './user-operations.js';
 import { helmVersion } from './version.js';
+import { redactDispatchText } from './project-environment.js';
 
 // Stateless transport; the HTTP layer resolves and validates round and dispatch tokens.
 export async function handleMcp(request: IncomingMessage, response: ServerResponse, input: unknown, store: TaskStore, actor: Actor,
@@ -33,7 +34,9 @@ export async function handleMcp(request: IncomingMessage, response: ServerRespon
         }
         return await browser.callTool(request.params.name, request.params.arguments ?? {});
       } catch (error) {
-        const failure = error instanceof RuleError ? error : new RuleError('BROWSER_UNAVAILABLE', '浏览器工具调用失败，请检查这次派单的浏览器进程。');
+        const reason = error instanceof Error ? error.message : String(error);
+        const failure = error instanceof RuleError ? error : new RuleError('BROWSER_UNAVAILABLE',
+          `浏览器工具调用失败：${actor.type === 'dispatch' ? redactDispatchText(store, actor.id, reason) : reason}`);
         const result = rejectOperation(store, actor, request.params.name, failure);
         return { isError: true, content: [{ type: 'text', text: JSON.stringify(result.body) }], structuredContent: result.body };
       }

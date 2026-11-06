@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -372,4 +374,36 @@ test('执行阶段规则在确认后的那一轮附上一次，续跑会话不�
   assert.deepEqual(briefs.map(brief => brief.resumed ?? false), [false, true, true, true, false]);
   // Aligning gets none; the resumed round after confirmation gets them once; a fresh session after compaction gets them again.
   assert.deepEqual(briefs.map(brief => brief.phaseRules), [undefined, executing, undefined, undefined, executing]);
+});
+
+// issue 30: medium regression for degraded snapshots and recovery across rounds.
+for (const failure of ['missing', 'copy'] as const) test(`跳过 skill (${failure}) 后保持配置和续跑，修好后新开会话收到工具`, async t => {
+  const small = { type: 'end', reason: 'completed', context: { tokens: 100, window: 1_000_000 } } as const;
+  const scenario = await resumeScenario(t, { resume: true, contextUsage: true }, Array(4).fill([small]));
+  await configureTestAgent(scenario.agentDir, 'claude-coordinator', { skills: ['recoverable'] });
+  const source = join(scenario.dataDir, 'library', 'skills', 'recoverable');
+  const repair = async () => { await mkdir(source, { recursive: true }); await writeFile(join(source, 'SKILL.md'), 'repaired tool'); };
+  if (failure === 'copy') {
+    await repair();
+    const { cpSync } = fs;
+    t.mock.method(fs, 'cpSync', (...args: Parameters<typeof fs.cpSync>) => {
+      cpSync(...args);
+      if (args[0] === source) throw new Error(`Cannot copy skill to ${args[1]}`);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  }
+  await scenario.next();
+  assert.ok(scenario.rounds[1]!.brief.toolProblems?.some(problem => problem.name === 'recoverable'));
+  await scenario.next();
+  assert.equal(scenario.rounds[2]!.resumeSessionId, scenario.rounds[1]!.sessionId);
+  t.mock.restoreAll(); syncBuiltinESMExports();
+  await repair();
+  await scenario.next();
+  assert.equal(scenario.rounds[3]!.resumeSessionId, undefined);
+  assert.equal(scenario.rounds[3]!.brief.toolProblems, undefined);
+  const events = await scenario.call('get-events', { workId: scenario.work.id }) as any[];
+  const rounds = events.filter(event => event.action === 'round-agent-loaded').map(event => event.details);
+  assert.ok(rounds.slice(1).every(round => round.agent.skills.includes('recoverable')));
+  assert.equal(await readFile(join(rounds.at(-1).agent.skillsPath, 'recoverable', 'SKILL.md'), 'utf8'), 'repaired tool');
 });

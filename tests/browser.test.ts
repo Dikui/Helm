@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -272,14 +274,45 @@ test('调度者撤销派单会关闭浏览器；运行层停止同样关闭浏�
   }
 });
 
-test('浏览器启动失败不拉起执行者，记录错误并清理进程', async t => {
+// issue 30: auxiliary browser failures leave recovery to the executor (medium, regression).
+test('浏览器启动失败仍拉起执行者，输入和事件带原因并清理进程', async t => {
   let executorStarted = false;
-  const daemon = await fixture(t, [() => { executorStarted = true; return []; }], { needsBrowser: true, browserArgs: ['--crash'] });
+  const daemon = await fixture(t, [ctx => {
+    executorStarted = true;
+    assert.match(JSON.parse(ctx.input).browserFailure, /Browser MCP exited.*2.*startup diagnostic/s);
+    assert.doesNotMatch(JSON.parse(ctx.input).browserFailure, /startup-secret/);
+    return [
+      { type: 'tool', name: 'browser_snapshot', arguments: {}, check: (value: any) => assert.equal(value.error.code, 'FORBIDDEN') },
+      { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '换工具检查' }, check: ok },
+    ];
+  }], { needsBrowser: true, browserArgs: ['--crash', '--diagnostic', 'startup diagnostic startup-secret'], projectEnvironment: { TOKEN: 'startup-secret' } });
   const result = await daemon.ended();
-  assert.equal(result.endReason, 'error');
-  assert.match(result.failure, /Browser MCP exited/);
-  assert.equal(executorStarted, false);
+  assert.equal(result.endReason, 'completed', result.failure);
+  assert.equal(executorStarted, true);
+  const events = await daemon.events();
+  assert.match(events.find(event => event.action === 'browser-failed')?.details.reason, /Browser MCP exited/);
+  assert.match(events.find(event => event.action === 'dispatch-ended')?.details.browserFailure, /Browser MCP exited/);
+  assert.ok(events.some(event => event.action === 'browser-stopped'));
+  assert.doesNotMatch(JSON.stringify(events), /startup-secret/);
   assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
+});
+
+// issue 30: medium regression, failing browser setup is still an auxiliary failure.
+test('浏览器配置文件写入失败仍启动执行者并交回原始原因', async t => {
+  const { writeFileSync } = fs;
+  t.mock.method(fs, 'writeFileSync', (...args: Parameters<typeof fs.writeFileSync>) => {
+    if (String(args[0]).endsWith('/browser/config.json')) throw new Error('browser config permission denied');
+    return writeFileSync(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const daemon = await fixture(t, [ctx => {
+    assert.match(JSON.parse(ctx.input).browserFailure, /browser config permission denied/);
+    return [];
+  }], { needsBrowser: true });
+  const result = await daemon.ended();
+  assert.equal(result.endReason, 'completed', result.failure);
+  assert.ok((await daemon.events()).some(event => event.action === 'browser-failed'));
 });
 
 test('浏览器尚未就绪时停止运行层会取消启动并清理进程', async t => {
@@ -287,6 +320,19 @@ test('浏览器尚未就绪时停止运行层会取消启动并清理进程', as
   const dispatch = await until(async () => (await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: daemon.dispatch.id })).result,
     value => Boolean(value.browserPgid));
   await daemon.close();
+  assert.throws(() => process.kill(dispatch.browserPgid, 0), { code: 'ESRCH' });
+});
+
+// issue 30: medium regression, cancellation is not a browser failure.
+test('用户取消尚未就绪的浏览器派单时保持中止且不记浏览器故障', async t => {
+  const daemon = await fixture(t, [() => { assert.fail('取消后不能启动执行者'); }], { needsBrowser: true, browserArgs: ['--hang-start'] });
+  const dispatch = await until(async () => (await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: daemon.dispatch.id })).result,
+    value => Boolean(value.browserPgid));
+  ok(await daemon.call('cancel-card', { workId: daemon.work.id, cardId: dispatch.cardId, reason: '用户取消' }));
+  const result = await daemon.ended();
+  assert.equal(result.endReason, 'aborted');
+  assert.equal(result.sessionId, null);
+  assert.ok(!(await daemon.events()).some(event => event.action === 'browser-failed'));
   assert.throws(() => process.kill(dispatch.browserPgid, 0), { code: 'ESRCH' });
 });
 
@@ -301,13 +347,34 @@ test('验收浏览器尚未就绪时看门狗仍能中止启动、清理进程�
   assert.throws(() => process.kill(result.browserPgid, 0), { code: 'ESRCH' });
 });
 
-test('运行中的浏览器 MCP 意外退出会结束挂住的执行者并记录错误', async t => {
-  const daemon = await fixture(t, [[{ type: 'hang' }]], { needsBrowser: true });
+test('运行中的浏览器退出不取消会话，工具返回脱敏的退出原因且保存已有成果', async t => {
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const daemon = await fixture(t, [[
+    { type: 'tool', name: 'browser_take_screenshot', arguments: { filename: 'before.svg' }, check: value => assert.ok(!(value as any).isError) },
+    { type: 'hang', until: hold },
+    { type: 'tool', name: 'browser_snapshot', arguments: {}, check: (value: any) => {
+      assert.equal(value.error.code, 'BROWSER_UNAVAILABLE');
+      assert.match(value.error.reason, /Browser MCP exited \(SIGTERM\).*diagnostic/s);
+      assert.doesNotMatch(value.error.reason, /browser-secret/);
+    } },
+    { type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'completed', reason: '自行恢复' }, check: ok },
+  ]], { needsBrowser: true, browserArgs: ['--diagnostic', 'diagnostic browser-secret'], projectEnvironment: { TOKEN: 'browser-secret' } });
   const dispatch = await until(async () => (await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: daemon.dispatch.id })).result,
     value => Boolean(value.sessionId));
+  await until(async () => { try { return await readFile(join(dispatch.outputPath, '..', 'browser', 'before.svg')); } catch { return null; } }, Boolean);
   process.kill(dispatch.browserPgid, 'SIGTERM');
+  await until(daemon.events, events => events.some(event => event.action === 'browser-failed'));
+  assert.equal((await daemon.call('get-dispatch', { workId: daemon.work.id, dispatchId: dispatch.id })).result.status, 'running');
+  release();
   const result = await daemon.ended();
-  assert.equal(result.endReason, 'error');
-  assert.match(result.failure, /Browser MCP exited unexpectedly/);
+  assert.equal(result.endReason, 'completed', result.failure);
+  const events = await daemon.events();
+  assert.match(events.find(event => event.action === 'dispatch-ended').details.browserFailure, /SIGTERM/);
+  assert.doesNotMatch(JSON.stringify(events), /browser-secret/);
+  const artifacts = (await daemon.call('get-dispatch-artifacts', { workId: daemon.work.id, dispatchId: dispatch.id })).result;
+  assert.ok(artifacts.some((artifact: any) => artifact.name === 'browser/before.svg'));
+  assert.ok(events.some(event => event.action === 'browser-stopped'));
   assert.throws(() => process.kill(dispatch.browserPgid, 0), { code: 'ESRCH' });
 });

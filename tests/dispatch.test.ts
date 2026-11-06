@@ -361,6 +361,52 @@ test('调度轮次拉起进程时也记录 pgid 与启动时间', async t => {
   assert.equal(event.object.type, 'coordinator-round');
 });
 
+// issue 30: medium regression for diagnostics and recovery through create-dispatch.
+for (const detached of [true, false]) test(`卡片副本切到${detached ? '游离 HEAD' : '其他分支'}时诊断分支，切回后可重派`, async t => {
+  let next!: () => void;
+  const hold = new Promise<void>(resolve => { next = resolve; });
+  t.after(() => next());
+  let path = ''; let branch = ''; let current = '';
+  const daemon = await fixture(t, [create, dispatch('first'), { type: 'hang', until: hold },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key: 'rejected', agentId: 'claude-executor' }), check: (value: any) => {
+      assert.equal(value.error.code, 'CARD_BRANCH_CHANGED');
+      assert.ok(value.error.reason.includes(path));
+      assert.ok(value.error.reason.includes(branch));
+      assert.ok(value.error.reason.includes(current));
+      assert.match(value.error.reason, /shell.*重试/s);
+      execFileSync('git', ['-C', path, 'checkout', branch], { stdio: 'pipe' });
+    } }, dispatch('repaired'),
+  ], [[], []]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const first = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
+  const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
+  path = card.workPath; branch = card.cardBranch;
+  execFileSync('git', ['-C', path, 'checkout', ...(detached ? ['--detach', 'HEAD'] : ['-b', 'other-branch'])], { stdio: 'pipe' });
+  current = detached ? daemon.git('rev-parse', branch) : 'other-branch';
+  next();
+  await daemon.finished();
+  const values = await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 2);
+  assert.equal(values.filter(event => event.action === 'dispatch-created').length, 2);
+});
+
+for (const detached of [true, false]) test(`提交前仍拒绝${detached ? '游离 HEAD' : '其他分支'}并给出副本诊断`, async t => {
+  let path = ''; let branch = ''; let current = '';
+  const daemon = await fixture(t, [create, dispatch()], [ctx => {
+    path = ctx.options.cwd;
+    const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+    branch = git('branch', '--show-current');
+    current = detached ? git('rev-parse', 'HEAD') : 'other-branch';
+    git('checkout', ...(detached ? ['--detach', 'HEAD'] : ['-b', 'other-branch']));
+    return [{ type: 'write', path: 'uncommitted.txt', content: '不得提交到错误的分支' }];
+  }]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
+  assert.equal(result.endReason, 'error');
+  for (const text of [path, branch, current]) assert.ok(result.failure.includes(text), result.failure);
+  assert.equal(execFileSync('git', ['-C', path, 'status', '--short'], { encoding: 'utf8' }).trim(), '?? uncommitted.txt');
+  assert.equal(result.endCommit, null);
+});
+
 test('收尾删除 index.lock 并中止半截 git 操作，卡片分支上不提交冲突标记或游离 HEAD', async t => {
   for (const operation of ['merge', 'rebase', 'cherry-pick', 'revert'] as const) await t.test(operation, async t => {
     let path = '';
@@ -391,6 +437,25 @@ test('收尾删除 index.lock 并中止半截 git 操作，卡片分支上不提
     assert.equal(existsSync(execFileSync('git', ['-C', path, 'rev-parse', '--git-path', 'index.lock'], { encoding: 'utf8' }).trim()), false);
     assert.ok(events.some(event => event.action === 'dispatch-git-aborted' && event.details.operation === operation));
   });
+});
+
+// issue 30: medium regression for unresolved index entries without an abortable operation.
+test('无法中止的冲突显示副本、分支和冲突文件且不提交', async t => {
+  let path = ''; let branch = '';
+  const daemon = await fixture(t, [create, dispatch()], [ctx => {
+    path = ctx.options.cwd;
+    const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+    branch = git('branch', '--show-current');
+    const blob = git('rev-parse', 'HEAD:README.md');
+    execFileSync('git', ['-C', path, 'update-index', '--index-info'], { input: `0 ${'0'.repeat(40)}\tREADME.md\n100644 ${blob} 1\tREADME.md\n100644 ${blob} 2\tREADME.md\n` });
+    return [];
+  }]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const result = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
+  assert.equal(result.endReason, 'error');
+  for (const text of [path, branch, 'README.md', '冲突文件']) assert.ok(result.failure.includes(text), result.failure);
+  assert.match(result.failure, /shell.*重试/s);
+  assert.equal(result.endCommit, null);
 });
 
 test('派单开始前重置副本的已暂存、未暂存和未跟踪改动，保留 ignore 的依赖', async t => {

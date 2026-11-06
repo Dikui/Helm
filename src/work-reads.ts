@@ -25,6 +25,7 @@ const eventLabels: Record<string, string> = {
   'work-created': '开始对齐', 'work-description-drafted': '工作说明草稿已更新',
   'round-started': '调度者正在处理', 'round-ended': '调度轮次结束',
   'round-step': '调度者正在处理',
+  'agent-tools-degraded': '部分工具不可用', 'browser-failed': '浏览器故障',
   'round-agent-loaded': '调度者已就绪', 'coordinator-notes-written': '调度笔记已更新',
   'gate-created': '有待决定的关卡', 'gate-updated': '关卡已更新', 'gate-decided': '关卡已决定', 'gate-withdrawn': '关卡已撤回',
   'card-skipped': '卡片已跳过', 'card-waiting': '卡片等待前置', 'card-unblocked': '卡片已解除阻塞',

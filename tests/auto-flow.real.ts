@@ -29,7 +29,7 @@ const execution = `这是 Helm 自动流程执行冒烟。在当前卡片副本�
 读取文件确认内容，然后必须调用 helm MCP 的 submit-conclusion，conclusion=completed，reason 写文件名和实际内容。
 不自行执行 git add 或 git commit，运行层会保存提交。${restrictions}`;
 
-for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 ${workspace}：执行完成后派验收并完成卡片，期间不唤醒调度者，空闲后只唤醒一轮`,
+for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 ${workspace}：执行完成后派验收并完成卡片，期间不唤醒调度者，空闲后唤醒一轮，仍未推进再提醒一轮`,
   { skip: !enabled, timeout: 600_000 }, async t => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-auto-flow-real-')));
     let daemon: Awaited<ReturnType<typeof startHelmd>> | undefined;
@@ -123,7 +123,8 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       await until(events, values => values.some(event => event.action === 'round-ended'));
       const gate = (await call('list-pending')).find((item: any) => item.workId === initial.id);
       await call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
-      const sequence = await until(events, values => values.filter(event => event.action === 'round-ended').length >= 3, 480_000);
+      // The woken round deliberately does nothing, so the runtime nudges once and then tells the user.
+      const sequence = await until(events, values => values.some(event => event.action === 'work-stalled'), 480_000);
       const cards = (await call('get-card-graph', params)).filter((node: any) => node.type === 'card');
       assert.equal(cards.length, 1);
       const card = cards[0];
@@ -164,10 +165,15 @@ for (const workspace of ['copy', 'scratch'] as const) test(`真实自动流程 $
       const before = starts.filter(event => event.id <= executionEnd.id).length;
       assert.equal(before, 2, '执行结束时只有夹具对齐轮次和第一轮真实调度者');
       assert.equal(starts.filter(event => event.id <= completed.id).length, before, '执行结束至卡片完成之间不得开始调度轮次');
-      assert.equal(starts.length, before + 1, '工作空闲后必须恰好唤醒一轮');
-      assert.ok(starts.at(-1)!.id > completed.id);
-      assert.equal(briefs.length, 2);
+      assert.equal(starts.length, before + 2, '工作空闲后唤醒一轮，它没有推进时再提醒一轮');
+      assert.ok(starts.at(-2)!.id > completed.id);
+      assert.equal(briefs.length, 3);
       assert.deepEqual(briefs[1]!.wakeEvents.map(event => event.id), [completed.id]);
+      const nudges = sequence.filter(event => event.action === 'work-stall-nudged');
+      assert.equal(nudges.length, 1, '停滞只自动提醒一次');
+      assert.deepEqual(briefs[2]!.wakeEvents.map(event => event.id), [nudges[0]!.id]);
+      assert.match(nudges[0]!.details.reason, /全部卡片已结束/);
+      assert.equal(sequence.filter(event => event.action === 'work-stalled').length, 1);
       for (const end of sequence.filter(event => event.action === 'round-ended')) {
         assert.equal(end.details.reason, 'completed', JSON.stringify(end.details));
         assert.equal(end.details.processed, true);

@@ -301,7 +301,7 @@ test('同一个 Claude 驱动按 Agent 角色注入规则，两种角色都使�
           assert.match(args.options!.systemPrompt as string, /卡片说明快照/);
           assert.match(args.options!.systemPrompt as string, /browser\/<文件名>/);
           assert.match(args.options!.systemPrompt as string, /不要 git commit 或改 git 配置/);
-          assert.match(args.options!.systemPrompt as string, /不要自己安装或启动浏览器/);
+          assert.match(args.options!.systemPrompt as string, /优先用注入的浏览器工具/);
           assert.ok((args.options!.tools as string[]).includes('Write'));
         } else assert.deepEqual(args.options!.tools, ['Bash', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill']);
       }) });
@@ -686,8 +686,9 @@ test('假 SDK 查询流经真实派单端点提交结论、使用浏览器替身
     if (purpose === 'verification') assert.equal(dispatch.endCommit, dispatch.startCommit);
     else assert.notEqual(dispatch.endCommit, dispatch.startCommit);
     assert.deepEqual(card.usage, dispatch.usage);
-    await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
-    assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, dispatch.usage);
+    // A new stall round can start between list-rounds and get-work; sample the aggregate atomically.
+    const work = await until(() => daemon.call('get-work', { workId: daemon.work.id }), value => !value.result.usage.incomplete);
+    assert.deepEqual(work.result.usage, dispatch.usage);
   });
 });
 

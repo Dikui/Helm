@@ -5,7 +5,7 @@ import type { ContextSize, DriverRegistry, DriverSession, EndReason, TokenUsage 
 import { projectPath } from './alignment.js';
 import { deliveryDetails } from './delivery.js';
 import { cardGraph } from './graph.js';
-import { agentEnvironment, type AgentConfig } from './agents.js';
+import { agentEnvironment, type AgentConfig, type ToolProblem } from './agents.js';
 import { RuleError, TaskStore, type Actor, type HelmEvent, type Work, type WorkDescription } from './store.js';
 import { noticeStall, pauseWorkFromRuntime } from './work-control.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
@@ -32,6 +32,7 @@ export interface StartupBrief {
   wakeEvents: HelmEvent[];
   recentConversation: ReturnType<TaskStore['conversation']>;
   interruptionNotice?: string;
+  toolProblems?: ToolProblem[];
 }
 
 function executingRulesHash(rules: string | undefined) {
@@ -279,13 +280,16 @@ export class RoundScheduler {
     }
 
     async function consume(this: RoundScheduler) {
-      const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator');
+      const configuredAgent = await this.store.agents.check(brief.work.coordinatorAgentId, 'coordinator', true);
       if (!accepting || stopReason || abortReason) return;
       const agent = this.store.agents.snapshot(configuredAgent, join(this.store.dataDir, 'rounds', id));
-      const mcpServers = this.store.agents.mcpServers(agent);
+      const mcpServers = this.store.agents.mcpServers(agent, agent.toolProblems);
       // Model, prompt, rules, skill names or MCP changes need a fresh session.
+      // Compare skipped names, not filesystem errors containing per-round paths; repair needs a fresh session.
       // shortcut: edited skill files under unchanged names still resume; compare their contents if that bites.
-      const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null });
+      const comparable = (snapshot: AgentConfig) => JSON.stringify({ ...snapshot, skillsPath: null,
+        toolProblems: (snapshot.toolProblems ?? []).map(({ type, name }) => ({ type, name })).sort((a, b) => `${a.type}/${a.name}`.localeCompare(`${b.type}/${b.name}`)),
+      });
       const driver = this.drivers[agent.driver]!;
       if (resume) {
         // The first round creates the session and does not count as a resume.
@@ -298,7 +302,9 @@ export class RoundScheduler {
           brief = started.fullBrief;
         }
       }
+      if (agent.toolProblems?.length) brief = { ...brief, toolProblems: agent.toolProblems };
       this.store.transaction(() => {
+        if (agent.toolProblems?.length) this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'agent-tools-degraded', { toolProblems: agent.toolProblems }, { workId });
         this.store.db.prepare('UPDATE coordinator_rounds SET agent_snapshot = ? WHERE id = ?').run(JSON.stringify(agent), id);
         this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-agent-loaded', { agent, resumed: Boolean(resume) }, { workId });
       });

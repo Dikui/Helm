@@ -148,7 +148,7 @@ export const operations: readonly Operation[] = [
     schema: z.object({ workId: z.string().min(1), agentId: z.string().min(1) }).strict(),
     execute({ store, actor }, { workId, agentId }) {
       const work = store.work(workId);
-      store.agents.get(agentId, 'coordinator');
+      store.agents.get(agentId, 'coordinator', true);
       if (work.coordinatorAgentId !== agentId) {
         store.db.prepare('UPDATE works SET coordinator_agent_id = ? WHERE id = ?').run(agentId, workId);
         const event = store.appendEvent(actor, { type: 'work', id: workId }, 'coordinator-agent-changed',
@@ -328,7 +328,7 @@ export const operations: readonly Operation[] = [
     execute({ store, actor }, { projectId, agentId }) {
       const project = store.db.prepare(`SELECT ${projectColumns} FROM projects WHERE id = ?`).get(projectId);
       if (!project) throw new RuleError('NOT_FOUND', '找不到这个项目。', 404);
-      store.agents.get(agentId, 'coordinator');
+      store.agents.get(agentId, 'coordinator', true);
       if (project.defaultCoordinatorAgentId !== agentId) {
         store.db.prepare('UPDATE projects SET default_coordinator_agent_id = ? WHERE id = ?').run(agentId, projectId);
         store.appendEvent(actor, { type: 'project', id: projectId }, 'project-coordinator-agent-set',
@@ -463,7 +463,7 @@ export const operations: readonly Operation[] = [
         else {
           workId = randomUUID();
           const coordinatorAgentId = params.coordinatorAgentId ?? String(project.default_coordinator_agent_id);
-          store.agents.get(coordinatorAgentId, 'coordinator');
+          store.agents.get(coordinatorAgentId, 'coordinator', true);
           store.db.prepare('INSERT INTO works (id, project_id, status, creation_key, created_at, coordinator_agent_id) VALUES (?, ?, ?, ?, ?, ?)')
             .run(workId, params.projectId, 'aligning', params.key, new Date().toISOString(), coordinatorAgentId);
           store.appendEvent(actor, { type: 'work', id: workId }, 'work-created', { projectId: params.projectId, coordinatorAgentId }, { workId });

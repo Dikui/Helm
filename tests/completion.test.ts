@@ -298,3 +298,26 @@ test('取消时即使补提交失败也删除副本并保留派单输出', async
   assert.match(result.failure, /invalid cleanup mode/i);
   assert.ok((await daemon.call('get-dispatch-output', params)).result.some((step: any) => step.text === 'Wrote discarded.txt'));
 });
+
+// issue 30: medium regression for _work diagnostics and coordinator shell recovery.
+for (const detached of [false, true]) test(`_work ${detached ? '游离且' : ''}不干净时显示状态，修复后能完成`, async t => {
+  const ended = hold();
+  t.after(ended.release);
+  let work: any;
+  const daemon = await fixture(t, [card('dirty'), dispatch('dirty'), { type: 'hang', until: ended.promise },
+    complete('dirty', value => {
+      assert.equal(value.error.code, 'WORK_COPY_DIRTY');
+      for (const text of [work.workPath, work.workBranch, '?? preserve.txt', git(work.workPath, 'rev-parse', 'HEAD')]) assert.ok(value.error.reason.includes(text), value.error.reason);
+      assert.match(value.error.reason, /shell.*重试/s);
+      git(work.workPath, 'checkout', work.workBranch);
+      execFileSync('git', ['-C', work.workPath, 'clean', '-f', '--', 'preserve.txt']);
+    }), complete('dirty'),
+  ], [[]]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+  await writeFile(join(work.workPath, 'preserve.txt'), '先看内容再清理');
+  if (detached) git(work.workPath, 'checkout', '--detach', 'HEAD');
+  ended.release();
+  await daemon.finished();
+  assert.equal((await daemon.cards())[0].status, 'completed');
+});

@@ -980,6 +980,83 @@ test('派单和调度轮次复制自带与库 skill，排队在启动时组装�
     || event.details.agent.skillsPath === join(daemon.directory, 'data', 'rounds', event.object.id, 'skills')));
 });
 
+// issue 30: medium regression. Filesystem copy is the substitute failure boundary.
+for (const failure of ['missing-mcp', 'skill-copy', 'reserved-mcp', 'stdio-mcp'] as const) test(`单个 ${failure} 故障时执行者和调度者保留其余工具并收到诊断`, async t => {
+  const seen: FakeContext[] = [];
+  const rounds = new FakeDriver([alignment, ctx => [
+    { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '工具恢复' }, saveAs: 'card', check: ok },
+    // The coordinator picks from list-agents, so a skippable problem must not read as unavailable there.
+    { type: 'tool', name: 'list-agents', arguments: { workId: workIdOf(ctx) }, check: value => {
+      const entry = (value as any).result.find((agent: any) => agent.id === 'executor');
+      assert.equal(entry.available, true);
+      if (failure !== 'skill-copy') assert.match(entry.warnings.join('\n'), /MCP|mcp/);
+    } },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'run', agentId: 'executor' }), check: ok },
+  ]]);
+  const executor = new FakeDriver([[]]);
+  const routed: Driver = {
+    capabilities: rounds.capabilities, checkAvailability: async () => ({ available: true }),
+    async start(options) {
+      const session = await (options.agent.role === 'coordinator' ? rounds : executor).start(options);
+      return { ...session, async send(input) {
+        seen.push({ options, input, results: new Map() });
+        return session.send(input);
+      } };
+    },
+  };
+  const daemon = await fixture(t, { 'claude-sdk': routed, grok: routed });
+  ok(await daemon.call('register-mcp', { name: 'working', config: { type: 'http', url: 'https://tools.example.invalid/mcp' } }));
+  ok(await daemon.call('register-mcp', { name: 'local', config: { type: 'stdio', command: 'node', env: { TOKEN: 'private-tool-token' } } }));
+  const brokenMcp = failure === 'reserved-mcp' ? 'helm' : failure === 'stdio-mcp' ? 'local' : 'absent';
+  const source = join(daemon.directory, 'skill-source');
+  await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'working skill');
+  for (const name of ['working', 'broken']) ok(await daemon.call('install-skill', { path: source, name }));
+  for (const [id, role] of [['claude-coordinator', 'coordinator'], ['executor', 'executor']]) {
+    await daemon.writeAgent(id!, { role, driver: failure === 'stdio-mcp' ? 'grok' : 'claude-sdk', model: failure === 'stdio-mcp' ? 'grok-4.7' : 'haiku', skills: failure === 'skill-copy' ? ['broken', 'working'] : ['working'], mcp: failure === 'skill-copy' ? ['working'] : [brokenMcp, 'working'] });
+    const own = join(daemon.agentDir, id!, 'skills', 'own');
+    await mkdir(own, { recursive: true }); await writeFile(join(own, 'SKILL.md'), 'own skill');
+  }
+  if (failure !== 'skill-copy') {
+    const entries = (await daemon.call('list-agents')).result;
+    for (const entry of entries) {
+      const saved = await daemon.call('save-agent', { id: entry.id, mode: 'update', baseRevision: entry.revision, config: entry.config, prompt: entry.prompt });
+      ok(saved);
+      assert.equal(saved.result.available, false);
+      assert.ok(saved.result.reason.includes(brokenMcp));
+      const checked = await daemon.call('recheck-agent', { id: entry.id });
+      ok(checked);
+      assert.equal(checked.result.available, false);
+    }
+  }
+  const { cpSync } = fs;
+  if (failure === 'skill-copy') {
+    t.mock.method(fs, 'cpSync', (...args: Parameters<typeof fs.cpSync>) => {
+      cpSync(...args);
+      if (String(args[0]).endsWith('/broken')) throw new Error('injected skill copy failure');
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  }
+  const { work, events } = await startWork(daemon);
+  const gate = (await daemon.call('list-pending')).result[0];
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
+  await until(events, events => events.some(event => event.action === 'dispatch-ended'));
+  assert.ok(seen.some(ctx => ctx.options.agent.role === 'executor'));
+  for (const ctx of seen) {
+    assert.deepEqual(Object.keys(ctx.options.mcpServers).sort(), ['helm', 'working']);
+    assert.deepEqual(await readdir(ctx.options.agent.skillsPath!), ['own', 'working']);
+    const problems = JSON.parse(ctx.input).toolProblems;
+    assert.ok(problems.some((problem: any) => problem.name === (failure === 'skill-copy' ? 'broken' : brokenMcp)));
+    assert.match(problems[0].reason, failure === 'skill-copy' ? /injected skill copy failure/ : /MCP/);
+    assert.deepEqual(ctx.options.agent.skills, failure === 'skill-copy' ? ['broken', 'working'] : ['working']);
+  }
+  assert.doesNotMatch(JSON.stringify(await events()), /private-tool-token/);
+  const degraded = (await events()).filter(event => event.action === 'agent-tools-degraded');
+  assert.ok(degraded.some(event => event.object.type === 'dispatch'));
+  assert.ok(degraded.some(event => event.object.type === 'coordinator-round'));
+  assert.equal((await daemon.call('list-dispatches', { workId: work.id })).result[0].endReason, 'completed');
+});
+
 test('派单及调度轮次合并所选 HTTP 或 stdio MCP，排队在启动时读取且运行中的配置保持不变', async t => {
   for (const [driver, transport] of [
     ['claude-sdk', 'http'], ['codex', 'http'], ['grok', 'http'], ['deepseek', 'http'],
@@ -1157,7 +1234,13 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
     assert.equal(values[0].agent.loadGlobalConfig, true);
     const denied = (await events()).find(event => event.action === 'operation-rejected' && event.actor.type === 'dispatch' && event.actor.id === values[0].id);
     assert.equal(denied?.details.code, 'FORBIDDEN');
-    if (change !== 'valid') {
+    if (change === 'missing-skill' || change === 'missing-mcp') {
+      assert.equal(values[1].endReason, 'completed', values[1].failure);
+      assert.ok((await events()).some(event => event.action === 'agent-tools-degraded' && event.dispatchId === values[1].id));
+      assert.ok(values[1].agent.toolProblems.some((problem: any) => problem.name === 'absent'));
+      return;
+    }
+    if (change === 'broken') {
       assert.equal(values[1].endReason, 'error');
       assert.equal(values[1].startCommit, null);
       assert.equal(values[1].endCommit, null);
@@ -1165,7 +1248,6 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
       assert.match(execFileSync('git', ['-C', card.workPath, 'status', '--porcelain'], { encoding: 'utf8' }), /unstarted.txt/);
       const ended = (await events()).find(value => value.action === 'dispatch-ended' && value.dispatchId === values[1].id);
       assert.equal(ended.details.error.code, 'AGENT_UNAVAILABLE');
-      if (change === 'missing-skill' || change === 'missing-mcp') assert.match(ended.details.error.reason, /absent/);
       return;
     }
     assert.equal(values[1].agent.model, 'after-queue');
@@ -1178,8 +1260,6 @@ test('排队派单在实际启动时重读 Agent，已经运行的派单保留�
 test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', async t => {
   for (const [name, config, reason] of [
     ['fast', { fast: true }, /extra usage/],
-    ['missing-mcp', { mcp: ['absent'] }, /absent/],
-    ['reserved-mcp', { mcp: ['helm'] }, /helm.*冲突/],
   ] as const) await t.test(name, async t => {
     const daemon = await fixture(t, { 'claude-sdk': new FakeDriver([[{ type: 'end', reason: 'completed', finalAnswer: '第一轮' }]]) });
     await daemon.writeAgent('claude-coordinator', { role: 'coordinator' });
@@ -1199,13 +1279,12 @@ test('坏的调度者 Agent 用结构化错误结束轮次，不拉起驱动', a
 test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误，同名 skill Agent 仍能派单', async t => {
   const rounds = new FakeDriver([alignment, ctx => [
     { type: 'tool', name: 'create-card', arguments: { workId: workIdOf(ctx), key: 'card', content: '检查不可用 Agent' }, saveAs: 'card', check: ok },
-    ...['broken', 'missing', 'fast', '../outside', 'missing-skill', 'missing-mcp', 'reserved-mcp', 'stdio-grok', 'stdio-deepseek'].map(agentId => ({
+    ...['broken', 'missing', 'fast', '../outside'].map(agentId => ({
       type: 'tool' as const, name: 'create-dispatch', arguments: (ctx: FakeContext) => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: agentId, agentId }),
       check: (value: any) => {
         assert.equal(value.ok, false, JSON.stringify(value));
         assert.equal(value.error.code, 'AGENT_UNAVAILABLE');
         assert.equal(value.error.details.agentId, agentId);
-        if (agentId.startsWith('stdio-')) assert.match(value.error.reason, /ACP.*(grok|deepseek).*不支持 stdio.*local/);
       },
     })),
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'clashing-skill', agentId: 'clashing-skill' }), check: ok },
@@ -1255,7 +1334,7 @@ test('派给坏 Agent、缺失 Agent 和 Claude fast Agent 返回结构化错误
   const gate = (await daemon.call('list-pending')).result[0];
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
   const values = await until(events, values => values.some(value => value.action === 'dispatch-ended'));
-  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 9);
+  assert.equal(values.filter(value => value.action === 'operation-rejected' && value.object.id === 'create-dispatch').length, 4);
   assert.ok(!JSON.stringify(await daemon.call('list-agents')).includes('private-stdio-token'));
   assert.ok(!JSON.stringify(await daemon.call('get-events')).includes('private-stdio-token'));
   const dispatches = (await daemon.call('list-dispatches', { workId: work.id })).result;

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
+import type { BrowserCommand } from '../src/browser.js';
 import { AgentCatalog } from '../src/agents.js';
 import { addDependency, createCard, type AutoFlow } from '../src/graph.js';
 import { completeCard } from '../src/completion.js';
@@ -45,7 +46,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 }
 
 async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[], verifiers: FakeScript[] = [], config: {
-  after?: FakeScript; codexDriver?: Driver;
+  after?: FakeScript; codexDriver?: Driver; browserCommand?: BrowserCommand;
 } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-auto-flow-')));
   const repo = join(directory, 'project');
@@ -57,7 +58,7 @@ async function fixture(t: TestContext, steps: FakeStep[], executors: FakeScript[
   const driver = new FakeDriver([[
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '自动流程', boundary: '本机', criteria: '机械步骤不唤醒', deliverables: '交付物及查看入口' }), check: ok },
   ], [...steps, { type: 'end', reason: 'completed', finalAnswer: 'auto-flow-planned' }], ...(config.after ? [config.after] : [])]);
-  const daemon = await startHelmd({ port: 0, dataDir, driver, executorDriver: new FakeDriver(executors), codexDriver: config.codexDriver ?? new FakeDriver(verifiers) });
+  const daemon = await startHelmd({ port: 0, dataDir, driver, browserCommand: config.browserCommand, executorDriver: new FakeDriver(executors), codexDriver: config.codexDriver ?? new FakeDriver(verifiers) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
     const response = await fetch(`${daemon.url}/api/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) });
@@ -129,6 +130,30 @@ for (const result of ['failed', 'undeclared', 'error']) test(`自动流程验收
   assert.notEqual((await daemon.cards())[0].status, 'completed');
   assert.deepEqual(brief!.wakeEvents.map(event => event.action), ['dispatch-ended']);
   assert.equal((await daemon.events()).some(event => event.action === 'auto-flow-stopped'), false);
+});
+
+// issue 30: medium regression, the second vote must see the first vote's browser failure.
+test('整批验收中较早结束的票出现浏览器故障，即使全部通过也交回调度者', async t => {
+  const verify = hold();
+  t.after(verify.release);
+  let brief: StartupBrief | undefined;
+  const autoFlow = flow();
+  autoFlow.verifications[0]!.needsBrowser = true;
+  const daemon = await fixture(t, [card('card', autoFlow), dispatch()], [[conclusion('completed')]], [
+    [conclusion('passed')], [{ type: 'hang', until: verify.promise }, conclusion('passed')],
+  ], {
+    browserCommand: { file: process.execPath, args: ['-e', 'console.error("browser unavailable"); process.exit(2)', '--'] },
+    after: ctx => { brief = JSON.parse(ctx.input); return []; },
+  });
+  await until(daemon.dispatches, values => values.some(item => item.purpose === 'verification' && item.status === 'ended'));
+  assert.equal((await daemon.events()).filter(event => event.action === 'round-started').length, 2);
+  verify.release();
+  await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length === 3);
+  assert.notEqual((await daemon.cards())[0].status, 'completed');
+  const votes = (await daemon.dispatches()).filter(item => item.purpose === 'verification');
+  assert.ok(votes.every(item => item.endReason === 'completed' && item.conclusion === 'passed'));
+  assert.deepEqual(brief!.wakeEvents.map(event => event.action), ['dispatch-ended']);
+  assert.ok(brief!.newEvents.some(event => event.action === 'browser-failed'));
 });
 
 test('自动流程的 Agent 不可用时记录 verify 停止原因并唤醒，建卡时不检查 Agent', async t => {

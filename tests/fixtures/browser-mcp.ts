@@ -39,6 +39,7 @@ if (!args.includes('--isolated') || option('--browser') !== 'chromium'
   || option('--host') !== '127.0.0.1' || config.browser.launchOptions.headless !== true) {
   throw new Error('Expected isolated, headless, bundled Chromium on loopback');
 }
+if (args.includes('--diagnostic')) console.error(option('--diagnostic'));
 if (args.includes('--crash')) process.exit(2);
 if (args.includes('--hang-start')) watchdog.ref();
 else {

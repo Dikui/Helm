@@ -60,3 +60,24 @@ test('调度者运行约定在调度者目录工作，改代码交给卡片', ()
   assert.match(roleRules('coordinator').runtime, /在调度者目录工作/);
   assert.match(roleRules('coordinator').runtime, /项目代码改动交给卡片执行/);
 });
+
+// issue 30: small spec. Recovery instructions preserve the existing hard boundaries.
+test('默认规则允许恢复工具和副本故障，并保留凭据、验收和 Git 边界', () => {
+  const runtime = readPrompt(defaultPromptDir, 'executor-runtime');
+  const executor = readPrompt(defaultPromptDir, 'executor-role');
+  const coordinator = readPrompt(defaultPromptDir, 'coordinator-role');
+  const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
+  assert.match(runtime, /browserFailure/);
+  assert.match(runtime, /优先用注入/);
+  assert.match(runtime, /无头.*独立.*用户数据目录/);
+  assert.match(runtime, /可以重启自己启动的服务/);
+  assert.match(executor, /先试着修.*装依赖.*换工具/);
+  assert.match(executor, /缺凭据.*直接注明/);
+  assert.match(executor, /不据此判标准没满足/);
+  assert.match(coordinator, /shell.*修复.*项目目录不动/);
+  assert.match(executing, /默认可派单写明启动/);
+  assert.match(executing, /先让执行者恢复/);
+  assert.match(runtime, /不要 git commit 或改 git 配置，不推送、不部署/);
+  assert.match(runtime, /验收时改产品代码让检查通过等于没有验收/);
+  assert.match(executor, /不要输出变量值/);
+});
