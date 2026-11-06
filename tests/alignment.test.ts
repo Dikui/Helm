@@ -9,6 +9,39 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 import type { StartupBrief } from '../src/rounds.js';
+import { AgentCatalog } from '../src/agents.js';
+import { ensureWorkCopy } from '../src/alignment.js';
+import { RuleError, TaskStore } from '../src/store.js';
+
+// Issue 30 item 5: medium regression for work-copy diagnostics.
+test('工作副本的基准引用不存在时保留脱敏的 Git 诊断', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-alignment-git-failure-'));
+  const repo = join(directory, 'project');
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  const store = new TaskStore(join(directory, 'data'), new AgentCatalog(join(directory, 'agents')));
+  t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
+  store.db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('project', '项目', ?, '2026-11-06')").run(repo);
+  // A persisted work can outlive the branch recorded as its base.
+  store.db.prepare("INSERT INTO works (id, project_id, status, creation_key, created_at, base_ref) VALUES ('work', 'project', 'executing', 'work', '2026-11-06', ?)").run('missing-ref');
+  for (const base of ['missing-ref', 'https://diagnostic-user:diagnostic-token@example.invalid/repo.git']) {
+    store.db.prepare("UPDATE works SET base_ref = ? WHERE id = 'work'").run(base);
+    assert.throws(() => ensureWorkCopy(store, 'work'), error => {
+      assert.ok(error instanceof RuleError);
+      assert.equal(error.code, 'GIT_ERROR');
+      assert.ok(error.message.startsWith('git 操作失败，请检查项目、基准 ref 和工作分支。'));
+      assert.match(error.message, /git .*rev-parse.*--verify.*--end-of-options/);
+      assert.match(error.message, /128/);
+      assert.match(error.message, /fatal:/);
+      assert.doesNotMatch(error.message, /diagnostic-user|diagnostic-token/);
+      assert.doesNotMatch(JSON.stringify(error.details), /diagnostic-user|diagnostic-token/);
+      const ref = base === 'missing-ref' ? 'refs/heads/missing-ref^{commit}' : 'refs/heads/https://example.invalid/repo.git^{commit}';
+      assert.deepEqual(error.details?.args, ['-C', repo, 'rev-parse', '--verify', '--end-of-options', ref]);
+      assert.equal(error.details?.exitCode, 128);
+      assert.match(String(error.details?.stderr), /fatal:/);
+      return true;
+    });
+  }
+});
 
 type AlignmentScript = FakeStep[] | ((context: FakeContext & { brief: StartupBrief }) => FakeStep[]);
 
