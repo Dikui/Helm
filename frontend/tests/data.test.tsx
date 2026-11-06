@@ -81,3 +81,38 @@ test('切换工作会取消旧读取，迟到的旧响应不会覆盖当前工�
   await waitFor(() => expect(delivered).toBe(true));
   expect(screen.getByLabelText('工作进展').textContent).toBe('2');
 });
+
+// regression, small — 工作页连上事件流之前发生的变更不再丢失：读取若早于事件流，这段时间的事件永远不会到达。
+test('事件流建立后才做首次读取，建立前发生的变化不会丢失', async () => {
+  let value = 0;
+  let reads = 0;
+  let release!: () => void;
+  const opened = new Promise<void>(resolve => { release = resolve; });
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/events')) {
+      await opened;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { init?.signal?.addEventListener('abort', () => controller.close(), { once: true }); },
+      }));
+    }
+    reads++;
+    return Response.json({ ok: true, result: value });
+  };
+  render(<DataProvider transport={transport}><Resource /></DataProvider>);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(reads).toBe(0);
+  value = 1;
+  release();
+  await waitFor(() => expect(screen.getByLabelText('工作进展').textContent).toBe('1'));
+  expect(reads).toBe(1);
+});
+
+// spec, small — 等事件流不能让离线或事件流故障时的页面一直空白。
+test('事件流连不上时资源照常读取', async () => {
+  const transport: typeof fetch = async input => {
+    if (String(input).endsWith('/events')) throw new Error('事件流不可用');
+    return Response.json({ ok: true, result: 7 });
+  };
+  render(<DataProvider transport={transport}><Resource /></DataProvider>);
+  await waitFor(() => expect(screen.getByLabelText('工作进展').textContent).toBe('7'));
+});

@@ -48,6 +48,8 @@ test('派单打回回路、步骤分页及成果可查，派单结束经 SSE 同
     window.history.replaceState(null, '', `/works/${work.id}/structure`);
     render(<App baseUrl={daemon.url} transport={transport} />);
     await screen.findByText('实时更新已连接');
+    // The list tab comes from the aligning → executing change, so the page must load before the decision.
+    await screen.findByRole('banner', { name: '工作概况' });
     const pending = await until(() => daemon!.call('list-pending'), value => value.result[0]?.description);
     const gate = pending.result[0];
     ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));

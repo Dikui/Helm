@@ -26,13 +26,16 @@ export function useData() {
 }
 
 export function useResource<T>(operation: string, params: object = {}, affects?: (event: HelmEvent) => boolean) {
-  const { api, listeners } = useData();
+  const { api, listeners, connection } = useData();
+  // A fresh stream starts at the current tail, so a read made before it opens would miss whatever happens in between.
+  const subscribed = connection !== 'connecting';
   const key = JSON.stringify(params);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion(value => value + 1), []);
   const identity = `${operation}:${key}`;
   const [state, setState] = useState<{ identity: string; data?: T; error?: Error }>({ identity });
   useEffect(() => {
+    if (!subscribed) return;
     const controller = new AbortController();
     const input = JSON.parse(key);
     let refreshing = false;
@@ -71,6 +74,6 @@ export function useResource<T>(operation: string, params: object = {}, affects?:
     void refresh().catch(() => {});
     return () => { controller.abort(); clearTimeout(retry); listeners.delete(listener); };
     // params are compared by value; callers keep custom predicates stable.
-  }, [api, listeners, operation, key, identity, affects, version]);
+  }, [api, listeners, operation, key, identity, affects, version, subscribed]);
   return { ...(state.identity === identity ? state : {}), reload };
 }
