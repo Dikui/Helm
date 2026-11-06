@@ -1,0 +1,4 @@
+.copy-text { display: grid; gap: var(--space-2); min-width: 0; }
+.copy-text .row { justify-content: space-between; flex-wrap: wrap; }
+.copy-text textarea { width: 100%; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font-size: var(--text-sm); resize: none; }
+.copy-text-feedback { min-height: 1.5em; font-size: var(--text-sm); color: var(--muted); }

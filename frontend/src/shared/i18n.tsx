@@ -1,6 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 export const messages = {
   zh: {
+    workReference: '工作引用与路径', workReferenceText: '工作引用', workReferenceId: '工作 ID', workReferenceLink: '工作链接', workReferenceStatus: '状态',
+    workReferenceProjectPath: '项目路径', workReferenceCopyPath: '工作副本路径', workReferenceBranch: '工作分支（记录）', workReferenceBase: '基准',
+    workReferenceHelp: '复制路径或工作引用，交给运行 Helm 的同一台机器上的外部 Agent 分析。引用中的工作记录可在 Helm 运行时读取。',
+    workReferenceReadHelp: '只读查询工作记录：向以下地址发送 POST，使用上面的工作 ID 作为 JSON 请求体。',
+    workReferenceNoCopy: '工作副本尚未创建。', workReferenceCopyRemoved: '工作已结束，不再提供工作副本路径。', workReferenceProjectMissing: '找不到这项工作的项目，请重读后再试。',
+    copyProjectPath: '复制项目路径', copyWorkPath: '复制工作副本路径', copyWorkReference: '复制工作引用',
+    copyTextDone: '已复制', copyTextPending: '正在复制…', copyTextFailed: '无法自动复制，请选中文本手动复制，或重试。',
     eventRoundInterrupted: '打断调度轮次',
     eventCardSkipped: '卡片已跳过',
     eventCardUnblocked: '卡片已解除受阻',
@@ -502,6 +509,13 @@ export const messages = {
     structureActorUser: '用户', structureActorRound: '调度轮次', structureActorDispatch: '派单', structureActorRuntime: '运行层',
   },
   en: {
+    workReference: 'Work reference and paths', workReferenceText: 'Work reference', workReferenceId: 'Work ID', workReferenceLink: 'Work link', workReferenceStatus: 'Status',
+    workReferenceProjectPath: 'Project path', workReferenceCopyPath: 'Work copy path', workReferenceBranch: 'Work branch (recorded)', workReferenceBase: 'Base',
+    workReferenceHelp: 'Copy a path or work reference for an external agent on the machine running Helm. Work records can be read while Helm is running.',
+    workReferenceReadHelp: 'Read-only work records: send POST requests to the following URLs with the work ID above as a JSON request body.',
+    workReferenceNoCopy: 'The work copy has not been created yet.', workReferenceCopyRemoved: 'This work has ended; a work copy path is no longer provided.', workReferenceProjectMissing: 'This work’s project could not be found. Reload and try again.',
+    copyProjectPath: 'Copy project path', copyWorkPath: 'Copy work copy path', copyWorkReference: 'Copy work reference',
+    copyTextDone: 'Copied', copyTextPending: 'Copying…', copyTextFailed: 'Could not copy automatically. Select the text to copy it manually, or retry.',
     eventRoundInterrupted: 'Round interrupted',
     eventCardSkipped: 'Card skipped',
     eventCardUnblocked: 'Card unblocked',

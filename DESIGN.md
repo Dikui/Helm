@@ -35,6 +35,7 @@ Agent 字母标志由 `shared/AgentMark.tsx` 统一提供：Claude 为 C / 玫�
 - 实时：`shared/events.ts` 使用 fetch 读取 POST SSE，通知相关资源后推进游标；断线使用 Last-Event-ID 补读。`shared/data.tsx` 中各资源独立重读，慢请求不阻塞后续事件；同一资源保持一个在途请求，期间的连续事件合并为补读，读取失败自行退避重试。
 - 语言：`shared/i18n.tsx` 管理中文 / 英文和 localStorage。仅翻译界面文字，用户和 Agent 内容原样显示。
 - 反馈：`shared/feedback.tsx` 提供可读取原始原因的行内错误；保留输入，按钮提交中禁用并标记忙碌。
+- 工作引用与路径：工作页“操作”菜单在所有阶段提供只读弹窗，复用 ActionDialog；可复制项目路径、活动工作的已有副本路径，以及含完整工作 ID、稳定链接、分支记录和现有只读查询方法的工作引用，供同机外部 Agent 分析。副本未创建或工作已结束时明确说明，不猜路径或创建副本。`shared/CopyText.tsx` 统一复制、忙碌、成功和失败反馈；剪贴板不可用时尝试复制选中文本，失败保留全文供手动复制。
 - 取消工作：读取到工作已取消时自动关闭取消确认框，复用 ActionDialog 恢复滚动与触发按钮焦点，不等待清理结束后的 HTTP 响应。请求仍在途时保留重复提交保护；取消前失败保留确认框供重试，取消后迟到的错误在页面中显示。
 - 删除工作：已暂停工作可以从工作页“删除工作”入口打开确认框，明确说明先取消工作；关闭确认框仍保持暂停。确认后串行完成既有取消与删除操作，未导出时保留先导出 / 仍然删除的提醒。失败保留确认框并显示原始原因供重试，成功后回收件箱；存在未合入的保留分支时先逐项列出分支和原因。后端仍只允许删除已结束工作。
 - 初始化 git：依据 ADR 0018，收件箱与工作对话共用 `GateDecision` 和 `GitInitializationDetails`，显示预计提交概况及建议忽略路径；没有 `.gitignore` 时可编辑规则，已有则沿用。拒绝须填写原因并保留卡片阻塞；提交失败保留输入供重试。项目内共享的关卡在当前工作中决定，决定结果与原因保留在对话。
@@ -109,6 +110,7 @@ Agent 详情使用原生表单、单选推理强度和计费卡，Fast 使用原
 | Scrollbar | styles/app.css 全局基线 | tokens.css 的 border / surface 变量 | 各面板拥有自己的滚动几何，窄屏允许外层滚动 | 静态核对；浏览器由调度者另验 |
 | CRUD | 页面既有操作 + ActionDialog / RegisterProjectDialog / CardActions | allowedOperations、确认规则与接口错误 | 新建工作进入对齐；Agent 保存回详情；项目扩展设置 | work-actions.test.tsx、settings.test.tsx、card-graph.test.tsx |
 | Toast | shared/feedback.tsx 的行内 ErrorNotice、role=status 保存结果 | 接口错误与实际操作结果 | 持久错误就地显示；保存结果就地显示 | app.test.tsx、settings.test.tsx |
+| Clipboard | shared/CopyText.tsx | 当前显示的只读全文、浏览器剪贴板结果 | 路径短字段、工作引用长字段；失败保留可选取文本 | work-reference.test.tsx |
 
 Agent 提示词在界面内编辑和保存，自带技能从磁盘读取。
 

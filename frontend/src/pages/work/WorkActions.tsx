@@ -9,6 +9,7 @@ import type { Work } from '../../shared/types.js';
 import { ExportForm } from './ExportForm.js';
 import { CoordinatorChooser } from './CoordinatorChooser.js';
 import { ActionDialog } from './ActionDialog.js';
+import { WorkReference } from './WorkReference.js';
 import './work-actions.css';
 
 export interface ActionWork extends Work { allowedOperations?: string[]; coordinatorAgentId?: string; outputsDeletedAt?: string | null }
@@ -18,7 +19,7 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
   const { api } = useData();
   const { navigate } = useRouter();
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState<'cancel' | 'agent' | 'export' | 'delete' | 'remove'>();
+  const [panel, setPanel] = useState<'cancel' | 'agent' | 'export' | 'delete' | 'remove' | 'reference'>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error>();
   const [restriction, setRestriction] = useState<{ status: string; operations: string[] }>();
@@ -74,6 +75,7 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
       {(!inline || !ended) && <button ref={inline ? trigger : undefined} className="btn sm" disabled={!enabled(work.status === 'paused' ? 'resume-work' : 'pause-work')}
         onClick={() => void run(work.status === 'paused' ? 'resume-work' : 'pause-work')}>{t(work.status === 'paused' ? 'resumeWork' : 'pauseWork')}</button>}
       {!inline && <button className="btn sm" onClick={() => { setOpen(false); focusConversation(); trigger.current?.focus(); }}>{t('focusConversation')}</button>}
+      {!inline && <button className="btn sm" onClick={() => { setOpen(false); setPanel('reference'); }}>{t('workReference')}</button>}
       {!inline && <button className="btn sm" disabled={!enabled('change-coordinator-agent')} onClick={() => { setError(undefined); setOpen(false); setPanel('agent'); }}>{t('changeCoordinator')}</button>}
       {!inline && <button className="btn sm work-danger" disabled={!enabled('cancel-work')} onClick={() => { setOpen(false); setError(undefined); setPanel('cancel'); }}>{t('cancelWork')}</button>}
       {(!inline || ended) && <button ref={inline && ended ? trigger : undefined} className="btn sm" disabled={!enabled('export-outputs', ended)} onClick={event => { if (inline) trigger.current = event.currentTarget; setError(undefined); setOpen(false); setPanel('export'); }}>{t(inline ? 'exportAction' : 'exportOutputs')}</button>}
@@ -85,6 +87,9 @@ export function WorkActions({ work, reload, inline = false, coordinatorOnly = fa
     </div>}
     {exportPath && !open && !panel && <div className="work-export-result" role="status"><div className="row"><span>{t('outputsExported')}</span><button className="btn sm" aria-label={t('dismissActionFeedback')} onClick={() => setExportPath(undefined)}>×</button></div><span className="mono">{exportPath}</span></div>}
     {error && !panel && !open && !inline && <div className="work-action-error"><ErrorNotice error={error} /><button className="btn sm" onClick={() => setError(undefined)}>{t('dismissActionFeedback')}</button></div>}
+    {panel === 'reference' && <ActionDialog key="reference" title={t('workReference')} busy={false} onClose={close} returnFocus={trigger}>
+      <WorkReference work={work} />
+    </ActionDialog>}
     {panel === 'export' && <ActionDialog key="export" title={t('exportOutputs')} busy={busy} onClose={close} returnFocus={trigger}>
       <p>{work.title}</p>
       {work.outputsDeletedAt && <p>{t('exportAfterDeletion')}</p>}
