@@ -113,7 +113,8 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
 });
 
 for (const initializeBeforeConfirm of [true, false]) for (const purpose of ['execution', 'verification'] as const) test(`非 git 目录自行初始化后实时识别，${initializeBeforeConfirm ? '确认草稿' : '派单'}时取当前分支，${purpose}`, async t => {
-  const daemon = await uiFixture([[draft], [], [
+  // The second empty round is the stall nudge; it must end before the user message starts the third script.
+  const daemon = await uiFixture([[draft], [], [], [
     { type: 'tool', name: 'create-card', saveAs: 'write', arguments: { key: 'write', content: '现在可以派单' }, check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ key: 'write', cardId: saved(ctx, 'write').id, agentId: 'claude-executor', purpose }), check: ok },
   ]], undefined, { registerProject: false, executorScripts: [[{ type: 'hang' }]] });
@@ -136,7 +137,7 @@ for (const initializeBeforeConfirm of [true, false]) for (const purpose of ['exe
   };
   let head = initializeBeforeConfirm ? initialize() : '';
   ok(await daemon.call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' }));
-  await until(() => daemon.call('list-rounds', params), value => value.result.rounds.filter((round: any) => round.status === 'ended').length === 2);
+  await until(() => daemon.call('list-rounds', params), value => value.result.rounds.filter((round: any) => round.status === 'ended').length === 3);
   if (!initializeBeforeConfirm) head = initialize();
   const liveProject = (await daemon.call('list-projects')).result.find((item: any) => item.id === project.id);
   assert.equal(liveProject.isGit, true);

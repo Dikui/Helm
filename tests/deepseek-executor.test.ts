@@ -568,7 +568,9 @@ test('DeepSeek 反问后 end_turn 正常完成、结论未声明，token 汇总�
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
   assert.deepEqual(card.usage, { inputTokens: 45, outputTokens: 6 });
   await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
-  assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 45, outputTokens: 6 });
+  // A stall nudge round may start after the rounds above ended; its usage is unknown until it ends.
+  const settled = await until(() => daemon.call('get-work', { workId: daemon.work.id }), value => !value.result.usage.incomplete);
+  assert.deepEqual(settled.result.usage, { inputTokens: 45, outputTokens: 6 });
 });
 
 test('DeepSeek 上下文溢出的结束方式保存到派单结果，供调度者拆小卡片', async t => {

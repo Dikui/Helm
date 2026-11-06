@@ -33,7 +33,9 @@ for (const purpose of ['execution', 'verification'] as const) test(`Grok ${purpo
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: dispatch.cardId })).result;
   assert.deepEqual(card.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
   await until(() => daemon.call('list-rounds', { workId: daemon.work.id }), value => value.result.rounds.every((round: any) => round.status === 'ended'));
-  assert.deepEqual((await daemon.call('get-work', { workId: daemon.work.id })).result.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
+  // A stall nudge round may start after the rounds above ended; its usage is unknown until it ends.
+  const settled = await until(() => daemon.call('get-work', { workId: daemon.work.id }), value => !value.result.usage.incomplete);
+  assert.deepEqual(settled.result.usage, { inputTokens: 120, outputTokens: 9, cacheReadTokens: 80, cacheWriteTokens: 6 });
   if (purpose === 'execution') {
     assert.equal((await readFile(join(card.workPath, 'inside.txt'), 'utf8')).trim(), 'inside');
     assert.equal(daemon.git('show', `${card.cardBranch}:inside.txt`), 'inside');

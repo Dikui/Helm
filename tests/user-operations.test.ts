@@ -160,9 +160,11 @@ test('工作暂停不改卡片状态，只投递用户消息，关卡仍可决�
   const pausedBrief = daemon.briefs.at(-1)!;
   assert.equal(pausedBrief.work.status, 'paused');
   assert.deepEqual(pausedBrief.wakeEvents.map(event => event.action), ['message-sent']);
+  // This round also ends stalled, so a nudge round may already have appended its own brief.
+  const resumedIndex = daemon.briefs.length;
   assert.equal((await daemon.call('resume-work', daemon.params)).result.status, 'executing');
   await until(daemon.events, events => events.filter(event => event.action === 'round-ended').length > before + 1);
-  const resumedBrief = daemon.briefs.at(-1)!;
+  const resumedBrief = daemon.briefs[resumedIndex]!;
   for (const action of ['work-paused', 'dispatch-ended', 'gate-decided', 'work-resumed']) {
     assert.ok(resumedBrief.wakeEvents.some(event => event.action === action), action);
   }

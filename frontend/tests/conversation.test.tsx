@@ -142,7 +142,8 @@ test.each(['对齐', '执行'])('%s阶段从启动到结束显示思考、展开
     { type: 'hang', until: new Promise<void>(resolve => { finish = resolve; }) },
   ];
   let work: any;
-  if (phase === '执行') work = await executingWork([script]);
+  // The stall nudge round follows immediately; it repeats the output the strip assertion expects.
+  if (phase === '执行') work = await executingWork([script, [{ type: 'output', text: '正在检查邮件模板\n第二行原文' }]]);
   else {
     daemon = await uiFixture([script]);
     work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '对齐思考', key: 'start' })).result.work;
