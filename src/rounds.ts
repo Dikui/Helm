@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContextSize, DriverRegistry, DriverSession, EndReason, TokenUsage } from './driver.js';
@@ -22,6 +22,7 @@ export interface StartupBrief {
   // A resumed session already holds the description and notes; it gets only what changed (ADR 0017).
   resumed?: true;
   phaseRules?: string;
+  phaseRulesNotice?: string;
   workDescription?: (WorkDescription & { confirmation: '未确认' | '已确认' }) | null;
   activeWorkDescription?: WorkDescription | null;
   cardGraph: ReturnType<typeof cardGraph>;
@@ -33,7 +34,11 @@ export interface StartupBrief {
   interruptionNotice?: string;
 }
 
-export function startupBrief(store: TaskStore, workId: string, wakeIds: number[], resumedRoundId?: string): StartupBrief {
+function executingRulesHash(rules: string | undefined) {
+  return rules === undefined ? null : createHash('sha256').update(rules).digest('hex');
+}
+
+export function startupBrief(store: TaskStore, workId: string, wakeIds: number[], resumedRoundId?: string, phaseRules?: string): StartupBrief {
   const withdrawn = new Set(store.db.prepare('SELECT id FROM messages WHERE work_id = ? AND withdrawn_at IS NOT NULL').all(workId).map(row => String(row.id)));
   const work = store.work(workId);
   const codePath = work.workPath ?? projectPath(store, workId);
@@ -44,15 +49,18 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   // Agent snapshots carry whole prompts; the coordinator has its own and dispatches keep agentId.
   const brief = (event: HelmEvent) => event.action.startsWith('dispatch-') && event.details && typeof event.details === 'object' && 'agent' in event.details
     ? { ...event, details: { ...event.details, agent: undefined } } : event;
-  // Executing rules enter a session once, so the system prompt stays fixed for resume (ADR 0017).
+  // Executing rules travel in the brief so updates preserve the session's cached system prompt (ADR 0017).
   const resumedStart = resumedRoundId && store.db.prepare(`SELECT details FROM events WHERE action = 'round-started' AND object_id = ?`).get(resumedRoundId);
-  const sessionHasExecutingRules = resumedStart && JSON.parse(String(resumedStart.details)).executingRules === true;
+  const previousRules = resumedStart ? JSON.parse(String(resumedStart.details)).executingRules : undefined;
+  const rules = work.activeDescriptionId ? phaseRules ?? readPrompt(store.agents.promptDirectory, 'coordinator-executing') : undefined;
+  const rulesChanged = rules !== undefined && previousRules !== executingRulesHash(rules);
   return {
     projectPath: codePath,
     projectInstructionPaths: ['AGENTS.md', 'CLAUDE.md'].map(name => join(codePath, name))
       .filter(path => statSync(path, { throwIfNoEntry: false })?.isFile()),
     projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),
-    ...(work.activeDescriptionId && !sessionHasExecutingRules ? { phaseRules: readPrompt(store.agents.promptDirectory, 'coordinator-executing') } : {}),
+    ...(rulesChanged ? { phaseRules: rules,
+      ...(previousRules ? { phaseRulesNotice: '执行规则已更新，此版取代会话中的旧版' } : {}) } : {}),
     ...(resumedRoundId ? { resumed: true } : {
       activeWorkDescription: versions.find(item => item.id === work.activeDescriptionId) ?? null,
       workDescription: description ? { ...description, confirmation: description.status === 'draft' ? '未确认' : '已确认' } : null,
@@ -168,11 +176,12 @@ export class RoundScheduler {
       const resume = previous?.sessionId && previous.agent && previous.reason === 'completed' && !previous.compacted
         ? { roundId: String(previous.id), sessionId: String(previous.sessionId), agent: JSON.parse(String(previous.agent)) as AgentConfig, cwd: previousCwd, context } : undefined;
       const fullBrief = startupBrief(this.store, workId, ids);
-      const brief = resume ? startupBrief(this.store, workId, ids, resume.roundId) : fullBrief;
+      // Both briefs and the recorded hash use one read, even if consume later falls back to a fresh session.
+      const brief = resume ? startupBrief(this.store, workId, ids, resume.roundId, fullBrief.phaseRules) : fullBrief;
       this.store.db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, started_at, event_ids, output_path) VALUES (?, ?, 'running', ?, ?, ?)`)
         .run(id, workId, new Date().toISOString(), JSON.stringify(ids), outputPath);
       this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-started',
-        { eventIds: ids, outputPath, cwd, executingRules: Boolean(brief.work.activeDescriptionId) }, { workId });
+        { eventIds: ids, outputPath, cwd, executingRules: executingRulesHash(fullBrief.phaseRules) }, { workId });
       return { ids, brief, resume, fullBrief };
     });
     const ids = started.ids;

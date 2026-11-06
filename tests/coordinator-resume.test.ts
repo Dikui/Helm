@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
-import { FakeDriver, type DriverCapabilities, type FakeContext, type FakeStep } from '../src/driver.js';
+import { FakeDriver, type DriverCapabilities, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
+import { writePrompt } from '../src/prompts.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { configureTestAgent, copyAgents, startTestHelmd } from './helmd-fixture.js';
 
@@ -42,7 +44,7 @@ for (const capabilities of [
   assert.deepEqual(rounds.map(round => round.brief.coordinatorNotes), ['', '']);
 });
 
-async function resumeScenario(t: TestContext, capabilities: Pick<DriverCapabilities, 'resume' | 'contextUsage'>, scripts: FakeStep[][]) {
+async function resumeScenario(t: TestContext, capabilities: Pick<DriverCapabilities, 'resume' | 'contextUsage'>, scripts: FakeScript[]) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-resume-capability-')));
   const agentDir = await copyAgents(directory);
   const rounds: { sessionId: string; resumeSessionId?: string; brief: StartupBrief }[] = [];
@@ -72,11 +74,104 @@ async function resumeScenario(t: TestContext, capabilities: Pick<DriverCapabilit
     count++;
   };
   await ended();
-  return { rounds, agentDir, async next() {
+  return { rounds, agentDir, dataDir: join(directory, 'data'), call, work, async confirm() {
+    const gate = (await call('list-pending')).find((item: any) => item.kind === 'work-confirmation');
+    await call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' });
+    await ended();
+  }, async next() {
     await call('send-message', { workId: work.id, body: '继续', key: `next-${count}` });
     await ended();
   } };
 }
+
+async function executingScenario(t: TestContext, scripts: FakeStep[][]) {
+  const small = { type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } } as const;
+  const scenario = await resumeScenario(t, { resume: true, contextUsage: true }, [
+    [{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
+      requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', deliverables: '交付物及查看入口', key: 'draft' }) }, small],
+    [small],
+    ...scripts,
+  ]);
+  await scenario.confirm();
+  return scenario;
+}
+
+// Issue 30 item 4 / ADR 0017; small regression. FakeDriver replaces the external coordinator CLI.
+test('执行规则更新在同一会话的下一轮取代旧版，之后未变的轮次不再附规则', async t => {
+  const small = { type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } } as const;
+  const scenario = await executingScenario(t, [[small], [small], [small]]);
+  await scenario.next();
+  assert.equal(scenario.rounds[2]!.brief.phaseRules, undefined);
+
+  const updated = '新版执行规则：先验收再交付。\n';
+  writePrompt(join(scenario.dataDir, 'prompts'), 'coordinator-executing', updated);
+  await scenario.next();
+  const replacement = scenario.rounds[3]!.brief;
+  assert.equal(replacement.phaseRules, updated);
+  assert.equal(replacement.phaseRulesNotice, '执行规则已更新，此版取代会话中的旧版');
+  await scenario.next();
+  assert.equal(scenario.rounds[4]!.brief.phaseRules, undefined);
+  assert.equal(scenario.rounds[4]!.brief.phaseRulesNotice, undefined);
+  assert.equal(scenario.rounds[1]!.brief.phaseRulesNotice, undefined);
+  for (const round of scenario.rounds.slice(1)) {
+    assert.equal(round.sessionId, scenario.rounds[0]!.sessionId);
+    assert.equal(round.resumeSessionId, scenario.rounds[0]!.sessionId);
+    assert.equal(round.brief.resumed, true);
+  }
+  const starts = (await scenario.call('get-events', { workId: scenario.work.id }))
+    .filter((event: any) => event.action === 'round-started');
+  assert.match(starts[1].details.executingRules, /^[0-9a-f]{64}$/);
+  assert.deepEqual(starts.map((event: any) => event.details.executingRules), [
+    null, starts[1].details.executingRules, starts[1].details.executingRules,
+    '90c745a5b9f7a5ac2b18ce5aa353c5b2da209385a2432f5a317425718b534abf',
+    '90c745a5b9f7a5ac2b18ce5aa353c5b2da209385a2432f5a317425718b534abf',
+  ]);
+});
+
+// Issue 30 item 4 / ADR 0017; small regression. Seed historical event formats; observe briefs via the CLI fixture.
+for (const legacyRules of [true, false, undefined]) test(`旧事件 executingRules=${legacyRules} 的会话只补发一次执行规则`, async t => {
+  const small = { type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } } as const;
+  const scenario = await executingScenario(t, [[small], [small]]);
+  const start = (await scenario.call('get-events', { workId: scenario.work.id }))
+    .filter((event: any) => event.action === 'round-started').at(-1);
+  const details = { ...start.details };
+  if (legacyRules === undefined) delete details.executingRules;
+  else details.executingRules = legacyRules;
+  const database = new DatabaseSync(join(scenario.dataDir, 'helm.db'));
+  try { database.prepare('UPDATE events SET details = ? WHERE id = ?').run(JSON.stringify(details), start.id); }
+  finally { database.close(); }
+
+  await scenario.next();
+  assert.equal(scenario.rounds[2]!.brief.phaseRules, scenario.rounds[1]!.brief.phaseRules);
+  assert.equal(scenario.rounds[2]!.brief.phaseRulesNotice, legacyRules === true ? '执行规则已更新，此版取代会话中的旧版' : undefined);
+  await scenario.next();
+  assert.equal(scenario.rounds[3]!.brief.phaseRules, undefined);
+  assert.equal(scenario.rounds[3]!.brief.phaseRulesNotice, undefined);
+  for (const round of scenario.rounds.slice(2)) assert.equal(round.resumeSessionId, scenario.rounds[0]!.sessionId);
+});
+
+// Issue 30 item 4 / ADR 0017; small regression. FakeDriver replaces the external coordinator CLI.
+for (const changed of [false, true]) test(`续跑因 Agent 改动改为新会话时记录完整简报的规则版本（规则更新=${changed}）`, async t => {
+  const small = { type: 'end', reason: 'completed', context: { tokens: 20_000, window: 1_000_000 } } as const;
+  const scenario = await executingScenario(t, [[small], [small]]);
+  const previousStart = (await scenario.call('get-events', { workId: scenario.work.id }))
+    .filter((event: any) => event.action === 'round-started').at(-1);
+  if (changed) writePrompt(join(scenario.dataDir, 'prompts'), 'coordinator-executing', '新版执行规则：先验收再交付。\n');
+  await configureTestAgent(scenario.agentDir, 'claude-coordinator', { model: 'opus' });
+  await scenario.next();
+  const fresh = scenario.rounds[2]!;
+  assert.equal(fresh.resumeSessionId, undefined);
+  assert.notEqual(fresh.sessionId, scenario.rounds[0]!.sessionId);
+  assert.equal(fresh.brief.phaseRules, changed ? '新版执行规则：先验收再交付。\n' : scenario.rounds[1]!.brief.phaseRules);
+  assert.equal(fresh.brief.phaseRulesNotice, undefined);
+  const start = (await scenario.call('get-events', { workId: scenario.work.id }))
+    .filter((event: any) => event.action === 'round-started').at(-1);
+  assert.equal(start.details.executingRules, changed ? '90c745a5b9f7a5ac2b18ce5aa353c5b2da209385a2432f5a317425718b534abf' : previousStart.details.executingRules);
+  await scenario.next();
+  assert.equal(scenario.rounds[3]!.resumeSessionId, fresh.sessionId);
+  assert.equal(scenario.rounds[3]!.brief.phaseRules, undefined);
+  assert.equal(scenario.rounds[3]!.brief.phaseRulesNotice, undefined);
+});
 
 test('不报告占用的调度者连续续跑十轮后新开，新会话重新计数', async t => {
   const scenario = await resumeScenario(t, { resume: true, contextUsage: false },
