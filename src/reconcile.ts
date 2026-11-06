@@ -11,7 +11,7 @@ import type { TaskStore } from './store.js';
 import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
 import { reconcileScratchDirectories } from './scratch.js';
-import { projectEnvironment, protectDispatchEnvironment } from './project-environment.js';
+import { projectEnvironment, protectDispatchEnvironment, redactDispatchText } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
 import { reconcileCoordinatorDirectories } from './coordinator-directory.js';
 
@@ -71,16 +71,21 @@ export async function reconcileStartup(store: TaskStore) {
     for (const row of dispatches) {
       const dispatch = getDispatch(store, work.id, String(row.id));
       const protection = protectDispatchEnvironment(store, dispatch.id, projectEnvironment(store, work.projectId));
-      let endCommit: string | null;
+      let endCommit: string | null = null;
+      let failure: string | null = null;
       // Migrated read-only executions never had a card copy; abort them so a new dispatch can prepare one.
       const card = cardDetails(store, work.id, dispatch.cardId);
       const hasCopy = dispatch.purpose === 'verification' || (card.workPath && card.cardBranch);
-      try { endCommit = card.workspace === 'scratch' || (dispatch.status === 'running' && hasCopy) ? finishDispatchCopy(store, dispatch, 'aborted', restartReason) : null; }
+      try { endCommit = card.workspace === 'scratch' || (dispatch.status === 'running' && hasCopy) ? await finishDispatchCopy(store, dispatch, 'aborted', restartReason) : null; }
+      catch (error) {
+        if (card.workspace !== 'scratch' || dispatch.purpose !== 'execution') throw error;
+        failure = redactDispatchText(store, dispatch.id, error instanceof Error ? error.message : String(error));
+      }
       finally { protection.release(); }
       store.transaction(() => {
-        store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = 'aborted', abort_reason = ?,
-          final_answer = NULL, conclusion = 'undeclared', conclusion_reason = NULL, end_commit = ? WHERE id = ?`)
-          .run(new Date().toISOString(), dispatch.status === 'running' ? restartReason : dispatch.abortReason ?? restartReason, endCommit, dispatch.id);
+        store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, abort_reason = ?,
+          final_answer = NULL, conclusion = 'undeclared', conclusion_reason = NULL, end_commit = ?, failure = COALESCE(?, failure) WHERE id = ?`)
+          .run(new Date().toISOString(), failure ? 'error' : 'aborted', dispatch.status === 'running' ? restartReason : dispatch.abortReason ?? restartReason, endCommit, failure, dispatch.id);
         refreshCardReadiness(store, work.id);
         const event = store.appendEvent(runtime, { type: 'dispatch', id: dispatch.id }, 'dispatch-ended', getDispatch(store, work.id, dispatch.id),
           { workId: work.id, cardId: dispatch.cardId, dispatchId: dispatch.id });

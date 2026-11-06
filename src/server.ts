@@ -1,6 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createReadStream } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { getArtifact } from './dispatch.js';
 import { escapeOperations, invoke, rejectOperation } from './operations.js';
 import { RuleError, TaskStore, type Actor, type EventFilter } from './store.js';
 import { handleMcp } from './mcp.js';
@@ -82,6 +86,13 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
         return json(response, 405, { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null });
       }
       if (request.method === 'GET') {
+        if (path === '/api/artifact-download') {
+          if (['cross-site', 'same-site'].includes(String(request.headers['sec-fetch-site']))) {
+            throw new RuleError('INVALID_FETCH_SITE', '成果下载只接受本机同源请求。', 403);
+          }
+          const params = new URL(request.url!, 'http://127.0.0.1').searchParams;
+          return await downloadArtifact(store, params.get('workId') ?? '', params.get('artifactId') ?? '', response);
+        }
         const decoded = staticPath(request.url ?? '/');
         if (!/^\/(api(?:\/|$)|events(?:\/|$)|mcp(?:\/|$))/.test(decoded)) {
           return await serveStatic(options.staticDir ?? defaultStaticDir, decoded, response);
@@ -169,6 +180,27 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       return closing;
     },
   };
+}
+
+async function downloadArtifact(store: TaskStore, workId: string, artifactId: string, response: ServerResponse) {
+  const artifact = getArtifact(store, workId, artifactId);
+  if (artifact.kind === 'branch' || !artifact.path) throw new RuleError('INVALID_ARTIFACT', '这个成果没有可下载的文件。', 400);
+  let file;
+  try { file = await open(String(artifact.path), 'r'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new RuleError('FILE_NOT_FOUND', '找不到这个成果文件。', 404);
+    throw error;
+  }
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) throw new RuleError('INVALID_ARTIFACT', '这个成果没有可下载的文件。', 400);
+    const name = encodeURIComponent(basename(String(artifact.name))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+    response.writeHead(200, {
+      'Content-Type': 'application/octet-stream', 'Content-Length': stat.size, 'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': `attachment; filename*=UTF-8''${name}`,
+    });
+    await pipeline(createReadStream(String(artifact.path), { fd: file.fd, autoClose: false }), response);
+  } finally { await file.close(); }
 }
 
 // MCP names the operation inside the JSON-RPC body (possibly a batch) rather than the path.

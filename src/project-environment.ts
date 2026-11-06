@@ -1,10 +1,13 @@
 import { z } from 'zod';
+import { constants, createReadStream, createWriteStream } from 'node:fs';
+import { copyFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { acpAgents } from './acp-agents.js';
 import { runtimeEnvironmentNames } from './environment.js';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import type { DriverEvent } from './driver.js';
 
-const dispatchRedactors = new WeakMap<TaskStore, Map<string, { text: (text: string) => string; bytes: (text: string) => string }>>();
+const dispatchRedactors = new WeakMap<TaskStore, Map<string, { text: (text: string) => string; bytes: (text: string) => string; byteSpellings: string[] }>>();
 
 // Keep the startup values protected even if the user replaces/deletes them
 // while this dispatch is running. Nothing here is serialized.
@@ -13,7 +16,8 @@ export function protectDispatchEnvironment(store: TaskStore, id: string, environ
   if (!active) { active = new Map(); dispatchRedactors.set(store, active); }
   const redact = environmentRedactor(environment);
   const bytes = environmentRedactor(Object.fromEntries(Object.entries(environment).map(([name, value]) => [name, Buffer.from(value).toString('latin1')])));
-  active.set(id, { text: redact, bytes });
+  const byteSpellings = environmentSpellings(environment).map(value => Buffer.from(value).toString('latin1'));
+  active.set(id, { text: redact, bytes, byteSpellings });
   return { redact, release: () => active.delete(id) };
 }
 
@@ -25,6 +29,31 @@ export function redactDispatchContent(store: TaskStore, id: string, content: str
   if (typeof content === 'string') return redactDispatchText(store, id, content);
   const redact = dispatchRedactors.get(store)?.get(id)?.bytes;
   return redact ? Buffer.from(redact(content.toString('latin1')), 'latin1') : content;
+}
+
+export async function copyDispatchFile(store: TaskStore, id: string, source: string, destination: string) {
+  const spellings = dispatchRedactors.get(store)?.get(id)?.byteSpellings ?? [];
+  if (!spellings.length) return copyFile(source, destination, constants.COPYFILE_FICLONE);
+  const pattern = new RegExp(spellings.map(escapePattern).join('|'), 'g');
+  const tailLength = Math.max(...spellings.map(value => value.length)) - 1;
+  await pipeline(createReadStream(source), async function* (chunks) {
+    let pending = '';
+    for await (const chunk of chunks) {
+      pending += (chunk as Buffer).toString('latin1');
+      const limit = Math.max(0, pending.length - tailLength);
+      let cursor = 0, output = '';
+      pattern.lastIndex = 0;
+      for (let match; (match = pattern.exec(pending)) && match.index < limit;) {
+        output += pending.slice(cursor, match.index) + '[REDACTED]';
+        cursor = pattern.lastIndex;
+      }
+      // Consume complete matches even when they end inside the retained tail.
+      const end = Math.max(cursor, limit);
+      yield Buffer.from(output + pending.slice(cursor, end), 'latin1');
+      pending = pending.slice(end);
+    }
+    yield Buffer.from(pending.replace(pattern, '[REDACTED]'), 'latin1');
+  }, createWriteStream(destination, { flags: 'wx' }));
 }
 
 const managedNames = new Set([
@@ -64,11 +93,17 @@ export function changeProjectEnvironment(store: TaskStore, actor: Actor, project
 // Defense against accidental shell/CLI echoes in Helm's output and summaries.
 // Include JSON-escaped spellings because drivers wrap CLI output in JSON text.
 export function environmentRedactor(environment: Record<string, string>) {
-  const spellings = [...new Set(Object.values(environment).filter(Boolean).flatMap(value => [value, JSON.stringify(value).slice(1, -1)]))]
-    .sort((a, b) => b.length - a.length);
-  const pattern = spellings.length ? new RegExp(spellings.map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g') : undefined;
+  const spellings = environmentSpellings(environment);
+  const pattern = spellings.length ? new RegExp(spellings.map(escapePattern).join('|'), 'g') : undefined;
   return (text: string) => pattern ? text.replace(pattern, '[REDACTED]') : text;
 }
+
+function environmentSpellings(environment: Record<string, string>) {
+  return [...new Set(Object.values(environment).filter(Boolean).flatMap(value => [value, JSON.stringify(value).slice(1, -1)]))]
+    .sort((a, b) => b.length - a.length);
+}
+
+function escapePattern(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 export function redactEnvironmentEvent(event: DriverEvent, redact: (text: string) => string): DriverEvent {
   if (event.type === 'output') return { ...event, text: redact(event.text) };

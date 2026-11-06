@@ -1,5 +1,8 @@
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { DataProvider } from '../src/shared/data.js';
+import { I18nProvider } from '../src/shared/i18n.js';
+import { ReadArtifact } from '../src/pages/work/card-graph/DispatchDetails.js';
 import { App } from '../src/App.js';
 const { uiFixture, until }: typeof import('../../tests/ui-fixture.js') = await import('../../dist/tests/' + 'ui-fixture.js');
 let daemon: Awaited<ReturnType<typeof uiFixture>> | undefined;
@@ -39,5 +42,34 @@ test('临时目录卡片显示运行位置，派单详情可读成果文件并�
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect(within(inspector).getByText('Workspace')).toBeTruthy();
+  expect(within(inspector).getByRole('link', { name: 'Download' })).toBeTruthy();
   expect(within(inspector).getAllByText('Scratch directory').length).toBeGreaterThan(0);
+});
+
+// issue 30: small spec — HTTP transport substitutes the API, preserving real error-code handling.
+for (const language of ['zh', 'en']) for (const kind of ['file', 'test-output', 'branch', 'too-large'] as const) test(`成果 ${kind} 的下载入口和预览提示（${language}）`, async () => {
+  localStorage.setItem('helm.language', language);
+  const download = language === 'zh' ? '下载' : 'Download';
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/events')) return new Response(new ReadableStream<Uint8Array>({
+      start(controller) { init?.signal?.addEventListener('abort', () => controller.close(), { once: true }); },
+    }));
+    return kind === 'too-large'
+      ? Response.json({ ok: false, error: { code: 'FILE_TOO_LARGE', reason: 'generic server error', allowedOperations: [] } }, { status: 413 })
+      : Response.json({ ok: true, result: { id: 'artifact', kind, name: 'report.txt', content: 'saved content' } });
+  };
+  render(<DataProvider baseUrl="http://localhost:4242" transport={transport}><I18nProvider><ReadArtifact workId="work & one" artifactId="artifact" /></I18nProvider></DataProvider>);
+  if (kind === 'branch') {
+    await screen.findByText(language === 'zh' ? '分支' : 'Branch');
+    expect(screen.queryByRole('link', { name: download })).toBeNull();
+  } else {
+    const link = await screen.findByRole('link', { name: download });
+    expect(link.getAttribute('href')).toBe('http://localhost:4242/api/artifact-download?workId=work+%26+one&artifactId=artifact');
+    expect(link.hasAttribute('download')).toBe(true);
+    expect(link.className).toBe('btn sm');
+    if (kind === 'too-large') {
+      expect(screen.getByText(language === 'zh' ? '文件超过 20 MiB，无法预览，请下载后查看。' : 'This file exceeds 20 MiB and cannot be previewed. Download it to view locally.')).toBeTruthy();
+      expect(screen.queryByText('generic server error')).toBeNull();
+    } else expect(await screen.findByText('saved content')).toBeTruthy();
+  }
 });

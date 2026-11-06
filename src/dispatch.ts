@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
 import { ensureWorkCopy, projectPath, recordBaseBranch } from './alignment.js';
@@ -12,6 +12,7 @@ import { redactDispatchContent, redactDispatchText } from './project-environment
 import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 import { readArtifactDiff } from './artifact-diff.js';
+import { maxAttachmentBytes } from './attachments.js';
 import { gitFailure } from './git-failure.js';
 
 export interface Dispatch {
@@ -320,12 +321,18 @@ export function reportedArtifact(workPath: string, path: string) {
   return { name: suffix, content: readFileSync(source, 'utf8') };
 }
 
-export function readArtifact(store: TaskStore, workId: string, artifactId: string, encoding: 'utf8' | 'base64' = 'utf8', path?: string) {
+export function getArtifact(store: TaskStore, workId: string, artifactId: string) {
   store.work(workId);
   const artifact = store.db.prepare(`SELECT a.id, a.dispatch_id AS dispatchId, a.kind, a.name, a.path, a.ref, a.commit_sha AS commitSha FROM artifacts a
     JOIN dispatches d ON d.id = a.dispatch_id WHERE a.id = ? AND d.work_id = ?`).get(artifactId, workId);
   if (!artifact) throw new RuleError('INVALID_ARTIFACT', '成果必须属于这项工作。', 400);
+  return artifact;
+}
+
+export function readArtifact(store: TaskStore, workId: string, artifactId: string, encoding: 'utf8' | 'base64' = 'utf8', path?: string) {
+  const artifact = getArtifact(store, workId, artifactId);
   if (artifact.kind === 'branch') return { ...artifact, content: null, diff: branchArtifactDiff(store, workId, artifact, path) };
   if (path !== undefined) throw new RuleError('INVALID_ARTIFACT_PATH', '只有分支成果可按文件读取 patch。', 400);
+  if (artifact.path && statSync(String(artifact.path)).size > maxAttachmentBytes) throw new RuleError('FILE_TOO_LARGE', '文件超过 20 MiB，无法预览，可以下载后查看。', 413);
   return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path)).toString(encoding) : null, diff: undefined };
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -176,7 +176,11 @@ test('未导出先提示，CLI 确认后只删原始事件流，保留成果、�
   const afterEvents = await daemon.events();
   assert.deepEqual(afterEvents.slice(0, events.length), events);
   assert.equal(afterEvents.filter(event => event.action === 'outputs-deleted').length, 1);
-  assert.ok(!(await daemon.call('list-pending')).some((item: any) => item.kind === 'output-threshold'));
+  // issue 30: medium regression — deleting output streams leaves artifact usage counted.
+  const artifactBytes = (await Promise.all(artifacts.filter((item: any) => item.path).map(async (item: any) => (await stat(item.path)).size))).reduce((sum, size) => sum + size, 0);
+  const warning = (await daemon.call('list-pending')).find((item: any) => item.kind === 'output-threshold');
+  assert.ok(warning);
+  assert.equal(warning.totalBytes, artifactBytes);
   await daemon.restart();
   assert.deepEqual(await daemon.output(), { status: 'deleted', message: '已删除' });
   assert.equal((await daemon.call('read-artifact', { ...daemon.params, artifactId: artifact.id })).content, '必须保留的成果\n');

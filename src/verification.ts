@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs';
+import { constants, cpSync, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { projectPath } from './alignment.js';
 import { dispatchGit, type Dispatch } from './dispatch.js';
@@ -25,7 +25,7 @@ export function createVerificationCopy(store: TaskStore, dispatch: Dispatch, com
   mkdirSync(dirname(path), { recursive: true });
   if (cardDetails(store, dispatch.workId, dispatch.cardId).workspace === 'scratch') {
     const source = scratchPath(store, dispatch.workId, dispatch.cardId);
-    if (existsSync(source)) cpSync(source, path, { recursive: true, filter: entry => !lstatSync(entry).isSymbolicLink() });
+    if (existsSync(source)) cpSync(source, path, { recursive: true, mode: constants.COPYFILE_FICLONE, filter: entry => !lstatSync(entry).isSymbolicLink() });
     else mkdirSync(path);
   } else dispatchGit(projectPath(store, dispatch.workId), 'worktree', 'add', '--detach', path, commit!);
 }

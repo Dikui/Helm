@@ -49,7 +49,8 @@ function outputFiles(store: TaskStore, workId?: string): string[] {
 // Called in the same transaction as the triggering operation or dispatch ending.
 export function checkOutputUsage(store: TaskStore) {
   let totalBytes = 0;
-  for (const path of outputFiles(store)) {
+  const artifacts = store.db.prepare('SELECT DISTINCT path FROM artifacts WHERE path IS NOT NULL').all().map(row => String(row.path));
+  for (const path of new Set([...outputFiles(store), ...artifacts])) {
     try { totalBytes += lstatSync(path).size; }
     catch (error) { if (!missing(error)) throw error; }
   }

@@ -52,6 +52,17 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
   if (work.status !== 'executing' && !runtimePaused) throw new RuleError('WORK_NOT_EXECUTING', '只能在执行中或由运行层暂停的工作里标记卡片完成。');
   const dispatches = listDispatches(store, work.id, card.id);
   if (dispatches.some(item => item.status !== 'ended')) throw new RuleError('DISPATCH_ACTIVE', '派单结束后才能标记卡片完成。');
+  if (card.workspace === 'scratch') {
+    const latest = dispatches.filter(item => item.purpose === 'execution').at(-1);
+    const unsaved = latest && store.events({ dispatchId: latest.id, actions: ['scratch-artifacts-unsaved'] });
+    if (unsaved?.length) {
+      const failures = unsaved.map(event => {
+        const details = event.details as { name: string; reason: string };
+        return `${details.name}：${details.reason}`;
+      }).join('；');
+      throw new RuleError('SCRATCH_ARTIFACTS_UNSAVED', `临时目录成果尚未保存：${failures}。请释放空间或删除文件后重新派单再完成；放弃这些文件请取消卡片。`);
+    }
+  }
   if (['waiting', 'skipped', 'paused'].includes(card.status)) throw new RuleError('CARD_NOT_COMPLETABLE', '等待前置、已跳过或暂停的卡片不能标记完成。');
   if (!dispatches.some(item => item.endReason === 'completed')) throw new RuleError('NO_COMPLETED_DISPATCH', '从没正常完成过派单的卡片不能标完成，只能取消。');
   const passed = dispatches.filter(item => item.purpose === 'verification' && item.endReason === 'completed' && item.conclusion === 'passed');

@@ -35,7 +35,7 @@ function stepSummary(event: DriverEvent) {
 }
 
 // Both normal shutdown and startup recovery save the same git state and artifacts.
-export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason: EndReason, abortReason?: string | null) {
+export async function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason: EndReason, abortReason?: string | null) {
   const card = cardDetails(store, dispatch.workId, dispatch.cardId);
   if (dispatch.purpose === 'verification') {
     removeVerificationCopy(store, dispatch.workId, verificationPath(store, dispatch));
@@ -44,7 +44,7 @@ export function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, reason:
     if (dispatch.startCommit) store.transaction(() => saveArtifact(store, dispatch, 'branch', branch, branch, dispatch.startCommit!));
     return dispatch.startCommit;
   }
-  if (card.workspace === 'scratch') { saveScratchArtifacts(store, dispatch); return null; }
+  if (card.workspace === 'scratch') { await saveScratchArtifacts(store, dispatch); return null; }
   const workPath = card.workPath!;
   const conflictMerge = reason === 'completed' && pendingConflictCardMerge(store, dispatch, workPath);
   if (!conflictMerge) abortCardGit(store, dispatch, workPath, card.cardBranch!);
@@ -354,7 +354,7 @@ export class ExecutionRunner {
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
-        if (scratch || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
+        if (scratch || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = await finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,
           getDispatch(this.store, dispatch.workId, dispatch.id).abortReason ?? (this.stopping ? '运行层重启' : null));
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
@@ -373,6 +373,7 @@ export class ExecutionRunner {
       }
       if (current.abortReason) reason = 'aborted';
       if (reason === 'timed-out') failure = [failure, '派单超时终止，可在设置的运行页调整超时。'].filter(Boolean).join('; ');
+      if (scratch && this.store.events({ dispatchId: dispatch.id, actions: ['scratch-artifacts-unsaved'] }).length) reason = 'error';
       if (reason !== 'completed') finalAnswer = null;
       if (failure) failure = redact(failure);
       const ended = this.store.transaction(() => {

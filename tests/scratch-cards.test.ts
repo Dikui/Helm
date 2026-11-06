@@ -1,20 +1,54 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { Readable } from 'node:stream';
+import { get } from 'node:http';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { AgentCatalog } from '../src/agents.js';
-import { createDispatch, dispatchArtifacts, getDispatch, listDispatches, markOutdated, readArtifact, submitConclusion } from '../src/dispatch.js';
+import { createDispatch, dispatchArtifacts, getDispatch, listDispatches, markOutdated, readArtifact, saveArtifact, submitConclusion } from '../src/dispatch.js';
 import { FakeDriver, type Driver, type EndReason, type SessionOptions } from '../src/driver.js';
 import { ExecutionRunner } from '../src/execution.js';
 import { cardDetails, cardGraph, createCard, updateCard } from '../src/graph.js';
 import { cancelCard, completeCard } from '../src/completion.js';
 import { reconcileStartup } from '../src/reconcile.js';
 import { RuleError, TaskStore } from '../src/store.js';
-import { fixtureAgentDir } from './helmd-fixture.js';
+import { startTestHelmd, fixtureAgentDir } from './helmd-fixture.js';
 
 const actor = { type: 'runtime', id: 'test' } as const;
 const code = (expected: string) => (error: unknown) => error instanceof RuleError && error.code === expected;
+
+// issue 30: medium regression — completing a scratch card must not discard large originals.
+test('超过 20 MiB 的临时目录成果完成后仍完整保存，读取只拒绝预览', async t => {
+  const content = Buffer.alloc(21 * 1024 * 1024, 0xa5);
+  const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+  const ctx = fixture(t, options => writeFileSync(join(options.cwd, 'data.js'), content));
+  const card = ctx.card();
+  const dispatch = await ctx.run(card.id);
+  assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? '');
+  const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[]).find(file => file.name === 'data.js');
+  assert.ok(file, '大文件必须保存为成果');
+  assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
+  assert.equal(existsSync(ctx.starts[0]!.cwd), false);
+  assert.equal(hash(readFileSync(file.path)), hash(content));
+  assert.throws(() => readArtifact(ctx.store, 'work', file.id), code('FILE_TOO_LARGE'));
+  const daemon = await startTestHelmd({ port: 0, dataDir: ctx.store.dataDir });
+  try {
+    const read = await fetch(`${daemon.url}/api/read-artifact`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workId: 'work', artifactId: file.id }) });
+    assert.equal(read.status, 413);
+    assert.equal((await read.json() as any).error.code, 'FILE_TOO_LARGE');
+    const response = await fetch(`${daemon.url}/api/artifact-download?workId=work&artifactId=${file.id}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+    assert.equal(response.headers.get('content-length'), String(content.length));
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('content-disposition'), "attachment; filename*=UTF-8''data.js");
+    assert.equal(hash(Buffer.from(await response.arrayBuffer())), hash(content));
+  } finally { await daemon.close(); }
+});
 
 function fixture(t: TestContext, execute = (_options: SessionOptions, _input: any) => {}, reason: EndReason | (() => EndReason) = 'completed') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'helm-scratch-')));
@@ -230,7 +264,7 @@ test('临时目录的多票验收各用独立副本且与执行互斥', async t 
 });
 
 for (const reason of ['completed', 'error', 'quota-exhausted', 'timed-out', 'aborted', 'context-overflow'] as const) {
-  test(`临时目录派单 ${reason} 后保存文件，脱敏项目变量，跳过符号链接和超阈值文件并注明`, async t => {
+  test(`临时目录派单 ${reason} 后保存文件，脱敏项目变量，跳过符号链接并注明`, async t => {
     const ctx = fixture(t, options => {
       mkdirSync(join(options.cwd, 'reports'));
       writeFileSync(join(options.cwd, 'reports', 'report.txt'), 'fact secret-value\n');
@@ -238,8 +272,6 @@ for (const reason of ['completed', 'error', 'quota-exhausted', 'timed-out', 'abo
       symlinkSync(join(ctx.project, 'notes.txt'), join(options.cwd, 'external.txt'));
       symlinkSync(ctx.project, join(options.cwd, 'external-dir'));
       symlinkSync('missing', join(options.cwd, 'broken'));
-      writeFileSync(join(options.cwd, 'large.bin'), '');
-      truncateSync(join(options.cwd, 'large.bin'), 20 * 1024 * 1024 + 1);
     }, reason);
     ctx.store.db.exec("INSERT INTO project_environment VALUES ('project', 'RESEARCH_TOKEN', 'secret-value')");
     const dispatch = await ctx.run(ctx.card().id);
@@ -252,9 +284,8 @@ for (const reason of ['completed', 'error', 'quota-exhausted', 'timed-out', 'abo
     assert.doesNotMatch(String(text), /secret-value/);
     assert.equal(readArtifact(ctx.store, 'work', files.find(file => file.name === 'binary.bin')!.id, 'base64').content, 'AAEC/w==');
     const note = readArtifact(ctx.store, 'work', files.find(file => file.kind === 'test-output')!.id).content;
-    for (const name of ['external.txt', 'external-dir', 'broken', 'large.bin']) assert.ok(String(note).includes(name));
+    for (const name of ['external.txt', 'external-dir', 'broken']) assert.ok(String(note).includes(name));
     assert.match(String(note), /符号链接/);
-    assert.match(String(note), /20 MiB/);
   });
 }
 
@@ -389,4 +420,164 @@ test('返工派单在启动前取消时也保存并脱敏已有文件', async t 
   const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[]).find(file => file.name === 'report.txt');
   assert.ok(file);
   assert.equal(readArtifact(ctx.store, 'work', file.id).content, 'private [REDACTED]\n');
+});
+
+// issue 30: medium regression — a failed save must retain originals until a successful redispatch.
+for (const ending of ['completed', 'timed-out', 'aborted'] as const) test(`派单 ${ending} 后保存失败以 error 结束且不发布部分成果，禁止完成，修好后重新派单可完成`, async t => {
+  let attempts = 0, blocked = '';
+  const ctx = fixture(t, options => {
+    writeFileSync(join(options.cwd, 'a.txt'), 'first file');
+    blocked = join(options.cwd, 'secret-value.txt');
+    writeFileSync(blocked, 'second file');
+    chmodSync(blocked, attempts++ ? 0o600 : 0);
+  }, () => attempts === 1 ? ending : 'completed');
+  ctx.store.db.exec("INSERT INTO project_environment VALUES ('project', 'TOKEN', 'secret-value')");
+  const card = ctx.card();
+  t.after(() => { if (existsSync(blocked)) chmodSync(blocked, 0o600); });
+  const failed = await ctx.run(card.id);
+  assert.equal(failed.endReason, 'error');
+  assert.match(failed.failure!, /\[REDACTED\]\.txt.*EACCES/);
+  assert.doesNotMatch(failed.failure!, /secret-value/);
+  assert.deepEqual(dispatchArtifacts(ctx.store, 'work', failed.id), []);
+  const events = ctx.store.events({ dispatchId: failed.id });
+  assert.equal(events.filter(event => event.action === 'artifact-saved').length, 0);
+  assert.equal(events.filter(event => event.action === 'scratch-artifacts-unsaved').length, 1);
+  assert.equal(existsSync(join(ctx.store.dataDir, 'dispatches', failed.id, 'artifacts')), true);
+  assert.deepEqual(readdirSync(join(ctx.store.dataDir, 'dispatches', failed.id, 'artifacts')), []);
+  assert.ok(existsSync(ctx.starts[0]!.cwd));
+  assert.throws(() => completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }), error => {
+    assert.ok(code('SCRATCH_ARTIFACTS_UNSAVED')(error));
+    assert.match((error as Error).message, /释放空间.*重新派单.*取消卡片/);
+    return true;
+  });
+  chmodSync(blocked, 0o600);
+  const saved = await ctx.run(card.id);
+  assert.equal(saved.endReason, 'completed', saved.failure ?? '');
+  assert.equal((dispatchArtifacts(ctx.store, 'work', saved.id) as any[]).length, 2);
+  assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
+});
+
+// issue 30: medium regression — one unreadable scratch file cannot prevent startup.
+test('启动对账遇到成果保存失败仍结束派单并保留 failure 和临时目录', async t => {
+  const ctx = fixture(t);
+  await ctx.runner.close();
+  const card = ctx.card();
+  const dispatch = await ctx.dispatch(card.id);
+  ctx.store.db.prepare("UPDATE dispatches SET status = 'running' WHERE id = ?").run(dispatch.id);
+  const root = join(ctx.store.dataDir, 'scratch', 'work', card.id);
+  mkdirSync(root, { recursive: true });
+  const path = join(root, 'blocked.txt');
+  writeFileSync(path, 'retained');
+  chmodSync(path, 0);
+  t.after(() => { if (existsSync(path)) chmodSync(path, 0o600); });
+  await assert.doesNotReject(() => reconcileStartup(ctx.store));
+  const ended = getDispatch(ctx.store, 'work', dispatch.id);
+  assert.equal(ended.status, 'ended');
+  assert.equal(ended.endReason, 'error');
+  assert.match(ended.failure!, /blocked\.txt.*EACCES/);
+  assert.ok(existsSync(path));
+});
+
+// issue 30: medium spec — raw and JSON spellings spanning stream chunks remain secret.
+test('流式保存跨块秘密值并保持其他二进制字节', async t => {
+  const secret = '秘密"value\nend';
+  const spelling = JSON.stringify(secret).slice(1, -1);
+  const prefix = Buffer.alloc(64 * 1024 - 5, 0xff);
+  const padding = Buffer.alloc(64 * 1024 - Buffer.byteLength(secret) - 2, 0xfd);
+  const content = Buffer.concat([prefix, Buffer.from(secret), Buffer.from([0, 0xfe]), padding, Buffer.from(spelling)]);
+  const expected = Buffer.concat([prefix, Buffer.from('[REDACTED]'), Buffer.from([0, 0xfe]), padding, Buffer.from('[REDACTED]')]);
+  const ctx = fixture(t, options => writeFileSync(join(options.cwd, 'data.bin'), content));
+  ctx.store.db.prepare('INSERT INTO project_environment VALUES (?, ?, ?)').run('project', 'TOKEN', secret);
+  const dispatch = await ctx.run(ctx.card().id);
+  assert.equal(dispatch.endReason, 'completed', dispatch.failure ?? '');
+  const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[])[0]!;
+  assert.deepEqual(readFileSync(file.path), expected);
+});
+
+// issue 30 / ADR 0016: medium spec — download is the sole GET API, scoped to one work.
+test('成果下载校验来源和工作归属，拒绝分支和缺失文件，安全编码文件名，其他 GET API 不变', async t => {
+  const name = '目录/中文"line\n(1)\'.txt';
+  const ctx = fixture(t, options => {
+    mkdirSync(join(options.cwd, '目录'));
+    writeFileSync(join(options.cwd, name), 'downloaded');
+  });
+  const dispatch = await ctx.run(ctx.card().id);
+  const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[])[0]!;
+  ctx.store.db.exec("INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('other', 'project', 'executing', 'other', '2026-11-01')");
+  ctx.store.transaction(() => saveArtifact(ctx.store, dispatch, 'branch', 'branch', 'ref', 'commit'));
+  // A legacy metadata-only file has no creation operation in the current API.
+  ctx.store.db.prepare("INSERT INTO artifacts VALUES ('no-file', ?, 'file', 'empty', NULL, NULL, NULL)").run(dispatch.id);
+  const branch = (ctx.store.db.prepare("SELECT id FROM artifacts WHERE kind = 'branch'").get()!).id;
+  const daemon = await startTestHelmd({ port: 0, dataDir: ctx.store.dataDir });
+  try {
+    const url = `${daemon.url}/api/artifact-download?workId=work&artifactId=${file.id}`;
+    for (const site of ['cross-site', 'same-site']) {
+      const response = await fetch(url, { headers: { 'sec-fetch-site': site } });
+      assert.equal(response.status, 403);
+    }
+    assert.equal((await fetch(url, { headers: { origin: 'https://external.invalid' } })).status, 403);
+    const invalidHost = await new Promise<number | undefined>((resolve, reject) => {
+      get(url, { headers: { host: 'external.invalid' } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject);
+    });
+    assert.equal(invalidHost, 403);
+    for (const site of [undefined, 'same-origin', 'none']) {
+      const response = await fetch(url, { headers: site ? { 'sec-fetch-site': site } : {} });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'downloaded');
+      assert.equal(response.headers.get('content-disposition'), "attachment; filename*=UTF-8''%E4%B8%AD%E6%96%87%22line%0A%281%29%27.txt");
+    }
+    const wrongWork = await fetch(url.replace('workId=work', 'workId=other'));
+    assert.equal(wrongWork.status, 400);
+    assert.equal((await wrongWork.json() as any).error.code, 'INVALID_ARTIFACT');
+    for (const id of [String(branch), 'no-file']) {
+      const noFile = await fetch(url.replace(file.id, id));
+      assert.equal(noFile.status, 400);
+      assert.equal((await noFile.json() as any).error.code, 'INVALID_ARTIFACT');
+    }
+    for (const route of ['/api/get-work?workId=work', '/api/missing', '/api/artifact-download/']) {
+      const response = await fetch(daemon.url + route);
+      assert.equal(response.status, 405);
+      assert.equal((await response.json() as any).error.code, 'METHOD_NOT_ALLOWED');
+    }
+    rmSync(file.path);
+    const missing = await fetch(url);
+    assert.equal(missing.status, 404);
+    assert.equal((await missing.json() as any).error.code, 'FILE_NOT_FOUND');
+  } finally { await daemon.close(); }
+});
+
+// issue 30: medium spec — substitute a failing disk stream at the filesystem boundary.
+test('成果下载中途读取失败会中断响应，不返回截断的成功内容', async t => {
+  const ctx = fixture(t, options => writeFileSync(join(options.cwd, 'file.txt'), 'complete content'));
+  const dispatch = await ctx.run(ctx.card().id);
+  const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[])[0]!;
+  const daemon = await startTestHelmd({ port: 0, dataDir: ctx.store.dataDir });
+  const original = fs.createReadStream;
+  const stream = t.mock.method(fs, 'createReadStream', (path: any, options: any) => {
+    if (String(path) !== file.path) return original(path, options);
+    return Readable.from((async function* () {
+      yield Buffer.from('partial');
+      await new Promise(resolve => setImmediate(resolve));
+      throw new Error('simulated disk read failure');
+    })());
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(async () => {
+      const response = await fetch(`${daemon.url}/api/artifact-download?workId=work&artifactId=${file.id}`);
+      await response.arrayBuffer();
+    });
+  } finally {
+    stream.mock.restore(); syncBuiltinESMExports();
+    await daemon.close();
+  }
+});
+
+// issue 30: medium spec — binary data is copied without a text round trip when no secrets exist.
+test('没有秘密值的临时目录成果逐字节保留非 UTF-8 二进制', async t => {
+  const bytes = Buffer.concat([Buffer.from(Array.from({ length: 256 }, (_, byte) => byte)), Buffer.alloc(64 * 1024, 0xfe)]);
+  const ctx = fixture(t, options => writeFileSync(join(options.cwd, 'bytes.bin'), bytes));
+  const dispatch = await ctx.run(ctx.card().id);
+  const file = (dispatchArtifacts(ctx.store, 'work', dispatch.id) as any[])[0]!;
+  assert.deepEqual(readFileSync(file.path), bytes);
 });
