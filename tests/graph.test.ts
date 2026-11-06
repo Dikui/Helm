@@ -7,6 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd } from './helmd-fixture.js';
+import { reviewReport } from './fixtures/review-report.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -22,7 +23,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
   }
 }
 
-async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript, aligning: FakeStep[] = []) {
+async function fixture(t: TestContext, script: FakeStep[], after: FakeScript[] = [], aligning: FakeStep[] = []) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-graph-')));
   const repo = join(directory, 'project');
   execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
@@ -34,7 +35,7 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript, a
   const daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver([[
     ...aligning,
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '卡片图', boundary: '本机', criteria: '依赖约束成立', deliverables: '交付物及查看入口' }), check: ok },
-  ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'graph-script-finished' }], ...(after ? [after] : [])]) });
+  ], [...script, { type: 'end', reason: 'completed', finalAnswer: 'graph-script-finished' }], ...after]) });
   t.after(async () => { await daemon.close(); await rm(directory, { recursive: true, force: true }); });
   const call = async (name: string, params: object = {}) => {
     const response = await fetch(`${daemon.url}/api/${name}`, {
@@ -57,7 +58,8 @@ async function fixture(t: TestContext, script: FakeStep[], after?: FakeScript, a
   return { ...daemon, call, work, gate, events, finished, dataDir, project };
 }
 
-test('调度者建卡和改卡按 key 去重，内容和验收标记可读；自己建的卡片不唤醒下一轮，下一轮简报含卡片图', async t => {
+// Issue 30 item 3: medium regression. FakeDriver replaces the coordinator CLI.
+test('调度者建卡和改卡按 key 去重，内容和验收标记可读；停滞提醒的下一轮简报含卡片图', async t => {
   let nextBrief: StartupBrief | undefined;
   const daemon = await fixture(t, [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'logic', content: '游戏逻辑', needsVerification: true }), saveAs: 'card', check: ok },
@@ -65,7 +67,7 @@ test('调度者建卡和改卡按 key 去重，内容和验收标记可读；自
     { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '游戏逻辑和重开', needsVerification: false }), check: ok },
     { type: 'tool', name: 'update-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, content: '游戏逻辑和重开', needsVerification: false }), check: ok },
     { type: 'tool', name: 'get-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id }), check: result => { ok(result); assert.equal((result as any).result.needsVerification, false); } },
-  ], ctx => { nextBrief = JSON.parse(ctx.input); return []; });
+  ], [ctx => { nextBrief = JSON.parse(ctx.input); return []; }]);
   const events = await daemon.finished();
   const graph = (await daemon.call('get-card-graph', { workId: daemon.work.id })).result;
   assert.equal(graph.filter((node: any) => node.type === 'card').length, 1);
@@ -77,18 +79,17 @@ test('调度者建卡和改卡按 key 去重，内容和验收标记可读；自
   assert.equal(graph.find((node: any) => node.type === 'gate').id, daemon.gate.id);
   assert.equal(events.filter(event => event.action === 'card-created').length, 1);
   assert.equal(events.filter(event => event.action === 'card-updated').length, 1);
-  // card-ready is recorded but does not wake; with nothing dispatched the work stalls until the user writes.
+  // card-ready does not wake; the runtime nudge carries the next round.
   const stalled = await until(daemon.events, values => values.some(event => event.action === 'work-stalled'));
   assert.ok(stalled.some(event => event.action === 'card-ready' && event.cardId === card.id));
-  assert.equal(nextBrief, undefined);
-  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'wake', body: '继续' }));
-  await until(async () => nextBrief, brief => brief !== undefined);
   assert.equal((nextBrief!.cardGraph.find((node: any) => node.type === 'card') as any).id, card.id);
-  assert.deepEqual(nextBrief!.wakeEvents.map(event => event.action), ['message-sent']);
+  assert.deepEqual(nextBrief!.wakeEvents.map(event => event.action), ['work-stall-nudged']);
+  assert.match((nextBrief!.wakeEvents[0]!.details as any).reason, /没有运行中的派单.*继续推进.*关卡/);
   assert.equal((await daemon.call('create-card', { workId: daemon.work.id, key: 'user', content: '用户不能建卡' })).error.code, 'FORBIDDEN');
 });
 
-test('写入范围规范化后保存，没有依赖的卡片范围重叠时只提示；执行中无事可做的轮次结束后提示用户工作停住', async t => {
+// Issue 30 item 3: medium regression. A nudge round cannot nudge itself again.
+test('写入范围规范化后保存，没有依赖的卡片范围重叠时只提示；提醒后仍停滞才通知用户且不再自动唤醒', async t => {
   const card = (ctx: FakeContext, key: string, writeScopes: string[]) => ({ workId: workIdOf(ctx), key, content: key, writeScopes });
   const daemon = await fixture(t, [
     { type: 'tool', name: 'create-card', arguments: ctx => card(ctx, 'api', ['./src/api/', 'src/api']), saveAs: 'api', check: value => { ok(value); assert.deepEqual((value as any).result.writeScopes, ['src/api']); } },
@@ -108,10 +109,65 @@ test('写入范围规范化后保存，没有依赖的卡片范围重叠时只�
   assert.deepEqual(warned('after-api'), ['docs', 'user']);
   assert.deepEqual((cards.get('docs') as any).writeScopes, ['docs', 'src/api/routes']);
   const events = await until(daemon.events, values => values.some(event => event.action === 'work-stalled'));
+  assert.equal(events.filter(event => event.action === 'work-stall-nudged').length, 1);
   assert.equal(events.filter(event => event.action === 'work-stalled').length, 1);
-  assert.ok(events.some(event => event.action === 'needs-user-attention' && event.details.kind === 'work-stalled'));
+  assert.equal(events.filter(event => event.action === 'needs-user-attention' && event.details.kind === 'work-stalled').length, 1);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const settled = await daemon.events();
+  // One alignment round and two executing rounds; there must be no third executing round.
+  assert.equal(settled.filter(event => event.action === 'round-started').length, 3);
+  assert.equal(settled.filter(event => event.action === 'work-stall-nudged').length, 1);
   const conversation = (await daemon.call('get-conversation', { workId: daemon.work.id })).result;
-  assert.ok(conversation.some((item: any) => item.sender === 'runtime' && item.body.includes('发一条消息即可唤醒调度者')));
+  const notices = conversation.filter((item: any) => item.sender === 'runtime');
+  assert.equal(notices.length, 1);
+  assert.ok(notices[0].body.includes('发一条消息即可唤醒调度者'));
+  assert.ok(notices[0].body.includes('已提醒过调度者一次'));
+  assert.doesNotMatch(notices[0].body, /请继续推进/, '给调度者的指示不能出现在给用户的消息里');
+});
+
+// Issue 30 item 3: medium regression; the public event stream models idle -> nudged -> review.
+test('全部卡片完成但漏发审核时自动唤醒，简报给出原因，补发审核后不通知用户停滞', async t => {
+  let nudgeBrief: StartupBrief | undefined;
+  const daemon = await fixture(t, [
+    { type: 'tool', name: 'create-card', arguments: { key: 'done', content: '完成工作', workspace: 'scratch' }, saveAs: 'card', check: ok },
+    { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ cardId: saved(ctx, 'card').id, key: 'execute', agentId: 'claude-executor' }), check: ok },
+  ], [ctx => [
+    { type: 'tool', name: 'complete-card', arguments: { cardId: (JSON.parse(ctx.input) as StartupBrief).cardGraph.find(node => node.type === 'card')!.id }, check: ok },
+  ], ctx => {
+    nudgeBrief = JSON.parse(ctx.input);
+    return [{ type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport() }, check: ok }];
+  }]);
+  const events = await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length === 4);
+  assert.equal(events.filter(event => event.action === 'card-completed').length, 1);
+  const nudge = events.find(event => event.action === 'work-stall-nudged')!;
+  assert.equal(events.filter(event => event.action === 'work-stall-nudged').length, 1);
+  assert.ok(events.find(event => event.action === 'round-ended' && event.object.id === nudge.details.roundId)!.id < nudge.id);
+  assert.deepEqual(nudgeBrief!.wakeEvents.map(event => event.action), ['work-stall-nudged']);
+  assert.deepEqual(nudgeBrief!.wakeEvents[0]!.details, {
+    reason: '全部卡片已结束，但工作没有进入审核：目标满足就发起审核；正在处理合入冲突就完成冲突处理；还有差距就继续派单', roundId: nudge.details.roundId,
+  });
+  assert.equal((await daemon.call('get-work', { workId: daemon.work.id })).result.status, 'awaiting-review');
+  assert.equal(events.filter(event => event.action === 'work-stalled').length, 0);
+  assert.equal(events.filter(event => event.action === 'needs-user-attention' && event.details.kind === 'work-stalled').length, 0);
+  assert.ok(!(await daemon.call('get-conversation', { workId: daemon.work.id })).result.some((item: any) => item.sender === 'runtime'));
+});
+
+// Issue 30 item 3: medium regression; external wakes reset the opportunity to nudge.
+test('用户发消息唤醒后再次停滞时可以再提醒调度者一次', async t => {
+  let messageBrief: StartupBrief | undefined;
+  let secondNudgeBrief: StartupBrief | undefined;
+  const daemon = await fixture(t, [], [[], ctx => { messageBrief = JSON.parse(ctx.input); return []; },
+    ctx => { secondNudgeBrief = JSON.parse(ctx.input); return []; }]);
+  const read = () => daemon.events();
+  const stalled = await until(read, values => values.some(event => event.action === 'work-stalled'));
+  assert.equal(stalled.filter(event => event.action === 'work-stall-nudged').length, 1);
+  ok(await daemon.call('send-message', { workId: daemon.work.id, key: 'wake-again', body: '继续推进' }));
+  const events = await until(read, values => values.filter(event => event.action === 'work-stalled').length === 2);
+  assert.deepEqual(messageBrief!.wakeEvents.map(event => event.action), ['message-sent']);
+  assert.deepEqual(secondNudgeBrief!.wakeEvents.map(event => event.action), ['work-stall-nudged']);
+  assert.equal(events.filter(event => event.action === 'work-stall-nudged').length, 2);
+  assert.equal(events.filter(event => event.action === 'needs-user-attention' && event.details.kind === 'work-stalled').length, 2);
+  assert.equal(events.filter(event => event.action === 'round-started').length, 5);
 });
 
 test('一般关卡支持 key 去重、修改历史和用户选项或自由回答，调度者不能代答或撤回固定关卡', async t => {
@@ -137,6 +193,7 @@ test('一般关卡支持 key 去重、修改历史和用户选项或自由回答
   assert.equal(choice.status, 'pending');
   assert.equal(events.filter(event => event.action === 'needs-user-attention' && event.details.kind === 'general').length, 2);
   assert.ok(!events.some(event => event.action === 'work-stalled'), '有待决定的关卡时不算停住');
+  assert.ok(!events.some(event => event.action === 'work-stall-nudged'));
   const decide = { workId: daemon.work.id, gateId: chosenGateId, decision: '本地' };
   const chosen = await daemon.call('decide-gate', decide);
   ok(chosen);
@@ -236,7 +293,7 @@ test('取消上游和撤回关卡使下游级联跳过、保留依赖并在同�
     { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'gate').id, reason: '问题改了，稍后重新提出' }), check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: node(ctx, 'gate', 'gate'), downstream: node(ctx, 'downstream') }), check: value => assert.equal((value as any).error.code, 'INACTIVE_UPSTREAM') },
     { type: 'tool', name: 'update-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'gate').id, body: '不能再改' }), check: value => assert.equal((value as any).error.code, 'GATE_CLOSED') },
-  ], ctx => { nextBrief = JSON.parse(ctx.input); return []; });
+  ], [ctx => { nextBrief = JSON.parse(ctx.input); return []; }]);
   const events = await daemon.finished();
   const graph = (await daemon.call('get-card-graph', { workId: daemon.work.id })).result;
   assert.equal(graph.find((node: any) => node.key === 'downstream').status, 'skipped');
@@ -314,13 +371,13 @@ test('关卡链的前置都满足后才放行卡片，修订工作说明的固�
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workIdOf(ctx), key: 'second', question: '第二项决定？' }), saveAs: 'second', check: value => { ok(value); secondGateId = (value as any).result.id; } },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'first').id }, downstream: { type: 'gate', id: saved(ctx, 'second').id } }), check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'second').id }, downstream: { type: 'card', id: saved(ctx, 'card').id } }), check: ok },
-  ], ctx => [
+  ], [ctx => [
     { type: 'hang', until: barrier },
     { type: 'tool', name: 'draft-work-description', arguments: { workId: workIdOf(ctx), key: 'revision', requirements: '修订后的卡片图', boundary: '本机', criteria: '链上的前置都满足', deliverables: '交付物及查看入口' }, saveAs: 'revision', check: ok },
     { type: 'tool', name: 'add-dependency', arguments: ctx => ({ workId: workIdOf(ctx), upstream: { type: 'gate', id: saved(ctx, 'revision').gateId }, downstream: { type: 'card', id: cardId } }), check: ok },
     { type: 'tool', name: 'update-gate', arguments: { workId: workIdOf(ctx), gateId: firstGateId, body: '后续轮次继续修改同一调度者的关卡' }, check: ok },
     { type: 'end', reason: 'completed', finalAnswer: 'revision-ready' },
-  ]);
+  ]]);
   await daemon.finished();
   const card = async () => (await daemon.call('get-card', { workId: daemon.work.id, cardId })).result;
   // Deciding the later gate alone cannot bypass an undecided ancestor.

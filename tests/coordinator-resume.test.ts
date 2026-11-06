@@ -89,7 +89,8 @@ async function executingScenario(t: TestContext, scripts: FakeStep[][]) {
   const scenario = await resumeScenario(t, { resume: true, contextUsage: true }, [
     [{ type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
       requirements: '网页版游戏', boundary: '只做本地页面', criteria: '可以开始和重开', deliverables: '交付物及查看入口', key: 'draft' }) }, small],
-    [small],
+    // Keep execution waiting for a real user decision so stall recovery does not add rounds to rule-version scenarios.
+    [{ type: 'tool', name: 'propose-gate', arguments: { key: 'decision', question: '是否继续交付？' } }, small],
     ...scripts,
   ]);
   await scenario.confirm();

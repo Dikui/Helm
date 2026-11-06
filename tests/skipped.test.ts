@@ -121,7 +121,8 @@ test('暂停、完成、取消、排队及运行派单保持原状态，活动�
   assert.deepEqual(children.map(status), ['paused', 'completed', 'cancelled', 'skipped', 'skipped']);
 });
 
-test('跳过卡片不阻止审核、不算整体验收必需卡片，结束后不误报工作停住；仍有待办时会报告', t => {
+// Issue 30 item 3: regression, small. Missing round ids still receive one nudge.
+test('跳过卡片不阻止审核、不算整体验收必需卡片，全部结束但未审核时仍提醒调度者', t => {
   const { store, card, link, cancel, dispatch } = fixture(t);
   const source = card('source'), child = card('child'), overall = card('overall', true, true);
   link(source, child); cancel(source);
@@ -134,12 +135,32 @@ test('跳过卡片不阻止审核、不算整体验收必需卡片，结束后�
   // Cancellation wakes are cleared as they would be after a round claims them.
   store.db.exec('DELETE FROM wake_queue');
   noticeStall(store, 'w', 'unfinished');
-  assert.equal(store.events({ workId: 'w' }).filter(event => event.action === 'work-stalled').length, 1);
+  assert.equal(store.events({ workId: 'w' }).filter(event => event.action === 'work-stall-nudged').length, 1);
+  store.db.exec('DELETE FROM wake_queue');
   store.db.prepare("UPDATE cards SET status = 'completed' WHERE id = ?").run(overall.id);
   noticeStall(store, 'w', 'finished');
-  assert.equal(store.events({ workId: 'w' }).filter(event => event.action === 'work-stalled').length, 1);
+  const nudges = store.events({ workId: 'w', actions: ['work-stall-nudged'] });
+  assert.equal(nudges.length, 2);
+  assert.deepEqual(nudges[1]!.details, { roundId: 'finished', reason: '全部卡片已结束，但工作没有进入审核：目标满足就发起审核；正在处理合入冲突就完成冲突处理；还有差距就继续派单' });
+  assert.equal(store.db.prepare('SELECT event_id FROM wake_queue WHERE processed_by IS NULL').get()!.event_id, nudges[1]!.id);
+  assert.equal(store.events({ workId: 'w', actions: ['work-stalled', 'needs-user-attention'] }).length, 0);
   assert.equal(requestReview(store, actor, { workId: 'w', key: 'review', report: reviewReport() }).status, 'pending');
 });
+
+// Issue 30 item 3: small regression. Dispatch records replace active executor processes.
+for (const busy of ['queued', 'running', 'pending-gate', 'paused-card', 'pending-event']) {
+  test(`工作有 ${busy} 时不提醒调度者或用户`, t => {
+    const { store, card, dispatch, cancel } = fixture(t);
+    const active = card('active');
+    if (busy === 'queued' || busy === 'running') dispatch(active, 'execution', busy);
+    if (busy === 'pending-gate') proposeGate(store, actor, { workId: 'w', key: 'decision', question: '需要决定' });
+    if (busy === 'paused-card') store.db.prepare("UPDATE cards SET status = 'paused' WHERE id = ?").run(active.id);
+    if (busy === 'pending-event') cancel(active);
+    const before = store.events({ workId: 'w' }).length;
+    noticeStall(store, 'w', 'busy');
+    assert.equal(store.events({ workId: 'w' }).length, before);
+  });
+}
 
 test('汇总字段迁移保留旧卡片和依赖，默认 false，支持 skipped 并在重开后保持', t => {
   const directory = mkdtempSync(join(tmpdir(), 'helm-aggregate-migration-'));
