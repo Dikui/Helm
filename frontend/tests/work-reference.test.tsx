@@ -164,6 +164,28 @@ test('不支持 Clipboard API 时可通过选中文本的兼容方式复制', as
   expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe(daemon!.repo);
 });
 
+// A click can land between the commit that shows the button and React's later effect flush.
+test('按钮刚出现就复制时仍显示已复制', async () => {
+  await startWork();
+  Reflect.deleteProperty(navigator, 'clipboard');
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: () => true });
+  render(<App baseUrl={daemon!.url} />);
+  await screen.findByRole('heading', { level: 1, name: '分析工作问题' });
+  const clicked = new Promise<void>(resolve => {
+    const observer = new MutationObserver(() => {
+      const button = screen.queryByRole('button', { name: '复制项目路径' });
+      if (!button) return;
+      observer.disconnect();
+      fireEvent.click(button);
+      resolve();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+  const dialog = await openReference();
+  await clicked;
+  expect(await within(dialog).findByText('已复制')).toBeTruthy();
+});
+
 // Issue #28 · medium spec: substitute only an unavailable HTTP read, never the internal resource hook.
 test('项目资料加载失败不提供不完整引用，重读成功后可复制', async () => {
   const work = await startWork();

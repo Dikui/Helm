@@ -52,7 +52,8 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
   let executions: ExecutionRunner;
   let userOperations: UserOperations;
   let ready = false;
-  const server = createServer({ requireHostHeader: false }, async (request, response) => {
+  const handling = new Set<Promise<unknown>>();
+  const handle = async (request: IncomingMessage, response: ServerResponse) => {
     if (!ready) return json(response, 503, { error: { code: 'STARTING', reason: '运行层正在启动对账。', allowedOperations: [] } });
     let name = request.url ?? '/';
     let actor: Actor = { type: 'user', id: 'user' };
@@ -130,6 +131,10 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       if (!response.headersSent) json(response, 500, { error: { code: 'INTERNAL_ERROR', reason: '运行层内部错误。', allowedOperations: [] } });
       else response.destroy();
     }
+  };
+  const server = createServer({ requireHostHeader: false }, (request, response) => {
+    const handled = handle(request, response).finally(() => handling.delete(handled));
+    handling.add(handled);
   });
   try {
     await new Promise<void>((resolve, reject) => {
@@ -162,7 +167,8 @@ export async function startHelmd(options: { port?: number; dataDir?: string; age
       ready = false;
       closing ??= Promise.all([scheduler.close(), executions.close(), userOperations.settleDeliveries()]).then(() => new Promise<void>((resolve, reject) => {
         server.close(error => {
-          void store.agents.settleChecks().then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
+          // A dropped connection does not stop its operation, which may still write files and the store.
+          void Promise.allSettled(handling).then(() => store.agents.settleChecks()).then(() => { store.close(); error ? reject(error) : resolve(); }, reject);
         });
         server.closeAllConnections();
       }));
