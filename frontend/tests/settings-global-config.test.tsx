@@ -57,7 +57,9 @@ test.each(['codex', 'grok', 'deepseek'])('%s 不能干净启动时禁用开关�
   window.history.replaceState(null, '', `/settings/agents/${agent.id}`);
   render(<App baseUrl={daemon.url} transport={transport} />);
   const toggle = await screen.findByRole('checkbox', { name: '加载全局配置' }) as HTMLInputElement;
-  await waitFor(() => expect(toggle.disabled).toBe(true));
+  // The toggle is also disabled while the check loads; the reason appears only with its result.
+  await screen.findByText(reason);
+  expect(toggle.disabled).toBe(true);
   expect(toggle.checked).toBe(true);
   expect(screen.getByText(reason)).toBeTruthy();
   expect(toggle.getAttribute('aria-describedby')?.split(' ').some(id => document.getElementById(id)?.textContent === reason)).toBe(true);
@@ -69,7 +71,8 @@ test.each(['codex', 'grok', 'deepseek'])('%s 不能干净启动时禁用开关�
   expect(screen.queryByText(reason)).toBeNull();
   expect(description.value).toBe('保留的职责草稿');
   fireEvent.change(screen.getByRole('combobox', { name: '驱动' }), { target: { value: driver } });
-  await waitFor(() => expect(toggle.disabled).toBe(true));
+  await screen.findByText(reason);
+  expect(toggle.disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'EN' }));
   expect((screen.getByRole('checkbox', { name: 'Load global config' }) as HTMLInputElement).disabled).toBe(true);
   expect(screen.getByText(reason)).toBeTruthy();

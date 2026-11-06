@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -65,8 +65,21 @@ async function fixture(t: TestContext, executor: FakeScript, after: FakeScript =
     await daemon.close();
     daemon = await startHelmd({ port: 0, dataDir, driver: new FakeDriver(nextExecutor ? scripts() : []), executorDriver: new FakeDriver(nextExecutor ? [nextExecutor] : []) });
   };
-  return { call, request, params, project, events, dispatch, output, restart, dataDir, repo, directory, url: daemon.url };
+  return { call, request, params, project, events, dispatch, output, restart, close: () => daemon.close(), dataDir, repo, directory, url: daemon.url };
 }
+
+test('关闭 helmd 时等进行中的取消完成压缩，之后不再写数据目录', async t => {
+  const daemon = await fixture(t, [{ type: 'output', text: '执行者输出' }]);
+  await until(daemon.events, events => events.some(event => event.action === 'dispatch-ended'));
+  const cancelled = daemon.request('cancel-work', daemon.params).catch(() => {});
+  await until(() => daemon.call('get-work', daemon.params), work => work.status === 'cancelled');
+  await daemon.close();
+  const rounds = await readdir(join(daemon.dataDir, 'rounds'));
+  assert.ok(rounds.length > 0);
+  for (const name of rounds) assert.match(name, /\.jsonl\.gz$/);
+  assert.ok((await readdir(dirname(daemon.dispatch.outputPath), { recursive: true })).some(name => name.endsWith('.json.gz')));
+  await cancelled;
+});
 
 test('已结束工作导出全部输出、成果和完整任务库记录，归档可独立解包', async t => {
   const daemon = await fixture(t, [
