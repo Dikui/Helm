@@ -75,6 +75,7 @@ export const eventActionLabels: Record<string, MessageKey> = {
   'conflict-resolution-requested': 'eventConflictResolutionRequested',
   'conflict-resolution-finished': 'eventConflictResolutionFinished',
   'artifact-saved': 'eventArtifactSaved',
+  'scratch-artifacts-unsaved': 'eventScratchArtifactsUnsaved',
   'dependency-added': 'eventDependencyAdded',
   'dependency-removed': 'eventDependencyRemoved',
   'coordinator-agent-changed': 'eventCoordinatorAgentChanged',

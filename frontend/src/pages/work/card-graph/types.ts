@@ -29,4 +29,4 @@ export type OutputStep =
   | { type: 'end'; step: number; reason: NonNullable<Dispatch['endReason']>; finalAnswer?: string; usage: Usage; failure?: string };
 export type DispatchOutput = OutputStep[] | { status: 'deleted'; message: string };
 export interface Artifact { id: string; kind: 'branch' | 'file' | 'test-output'; name: string; ref: string | null; commitSha: string | null; diff?: import('../../../../../src/artifact-diff.js').ArtifactDiff }
-export interface ArtifactContent extends Artifact { content: string | null }
+export interface ArtifactContent extends Artifact { content: string | null; tooLarge?: boolean }

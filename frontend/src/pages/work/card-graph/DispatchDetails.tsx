@@ -1,7 +1,6 @@
 import { stepSummary } from '../../../shared/step-summary.js';
 import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useData, useResource } from '../../../shared/data.js';
-import { OperationError } from '../../../shared/api.js';
 import { ErrorNotice } from '../../../shared/feedback.js';
 import { extension, imageTypes } from '../../../shared/files.js';
 import { ActionDialog } from '../ActionDialog.js';
@@ -108,17 +107,16 @@ export function ReadArtifact({ workId, artifactId, path }: { workId: string; art
   const [previewing, setPreviewing] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
   const name = artifact.data?.name ?? '';
-  const tooLarge = artifact.error instanceof OperationError && artifact.error.failure.code === 'FILE_TOO_LARGE';
-  const downloadable = (artifact.data && artifact.data.kind !== 'branch') || tooLarge;
-  const renderable = artifact.data?.kind !== 'branch' && (Boolean(imageTypes[extension(name)]) || ['html', 'htm'].includes(extension(name)));
+  const tooLarge = artifact.data?.tooLarge === true;
+  const renderable = !tooLarge && artifact.data?.kind !== 'branch' && (Boolean(imageTypes[extension(name)]) || ['html', 'htm'].includes(extension(name)));
   return <div className="cg-artifact-content">
-    {downloadable && <a className="btn sm" href={`${api.baseUrl}/api/artifact-download?${new URLSearchParams({ workId, artifactId })}`} download>{t('artifactDownload')}</a>}
-    {artifact.data && artifact.data.kind !== 'branch' && <div className="row"><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button>
+    {artifact.data && artifact.data.kind !== 'branch' && <div className="row"><a className="btn sm" href={`${api.baseUrl}/api/artifact-download?${new URLSearchParams({ workId, artifactId })}`} download>{t('artifactDownload')}</a>
+      {!tooLarge && <><button className="btn sm" aria-pressed={encoding === 'utf8'} onClick={() => setEncoding('utf8')}>{t('graphText')}</button><button className="btn sm" aria-pressed={encoding === 'base64'} onClick={() => setEncoding('base64')}>{t('graphBase64')}</button></>}
       {renderable && <button ref={opener} className="btn sm" onClick={() => setPreviewing(true)}>{t('artifactPreview')}</button>}</div>}
     {previewing && <ArtifactPreview workId={workId} artifactId={artifactId} name={name} onClose={() => setPreviewing(false)} returnFocus={opener} />}
-    {tooLarge ? <p className="hint" role="status">{t('artifactTooLarge')}</p> : artifact.error && <ErrorNotice error={artifact.error} retry={artifact.reload} />}
+    {artifact.error && <ErrorNotice error={artifact.error} retry={artifact.reload} />}
     {artifact.data ? artifact.data.kind === 'branch' ? path && artifact.data.diff?.status === 'available' && artifact.data.diff.patch ? <>{artifact.data.diff.patch.truncated && <p role="status" className="hint">{t('artifactPatchTruncated').replace('{limit}', String(artifact.data.diff.limits.patchBytes / 1024))}</p>}<pre tabIndex={0} className="cg-file-patch" aria-label={`${t('artifactPatch')}：${path}`}>{artifact.data.diff.patch.text}</pre></> : <><div className="cg-prose"><span>{t('graphBranch')}</span><p><code>{artifact.data.ref}</code></p><code>{artifact.data.commitSha}</code><p className="hint">{t('artifactCardChanges')}</p></div><BranchDiff workId={workId} artifact={artifact.data} retry={artifact.reload} /></>
-      : <pre aria-label={artifact.data.name}>{artifact.data.content}</pre> : <p role="status">{artifact.error ? '' : t('loading')}</p>}
+      : tooLarge ? <p className="hint" role="status">{t('artifactTooLarge')}</p> : <pre aria-label={artifact.data.name}>{artifact.data.content}</pre> : <p role="status">{artifact.error ? '' : t('loading')}</p>}
   </div>;
 }
 

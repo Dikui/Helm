@@ -46,7 +46,7 @@ test('临时目录卡片显示运行位置，派单详情可读成果文件并�
   expect(within(inspector).getAllByText('Scratch directory').length).toBeGreaterThan(0);
 });
 
-// issue 30: small spec — HTTP transport substitutes the API, preserving real error-code handling.
+// issue 30: small spec — HTTP transport substitutes the API.
 for (const language of ['zh', 'en']) for (const kind of ['file', 'test-output', 'branch', 'too-large'] as const) test(`成果 ${kind} 的下载入口和预览提示（${language}）`, async () => {
   localStorage.setItem('helm.language', language);
   const download = language === 'zh' ? '下载' : 'Download';
@@ -55,7 +55,7 @@ for (const language of ['zh', 'en']) for (const kind of ['file', 'test-output', 
       start(controller) { init?.signal?.addEventListener('abort', () => controller.close(), { once: true }); },
     }));
     return kind === 'too-large'
-      ? Response.json({ ok: false, error: { code: 'FILE_TOO_LARGE', reason: 'generic server error', allowedOperations: [] } }, { status: 413 })
+      ? Response.json({ ok: true, result: { id: 'artifact', kind: 'file', name: 'report.txt', content: null, tooLarge: true } })
       : Response.json({ ok: true, result: { id: 'artifact', kind, name: 'report.txt', content: 'saved content' } });
   };
   render(<DataProvider baseUrl="http://localhost:4242" transport={transport}><I18nProvider><ReadArtifact workId="work & one" artifactId="artifact" /></I18nProvider></DataProvider>);
@@ -69,7 +69,7 @@ for (const language of ['zh', 'en']) for (const kind of ['file', 'test-output', 
     expect(link.className).toBe('btn sm');
     if (kind === 'too-large') {
       expect(screen.getByText(language === 'zh' ? '文件超过 20 MiB，无法预览，请下载后查看。' : 'This file exceeds 20 MiB and cannot be previewed. Download it to view locally.')).toBeTruthy();
-      expect(screen.queryByText('generic server error')).toBeNull();
+      expect(screen.queryByRole('button', { name: language === 'zh' ? '文本' : 'Text' })).toBeNull();
     } else expect(await screen.findByText('saved content')).toBeTruthy();
   }
 });

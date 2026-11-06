@@ -333,6 +333,7 @@ export function readArtifact(store: TaskStore, workId: string, artifactId: strin
   const artifact = getArtifact(store, workId, artifactId);
   if (artifact.kind === 'branch') return { ...artifact, content: null, diff: branchArtifactDiff(store, workId, artifact, path) };
   if (path !== undefined) throw new RuleError('INVALID_ARTIFACT_PATH', '只有分支成果可按文件读取 patch。', 400);
-  if (artifact.path && statSync(String(artifact.path)).size > maxAttachmentBytes) throw new RuleError('FILE_TOO_LARGE', '文件超过 20 MiB，无法预览，可以下载后查看。', 413);
+  // Not a rejection: a rejected read records an event, and open views reload on events.
+  if (artifact.path && statSync(String(artifact.path)).size > maxAttachmentBytes) return { ...artifact, content: null, tooLarge: true, diff: undefined };
   return { ...artifact, content: artifact.path ? readFileSync(String(artifact.path)).toString(encoding) : null, diff: undefined };
 }

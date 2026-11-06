@@ -36,7 +36,7 @@ const eventLabels: Record<string, string> = {
   'work-stall-nudged': '运行层提醒调度者继续推进',
   'needs-user-attention': '等你处理', 'operation-rejected': '操作被拒绝', 'round-interrupted': '调度轮次已打断',
   'coordinator-agent-changed': '调度者 Agent 已更换', 'dependency-added': '卡片依赖已添加', 'dependency-removed': '卡片依赖已移除',
-  'artifact-saved': '成果已保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除', 'work-deleted': '工作已删除',
+  'artifact-saved': '成果已保存', 'scratch-artifacts-unsaved': '临时目录成果未保存', 'outputs-exported': '输出已导出', 'outputs-deleted': '输出已删除', 'work-deleted': '工作已删除',
   'context-compacted': '上下文已压缩', 'process-started': 'Agent 已启动', 'browser-started': '浏览器已启动', 'browser-stopped': '浏览器已停止',
 };
 

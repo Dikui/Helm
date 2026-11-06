@@ -241,7 +241,7 @@ export const operations: readonly Operation[] = [
     execute: ({ store }, { workId, dispatchId }) => dispatchArtifacts(store, workId, dispatchId),
   }),
   operation({
-    name: 'read-artifact', description: '读取成果内容；分支成果可用 path 读取单文件 patch，二进制文件用 encoding: base64', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
+    name: 'read-artifact', description: '读取成果内容；分支成果可用 path 读取单文件 patch，二进制文件用 encoding: base64；超过 20 MiB 的文件返回 tooLarge: true，不含内容', callers: ['user', 'coordinator-round'], keyed: false, mutates: false,
     schema: z.object({ workId: z.string().min(1), artifactId: z.string().min(1), encoding: z.enum(['utf8', 'base64']).optional(), path: z.string().min(1).max(4096).optional() }).strict(),
     execute: ({ store }, { workId, artifactId, encoding, path }) => readArtifact(store, workId, artifactId, encoding, path),
   }),

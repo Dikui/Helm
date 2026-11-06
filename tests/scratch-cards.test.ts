@@ -34,12 +34,16 @@ test('超过 20 MiB 的临时目录成果完成后仍完整保存，读取只拒
   assert.equal(completeCard(ctx.store, actor, { workId: 'work', cardId: card.id }).status, 'completed');
   assert.equal(existsSync(ctx.starts[0]!.cwd), false);
   assert.equal(hash(readFileSync(file.path)), hash(content));
-  assert.throws(() => readArtifact(ctx.store, 'work', file.id), code('FILE_TOO_LARGE'));
+  assert.equal((readArtifact(ctx.store, 'work', file.id) as any).tooLarge, true);
   const daemon = await startTestHelmd({ port: 0, dataDir: ctx.store.dataDir });
   try {
     const read = await fetch(`${daemon.url}/api/read-artifact`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workId: 'work', artifactId: file.id }) });
-    assert.equal(read.status, 413);
-    assert.equal((await read.json() as any).error.code, 'FILE_TOO_LARGE');
+    assert.equal(read.status, 200);
+    const preview = (await read.json() as any).result;
+    assert.equal(preview.tooLarge, true);
+    assert.equal(preview.content, null);
+    // A rejection would be recorded as an event, which makes open views read again in a loop.
+    assert.equal(ctx.store.events({ workId: 'work', actions: ['operation-rejected'] }).length, 0);
     const response = await fetch(`${daemon.url}/api/artifact-download?workId=work&artifactId=${file.id}`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'application/octet-stream');
