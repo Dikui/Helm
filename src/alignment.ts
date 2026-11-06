@@ -7,10 +7,11 @@ import { refreshCardReadiness } from './graph.js';
 import { deleteBranch } from './branch-cleanup.js';
 import { runtimeMessage } from './work-control.js';
 import { projectGitReady, projectGitRoot } from './project-reads.js';
+import { gitFailure } from './git-failure.js';
 
 function git(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
-  catch { throw new RuleError('GIT_ERROR', 'git 操作失败，请检查项目、基准 ref 和工作分支。'); }
+  catch (error) { throw gitFailure('git 操作失败，请检查项目、基准 ref 和工作分支。', ['-C', path, ...args], error); }
 }
 
 function resolveBaseCommit(project: string, baseRef: string) {

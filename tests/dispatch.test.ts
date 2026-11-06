@@ -11,6 +11,97 @@ import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeSt
 import type { StartupBrief } from '../src/rounds.js';
 import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
 import { testProcessWatchdog } from './fixtures/test-process.js';
+import { dispatchGit } from '../src/dispatch.js';
+import { RuleError } from '../src/store.js';
+
+// Issue 30 item 5: medium regression, exercised against local Git.
+test('派单 Git 引用不存在时保留命令、退出码和 stderr', async t => {
+  const repo = await mkdtemp(join(tmpdir(), 'helm-git-failure-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  assert.throws(() => dispatchGit(repo, 'rev-parse', '--verify', 'missing-ref'), error => {
+    assert.ok(error instanceof RuleError);
+    assert.equal(error.code, 'GIT_ERROR');
+    assert.ok(error.message.startsWith('派单 git 操作失败，请检查卡片副本和分支。'));
+    assert.match(error.message, /git .*rev-parse.*--verify.*missing-ref/);
+    assert.match(error.message, /128/);
+    assert.match(error.message, /fatal:/);
+    assert.deepEqual(error.details?.args, ['-C', repo, 'rev-parse', '--verify', 'missing-ref']);
+    assert.equal(error.details?.exitCode, 128);
+    assert.match(String(error.details?.stderr), /fatal:/);
+    return true;
+  });
+});
+
+// Issue 30 item 5: medium regression; invalid branch names require no network access.
+test('派单 Git 诊断移除参数和 stderr 中 URL 的凭据', async t => {
+  const repo = await mkdtemp(join(tmpdir(), 'helm-git-redaction-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  const url = 'https://diagnostic-user:diagnostic-token@example.invalid/repo.git';
+  assert.throws(() => dispatchGit(repo, 'check-ref-format', '--branch', url), error => {
+    assert.ok(error instanceof RuleError);
+    assert.doesNotMatch(error.message, /diagnostic-user|diagnostic-token/);
+    assert.doesNotMatch(JSON.stringify(error.details), /diagnostic-user|diagnostic-token/);
+    assert.ok(error.message.includes('https://example.invalid/repo.git'));
+    assert.deepEqual(error.details?.args, ['-C', repo, 'check-ref-format', '--branch', 'https://example.invalid/repo.git']);
+    assert.ok(String(error.details?.stderr).includes('https://example.invalid/repo.git'));
+    return true;
+  });
+});
+
+// Issue 30 item 5: medium regression; a local alias emits deterministic stderr.
+test('派单 Git 诊断保留脱敏后 stderr 的最后 2000 字符', async t => {
+  const repo = await mkdtemp(join(tmpdir(), 'helm-git-stderr-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const stderr = `discarded-start${'.'.repeat(3000)}https://diagnostic-user:${'token'.repeat(600)}@example.invalid/repo.git\nlast-line`;
+  const expected = `${'.'.repeat(1958)}https://example.invalid/repo.git\nlast-line`;
+  assert.throws(() => dispatchGit(repo, '-c', `alias.diagnostic=!printf '%s' '${stderr}' >&2; exit 17`, 'diagnostic'), error => {
+    assert.ok(error instanceof RuleError);
+    assert.equal(error.details?.exitCode, 17);
+    assert.equal(error.details?.stderr, expected);
+    assert.ok(error.message.endsWith(expected));
+    assert.doesNotMatch(error.message + JSON.stringify(error.details), /diagnostic-user|token/);
+    return true;
+  });
+});
+
+// Issue 30 item 5: medium regression for silent Git failures.
+test('派单 Git 没有 stderr 时提供可用的错误原因', async t => {
+  const repo = await mkdtemp(join(tmpdir(), 'helm-git-silent-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  assert.throws(() => dispatchGit(repo, 'show-ref', '--verify', '--quiet', 'refs/heads/missing-ref'), error => {
+    assert.ok(error instanceof RuleError);
+    assert.equal(error.code, 'GIT_ERROR');
+    assert.equal(error.details?.exitCode, 1);
+    assert.equal(error.details?.stderr, '');
+    assert.match(String(error.details?.reason), /Command failed: git.*show-ref/);
+    assert.ok(error.message.endsWith(String(error.details?.reason)));
+    return true;
+  });
+});
+
+// Issue 30 item 5: small regression; an empty PATH substitutes for unavailable Git.
+test('派单 Git 无法启动时保留启动错误且不泄露 URL 凭据', () => {
+  const originalPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    assert.throws(() => dispatchGit('/', 'check-ref-format', '--branch', 'https://diagnostic-user:diagnostic-token@example.invalid/repo.git'), error => {
+      assert.ok(error instanceof RuleError);
+      assert.equal(error.code, 'GIT_ERROR');
+      assert.equal(error.details?.exitCode, null);
+      assert.equal(error.details?.stderr, '');
+      assert.match(String(error.details?.reason), /ENOENT/);
+      assert.match(error.message, /exit unknown.*ENOENT/);
+      assert.doesNotMatch(error.message + JSON.stringify(error.details), /diagnostic-user|diagnostic-token/);
+      return true;
+    });
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;

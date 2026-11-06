@@ -12,6 +12,7 @@ import { redactDispatchContent, redactDispatchText } from './project-environment
 import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 import { readArtifactDiff } from './artifact-diff.js';
+import { gitFailure } from './git-failure.js';
 
 export interface Dispatch {
   id: string; workId: string; cardId: string; key: string; purpose: 'execution' | 'verification'; agentId: string;
@@ -91,7 +92,7 @@ export function markOutdated(store: TaskStore, dispatches: Dispatch[]) {
 
 export function dispatchGit(path: string, ...args: string[]) {
   try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd(); }
-  catch { throw new RuleError('GIT_ERROR', '派单 git 操作失败，请检查卡片副本和分支。'); }
+  catch (error) { throw gitFailure('派单 git 操作失败，请检查卡片副本和分支。', ['-C', path, ...args], error); }
 }
 
 export function committedFile(path: string, commit: string, name: string) {
