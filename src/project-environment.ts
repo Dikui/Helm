@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { acpAgents } from './acp-agents.js';
 import { runtimeEnvironmentNames } from './environment.js';
@@ -31,12 +32,15 @@ export function redactDispatchContent(store: TaskStore, id: string, content: str
   return redact ? Buffer.from(redact(content.toString('latin1')), 'latin1') : content;
 }
 
-export async function copyDispatchFile(store: TaskStore, id: string, source: string, destination: string) {
+export async function copyDispatchFile(store: TaskStore, id: string, source: string | Readable, destination: string) {
   const spellings = dispatchRedactors.get(store)?.get(id)?.byteSpellings ?? [];
-  if (!spellings.length) return copyFile(source, destination, constants.COPYFILE_FICLONE);
+  if (!spellings.length) {
+    if (typeof source === 'string') return copyFile(source, destination, constants.COPYFILE_FICLONE);
+    return pipeline(source, createWriteStream(destination, { flags: 'wx' }));
+  }
   const pattern = new RegExp(spellings.map(escapePattern).join('|'), 'g');
   const tailLength = Math.max(...spellings.map(value => value.length)) - 1;
-  await pipeline(createReadStream(source), async function* (chunks) {
+  await pipeline(typeof source === 'string' ? createReadStream(source) : source, async function* (chunks) {
     let pending = '';
     for await (const chunk of chunks) {
       pending += (chunk as Buffer).toString('latin1');

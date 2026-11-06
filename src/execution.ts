@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DriverRegistry, DriverEvent, DriverSession, EndReason, TokenUsage } from './driver.js';
-import { abortCardGit, activeDispatch, committedFile, createDispatch, dispatchGit, getDispatch, listDispatches, markOutdated, prepareCardCopy, reportedArtifact, saveArtifact, verificationCommit, type Dispatch } from './dispatch.js';
+import { abortCardGit, activeDispatch, createDispatch, dispatchGit, getDispatch, listDispatches, markOutdated, prepareCardCopy, reportedArtifact, saveArtifact, saveCommitArtifacts, verificationCommit, type Dispatch } from './dispatch.js';
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
@@ -54,17 +54,14 @@ export async function finishDispatchCopy(store: TaskStore, dispatch: Dispatch, r
     dispatchGit(workPath, 'diff', '--check');
   }
   if (conflictMerge || dispatchGit(workPath, 'status', '--porcelain')) {
-    const names = dispatchGit(workPath, 'ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-    if (names.length) dispatchGit(workPath, 'add', '--', ...names);
+    // Not a path list: thousands of paths exceed the OS argument limit.
+    dispatchGit(workPath, 'add', '--all');
     dispatchGit(workPath, '-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false',
       'commit', '-m', `Helm dispatch ${dispatch.id}: ${reason}${abortReason ? ` (${abortReason})` : ''}`);
   }
   const endCommit = dispatchGit(workPath, 'rev-parse', 'HEAD');
   const files = dispatch.startCommit ? dispatchGit(workPath, 'diff', '--name-only', '--diff-filter=ACMRT', '-z', dispatch.startCommit, endCommit).split('\0').filter(Boolean) : [];
-  store.transaction(() => {
-    saveArtifact(store, dispatch, 'branch', card.cardBranch!, card.cardBranch!, endCommit);
-    for (const name of files) saveArtifact(store, dispatch, 'file', name, committedFile(workPath, endCommit, name), endCommit);
-  });
+  await saveCommitArtifacts(store, dispatch, workPath, card.cardBranch!, endCommit, files);
   return endCommit;
 }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { tmpdir } from 'node:os';
@@ -9,10 +9,11 @@ import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { FakeDriver, type Driver, type FakeContext, type FakeScript, type FakeStep, type SessionOptions } from '../src/driver.js';
 import type { StartupBrief } from '../src/rounds.js';
-import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './helmd-fixture.js';
+import { startTestHelmd as startHelmd, copyAgents, configureTestAgent, fixtureAgentDir } from './helmd-fixture.js';
 import { testProcessWatchdog } from './fixtures/test-process.js';
-import { dispatchGit } from '../src/dispatch.js';
-import { RuleError } from '../src/store.js';
+import { AgentCatalog } from '../src/agents.js';
+import { dispatchGit, saveCommitArtifacts, type Dispatch } from '../src/dispatch.js';
+import { RuleError, TaskStore } from '../src/store.js';
 import { gitFailure } from '../src/git-failure.js';
 
 // Issue 30 item 5: medium regression, exercised against local Git.
@@ -204,6 +205,72 @@ test('项目 pre-commit 失败仍自动提交派单成果，后续派单保留�
   const records = (await daemon.call('list-dispatches', params)).result;
   assert.equal(records[1].endReason, 'completed', records[1].failure);
   assert.equal(records[1].startCommit, first.endCommit);
+});
+
+// Issue 30 item 1: high regression; a large or binary file must not fail the dispatch after its commit landed.
+test('副本卡派单改动超过 1 MiB 的文件和二进制文件时正常结束，成果逐字节一致且脱敏', async t => {
+  const secret = 'copy-artifact-secret';
+  const large = Buffer.concat([Buffer.alloc(1024 * 1024, 'a'), Buffer.from(secret), Buffer.alloc(1024 * 1024, 0xff)]);
+  const binary = Buffer.from([0, 0xff, 0xfe, 0x80, 0x0a, 0xc3]);
+  const daemon = await fixture(t, [create, dispatch()], [ctx => {
+    writeFileSync(join(ctx.options.cwd, 'large.bin'), large);
+    writeFileSync(join(ctx.options.cwd, 'small.bin'), binary);
+    return [];
+  }], { beforeConfirm: async call => {
+    const projectId = (await call('list-projects')).result[0].id;
+    ok(await call('set-project-environment', { projectId, name: 'COPY_SECRET', value: secret }));
+  } });
+  await daemon.finished();
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const params = { workId: daemon.work.id };
+  const ended = (await daemon.call('list-dispatches', params)).result[0];
+  assert.equal(ended.endReason, 'completed', ended.failure);
+  const artifacts = (await daemon.call('get-dispatch-artifacts', { ...params, dispatchId: ended.id })).result as any[];
+  assert.deepEqual(artifacts.map(artifact => artifact.kind), ['branch', 'file', 'file']);
+  const content = async (name: string) => Buffer.from((await daemon.call('read-artifact',
+    { ...params, artifactId: artifacts.find(artifact => artifact.name === name).id, encoding: 'base64' })).result.content, 'base64');
+  assert.deepEqual(await content('small.bin'), binary);
+  assert.deepEqual(await content('large.bin'), Buffer.concat([Buffer.alloc(1024 * 1024, 'a'), Buffer.from('[REDACTED]'), Buffer.alloc(1024 * 1024, 0xff)]));
+});
+
+// Issue 30 item 1: medium regression; path lists over 1 MiB exceed both git's output buffer and macOS ARG_MAX.
+test('副本卡派单删除大量文件时路径列表超过 1 MiB 仍正常结束并提交', async t => {
+  const count = 6000;
+  const name = (index: number) => `${'x'.repeat(190)}-${index}`;
+  const daemon = await fixture(t, [create, dispatch()], [ctx => {
+    const git = (...args: string[]) => execFileSync('git', ['-C', ctx.options.cwd, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', ...args], { stdio: 'ignore' });
+    for (let index = 0; index < count; index++) writeFileSync(join(ctx.options.cwd, name(index)), '');
+    git('add', '.');
+    git('commit', '-m', 'many files');
+    for (let index = 0; index < count; index++) rmSync(join(ctx.options.cwd, name(index)));
+    return [];
+  }]);
+  await daemon.finished();
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const ended = (await daemon.call('list-dispatches', { workId: daemon.work.id })).result[0];
+  assert.equal(ended.endReason, 'completed', ended.failure);
+  assert.equal(daemon.git('ls-tree', '--name-only', ended.endCommit), 'README.md');
+});
+
+// Issue 30 item 1: medium regression; a failed save must not leave orphan files beside the dispatch.
+test('已提交文件保存失败时删除已写部分，错误保留 Git 诊断', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-commit-artifacts-')));
+  const repo = join(directory, 'project');
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  await writeFile(join(repo, 'a.txt'), 'first\n');
+  execFileSync('git', ['-C', repo, 'add', 'a.txt']);
+  execFileSync('git', ['-C', repo, '-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '-m', 'baseline'], { stdio: 'ignore' });
+  const store = new TaskStore(join(directory, 'data'), new AgentCatalog(fixtureAgentDir));
+  t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
+  const record = { id: 'dispatch', workId: 'work', cardId: 'card' } as Dispatch;
+  await assert.rejects(saveCommitArtifacts(store, record, repo, 'main', 'HEAD', ['a.txt', 'missing.txt']), error => {
+    assert.ok(error instanceof RuleError);
+    assert.equal(error.code, 'GIT_ERROR');
+    assert.equal(error.details?.exitCode, 128);
+    assert.match(String(error.details?.stderr), /missing\.txt/);
+    return true;
+  });
+  assert.deepEqual(readdirSync(join(store.dataDir, 'dispatches', 'dispatch', 'artifacts')), []);
 });
 
 test('全局并发满时按序排队，调低不打断，调高立即补位；调度轮次不占执行者名额', async t => {

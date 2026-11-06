@@ -1,6 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EndReason, TokenUsage } from './driver.js';
 import { ensureWorkCopy, projectPath, recordBaseBranch } from './alignment.js';
@@ -8,7 +10,7 @@ import { cardDetails } from './graph.js';
 import type { AgentConfig } from './agents.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { readOutput } from './outputs.js';
-import { redactDispatchContent, redactDispatchText } from './project-environment.js';
+import { copyDispatchFile, redactDispatchContent, redactDispatchText } from './project-environment.js';
 import { projectGitReady } from './project-reads.js';
 import { reconcileGitInitialization, requireGitInitialization } from './git-initialization.js';
 import { readArtifactDiff } from './artifact-diff.js';
@@ -95,12 +97,19 @@ const DISPATCH_GIT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function dispatchGit(path: string, ...args: string[]) {
   const gitArgs = ['-C', path, '-c', 'core.hooksPath=/dev/null', ...args];
-  try { return execFileSync('git', gitArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: DISPATCH_GIT_TIMEOUT_MS }).trimEnd(); }
+  // No cap: path lists grow with the repository, and a truncated one is never usable.
+  try { return execFileSync('git', gitArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: Infinity, timeout: DISPATCH_GIT_TIMEOUT_MS }).trimEnd(); }
   catch (error) { throw gitFailure('派单 git 操作失败，请检查卡片副本和分支。', gitArgs, error); }
 }
 
-export function committedFile(path: string, commit: string, name: string) {
-  return execFileSync('git', ['-C', path, 'show', `${commit}:${name}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+// Streamed: a large file must not fill memory, and a binary one must not pass through text decoding.
+async function copyCommittedFile(store: TaskStore, dispatchId: string, path: string, commit: string, name: string, destination: string) {
+  const args = ['-C', path, 'show', `${commit}:${name}`];
+  const git = spawn('git', args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: DISPATCH_GIT_TIMEOUT_MS });
+  let stderr = '';
+  git.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
+  const [[status, signal]] = await Promise.all([once(git, 'close'), copyDispatchFile(store, dispatchId, git.stdout, destination)]);
+  if (status !== 0) throw gitFailure('读取已提交文件失败。', args, { status, stderr, message: `signal ${signal}` });
 }
 
 export function abortCardGit(store: TaskStore, dispatch: Dispatch, workPath: string, cardBranch?: string) {
@@ -309,9 +318,33 @@ export function saveArtifact(store: TaskStore, dispatch: Dispatch, kind: 'branch
   const id = randomUUID();
   const path = kind === 'branch' ? null : join(store.dataDir, 'dispatches', dispatch.id, 'artifacts', id);
   if (path) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); }
-  store.db.prepare('INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, dispatch.id, kind, name, path, kind === 'branch' ? value : null, commit ?? null);
-  store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'artifact', id }, 'artifact-saved', { kind, name, path, ref: kind === 'branch' ? value : null, commitSha: commit ?? null },
+  recordArtifact(store, dispatch, id, kind, name, path, kind === 'branch' ? value as string : null, commit ?? null);
+}
+
+function recordArtifact(store: TaskStore, dispatch: Dispatch, id: string, kind: 'branch' | 'file' | 'test-output', name: string, path: string | null, ref: string | null, commit: string | null) {
+  store.db.prepare('INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, dispatch.id, kind, name, path, ref, commit);
+  store.appendEvent({ type: 'runtime', id: 'helmd' }, { type: 'artifact', id }, 'artifact-saved', { kind, name, path, ref, commitSha: commit },
     { workId: dispatch.workId, cardId: dispatch.cardId, dispatchId: dispatch.id });
+}
+
+// Files are written before the transaction, which cannot wait for git; only the rows need to be atomic.
+export async function saveCommitArtifacts(store: TaskStore, dispatch: Dispatch, workPath: string, branch: string, commit: string, names: string[]) {
+  const directory = join(store.dataDir, 'dispatches', dispatch.id, 'artifacts');
+  const files = names.map(source => {
+    const id = randomUUID();
+    return { id, source, name: redactDispatchText(store, dispatch.id, source), path: join(directory, id) };
+  });
+  try {
+    mkdirSync(directory, { recursive: true });
+    for (const file of files) await copyCommittedFile(store, dispatch.id, workPath, commit, file.source, file.path);
+    store.transaction(() => {
+      saveArtifact(store, dispatch, 'branch', branch, branch, commit);
+      for (const file of files) recordArtifact(store, dispatch, file.id, 'file', file.name, file.path, null, commit);
+    });
+  } catch (error) {
+    await Promise.allSettled(files.map(file => rm(file.path, { force: true })));
+    throw error;
+  }
 }
 
 export function reportedArtifact(workPath: string, path: string) {
