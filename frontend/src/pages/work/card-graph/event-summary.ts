@@ -65,6 +65,7 @@ export const eventActionLabels: Record<string, MessageKey> = {
   'work-cancelled': 'eventWorkCancelled',
   'work-completed': 'eventWorkCompleted',
   'work-stalled': 'eventWorkStalled',
+  'work-stall-nudged': 'eventWorkStallNudged',
   'needs-user-attention': 'eventNeedsUserAttention',
   'base-merge-started': 'eventBaseMergeStarted',
   'base-merge-result': 'eventBaseMergeResult',
