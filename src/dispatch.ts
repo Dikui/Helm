@@ -90,9 +90,12 @@ export function markOutdated(store: TaskStore, dispatches: Dispatch[]) {
   });
 }
 
+const DISPATCH_GIT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export function dispatchGit(path: string, ...args: string[]) {
-  try { return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd(); }
-  catch (error) { throw gitFailure('派单 git 操作失败，请检查卡片副本和分支。', ['-C', path, ...args], error); }
+  const gitArgs = ['-C', path, '-c', 'core.hooksPath=/dev/null', ...args];
+  try { return execFileSync('git', gitArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: DISPATCH_GIT_TIMEOUT_MS }).trimEnd(); }
+  catch (error) { throw gitFailure('派单 git 操作失败，请检查卡片副本和分支。', gitArgs, error); }
 }
 
 export function committedFile(path: string, commit: string, name: string) {

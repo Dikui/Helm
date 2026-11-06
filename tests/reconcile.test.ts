@@ -242,13 +242,35 @@ while [ -f '${block}' ]; do sleep 0.1; done
   return { block, wait: () => until(async () => existsSync(marker), Boolean) };
 }
 
+// Issue 30 item 6: medium regression; a Git executable substitute pauses after the real merge,
+// replacing the project hook that internal card merges now skip.
 test('标记完成在 _work 合并中崩溃，重启 abort 后可重试标记完成', async t => {
   const daemon = await fixture(t, 'settled');
   const { card, dispatch, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
-  const hook = await blockingHook(daemon, 'pre-merge-commit');
+  const block = join(daemon.directory, 'block');
+  const marker = join(daemon.directory, 'merge-entered');
+  const wrapper = join(daemon.processTools, 'git');
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  await writeFile(block, 'block');
+  await writeFile(wrapper, `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+import { existsSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+const run = args => {
+  const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+};
+if (args[1] === ${JSON.stringify(daemon.work.workPath)} && args.includes('merge') && !args.includes('--abort')) {
+  process.chdir(${JSON.stringify(daemon.work.workPath)});
+  run([...args, '--no-commit']);
+  writeFileSync(${JSON.stringify(marker)}, 'reached');
+  while (existsSync(${JSON.stringify(block)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+}
+run(args);
+`, { mode: 0o755 });
   const completion = daemon.tool('complete-card', { ...daemon.scope, cardId: card.id }).catch(error => error);
-  await hook.wait();
+  await until(async () => existsSync(marker), Boolean);
   await daemon.restart();
   await completion;
   await daemon.waitRound();
@@ -256,7 +278,8 @@ test('标记完成在 _work 合并中崩溃，重启 abort 后可重试标记完
   assert.equal(existsSync(git(daemon.work.workPath, 'rev-parse', '--git-path', 'MERGE_HEAD')), false);
   assert.notEqual((await daemon.call('get-card', { ...daemon.scope, cardId: card.id })).status, 'completed');
   assert.ok((await daemon.events()).some(event => event.action === 'work-merge-aborted'));
-  await rm(hook.block);
+  await rm(wrapper);
+  await rm(block);
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
   assert.equal((await daemon.call('get-card', { ...daemon.scope, cardId: card.id })).status, 'completed');
   assert.equal(existsSync(join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId)), false);

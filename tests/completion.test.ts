@@ -101,6 +101,26 @@ test('完成卡片先合并、删除副本和分支，重复完成保持成果�
   assert.equal((await daemon.events()).filter(event => event.action === 'card-completed').length, 1);
 });
 
+// Issue 30 item 6: medium regression for internal card merges running project hooks.
+test('卡片合并跳过项目的 pre-merge-commit 和 post-merge 钩子', async t => {
+  const ended = hold();
+  t.after(ended.release);
+  const daemon = await fixture(t, [card('internal'), dispatch('internal'), { type: 'hang', until: ended.promise }, complete('internal')], [[
+    { type: 'write', path: 'internal.txt', content: '卡片成果\n' },
+  ]]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const marker = join(daemon.repo, '..', 'merge-hook-ran');
+  for (const name of ['pre-merge-commit', 'post-merge']) {
+    await writeFile(join(daemon.repo, '.git', 'hooks', name), `#!/bin/sh\necho ${name} >> '${marker}'\n`, { mode: 0o755 });
+  }
+  ended.release();
+  await daemon.finished();
+  assert.equal((await daemon.cards())[0].status, 'completed');
+  const work = (await daemon.call('get-work', { workId: daemon.work.id })).result;
+  assert.equal(git(daemon.repo, 'show', `${work.workBranch}:internal.txt`), '卡片成果');
+  await assert.rejects(access(marker), { code: 'ENOENT' });
+});
+
 test('两张卡片冲突时保持原状态，修复卡片合入原分支后可完成原卡片，下游含全部成果', async t => {
   const bothEnded = hold();
   const inspected = hold();
@@ -256,6 +276,7 @@ test('合并成功但清理失败时不写完成，清理后重试复用已有�
   assert.equal(git(daemon.repo, 'rev-parse', work.workBranch), merge);
 });
 
+// Issue 30 item 6: medium regression; invalid cleanup mode fails commits without affecting copy deletion.
 test('取消时即使补提交失败也删除副本并保留派单输出', async t => {
   const written = hold();
   t.after(written.release);
@@ -264,7 +285,7 @@ test('取消时即使补提交失败也删除副本并保留派单输出', async
   ]]);
   await until(daemon.events, values => values.some(event => event.action === 'dispatch-step'));
   const before = (await daemon.cards())[0];
-  await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  git(daemon.repo, 'config', 'commit.cleanup', 'invalid-cleanup-mode');
   written.release();
   await daemon.finished();
   await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
@@ -274,5 +295,6 @@ test('取消时即使补提交失败也删除副本并保留派单输出', async
   const result = (await daemon.call('get-dispatch', params)).result;
   assert.equal(result.endReason, 'aborted');
   assert.ok(result.failure);
+  assert.match(result.failure, /invalid cleanup mode/i);
   assert.ok((await daemon.call('get-dispatch-output', params)).result.some((step: any) => step.text === 'Wrote discarded.txt'));
 });

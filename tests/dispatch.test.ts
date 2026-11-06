@@ -13,6 +13,7 @@ import { startTestHelmd as startHelmd, copyAgents, configureTestAgent } from './
 import { testProcessWatchdog } from './fixtures/test-process.js';
 import { dispatchGit } from '../src/dispatch.js';
 import { RuleError } from '../src/store.js';
+import { gitFailure } from '../src/git-failure.js';
 
 // Issue 30 item 5: medium regression, exercised against local Git.
 test('派单 Git 引用不存在时保留命令、退出码和 stderr', async t => {
@@ -26,7 +27,7 @@ test('派单 Git 引用不存在时保留命令、退出码和 stderr', async t 
     assert.match(error.message, /git .*rev-parse.*--verify.*missing-ref/);
     assert.match(error.message, /128/);
     assert.match(error.message, /fatal:/);
-    assert.deepEqual(error.details?.args, ['-C', repo, 'rev-parse', '--verify', 'missing-ref']);
+    assert.deepEqual(error.details?.args, ['-C', repo, '-c', 'core.hooksPath=/dev/null', 'rev-parse', '--verify', 'missing-ref']);
     assert.equal(error.details?.exitCode, 128);
     assert.match(String(error.details?.stderr), /fatal:/);
     return true;
@@ -44,7 +45,7 @@ test('派单 Git 诊断移除参数和 stderr 中 URL 的凭据', async t => {
     assert.doesNotMatch(error.message, /diagnostic-user|diagnostic-token/);
     assert.doesNotMatch(JSON.stringify(error.details), /diagnostic-user|diagnostic-token/);
     assert.ok(error.message.includes('https://example.invalid/repo.git'));
-    assert.deepEqual(error.details?.args, ['-C', repo, 'check-ref-format', '--branch', 'https://example.invalid/repo.git']);
+    assert.deepEqual(error.details?.args, ['-C', repo, '-c', 'core.hooksPath=/dev/null', 'check-ref-format', '--branch', 'https://example.invalid/repo.git']);
     assert.ok(String(error.details?.stderr).includes('https://example.invalid/repo.git'));
     return true;
   });
@@ -103,6 +104,23 @@ test('派单 Git 无法启动时保留启动错误且不泄露 URL 凭据', () =
   }
 });
 
+// Issue 30 item 6: medium regression; a local Git alias replaces a hung Git operation.
+for (const stderr of ['', 'before-timeout https://diagnostic-user:diagnostic-token@example.invalid/repo.git']) {
+  test(`Git 超时${stderr ? '且已有 stderr' : '且没有 stderr'}时诊断保留超时原因`, () => {
+    const args = ['-c', `alias.hang=!${stderr ? `echo '${stderr}' >&2; ` : ''}exec sleep 10`, 'hang'];
+    let failure: unknown;
+    try { execFileSync('git', args, { timeout: 100, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (error) { failure = error; }
+    assert.equal((failure as NodeJS.ErrnoException)?.code, 'ETIMEDOUT');
+    const diagnostic = gitFailure('Git 操作失败', args, failure);
+    assert.equal(diagnostic.code, 'GIT_ERROR');
+    assert.match(diagnostic.message, /ETIMEDOUT/);
+    assert.match(String(diagnostic.details?.reason), /ETIMEDOUT/);
+    assert.match(String(diagnostic.details?.stderr), stderr ? /before-timeout https:\/\/example.invalid/ : /^$/);
+    assert.doesNotMatch(diagnostic.message + JSON.stringify(diagnostic.details), /diagnostic-user|diagnostic-token/);
+  });
+}
+
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
 const ok = (value: any) => assert.equal(value.ok, true, JSON.stringify(value));
@@ -158,6 +176,35 @@ async function fixture(t: TestContext, script: FakeStep[], executors: FakeScript
 
 const create: FakeStep = { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'card', content: '写实现并报告结果' }), saveAs: 'card', check: ok };
 const dispatch = (key = 'dispatch'): FakeStep => ({ type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: saved(ctx, 'card').id, key, agentId: 'claude-executor' }), saveAs: key, check: ok });
+
+// Issue 30 item 6: medium regression for progress lost on the next dispatch.
+test('项目 pre-commit 失败仍自动提交派单成果，后续派单保留成果', async t => {
+  let next!: () => void;
+  const hold = new Promise<void>(resolve => { next = resolve; });
+  t.after(() => next());
+  const daemon = await fixture(t, [create, dispatch('first'), { type: 'hang', until: hold }, dispatch('next')], [ctx => {
+    const git = (...args: string[]) => execFileSync('git', ['-C', ctx.options.cwd, ...args], { encoding: 'utf8', stdio: 'pipe' });
+    const common = git('rev-parse', '--path-format=absolute', '--git-common-dir').trim();
+    writeFileSync(join(common, 'hooks', 'pre-commit'), '#!/bin/sh\necho project-hook-rejected >&2\nexit 1\n', { mode: 0o755 });
+    assert.throws(() => git('-c', 'user.name=Helm Test', '-c', 'user.email=helm@example.invalid', 'commit', '--allow-empty', '-m', 'executor commit'), /project-hook-rejected/);
+    return [{ type: 'write', path: 'progress.txt', content: '保留成果\n' }];
+  }, ctx => {
+    assert.equal(execFileSync('git', ['-C', ctx.options.cwd, 'show', 'HEAD:progress.txt'], { encoding: 'utf8' }), '保留成果\n');
+    assert.equal(existsSync(join(ctx.options.cwd, 'progress.txt')), true);
+    return [];
+  }]);
+  await until(daemon.events, values => values.some(event => event.action === 'dispatch-ended'));
+  const params = { workId: daemon.work.id };
+  const first = (await daemon.call('list-dispatches', params)).result[0];
+  assert.equal(first.endReason, 'completed', first.failure);
+  assert.equal(daemon.git('show', `${first.endCommit}:progress.txt`), '保留成果');
+  next();
+  await daemon.finished();
+  await until(daemon.events, values => values.filter(event => event.action === 'dispatch-ended').length === 2);
+  const records = (await daemon.call('list-dispatches', params)).result;
+  assert.equal(records[1].endReason, 'completed', records[1].failure);
+  assert.equal(records[1].startCommit, first.endCommit);
+});
 
 test('全局并发满时按序排队，调低不打断，调高立即补位；调度轮次不占执行者名额', async t => {
   const releases: (() => void)[] = [];
