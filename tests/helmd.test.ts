@@ -215,7 +215,8 @@ test('SSE 积压超过写缓冲时等待读取而不断开；不带游标只推�
   replay.close();
   const live = await stream(t, daemon.url);
   await daemon.call('set-concurrency', { limit: 3 });
-  assert.equal((await live.next()).action, 'concurrency-set');
+  // The backlog's alignment rounds are still running, so their events may arrive first; only new ones may arrive at all.
+  for (let event = await live.next(); event.action !== 'concurrency-set'; event = await live.next()) assert.ok(event.id > history.at(-1).id);
   live.close();
 });
 
