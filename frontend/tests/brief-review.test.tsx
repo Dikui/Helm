@@ -57,7 +57,7 @@ async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => Revi
   daemon = await uiFixture([[draft(1)], [
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'code', content: '实现成果' }), saveAs: 'code', check: ok },
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('code') as any).result.id, key: 'execute', agentId: 'claude-executor' }), saveAs: 'execute', check: ok },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'too-early', report: reviewReport('还未完成') }), check: value => expect((value as any).error.code).toBe('NON_TERMINAL_CARDS') },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'too-early', ...reviewReport('还未完成') }), check: value => expect((value as any).error.code).toBe('NON_TERMINAL_CARDS') },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('code') as any).result.id }), check: ok },
     { type: 'tool', name: 'create-card', arguments: ctx => ({ workId: workIdOf(ctx), key: 'overall', content: '整体验收', needsVerification: true }), saveAs: 'overall', check: ok },
@@ -67,7 +67,7 @@ async function prepareReview(report?: ReviewReport | ((ctx: FakeContext) => Revi
     { type: 'hang', until: verificationEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('overall') as any).result.id }), check: ok },
     { type: 'tool', name: 'get-dispatch-artifacts', arguments: ctx => ({ workId: workIdOf(ctx), dispatchId: (ctx.results.get('execute') as any).result.id }), saveAs: 'artifacts', check: ok },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: typeof report === 'function' ? report(ctx) : report ?? reviewReport('汇总报告原文\n成果：result.txt') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...(typeof report === 'function' ? report(ctx) : report ?? reviewReport('汇总报告原文\n成果：result.txt')) }), check: ok },
   ]], undefined, { executorScripts: [
     [{ type: 'write', path: 'result.txt', content: '审核成果\n' + '内容'.repeat(25_000) + '\n末尾成果\n' }],
     [{ type: 'tool', name: 'submit-conclusion', arguments: { conclusion: 'passed', reason: '全部标准通过，原文保留' }, check: ok }],
@@ -262,9 +262,9 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
   const validReady = new Promise<void>(resolve => { submitValid = resolve; });
   daemon = await uiFixture([[draft(1)], [
     { type: 'hang', until: invalidReady },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: { ...reviewReport(), summary: '' } }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport(), summary: '' }) },
     { type: 'hang', until: validReady },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('补齐后的结论') }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('补齐后的结论') }) },
   ]]);
   const work = await createWork();
   await confirmVersion(work.id, 1);
@@ -298,7 +298,7 @@ test('报告加载、读取失败重试、空报告及字段缺失均有反馈�
     expect(await screen.findByText('汇总报告尚不能发起审核')).toBeTruthy();
     await reportSequence('字段待补齐，未生成关卡');
     const invalid = screen.getByText('汇总报告尚不能发起审核').closest('section')!;
-    expect(within(invalid).getByText(/report.summary: 缺少结论说明/)).toBeTruthy();
+    expect(within(invalid).getByText(/summary: 缺少结论说明/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '接受' })).toBeNull();
     submitValid();
     expect(await within(inspector).findByRole('button', { name: '接受' })).toBeTruthy();
@@ -333,8 +333,8 @@ test('报告成功读取后重读失败也隐藏旧审核操作，重试恢复�
 
 test('已有有效待审核报告时，失败的重复提交不会显示未生成关卡或挡住审核', async () => {
   daemon = await uiFixture([[draft(1)], [
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('已有有效报告') }) },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: { ...reviewReport(), summary: '' } }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('已有有效报告') }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport(), summary: '' }) },
   ]]);
   const work = await createWork();
   await confirmVersion(work.id, 1);
@@ -654,7 +654,7 @@ test('收件箱退回失败保留意见和原始原因，重试后与工作页�
 
 test('审核没有 diff 或整体验收时如实显示，默认生效版本通过 SSE 跟随新确认版本', async () => {
   daemon = await uiFixture([[draft(1)], [draft(2)], [
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('没有代码变更') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('没有代码变更') }), check: ok },
   ]]);
   const work = await createWork();
   existingWorkCopy(join(daemon.directory, 'data'), work.id);
@@ -681,7 +681,7 @@ test.each(['zh', 'en'])('只有临时目录卡片的工作显示无代码改动�
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }), check: ok },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: workIdOf(ctx), cardId: (ctx.results.get('card') as any).result.id }), check: ok },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('只读分析结论') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('只读分析结论') }), check: ok },
   ]], undefined, { executorScripts: [[{ type: 'output', text: '只读分析结果' }]] });
   const work = await createWork();
   try {
@@ -715,7 +715,7 @@ test.each(['zh', 'en'])('只有临时目录卡片的工作显示无代码改动�
 
 test.each(['打开时已取消', '打开后取消'])('%s时审核和收件箱只读，保留报告并显示终态', async timing => {
   daemon = await uiFixture([[draft(1)], [
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('终态仍可读取的汇总报告') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('终态仍可读取的汇总报告') }), check: ok },
   ]]);
   const work = await createWork();
   await confirmVersion(work.id, 1);

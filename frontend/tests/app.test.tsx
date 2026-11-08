@@ -242,7 +242,7 @@ test('收件箱用量读取失败时由该资源自行重试，恢复后补读�
 
 test('审核归等你处理，行内退回附意见后恢复进行中', async () => {
   daemon = await uiFixture([[draft('v1')], [
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', report: reviewReport('汇总报告原文') }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', ...reviewReport('汇总报告原文') }) },
   ]]);
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, body: '等待审核的工作', key: 'start' })).result.work;
   render(<App baseUrl={daemon.url} />);

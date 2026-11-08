@@ -98,7 +98,7 @@ test('临时目录工作审核显示无代码改动，接受即完成且没有�
     { type: 'tool', name: 'create-dispatch', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id, key: 'execute', agentId: 'claude-executor' }) },
     { type: 'hang', until: executionEnded },
     { type: 'tool', name: 'complete-card', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, cardId: (ctx.results.get('card') as any).result.id }) },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', report: reviewReport('只读分析已完成') }) },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id, key: 'review', ...reviewReport('只读分析已完成') }) },
   ]], resolve('dist/ui'), { executorScripts: [[{ type: 'output', text: '分析完成，没有代码改动。' }]] });
   t.after(() => daemon.close());
   const work = (await daemon.call('send-message', { projectId: daemon.project.id, key: 'start', body: '分析项目' })).result.work;
@@ -156,7 +156,7 @@ content 要求用 Read 核对 smoke.txt，用 Node 读取后严格比较含换�
 并用 git diff --name-only origin/main HEAD 确认只改 smoke.txt；必须 submit-conclusion(passed 或 failed)。
 验收结束且 passed 后 complete-card 第二张。异常或受阻只报告，不额外派单、不重试、不假装成功。
 两张卡片都完成后 send-message（key=ui-ready，body 原样为：${readyMessage} \`smoke.txt\`），写笔记后退出。
-只有用户最新消息的正文完全等于「${reviewMessage}」才 request-review（key=ui-review），按工具 schema 填结构化 report：verdict=accept；summary 一两句结论；exceptions=[]；criteria 覆盖工作说明的标准且 status=passed，每项 evidence 链接实际成果或验收派单回答；cards 列出实际卡片结果、验收、evidence 和 dispatches；suggestions=[]。不提交 body，命令原文和 id 只放证据引用与行详情字段。
+只有用户最新消息的正文完全等于「${reviewMessage}」才 request-review（key=ui-review），按工具 schema 填报告字段（顶层参数，不包进 report 对象）：verdict=accept；summary 一两句结论；exceptions=[]；criteria 覆盖工作说明的标准且 status=passed，每项 evidence 链接实际成果或验收派单回答；cards 列出实际卡片结果、验收、evidence 和 dispatches；suggestions=[]。不提交 body，命令原文和 id 只放证据引用与行详情字段。
 每次从启动简报读当前卡片和派单状态，不重复执行已完成的阶段；等待时立即退出，不轮询。
 最多一张执行卡片和一张整体验收卡片、一次执行派单和一次验收派单。不要新增技能、文件或测试。`;
 

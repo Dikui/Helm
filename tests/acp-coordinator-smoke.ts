@@ -44,7 +44,7 @@ export async function acpCoordinatorSmoke(t: TestContext, kind: 'grok' | 'deepse
 没有卡片时：create-card，key=smoke-readme，content=只读检查 README.md，workspace=copy，needsVerification=false；
 然后 create-dispatch，key=smoke-dispatch，cardId 用返回的卡片 id，agentId=claude-executor，purpose=execution，needsBrowser=false，content=只读检查 README 基线并提交 completed。不要等待派单，本轮立即退出。
 已有卡片时：不得重复建卡或派单。若派单未结束，本轮退出。若派单正常结束且 conclusion=completed，调用 complete-card 完成卡片。
-卡片已完成后，调用 request-review，key=smoke-review，report 为结构化汇总报告：
+卡片已完成后，调用 request-review，key=smoke-review，报告字段作为顶层参数（不包进 report 对象）：
 verdict=accept，summary=README 只读检查完成，exceptions=[]，suggestions=[]；
 criteria=[{criterion: "README 基线保持原样", status: "passed", evidence: [{label: "派单结果", kind: "dispatch", ref: "实际派单 id"}]}]；
 cards=[{cardId: "实际卡片 id", title: "README 检查", result: "已完成只读检查", verification: "not-applicable", evidence: [{label: "派单结果", kind: "dispatch", ref: "实际派单 id"}], dispatches: [{agentId: "claude-executor", dispatchId: "实际派单 id"}]}]。

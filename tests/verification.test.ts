@@ -358,7 +358,7 @@ test('只派验收单的卡片新增上游成果后旧验收过期，复验检�
     dispatch('current-failed', 'verification', 'overall'), { type: 'hang', until: currentFailed.promise },
     complete(code('VERIFICATION_OUTDATED'), 'overall'),
     dispatch('again', 'verification', 'overall'), { type: 'hang', until: reverified.promise }, complete(ok, 'overall'),
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport() }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport() }), check: ok },
   ], [ctx => {
     overallPath = ctx.options.cwd;
     assert.equal(git(overallPath, 'rev-parse', 'HEAD'), git(overallPath, 'rev-parse', 'main'));

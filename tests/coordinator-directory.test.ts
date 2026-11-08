@@ -72,7 +72,7 @@ for (const outcome of ['completed', 'cancelled'] as const) test(`工作 ${outcom
     { type: 'write', path: 'notes.txt', content: '调度文件' },
     { type: 'tool', name: 'draft-work-description', arguments: { key: 'draft', requirements: '调研', boundary: '不改代码', criteria: '报告', deliverables: '交付物及查看入口' } },
   ], [
-    { type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport('调研完成') },
+    { type: 'tool', name: 'request-review', arguments: { key: 'review', ...reviewReport('调研完成') },
       check: value => assert.equal((value as any).ok, true) },
   ]]);
   t.after(() => daemon.close());

@@ -27,7 +27,7 @@ test('检查器随对齐、执行、审核和交付阶段归默认；阶段内�
   let review!: () => void;
   daemon = await uiFixture([[draft], [
     { type: 'hang', until: new Promise<void>(resolve => { review = resolve; }) },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workId(ctx), key: 'review', report: reviewReport('Ready for review') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workId(ctx), key: 'review', ...reviewReport('Ready for review') }), check: ok },
   ]]);
   const work = await create();
   window.history.replaceState(null, '', `/works/${work.id}`);

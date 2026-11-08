@@ -15,6 +15,8 @@ import { pushReviewedWork } from '../src/delivery.js';
 import { reviewReport } from './fixtures/review-report.js';
 import { decideReview } from '../src/review.js';
 import { reconcileStartup } from '../src/reconcile.js';
+import { z } from 'zod';
+import { operations } from '../src/operations.js';
 
 const workIdOf = (ctx: FakeContext) => (JSON.parse(ctx.input) as StartupBrief).work.id;
 const saved = (ctx: FakeContext, key: string): any => (ctx.results.get(key) as any).result;
@@ -38,24 +40,36 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
 }
 
 const review = (key = 'review', check: (value: any) => void = ok): Extract<FakeStep, { type: 'tool' }> => ({ type: 'tool', name: 'request-review',
-  arguments: ctx => ({ workId: workIdOf(ctx), key, report: reviewReport(`汇总报告 ${key}`) }), saveAs: key, check });
+  arguments: ctx => ({ workId: workIdOf(ctx), key, ...reviewReport(`汇总报告 ${key}`) }), saveAs: key, check });
+
+// 回归：report 整体嵌套为一个参数时（参数内对象三层），模型约两成调用在末尾多写一个 }，客户端判为非法 JSON 直接拒绝。
+test('调度者工具单个参数内的对象嵌套不超过两层，审核报告字段是顶层参数', () => {
+  const depth = (schema: any): number => Math.max(schema?.type === 'object' ? 1 : 0, 0)
+    + Math.max(0, ...Object.values(schema?.properties ?? {}).map(depth), schema?.items ? depth(schema.items) : 0);
+  for (const operation of operations.filter(item => item.callers.includes('coordinator-round'))) {
+    const properties = (z.toJSONSchema(operation.schema) as any).properties ?? {};
+    for (const [name, schema] of Object.entries(properties)) assert.ok(depth(schema) <= 2, `${operation.name}.${name} 嵌套过深`);
+  }
+  const review = z.toJSONSchema(operations.find(item => item.name === 'request-review')!.schema) as any;
+  assert.deepEqual(Object.keys(review.properties).sort(), ['cards', 'criteria', 'exceptions', 'key', 'suggestions', 'summary', 'verdict', 'workId']);
+});
 
 test('发起审核逐字段校验汇总报告，缺结论说明或标准证据时不生成关卡', async t => {
   const report = reviewReport();
   const daemon = await fixture(t, [[
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workIdOf(ctx), key: 'structured',
-      report: { ...report, summary: '', criteria: [{ criterion: '登录可用', status: 'passed', evidence: [] }] } }),
+      ...report, summary: '', criteria: [{ criterion: '登录可用', status: 'passed', evidence: [] }] }),
       check: (value: any) => {
         code('INVALID_PARAMS')(value);
-        assert.match(value.error.reason, /report.summary/);
-        assert.match(value.error.reason, /report.criteria.0.evidence/);
+        assert.match(value.error.reason, /summary/);
+        assert.match(value.error.reason, /criteria.0.evidence/);
       } },
     { type: 'hang' },
   ]]);
   const events = await until(daemon.events, events => events.some(event => event.action === 'operation-rejected'));
   const failure = events.find(event => event.action === 'operation-rejected').details;
-  assert.match(failure.reason, /report.summary/);
-  assert.match(failure.reason, /report.criteria.0.evidence/);
+  assert.match(failure.reason, /summary/);
+  assert.match(failure.reason, /criteria.0.evidence/);
   assert.equal((await daemon.getWork()).status, 'executing');
   assert.ok(!(await daemon.conversation()).some(item => item.kind === 'review'));
 });
@@ -77,16 +91,17 @@ test('汇总报告按字段保存并在对话和待决定列表中返回；重�
 test('发起审核拒绝新提交的纯文本、缺失字段和无效枚举，错误逐项指向报告字段且同 key 可重试', async t => {
   const report = reviewReport();
   const invalid: { input: object; path: string }[] = [
-    { input: { body: '旧式新提交' }, path: 'report' },
+    { input: { ...report, body: '旧式新提交' }, path: 'body' },
+    { input: { report }, path: 'report' },
     ...['verdict', 'summary', 'exceptions', 'criteria', 'cards', 'suggestions'].map(field => {
       const missing: Record<string, unknown> = { ...report };
       delete missing[field];
-      return { input: { report: missing }, path: `report.${field}` };
+      return { input: missing, path: field };
     }),
-    { input: { report: { ...report, verdict: 'approved' } }, path: 'report.verdict' },
-    { input: { report: { ...report, exceptions: [{ kind: 'unverified', what: '外网收信', why: ' ', evidence: [] }] } }, path: 'report.exceptions.0.why' },
-    { input: { report: { ...report, criteria: [{ criterion: '登录可用', status: 'passed', evidence: [{ label: '证据', kind: 'command', ref: '' }] }] } }, path: 'report.criteria.0.evidence.0.kind' },
-    { input: { report: { ...report, cards: [{ cardId: 'card', title: '登录', result: '完成', dispatches: [], evidence: report.criteria[0]!.evidence }] } }, path: 'report.cards.0.verification' },
+    { input: { ...report, verdict: 'approved' }, path: 'verdict' },
+    { input: { ...report, exceptions: [{ kind: 'unverified', what: '外网收信', why: ' ', evidence: [] }] }, path: 'exceptions.0.why' },
+    { input: { ...report, criteria: [{ criterion: '登录可用', status: 'passed', evidence: [{ label: '证据', kind: 'command', ref: '' }] }] }, path: 'criteria.0.evidence.0.kind' },
+    { input: { ...report, cards: [{ cardId: 'card', title: '登录', result: '完成', dispatches: [], evidence: report.criteria[0]!.evidence }] }, path: 'cards.0.verification' },
   ];
   const daemon = await fixture(t, [[...invalid.map(({ input }): FakeStep => ({ type: 'tool', name: 'request-review',
     arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...input }) })), review()]]);
@@ -414,7 +429,7 @@ test('非终态卡片阻止审核，错误和拒绝事件列出卡片，全部�
 test('审核是按 key 去重的固定关卡，仅接受或退回，退回保留报告和意见并唤醒新一轮', async t => {
   const daemon = await fixture(t, [[
     review(),
-    { ...review(), arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', report: reviewReport('重复调用不覆盖报告') }),
+    { ...review(), arguments: ctx => ({ workId: workIdOf(ctx), key: 'review', ...reviewReport('重复调用不覆盖报告') }),
       check: (value: any) => { ok(value); assert.match(value.result.body, /汇总报告 review/); assert.deepEqual(value.result.report, reviewReport('汇总报告 review')); } },
     review('second-pending', code('REVIEW_PENDING')),
     { type: 'tool', name: 'withdraw-gate', arguments: ctx => ({ workId: workIdOf(ctx), gateId: saved(ctx, 'review').id, reason: '撤回' }), check: code('FIXED_GATE') },

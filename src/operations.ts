@@ -606,8 +606,9 @@ export const operations: readonly Operation[] = [
   }),
   operation({
     name: 'request-review', description: '以汇总报告发起审核，只能由用户接受或退回', callers: ['coordinator-round'], keyed: true, mutates: true,
-    schema: z.object({ workId: z.string().min(1), key: z.string().min(1), report: reviewReportSchema }).strict(),
-    execute: ({ store, actor }, params) => requestReview(store, actor, params),
+    // 报告字段平铺为顶层参数：嵌套在一个 report 对象里时，模型常在末尾多写一个 }，客户端判为非法 JSON
+    schema: reviewReportSchema.extend({ workId: z.string().min(1), key: z.string().min(1) }).strict(),
+    execute: ({ store, actor }, { workId, key, ...report }) => requestReview(store, actor, { workId, key, report }),
   }),
   operation({
     name: 'propose-gate', description: '向用户提问或提出决策关卡，对齐中和执行中可用；options 给出可选答案，multiSelect=true 时可多选，用户也可自由回答', callers: ['coordinator-round'], keyed: true, mutates: true,

@@ -206,7 +206,7 @@ async function main() {
         dispatches: [{ agentId: 'claude-executor', dispatchId: executed.id }, { agentId: 'claude-executor', dispatchId: verified.id }] }],
       suggestions: reservations ? ['接受前确认保留项，或退回调度者补齐导出和真实服务验证。'] : [],
     };
-    await run(workId, [tool('complete-card', { workId, cardId: item.id }), tool('request-review', { workId, key: 'review', report })]);
+    await run(workId, [tool('complete-card', { workId, cardId: item.id }), tool('request-review', { workId, key: 'review', ...report })]);
     const gate = (await call('get-conversation', { workId })).find((node: any) => node.kind === 'review');
     return { workId, gateId: gate.id as string };
   }

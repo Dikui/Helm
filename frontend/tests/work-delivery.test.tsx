@@ -68,7 +68,7 @@ async function prepare(options: { scratch?: boolean; resolution?: FakeScript } =
       tool('create-dispatch', ctx => ({ workId: work.id, key: 'execute', cardId: saved(ctx, 'card'), agentId: 'claude-executor' })),
       { type: 'hang', until: executed },
       tool('complete-card', ctx => ({ workId: work.id, cardId: saved(ctx, 'card') })),
-      tool('request-review', { workId: work.id, key: 'review', report: reviewReport('Delivery report') }),
+      tool('request-review', { workId: work.id, key: 'review', ...reviewReport('Delivery report') }),
     ]);
     ok(await daemon!.call('decide-gate', { workId: work.id, gateId: descriptions[0].gateId, descriptionId: descriptions[0].id, decision: 'confirm' }));
     try {

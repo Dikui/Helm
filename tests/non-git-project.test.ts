@@ -49,7 +49,7 @@ test('非 git 项目临时目录派单无需初始化，审核无差异，接受
       assert.equal(JSON.parse(ctx.input).projectPath, projectPath);
       return [
         { type: 'tool', name: 'complete-card', arguments: { cardId: card.id }, check: ok },
-        { type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport('只读分析完成') }, check: ok },
+        { type: 'tool', name: 'request-review', arguments: { key: 'review', ...reviewReport('只读分析完成') }, check: ok },
       ];
     },
   ], undefined, { registerProject: false, executorScripts: [ctx => {

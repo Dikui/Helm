@@ -141,7 +141,7 @@ test('没有工作分支和副本的工作可启动对账、取消并删除，�
 test('已接受工作的冲突处理崩溃后保留接受、清理半截合并并唤醒调度者', async t => {
   const daemon = await fixture(t);
   const previousRound = await daemon.waitRound();
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('原审核') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('原审核') });
   for (const [path, content] of [[daemon.work.workPath, 'work\n'], [daemon.repo, 'base\n']]) {
     await writeFile(join(path, 'baseline.txt'), content);
     git(path, 'add', 'baseline.txt'); git(path, ...identity, 'commit', '-m', content.trim());
@@ -290,7 +290,7 @@ test('合入中崩溃，重启恢复合入并完成，不自动推送', async t 
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   const hook = await blockingHook(daemon, 'pre-merge-commit');
   await writeFile(join(daemon.repo, 'baseline.txt'), 'unrelated user edit\n');
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
@@ -321,7 +321,7 @@ for (const interruptedAt of ['post-merge', 'pre-push']) test(`独立合入或推
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   const baseline = git(daemon.remote, 'rev-parse', 'main');
   const hook = await blockingHook(daemon, interruptedAt);
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
@@ -387,7 +387,7 @@ test('重启保留接受决定和完成状态，不自动合入或重试推送',
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   const baseline = git(daemon.repo, 'rev-parse', 'main');
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await daemon.restart();
@@ -424,7 +424,7 @@ test('已接受工作的项目目录被删除后，重启仍能启动并保留�
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await rm(daemon.repo, { recursive: true, force: true });
   await daemon.restart();
@@ -436,7 +436,7 @@ test('已接受工作的项目目录不再是 git 仓库时，重启仍能启动
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await rm(join(daemon.repo, '.git'), { recursive: true, force: true });
   await daemon.restart();
@@ -457,7 +457,7 @@ test('用户自己发起、同样指向工作分支的合并在重启时保留',
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   git(daemon.repo, ...identity, 'merge', '--no-ff', '--no-commit', daemon.work.workBranch);
   const mergeHead = resolve(daemon.repo, git(daemon.repo, 'rev-parse', '--git-path', 'MERGE_HEAD'));
   const target = await readFile(mergeHead, 'utf8');
@@ -474,7 +474,7 @@ for (const copyMissing of [false, true]) test(`合入后重启补删残留的工
   const cardPath = join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId);
   const cardBranch = git(cardPath, 'symbolic-ref', '--short', 'HEAD');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   await daemon.call('merge-work', daemon.scope);
   await daemon.call('push-work', daemon.scope);
@@ -636,7 +636,7 @@ test('_work 已写下 MERGE_HEAD 的半截合并在重启时 abort', async t => 
 
 for (const status of ['merged', 'pushing']) test(`旧 ${status} 工作升级后已完成，helmd 重启不自动推送`, async t => {
   const daemon = await fixture(t, 'settled');
-  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', report: reviewReport('检查成果') });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   await writeFile(join(daemon.work.workPath, 'result.txt'), 'migrated result\n');
   git(daemon.work.workPath, 'add', 'result.txt');
   git(daemon.work.workPath, ...identity, 'commit', '-m', 'result');

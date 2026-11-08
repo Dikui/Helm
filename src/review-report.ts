@@ -26,6 +26,6 @@ export const reviewReportSchema = z.object({
     dispatches: z.array(z.object({ agentId: shortText('Agent id', 100), dispatchId: shortText('派单 id', 100) }).strict()),
   }).strict(), { error: '缺少卡片表；没有卡片请填 []' }),
   suggestions: z.array(shortText('建议'), { error: '缺少建议列表；没有建议请填 []' }),
-}, { error: '缺少结构化汇总报告 report，请填写结论、例外、标准表、卡片表和建议' }).strict();
+}).strict();
 
 export type ReviewReport = z.infer<typeof reviewReportSchema>;

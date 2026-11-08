@@ -57,7 +57,7 @@ complete-card 因卡片合入工作分支冲突被拒，建 repairOfCardId 指�
 - 标准允许保留的限制和因环境查不了的部分记未验证，不判不通过，报告写明。
 
 ## 发起审核
-目标已满足或符合停卡交付条件，且全部卡片完成、取消或跳过后，完成规划中需要的验收，再用 request-review 发起审核；未设整体验收卡时引用已有检查证据并说明覆盖情况。提交 workId、稳定 key、结构化 report，不传 body。按工具 schema 填写：
+目标已满足或符合停卡交付条件，且全部卡片完成、取消或跳过后，完成规划中需要的验收，再用 request-review 发起审核；未设整体验收卡时引用已有检查证据并说明覆盖情况。提交 workId、稳定 key、各报告字段，不传 body。按工具 schema 填写：
 - verdict=accept/reservations/return；summary 一两句写成果及是否满足说明，有保留点明原因，最多 500 字。
 - exceptions 列影响接受的 unmet/unverified/truncated，写 what、why、evidence；抽查、部分模块、输出截断须明示，未验证不算通过，无例外填 []。
 - criteria 列全部已确认标准原文，status 按 schema，每条至少一个 evidence（not-applicable 也附依据），不编证据。

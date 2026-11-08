@@ -240,7 +240,7 @@ test('已完成且从未建立副本的工作仍可复制工作引用', async ()
       key: 'draft', requirements: '分析问题', boundary: '本机', criteria: '能够定位', deliverables: '工作引用' }) },
   ], [
     { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: JSON.parse(ctx.input).work.id,
-      key: 'review', report: reviewReport('分析完成') }) },
+      key: 'review', ...reviewReport('分析完成') }) },
   ]]);
   const gate = (await daemon!.call('list-pending')).result[0];
   expect((await daemon!.call('decide-gate', { workId: work.id, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' })).ok).toBe(true);

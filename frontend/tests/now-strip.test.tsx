@@ -107,7 +107,7 @@ test('等你格随确认、决策和审核出现，报告与交付按阶段开�
     { type: 'tool', name: 'propose-gate', arguments: ctx => ({ workId: workId(ctx), key: 'gate', question: 'Choose storage', options: ['Memory', 'Disk'] }), check: ok },
   ], [
     { type: 'hang', until: new Promise<void>(resolve => { review = resolve; }) },
-    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workId(ctx), key: 'review', report: reviewReport('Ready') }), check: ok },
+    { type: 'tool', name: 'request-review', arguments: ctx => ({ workId: workId(ctx), key: 'review', ...reviewReport('Ready') }), check: ok },
   ]]);
   const work = await create(false);
   render(<App baseUrl={daemon.url} />);

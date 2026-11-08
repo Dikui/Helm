@@ -135,7 +135,7 @@ test('全部卡片完成但漏发审核时自动唤醒，简报给出原因，�
     { type: 'tool', name: 'complete-card', arguments: { cardId: (JSON.parse(ctx.input) as StartupBrief).cardGraph.find(node => node.type === 'card')!.id }, check: ok },
   ], ctx => {
     nudgeBrief = JSON.parse(ctx.input);
-    return [{ type: 'tool', name: 'request-review', arguments: { key: 'review', report: reviewReport() }, check: ok }];
+    return [{ type: 'tool', name: 'request-review', arguments: { key: 'review', ...reviewReport() }, check: ok }];
   }]);
   const events = await until(daemon.events, values => values.filter(event => event.action === 'round-ended').length === 4);
   assert.equal(events.filter(event => event.action === 'card-completed').length, 1);
