@@ -31,3 +31,7 @@ single-context：根目录 `GLOSSARY.md` 加 `docs/adr/`。涉及业务或架构
 ### Restart local helmd
 
 重启本机服务一律用 `npm run restart`（可加 `-- <超时秒数>`，默认 60）：构建、重启 launchd / systemd 用户服务、轮询 `list-works` 直到就绪，失败时说明原因并打印服务日志末尾。不要手敲 build、kickstart、sleep、curl。服务只跑一个检出的 `dist`（通常是主检出），在别的 worktree 里运行会直接报错，不会重启。
+
+### Compatibility
+
+Helm 还是 demo 版本，只供自用，不考虑给别人用：一切以准确为先，不做兼容。
