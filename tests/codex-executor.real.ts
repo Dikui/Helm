@@ -2,7 +2,8 @@
 // Uses the real Codex login through a symlink (never opened) and the installed Playwright browsers.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,8 +71,10 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
     assert.equal(first.endReason, 'completed', first.failure ?? JSON.stringify(first));
     assert.equal(first.conclusion, 'completed');
     assert.ok(first.usage.inputTokens > 0 && first.usage.outputTokens > 0);
-    assert.ok(first.sqlitePath.startsWith(join(daemon.dataDir, 'dispatches', first.id)));
-    assert.ok((await readdir(first.sqlitePath)).some(name => name.endsWith('.sqlite')));
+    // The state directory is deleted when the dispatch ends; the resume below runs without it.
+    const statePath = (dispatch: any) => join(daemon.dataDir, 'dispatches', dispatch.id, 'codex-sqlite');
+    assert.equal(first.sqlitePath, null);
+    assert.equal(existsSync(statePath(first)), false);
     const items = messages.filter((m: any) => m.method === 'item/completed').map((m: any) => m.params.item);
     for (const tool of ['browser_navigate', 'browser_snapshot', 'browser_take_screenshot', 'submit-conclusion']) {
       assert.ok(items.some((item: any) => item.type === 'mcpToolCall' && item.server === 'helm' && item.tool === tool && item.status === 'completed'), `必须实际调用 helm/${tool}`);
@@ -105,7 +108,8 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
       { inputTokens: threadTotal.inputTokens, outputTokens: threadTotal.outputTokens }, '两次用量之和必须等于线程累计：续跑只记本次增量');
     assert.equal(resumed.endReason, 'completed', resumed.failure);
     assert.equal(resumed.sessionId, first.sessionId);
-    assert.notEqual(resumed.sqlitePath, first.sqlitePath);
+    assert.equal(resumed.sqlitePath, null);
+    assert.equal(existsSync(statePath(resumed)), false);
     if (!resumed.finalAnswer.includes(marker)) {
       // The temporary HOME is removed after the test; keep Codex's own rollout for diagnosis.
       await cp(join(daemon.home, '.codex', 'sessions'), join(evidence, 'codex-sessions'), { recursive: true });

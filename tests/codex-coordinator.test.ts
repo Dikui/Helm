@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import { coordinatorFixture } from './codex-coordinator-fixture.js';
 import { until } from './claude-coordinator-fixture.js';
 import { codexErrors } from './fixtures/codex-errors.js';
 
-test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧事件不重投', async t => {
+test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧事件不重投；轮次结束即删除状态目录', async t => {
   const driver = new CodexDriver({ command: { file: process.execPath,
     args: ['-e', 'process.exit(process.argv.slice(1).join(" ") === "login status" ? 0 : 1)'] } });
   let observed: SessionOptions | undefined;
@@ -57,6 +58,7 @@ test('Codex 调度轮次真实错误样本触发额度暂停和 SSE 通知，旧
   assert.equal(observed!.resumeSessionId, undefined);
   assert.equal(observed!.dataDir, join(daemon.dataDir, 'rounds', end.object.id));
   const requests = (await readFile(join(observed!.dataDir!, 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(existsSync(join(observed!.dataDir!, 'codex-sqlite')), false);
   const thread = requests.find(r => r.method === 'thread/start').params;
   assert.equal(thread.sandbox, 'danger-full-access');
   assert.equal(thread.config.permissions, undefined);

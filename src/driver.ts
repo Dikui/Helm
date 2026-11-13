@@ -55,6 +55,8 @@ export type DriverEvent =
       unavailable?: { reason: string; command?: string }; context?: ContextSize };
 export interface DriverSession {
   id: string;
+  // CLI state directory of this run only, under SessionOptions.dataDir. The runtime deletes it when the run ends,
+  // so resuming the session must not depend on it.
   sqlitePath?: string;
   send(content: string): Promise<void>;
   cancel(): void;

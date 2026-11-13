@@ -8,6 +8,7 @@ import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
+import { removeDriverState } from './driver-state.js';
 import { completeCard, removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
@@ -380,6 +381,10 @@ export class ExecutionRunner {
         const cleaned = existsSync(workPath) ? await cleanupWorktreeProcesses(workPath, processes) : { pids: [] };
         if (cleaned.pids.length) this.store.transaction(() => this.store.appendEvent(runtime,
           { type: 'dispatch', id: dispatch.id }, 'dispatch-processes-cleaned', cleaned, scope));
+        // The driver's processes are gone; a later resume opens a state directory of its own.
+        if (removeDriverState(this.store, 'dispatches', dispatch.id)) this.store.transaction(() => {
+          this.store.db.prepare('UPDATE dispatches SET sqlite_path = NULL WHERE id = ?').run(dispatch.id);
+        });
         // A revocation may arrive while waiting for the processes to exit.
         if (getDispatch(this.store, dispatch.workId, dispatch.id).abortReason) reason = 'aborted';
         if (scratch || !ruleFailure || startCommit || dispatch.purpose === 'verification') endCommit = await finishDispatchCopy(this.store, { ...dispatch, startCommit }, reason,

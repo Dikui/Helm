@@ -2,7 +2,8 @@
 // Uses the real Codex login through a symlink (never opened).
 // No browser or real executor is needed for this coordinator smoke.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -15,7 +16,7 @@ import { until } from './claude-coordinator-fixture.js';
 const enabled = process.env.HELM_CODEX_COORDINATOR_REAL === '1';
 const shellQuote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 interface Observation {
-  options: SessionOptions; brief: StartupBrief; sessionId: string; sqlitePath?: string;
+  options: SessionOptions; brief: StartupBrief; sessionId: string; sqlitePath?: string; stateFiles: string[];
   messages: any[]; holding: boolean; command: string;
 }
 
@@ -36,7 +37,7 @@ function observedDriver() {
       delete env.NO_PROXY;
       delete env.no_proxy;
       const session = await base.start({ ...options, env });
-      const record: Observation = { options, sessionId: session.id, sqlitePath: session.sqlitePath,
+      const record: Observation = { options, sessionId: session.id, sqlitePath: session.sqlitePath, stateFiles: await readdir(session.sqlitePath!),
         brief: undefined!, messages: [], holding: false, command: '' };
       const attempt = rounds.push(record);
       return {
@@ -135,6 +136,9 @@ test('Codex 真实调度者①②③⑥：轮次 MCP 建卡改依赖派单、重
       console.log(`Codex coordinator initialize: ${timing} ms`);
       assert.ok(timing <= 15_000, 'initialize 超过 15 秒，触发 spec 推翻条件');
       assert.ok(round.sqlitePath!.startsWith(join(daemon.dataDir, 'rounds')));
+      // Codex kept its state there while the round ran; the runtime deleted it when the round ended.
+      assert.ok(round.stateFiles.some(name => name.endsWith('.sqlite')));
+      assert.equal(existsSync(round.sqlitePath!), false);
       // 改依赖等卡片图逻辑由单元测试覆盖；这里只验证真实 Codex 经 MCP 建卡派单、重投按 key 去重。
       for (const [name, count] of [['create-card', 1], ['create-dispatch', 1]] as const) successfulTool(round, name, count);
       const response = await fetch(`${daemon.url}/api/get-work`, { method: 'POST',

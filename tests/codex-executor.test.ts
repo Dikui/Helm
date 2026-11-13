@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CodexExecutorDriver } from '../src/codex-driver.js';
@@ -37,12 +38,14 @@ test('Codex 额度用完的派单经主边界唤醒调度者，改派 Claude 并
   assert.equal(await readFile(source, 'utf8'), 'fake credential; never open');
 });
 
-test('Codex 派单保存 thread 与 sqlite 目录，续跑同 thread 另开进程目录，运行层提交执行改动', async t => {
+test('Codex 派单保存 thread，续跑同 thread 另开状态目录；派单结束即删除状态目录并清空路径，运行层提交执行改动', async t => {
   const fake = new FakeDriver([[{ type: 'write', path: 'first.txt', content: '第一轮' }], [{ type: 'write', path: 'second.txt', content: '续跑' }]]);
   const starts: { id: string; sqlitePath: string; resume?: string }[] = [];
   const daemon = await codexFixture(t, { capabilities: new FakeDriver().capabilities, checkAvailability: async () => ({ available: true }), async start(options) {
     const session = await fake.start(options);
     const sqlitePath = join(options.dataDir!, 'codex-sqlite');
+    await mkdir(sqlitePath, { recursive: true });
+    await writeFile(join(sqlitePath, 'state_5.sqlite'), 'state');
     starts.push({ id: session.id, sqlitePath, resume: options.resumeSessionId });
     return { ...session, sqlitePath };
   } });
@@ -56,9 +59,13 @@ test('Codex 派单保存 thread 与 sqlite 目录，续跑同 thread 另开进�
   const dispatches = await daemon.ended(2);
   assert.equal(dispatches[1].sessionId, first.sessionId);
   assert.equal(starts[1]!.resume, first.sessionId);
-  assert.equal(first.sqlitePath, join(daemon.dataDir, 'dispatches', first.id, 'codex-sqlite'));
-  assert.equal(dispatches[1].sqlitePath, starts[1]!.sqlitePath);
-  assert.notEqual(first.sqlitePath, dispatches[1].sqlitePath);
+  assert.deepEqual(starts.map(start => start.sqlitePath), dispatches.map(dispatch => join(daemon.dataDir, 'dispatches', dispatch.id, 'codex-sqlite')));
+  for (const [index, dispatch] of dispatches.entries()) {
+    assert.equal(dispatch.sqlitePath, null);
+    assert.equal(existsSync(starts[index]!.sqlitePath), false);
+    // Step output next to the state directory stays.
+    assert.equal(existsSync(join(daemon.dataDir, 'dispatches', dispatch.id, 'steps')), true);
+  }
   const card = (await daemon.call('get-card', { workId: daemon.work.id, cardId: first.cardId })).result;
   assert.equal(daemon.git('show', `${card.cardBranch}:second.txt`), '续跑');
 });

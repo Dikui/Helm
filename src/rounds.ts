@@ -12,6 +12,7 @@ import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { projectEnvironmentNames } from './project-environment.js';
 import { readPrompt } from './prompts.js';
 import { createCoordinatorDirectory } from './coordinator-directory.js';
+import { removeDriverState } from './driver-state.js';
 
 export interface StartupBrief {
   projectPath: string;
@@ -242,6 +243,8 @@ export class RoundScheduler {
         if (cleaned.pids.length) this.store.transaction(() => {
           this.store.appendEvent(runtime, { type: 'coordinator-round', id }, 'round-processes-cleaned', cleaned, { workId });
         });
+        // The driver's processes are gone; the next round resumes from a state directory of its own.
+        removeDriverState(this.store, 'rounds', id);
       } catch (error) {
         failure = [failure, error instanceof Error ? error.message : String(error)].filter(Boolean).join('; ');
         if (reason === 'completed') { reason = 'error'; finalAnswer = undefined; }

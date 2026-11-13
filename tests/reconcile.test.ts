@@ -2,7 +2,7 @@ import { reviewReport } from './fixtures/review-report.js';
 import assert from 'node:assert/strict';
 import { execFileSync, fork, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -671,4 +671,48 @@ for (const status of ['merged', 'pushing']) test(`旧 ${status} 工作升级后�
   await daemon.call('push-work', daemon.scope);
   assert.equal(git(daemon.remote, 'show', 'main:result.txt'), 'migrated result');
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
+});
+
+test('启动对账删除已结束派单和轮次残留的 Codex 状态目录并清空路径，不碰未结束派单的目录和数据目录之外', async t => {
+  const daemon = await fixture(t);
+  await daemon.call('set-concurrency', { limit: 1 });
+  const first = await daemon.create('first');
+  await until(first.read, value => value.conclusion === 'completed');
+  const second = await daemon.create('second');
+  assert.equal((await second.read()).status, 'queued');
+  const state = (run: string, id: string) => join(daemon.dataDir, run, id, 'codex-sqlite');
+  const plant = async (path: string) => { await mkdir(path, { recursive: true }); await writeFile(join(path, 'state_5.sqlite'), 'state'); };
+  const record = (id: string) => {
+    const db = new DatabaseSync(join(daemon.dataDir, 'helm.db'));
+    try {
+      db.prepare('UPDATE dispatches SET sqlite_path = ? WHERE id = ?').run(state('dispatches', id), id);
+      return db.prepare(`SELECT id FROM coordinator_rounds WHERE status = 'ended' ORDER BY rowid`).all().map(row => String(row.id));
+    } finally { db.close(); }
+  };
+  await daemon.stop();
+  const [endedRound] = record(first.dispatch.id);
+  for (const path of [state('dispatches', first.dispatch.id), state('dispatches', second.dispatch.id), state('rounds', endedRound!)]) await plant(path);
+  await daemon.start();
+  // The crashed dispatch is ended by reconciliation; its ended event no longer names the deleted directory.
+  const aborted = await first.read();
+  assert.equal(aborted.abortReason, '运行层重启');
+  assert.equal(aborted.sqlitePath, null);
+  assert.equal((await daemon.events()).find(event => event.action === 'dispatch-ended' && event.dispatchId === first.dispatch.id).details.sqlitePath, null);
+  assert.equal(existsSync(state('dispatches', first.dispatch.id)), false);
+  assert.equal(existsSync(state('rounds', endedRound!)), false);
+  assert.equal((await until(second.read, value => value.status === 'running')).id, second.dispatch.id);
+  assert.equal(existsSync(join(state('dispatches', second.dispatch.id), 'state_5.sqlite')), true);
+
+  // A directory left by an earlier version: the dispatch ended long ago and still records the path.
+  await daemon.stop();
+  const linkedRound = record(first.dispatch.id).find(id => id !== endedRound)!;
+  await plant(state('dispatches', first.dispatch.id));
+  const outside = join(daemon.directory, 'outside');
+  await plant(join(outside, 'codex-sqlite'));
+  await rm(join(daemon.dataDir, 'rounds', linkedRound), { recursive: true, force: true });
+  await symlink(outside, join(daemon.dataDir, 'rounds', linkedRound));
+  await daemon.start();
+  assert.equal((await first.read()).sqlitePath, null);
+  assert.equal(existsSync(state('dispatches', first.dispatch.id)), false);
+  assert.equal(existsSync(join(outside, 'codex-sqlite', 'state_5.sqlite')), true);
 });

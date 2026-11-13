@@ -14,6 +14,7 @@ import { reconcileScratchDirectories } from './scratch.js';
 import { projectEnvironment, protectDispatchEnvironment, redactDispatchText } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
 import { reconcileCoordinatorDirectories } from './coordinator-directory.js';
+import { removeDriverState, removeEndedDriverState } from './driver-state.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const restartReason = '运行层重启';
@@ -82,7 +83,9 @@ export async function reconcileStartup(store: TaskStore) {
         failure = redactDispatchText(store, dispatch.id, error instanceof Error ? error.message : String(error));
       }
       finally { protection.release(); }
+      const stateRemoved = removeDriverState(store, 'dispatches', dispatch.id);
       store.transaction(() => {
+        if (stateRemoved) store.db.prepare('UPDATE dispatches SET sqlite_path = NULL WHERE id = ?').run(dispatch.id);
         store.db.prepare(`UPDATE dispatches SET status = 'ended', ended_at = ?, end_reason = ?, abort_reason = ?,
           final_answer = NULL, conclusion = 'undeclared', conclusion_reason = NULL, end_commit = ?, failure = COALESCE(?, failure) WHERE id = ?`)
           .run(new Date().toISOString(), failure ? 'error' : 'aborted', dispatch.status === 'running' ? restartReason : dispatch.abortReason ?? restartReason, endCommit, failure, dispatch.id);
@@ -101,6 +104,8 @@ export async function reconcileStartup(store: TaskStore) {
         { reason: 'aborted', abortReason: restartReason, eventIds: JSON.parse(String(row.event_ids)), processed: false }, { workId: String(row.work_id) });
     });
   }
+  // Every dispatch and round interrupted by the restart has ended, and none has started yet.
+  removeEndedDriverState(store);
 
   // Recover active Git operations before queued merges, regardless of work creation order.
   const queuedAt = new Map(store.db.prepare(`SELECT work_id, MAX(id) AS sequence FROM events
