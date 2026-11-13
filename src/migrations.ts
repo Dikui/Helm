@@ -320,4 +320,8 @@ export const migrations: readonly string[] = [
   DROP TABLE codex_usage;
   DROP TABLE codex_usage_delta;
   `,
+  `
+  ALTER TABLE dispatches ADD COLUMN output_bytes INTEGER;
+  ALTER TABLE coordinator_rounds ADD COLUMN output_bytes INTEGER;
+  `,
 ];

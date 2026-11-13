@@ -12,7 +12,7 @@ import { removeDriverState } from './driver-state.js';
 import { completeCard, removeCardCopy } from './completion.js';
 import { BrowserProcess, playwrightCommand, type BrowserCommand } from './browser.js';
 import { createVerificationCopy, removeVerificationCopy, verificationPath } from './verification.js';
-import { checkOutputUsage } from './outputs.js';
+import { checkOutputUsage, recordDispatchOutput } from './outputs.js';
 import { outputChunk, outputSummary } from './output-summary.js';
 import { prepareConflictCardMerge, pendingConflictCardMerge } from './conflict-resolution.js';
 import { projectEnvironment, protectDispatchEnvironment, redactEnvironmentEvent } from './project-environment.js';
@@ -429,6 +429,7 @@ export class ExecutionRunner {
           && (dispatch.purpose === 'verification' || (result.endReason === 'completed' && result.conclusion === 'completed'
             && (!currentCard.needsVerification || flow.verifications.length > 0)));
         if (!batchOpen && !automatic) this.store.db.prepare('INSERT INTO wake_queue (event_id, work_id) VALUES (?, ?)').run(event.id, dispatch.workId);
+        recordDispatchOutput(this.store, dispatch.id);
         checkOutputUsage(this.store);
         return { event, automatic };
       });

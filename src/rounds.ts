@@ -13,6 +13,7 @@ import { projectEnvironmentNames } from './project-environment.js';
 import { readPrompt } from './prompts.js';
 import { createCoordinatorDirectory } from './coordinator-directory.js';
 import { removeDriverState } from './driver-state.js';
+import { recordRoundOutput } from './outputs.js';
 
 export interface StartupBrief {
   projectPath: string;
@@ -255,6 +256,7 @@ export class RoundScheduler {
         // Context usage is usable only after a completed, uncompacted round.
         this.store.db.prepare(`UPDATE coordinator_rounds SET status = 'ended', ended_at = ?, reason = ?, usage = ?, context = ? WHERE id = ?`)
           .run(new Date().toISOString(), reason, JSON.stringify(usage), reason === 'completed' && context && !compacted ? JSON.stringify(context) : null, id);
+        recordRoundOutput(this.store, id);
         if (reason === 'completed') {
           const mark = this.store.db.prepare('UPDATE wake_queue SET processed_by = ? WHERE event_id = ?');
           for (const eventId of ids) mark.run(id, eventId);

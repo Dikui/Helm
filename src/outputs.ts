@@ -27,33 +27,67 @@ export function readOutput(path: string): Buffer {
   }
 }
 
-function outputFiles(store: TaskStore, workId?: string): string[] {
-  const paths: string[] = [];
-  for (const row of store.db.prepare('SELECT output_path FROM dispatches WHERE (? IS NULL OR work_id = ?)').all(workId ?? null, workId ?? null)) {
-    const directory = String(row.output_path);
-    try {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        if (entry.isFile() && /^\d+\.json(?:\.gz)?$/.test(entry.name)) paths.push(join(directory, entry.name));
-      }
-    } catch (error) { if (!missing(error)) throw error; }
-  }
-  for (const row of store.db.prepare('SELECT output_path FROM coordinator_rounds WHERE (? IS NULL OR work_id = ?)').all(workId ?? null, workId ?? null)) {
-    for (const path of [String(row.output_path), `${row.output_path}.gz`]) {
-      try { if (lstatSync(path).isFile()) paths.push(path); }
-      catch (error) { if (!missing(error)) throw error; }
-    }
-  }
-  return paths;
+function stepFiles(directory: string): string[] {
+  try {
+    return readdirSync(directory, { withFileTypes: true })
+      .filter(entry => entry.isFile() && /^\d+\.json(?:\.gz)?$/.test(entry.name)).map(entry => join(directory, entry.name));
+  } catch (error) { if (missing(error)) return []; throw error; }
 }
 
-// Called in the same transaction as the triggering operation or dispatch ending.
-export function checkOutputUsage(store: TaskStore) {
-  let totalBytes = 0;
-  const artifacts = store.db.prepare('SELECT DISTINCT path FROM artifacts WHERE path IS NOT NULL').all().map(row => String(row.path));
-  for (const path of new Set([...outputFiles(store), ...artifacts])) {
-    try { totalBytes += lstatSync(path).size; }
+function roundFiles(outputPath: string): string[] {
+  return [outputPath, `${outputPath}.gz`].filter(path => {
+    try { return lstatSync(path).isFile(); }
+    catch (error) { if (missing(error)) return false; throw error; }
+  });
+}
+
+function outputFiles(store: TaskStore, workId: string): string[] {
+  return [
+    ...store.db.prepare('SELECT output_path FROM dispatches WHERE work_id = ?').all(workId).flatMap(row => stepFiles(String(row.output_path))),
+    ...store.db.prepare('SELECT output_path FROM coordinator_rounds WHERE work_id = ?').all(workId).flatMap(row => roundFiles(String(row.output_path))),
+  ];
+}
+
+// Allocated space, not length, so sparse and compressed files count what they occupy on disk.
+function allocatedBytes(paths: Iterable<string>) {
+  let total = 0;
+  for (const path of paths) {
+    try { total += lstatSync(path).blocks * 512; }
     catch (error) { if (!missing(error)) throw error; }
   }
+  return total;
+}
+
+// A dispatch's output is its step files and the artifact files it saved. Artifact paths are created
+// under the dispatch's own directory, so deduplicating within the dispatch keeps any file from counting twice.
+export function recordDispatchOutput(store: TaskStore, dispatchId: string) {
+  const { output_path } = store.db.prepare('SELECT output_path FROM dispatches WHERE id = ?').get(dispatchId)!;
+  const artifacts = store.db.prepare('SELECT path FROM artifacts WHERE dispatch_id = ? AND path IS NOT NULL').all(dispatchId).map(row => String(row.path));
+  const bytes = allocatedBytes(new Set([...stepFiles(String(output_path)), ...artifacts]));
+  store.db.prepare('UPDATE dispatches SET output_bytes = ? WHERE id = ?').run(bytes, dispatchId);
+}
+
+export function recordRoundOutput(store: TaskStore, roundId: string) {
+  const { output_path } = store.db.prepare('SELECT output_path FROM coordinator_rounds WHERE id = ?').get(roundId)!;
+  store.db.prepare('UPDATE coordinator_rounds SET output_bytes = ? WHERE id = ?').run(allocatedBytes(roundFiles(String(output_path))), roundId);
+}
+
+function recordEndedRuns(store: TaskStore, where: string, ...params: string[]) {
+  for (const row of store.db.prepare(`SELECT id FROM dispatches WHERE status = 'ended' AND ${where}`).all(...params)) recordDispatchOutput(store, String(row.id));
+  for (const row of store.db.prepare(`SELECT id FROM coordinator_rounds WHERE status = 'ended' AND ${where}`).all(...params)) recordRoundOutput(store, String(row.id));
+}
+
+// Startup measures the ended runs without a record: those from before usage was recorded and
+// those ended by reconciliation. A missing directory counts as zero.
+export function reconcileOutputUsage(store: TaskStore) {
+  recordEndedRuns(store, 'output_bytes IS NULL');
+  checkOutputUsage(store);
+}
+
+// The total is the sum of the per-run records; it never reads output files.
+export function checkOutputUsage(store: TaskStore) {
+  const totalBytes = Number(store.db.prepare(`SELECT (SELECT COALESCE(SUM(output_bytes), 0) FROM dispatches)
+    + (SELECT COALESCE(SUM(output_bytes), 0) FROM coordinator_rounds) AS total`).get()!.total);
   const settings = store.db.prepare('SELECT output_threshold_bytes, output_threshold_exceeded FROM settings WHERE id = 1').get()!;
   const thresholdBytes = Number(settings.output_threshold_bytes);
   const exceeded = totalBytes > thresholdBytes;
@@ -104,7 +138,10 @@ async function compress(store: TaskStore, workId: string) {
       await rm(path);
     } finally { await rm(temporary, { force: true }); }
   }
-  store.transaction(() => checkOutputUsage(store));
+  store.transaction(() => {
+    recordEndedRuns(store, 'work_id = ?', workId);
+    checkOutputUsage(store);
+  });
 }
 
 function endedWork(store: TaskStore, workId: string) {
@@ -260,6 +297,7 @@ export function deleteWorkOutputs(store: TaskStore, actor: Actor, workId: string
     store.transaction(() => {
       store.db.prepare('UPDATE works SET outputs_deleted_at = ? WHERE id = ?').run(new Date().toISOString(), workId);
       store.appendEvent(actor, { type: 'work', id: workId }, 'outputs-deleted', { confirmedWithoutExport: !work.outputsExportedAt }, { workId });
+      recordEndedRuns(store, 'work_id = ?', workId);
       checkOutputUsage(store);
     });
     return deleted;

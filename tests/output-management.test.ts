@@ -189,8 +189,8 @@ test('未导出先提示，CLI 确认后只删原始事件流，保留成果、�
   const afterEvents = await daemon.events();
   assert.deepEqual(afterEvents.slice(0, events.length), events);
   assert.equal(afterEvents.filter(event => event.action === 'outputs-deleted').length, 1);
-  // issue 30: medium regression — deleting output streams leaves artifact usage counted.
-  const artifactBytes = (await Promise.all(artifacts.filter((item: any) => item.path).map(async (item: any) => (await stat(item.path)).size))).reduce((sum, size) => sum + size, 0);
+  // issue 30: medium regression — deleting output streams leaves artifact usage counted, by allocated space.
+  const artifactBytes = (await Promise.all(artifacts.filter((item: any) => item.path).map(async (item: any) => (await stat(item.path)).blocks * 512))).reduce((sum, size) => sum + size, 0);
   const warning = (await daemon.call('list-pending')).find((item: any) => item.kind === 'output-threshold');
   assert.ok(warning);
   assert.equal(warning.totalBytes, artifactBytes);

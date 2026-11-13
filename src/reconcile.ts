@@ -8,7 +8,7 @@ import { cardDetails, cardGraph, refreshCardReadiness } from './graph.js';
 import { cleanupRecordedProcessGroup, cleanupWorktreeProcesses } from './processes.js';
 import { deliveryDetails, mergeReviewedWork, completeReviewedWork, cleanupReviewedCopy } from './delivery.js';
 import type { TaskStore } from './store.js';
-import { checkOutputUsage, compressWorkOutputs } from './outputs.js';
+import { compressWorkOutputs, reconcileOutputUsage } from './outputs.js';
 import { removeVerificationCopy } from './verification.js';
 import { reconcileScratchDirectories } from './scratch.js';
 import { projectEnvironment, protectDispatchEnvironment, redactDispatchText } from './project-environment.js';
@@ -169,6 +169,6 @@ export async function reconcileStartup(store: TaskStore) {
         AND NOT EXISTS (SELECT 1 FROM dispatches WHERE card_id = c.id AND status IN ('queued', 'running'))
         AND NOT EXISTS (SELECT 1 FROM events WHERE card_id = c.id AND id > e.id
           AND action IN ('card-completed', 'dispatch-created', 'auto-flow-stopped'))`).run();
-    checkOutputUsage(store);
+    reconcileOutputUsage(store);
   });
 }
