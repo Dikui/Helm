@@ -10,8 +10,9 @@ export function removeDriverState(store: TaskStore, run: 'dispatches' | 'rounds'
   const parent = join(store.dataDir, run, id);
   try {
     if (!existsSync(parent)) return true;
-    // A linked parent leads outside the data directory. rmSync unlinks links below it without following them.
-    if (realpathSync(parent) !== parent) return false;
+    // A linked run directory leads outside the data directory; a linked ancestor of the data directory itself is fine.
+    // rmSync unlinks links below it without following them.
+    if (realpathSync(parent) !== join(realpathSync(store.dataDir), run, id)) return false;
     rmSync(join(parent, 'codex-sqlite'), { recursive: true, force: true });
     return true;
   } catch { return false; } // Kept on disk and in sqlite_path; the next startup tries again.
