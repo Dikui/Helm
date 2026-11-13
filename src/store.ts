@@ -49,6 +49,8 @@ export interface EventFilter {
   actorType?: ActorType;
   actorId?: string;
   actions?: string[];
+  ids?: number[];
+  excludeActions?: string[];
 }
 export interface HelmEvent {
   id: number;
@@ -126,6 +128,7 @@ COMMIT;`);
   }
 
   events(filter: EventFilter = {}): HelmEvent[] {
+    if (filter.ids?.length === 0) return [];
     const clauses = ['id > ?'];
     const values: SQLInputValue[] = [filter.after ?? 0];
     const fields = { workId: 'work_id', cardId: 'card_id', dispatchId: 'dispatch_id', actorType: 'actor_type', actorId: 'actor_id' } as const;
@@ -133,7 +136,11 @@ COMMIT;`);
       const value = filter[field as keyof typeof fields];
       if (value !== undefined) { clauses.push(`${column} = ?`); values.push(value); }
     }
-    if (filter.actions) { clauses.push(`action IN (${filter.actions.map(() => '?').join(', ')})`); values.push(...filter.actions); }
+    const lists = { actions: 'action IN', ids: 'id IN', excludeActions: 'action NOT IN' } as const;
+    for (const [field, test] of Object.entries(lists)) {
+      const list = filter[field as keyof typeof lists];
+      if (list) { clauses.push(`${test} (${list.map(() => '?').join(', ')})`); values.push(...list); }
+    }
     return this.db.prepare(`SELECT * FROM events WHERE ${clauses.join(' AND ')} ORDER BY id`).all(...values).map(row => ({
       id: Number(row.id), time: String(row.time),
       actor: { type: row.actor_type as ActorType, id: String(row.actor_id) },

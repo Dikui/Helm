@@ -74,14 +74,13 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
     // Executor steps and artifacts can number thousands per round; outcomes arrive as dispatch-ended,
     // details stay readable via get-dispatch-output and get-dispatch-artifacts.
     // Wake events appear only in wakeEvents; a failed round's wakes may predate lastStart.
-    newEvents: store.events({ workId, after: Number(lastStart ?? 0) })
+    newEvents: store.events({ workId, after: Number(lastStart ?? 0), excludeActions: ['dispatch-step', 'round-step', 'artifact-saved', 'round-agent-loaded'] })
       .filter(event => event.action !== 'message-sent' || !withdrawn.has(event.object.id))
-      .filter(event => !['dispatch-step', 'round-step', 'artifact-saved', 'round-agent-loaded'].includes(event.action))
       .filter(event => !wakeIds.includes(event.id))
       .filter(event => !resumedRoundId || event.actor.type !== 'coordinator-round' || event.actor.id !== resumedRoundId)
       .filter(event => work.status !== 'paused' || (event.action === 'message-sent' && event.actor.type === 'user'))
       .map(brief),
-    wakeEvents: store.events({ workId }).filter(event => wakeIds.includes(event.id)).map(brief),
+    wakeEvents: store.events({ workId, ids: wakeIds }).map(brief),
     recentConversation: store.conversation(workId).slice(-20),
     ...(previous && ['error', 'timed-out', 'context-overflow', 'aborted'].includes(String(previous.reason))
       ? { interruptionNotice: '上一轮中断，期间已做的操作见任务库' } : {}),

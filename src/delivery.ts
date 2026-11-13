@@ -79,7 +79,9 @@ async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeRes
 
 export interface PushResult { status: 'pushed' | 'failed'; reason?: string; baseBranch: string }
 export function deliveryDetails(store: TaskStore, workId: string) {
-  const events = store.events({ workId });
+  // Only these actions are read below; step events would otherwise dominate the read.
+  const events = store.events({ workId, actions: ['acceptance-withdrawn', 'base-merge-result', 'conflict-resolution-requested',
+    'conflict-resolution-finished', 'base-push-result', 'work-copy-cleanup', 'work-completed'] });
   const withdrawn = events.findLast(event => event.action === 'acceptance-withdrawn')?.id ?? 0;
   const current = events.filter(event => event.id > withdrawn);
   const mergeEvent = current.findLast(event => event.action === 'base-merge-result');
