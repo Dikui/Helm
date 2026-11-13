@@ -10,6 +10,7 @@ import { ExecutionRunner } from '../src/execution.js';
 import { createCard, updateCard } from '../src/graph.js';
 import { cancelCard, completeCard } from '../src/completion.js';
 import { reconcileStartup } from '../src/reconcile.js';
+import { removeCoordinatorDirectory } from '../src/coordinator-directory.js';
 import { TaskStore } from '../src/store.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 
@@ -72,6 +73,15 @@ for (const workspace of ['scratch', 'copy'] as const) test(`取消${workspace}�
   writeFileSync(join(path, 'partial'), 'x');
   assert.equal(cancelCard(ctx.store, actor, { workId: 'work', cardId: card.id, reason: '不需要' }).status, 'cancelled');
   assert.equal(existsSync(path), false);
+});
+
+test('工作结束时一并删除仍未完成的卡片的临时数据目录', async t => {
+  const ctx = fixture(t);
+  const skipped = createCard(ctx.store, actor, { workId: 'work', key: 'skipped', content: '被跳过', workspace: 'copy' });
+  const paths = [skipped.id, 'work'].map(id => join(ctx.store.dataDir, 'tmp', id));
+  for (const path of paths) { mkdirSync(path, { recursive: true }); writeFileSync(join(path, 'data'), 'x'); }
+  removeCoordinatorDirectory(ctx.store, 'work');
+  for (const path of paths) assert.equal(existsSync(path), false, path);
 });
 
 test('启动对账保留活动卡片和活动工作的临时数据目录，删除其余目录且不跟随符号链接', async t => {
