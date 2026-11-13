@@ -11,7 +11,20 @@ export type EndReason = 'completed' | 'error' | 'quota-exhausted' | 'timed-out' 
 // null means the driver has not reported that count; a reported zero stays zero.
 // incomplete: some runs in an aggregate did not report usage; the numbers are the known part.
 // cacheReadTokens / cacheWriteTokens are the parts of inputTokens read from / written to the prompt cache.
+// In an end event this is what the run itself spent, not the session's running total: the runtime adds the
+// runs of a work up as they are. A driver whose CLI reports a session total subtracts the total the resumed
+// session started from (usageSince).
 export interface TokenUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null; incomplete?: boolean }
+// The part of a cumulative total spent since `before`. A count missing on either side stays unknown.
+export function usageSince(total: TokenUsage, before: TokenUsage): TokenUsage {
+  const since = (key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens') => {
+    const now = total[key], then = before[key];
+    return now == null || then == null ? null : Math.max(0, now - then);
+  };
+  const cacheReadTokens = since('cacheReadTokens'), cacheWriteTokens = since('cacheWriteTokens');
+  return { inputTokens: since('inputTokens'), outputTokens: since('outputTokens'),
+    ...(cacheReadTokens !== null ? { cacheReadTokens } : {}), ...(cacheWriteTokens !== null ? { cacheWriteTokens } : {}) };
+}
 // Session size after the turn; drivers reporting it use the coordinator's context threshold (ADR 0017).
 export interface ContextSize { tokens: number; window?: number }
 interface HttpMcpServer { type?: 'http'; url: string; headers: Record<string, string> }
@@ -37,6 +50,7 @@ export type DriverEvent =
   | { type: 'output'; step: number; text: string }
   | { type: 'artifact'; step: number; kind: 'file' | 'test-output'; path: string }
   | { type: 'compaction'; step: number }
+  // usage: this run's own spend (see TokenUsage), unknown counts as null.
   | { type: 'end'; step: number; reason: EndReason; finalAnswer?: string; usage: TokenUsage; failure?: string;
       unavailable?: { reason: string; command?: string }; context?: ContextSize };
 export interface DriverSession {

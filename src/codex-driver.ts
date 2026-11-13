@@ -4,7 +4,7 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize } from './driver.js';
+import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, type ContextSize, usageSince } from './driver.js';
 
 interface CodexModel { model: string; displayName: string; hidden: boolean; isDefault: boolean;
   supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
@@ -166,7 +166,15 @@ export class CodexDriver implements Driver {
         },
         events: (async function* (): AsyncGenerator<DriverEvent> {
           let step = 0;
-          let usage: TokenUsage = { inputTokens: null, outputTokens: null };
+          // tokenUsage.total counts the whole thread, earlier runs included. Seen with Codex CLI 0.167.2 over two
+          // app-server processes (2026-11-12): the thread/resume response carries no usage; right after it the server
+          // replays one thread/tokenUsage/updated with the previous turn's turnId and the restored total
+          // (input 16008 / output 5), and the resumed turn then reports 32040 / 10 under its own turnId. So the
+          // baseline of a resumed run is the total notified under any other turn, and the run spent the difference
+          // (16032 / 5). No replay means the thread restored no total and counts from zero.
+          let restored: TokenUsage | undefined;
+          let total: TokenUsage | undefined;
+          const usage = (): TokenUsage => !total ? { inputTokens: null, outputTokens: null } : restored ? usageSince(total, restored) : total;
           let context: ContextSize | undefined;
           let finalAnswer = '';
           let terminalError: unknown;
@@ -176,15 +184,19 @@ export class CodexDriver implements Driver {
               if (cancelled) return;
               yield { type: 'output', step: ++step, text: JSON.stringify(message) };
               const params = message.params;
+              const reported = message.method === 'thread/tokenUsage/updated' && params?.threadId === id ? params.tokenUsage?.total : undefined;
+              const threadTotal: TokenUsage | undefined = reported && { inputTokens: reported.inputTokens ?? null, outputTokens: reported.outputTokens ?? null,
+                ...(reported.cachedInputTokens != null ? { cacheReadTokens: reported.cachedInputTokens } : {}),
+                ...(reported.cacheWriteInputTokens != null ? { cacheWriteTokens: reported.cacheWriteInputTokens } : {}) };
+              // Before turn/start answers, a resumed thread can only be reporting an earlier turn.
+              if (threadTotal && options.resumeSessionId && params.turnId && params.turnId !== turnId) { restored = threadTotal; continue; }
               if (params?.threadId !== id || (params?.turnId && turnId && params.turnId !== turnId)) continue;
               if (message.method === 'turn/plan/updated') {
                 const entries = normalizePlan(params.plan, 'step');
                 if (entries) yield { type: 'plan', step: ++step, entries };
               }
-              if (message.method === 'thread/tokenUsage/updated' && params.tokenUsage?.total) {
-                const total = params.tokenUsage.total;
-                usage = { inputTokens: total.inputTokens ?? null, outputTokens: total.outputTokens ?? null, ...(total.cachedInputTokens != null ? { cacheReadTokens: total.cachedInputTokens } : {}),
-                  ...(total.cacheWriteInputTokens != null ? { cacheWriteTokens: total.cacheWriteInputTokens } : {}) };
+              if (threadTotal) {
+                total = threadTotal;
                 // The latest request's input grows with the thread; Codex documents no other occupancy figure.
                 const last = params.tokenUsage.last;
                 if (typeof last?.inputTokens === 'number') context = { tokens: last.inputTokens + (last.outputTokens ?? 0),
@@ -202,14 +214,14 @@ export class CodexDriver implements Driver {
                 yield { type: 'end', step: ++step, reason: completed ? 'completed' : turn.status === 'interrupted' ? 'aborted'
                   : quotaExhausted(error) ? 'quota-exhausted' : 'error',
                   ...(completed ? { finalAnswer: answer } : {}), ...(failure ? { failure } : {}), ...missingVariable(failure, env),
-                  usage, ...(context ? { context } : {}) };
+                  usage: usage(), ...(context ? { context } : {}) };
                 return;
               }
             }
           } catch (error) {
             if (!cancelled) {
               yield { type: 'output', step: ++step, text: String(error) };
-              yield { type: 'end', step: ++step, reason: 'error', usage };
+              yield { type: 'end', step: ++step, reason: 'error', usage: usage() };
             }
           } finally { cancel(); }
         })(),

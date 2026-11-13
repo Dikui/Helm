@@ -23,6 +23,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     : message.method === 'model/list' ? (script.modelPages ?? [{ data: [] }])[Number(message.params.cursor ?? 0)]
     : {};
   emit({ id: message.id, result });
+  // The real app-server replays the restored thread total right after thread/resume.
+  if (message.method === 'thread/resume') for (const notification of script.resumeNotifications ?? []) emit(notification);
   if (message.method === 'initialize') emit({ method: 'fixture/environment', params: { env: process.env, cwd: process.cwd() } });
   if (message.method === 'turn/start') {
     if (script.shellProbe) {

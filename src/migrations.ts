@@ -284,4 +284,40 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE work_descriptions ADD COLUMN deliverables TEXT NOT NULL DEFAULT '';
   `,
+  `
+  -- Codex runs recorded the thread's running total; a run now records what it spent itself. Runs of one session
+  -- become differences between neighbours in start order. A run with no earlier known total, or whose total is
+  -- below the earlier one, keeps its value.
+  CREATE TEMP TABLE codex_usage AS
+    SELECT 'dispatches' AS source, id, session_id, COALESCE(started_at, created_at) AS at, rowid AS seq, usage FROM dispatches
+      WHERE session_id IS NOT NULL AND json_extract(agent_snapshot, '$.driver') = 'codex'
+        AND json_extract(usage, '$.inputTokens') IS NOT NULL AND json_extract(usage, '$.outputTokens') IS NOT NULL
+    UNION ALL
+    SELECT 'coordinator_rounds', id, session_id, started_at, rowid, usage FROM coordinator_rounds
+      WHERE session_id IS NOT NULL AND json_extract(agent_snapshot, '$.driver') = 'codex'
+        AND json_extract(usage, '$.inputTokens') IS NOT NULL AND json_extract(usage, '$.outputTokens') IS NOT NULL;
+  CREATE TEMP TABLE codex_usage_delta AS
+    WITH paired AS (
+      SELECT source, id, usage, LAG(usage) OVER (PARTITION BY source, session_id ORDER BY at, seq) AS previous FROM codex_usage
+    ), counted AS (
+      SELECT source, id, usage,
+        json_extract(usage, '$.inputTokens') - json_extract(previous, '$.inputTokens') AS input,
+        json_extract(usage, '$.outputTokens') - json_extract(previous, '$.outputTokens') AS output,
+        json_extract(usage, '$.cacheReadTokens') - json_extract(previous, '$.cacheReadTokens') AS cache_read,
+        json_extract(usage, '$.cacheWriteTokens') - json_extract(previous, '$.cacheWriteTokens') AS cache_write
+      FROM paired WHERE previous IS NOT NULL
+    ), rewritten AS (
+      SELECT source, id, cache_read, cache_write, json_set(usage, '$.inputTokens', input, '$.outputTokens', output) AS usage
+      FROM counted WHERE input >= 0 AND output >= 0
+    ), with_read AS (
+      SELECT source, id, cache_write, CASE WHEN cache_read >= 0 THEN json_set(usage, '$.cacheReadTokens', cache_read) ELSE usage END AS usage FROM rewritten
+    )
+    SELECT source, id, CASE WHEN cache_write >= 0 THEN json_set(usage, '$.cacheWriteTokens', cache_write) ELSE usage END AS usage FROM with_read;
+  UPDATE dispatches SET usage = (SELECT usage FROM codex_usage_delta WHERE source = 'dispatches' AND id = dispatches.id)
+    WHERE id IN (SELECT id FROM codex_usage_delta WHERE source = 'dispatches');
+  UPDATE coordinator_rounds SET usage = (SELECT usage FROM codex_usage_delta WHERE source = 'coordinator_rounds' AND id = coordinator_rounds.id)
+    WHERE id IN (SELECT id FROM codex_usage_delta WHERE source = 'coordinator_rounds');
+  DROP TABLE codex_usage;
+  DROP TABLE codex_usage_delta;
+  `,
 ];

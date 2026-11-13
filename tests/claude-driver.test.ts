@@ -724,6 +724,47 @@ test('Claude 未报告模型用量时保留未知，不把空 modelUsage 当成�
   assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: null, outputTokens: null });
 });
 
+// A resumed Claude session continues modelUsage from the cost-state its transcript saved (SDK 0.3.308 docs for SDKResultMessage.modelUsage).
+const costState = (modelUsage: object) => `${JSON.stringify({ type: 'user', message: { content: '"type":"cost-state"' } })}\n${JSON.stringify({ type: 'cost-state', sessionId: 'previous-round', modelUsage: { stale: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 1, cacheCreationInputTokens: 1 } } })}\n${JSON.stringify({ type: 'cost-state', sessionId: 'previous-round', modelUsage })}\n`;
+const saved = { main: { inputTokens: 4, outputTokens: 1, cacheReadInputTokens: 5, cacheCreationInputTokens: 3 } };
+
+for (const home of ['shared', 'dedicated'] as const) test(`Claude ${home} 主目录续跑时用量是本次运行的增量，减去会话记录里保存的累计`, async t => {
+  const base = await fixture(t, 'coordinator');
+  const options = { ...base, agent: { ...base.agent, home }, resumeSessionId: 'previous-round' };
+  const config = home === 'dedicated' ? join(base.cwd, '.helm', 'agent-homes', base.agent.id) : join(base.cwd, '.claude');
+  await mkdir(join(config, 'projects', '-some-project'), { recursive: true });
+  await writeFile(join(config, 'projects', '-some-project', 'previous-round.jsonl'), costState(saved));
+  const { end } = await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result()]) }), options);
+  // result(): input 35 (12 + 20 read + 3 written), output 5; saved: input 12 (4 + 5 + 3), output 1.
+  assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: 23, outputTokens: 4, cacheReadTokens: 15, cacheWriteTokens: 0 });
+});
+
+test('Claude 续跑时会话记录没有保存累计，或结果没有接着累计往上涨，用量按结果原值', async t => {
+  for (const transcript of [undefined, costState({}), costState({ main: { ...saved.main, outputTokens: 900 } })]) {
+    const options = { ...await fixture(t, 'coordinator'), resumeSessionId: 'previous-round' };
+    if (transcript) {
+      await mkdir(join(options.cwd, '.claude', 'projects', '-some-project'), { recursive: true });
+      await writeFile(join(options.cwd, '.claude', 'projects', '-some-project', 'previous-round.jsonl'), transcript);
+    }
+    const { end } = await collect(new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result()]) }), options);
+    assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
+  }
+});
+
+test('Claude 新会话不读会话记录，用量按结果原值', async t => {
+  const options = await fixture(t);
+  let requested = '';
+  const driver = new ClaudeDriver({ pathToClaudeCodeExecutable: '/test/bin/claude', query: fakeQuery([result()], args => { requested = args.options!.sessionId!; }) });
+  const session = await driver.start(options);
+  await mkdir(join(options.cwd, '.claude', 'projects', '-some-project'), { recursive: true });
+  await writeFile(join(options.cwd, '.claude', 'projects', '-some-project', `${session.id}.jsonl`), costState(saved));
+  await session.send('派单内容');
+  let end: DriverEvent | undefined;
+  for await (const event of session.events) if (event.type === 'end') end = event;
+  assert.equal(requested, session.id);
+  assert.deepEqual(end?.type === 'end' && end.usage, { inputTokens: 35, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 3 });
+});
+
 test('Claude 调度者可续跑，结束时报告最后一次主会话请求的占用和该模型窗口', async t => {
   const usage = (cached: number) => ({ input_tokens: 1, cache_read_input_tokens: cached, cache_creation_input_tokens: 2, output_tokens: 3 });
   const assistant = (model: string, used: object, parent_tool_use_id: string | null = null) => ({ type: 'assistant', parent_tool_use_id,

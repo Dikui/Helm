@@ -1,12 +1,12 @@
 import { normalizePlan } from './plans.js';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { query, type ModelInfo, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage } from './driver.js';
+import { type Driver, type DriverCapabilities, type DriverEvent, type DriverSession, type SessionOptions, type AgentAvailability, type ModelOption, type TokenUsage, usageSince } from './driver.js';
 import { driverEnvironment, findExecutable, runtimeEnvironment } from './environment.js';
 import { agentPrompt } from './prompts.js';
 import { managedProcess } from './processes.js';
@@ -25,14 +25,38 @@ async function localClaude(env: Record<string, string>) {
   return path;
 }
 
-function tokenUsage(message: SDKResultMessage): TokenUsage {
-  if (!message.modelUsage || !Object.keys(message.modelUsage).length) return { inputTokens: null, outputTokens: null };
-  return Object.values(message.modelUsage).reduce((total, model) => ({
+function tokenUsage(modelUsage: SDKResultMessage['modelUsage'] | undefined): TokenUsage {
+  if (!modelUsage || !Object.keys(modelUsage).length) return { inputTokens: null, outputTokens: null };
+  return Object.values(modelUsage).reduce((total, model) => ({
     inputTokens: total.inputTokens + model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens,
     outputTokens: total.outputTokens + model.outputTokens,
     cacheReadTokens: total.cacheReadTokens + model.cacheReadInputTokens,
     cacheWriteTokens: total.cacheWriteTokens + model.cacheCreationInputTokens,
   }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+}
+
+// modelUsage counts one query() call, but "a resumed or forked session continues from the totals its transcript
+// saved, when it has them (so the first result already carries the earlier turns)" (SDKResultMessage.modelUsage,
+// claude-agent-sdk 0.3.308). The CLI saves them as the transcript's last cost-state entry (seen with Claude Code
+// 2.1.322, which also carries startTime over a resume); the SDK exposes no reader for it. Not yet compared against
+// two real resumed runs: the local CLI was logged out on 2026-11-12.
+async function savedUsage(configDir: string, sessionId: string): Promise<TokenUsage | undefined> {
+  try {
+    for (const project of await readdir(join(configDir, 'projects'))) {
+      const transcript = await readFile(join(configDir, 'projects', project, `${sessionId}.jsonl`), 'utf8').catch(() => undefined);
+      if (transcript === undefined) continue;
+      const entry = transcript.split('\n').findLast(line => line.includes('"type":"cost-state"'));
+      const saved = tokenUsage(entry ? JSON.parse(entry).modelUsage : undefined);
+      return saved.inputTokens === null ? undefined : saved;
+    }
+  } catch { /* No readable saved total: the result is reported as it is. */ }
+  return undefined;
+}
+
+// A total that did not grow from the saved one was not continued from it.
+function runUsage(total: TokenUsage, saved: TokenUsage | undefined): TokenUsage {
+  const keys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const;
+  return saved && keys.every(key => total[key] != null && total[key] >= saved[key]!) ? usageSince(total, saved) : total;
 }
 
 function quotaExhausted(text: string) {
@@ -174,6 +198,8 @@ export class ClaudeDriver implements Driver {
         let quotaRejected = false;
         let lastRequest: { model: string; tokens: number } | undefined;
         try {
+          const saved = options.resumeSessionId
+            ? await savedUsage(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude'), id) : undefined;
           stream = runQuery({ prompt, options: sdkOptions });
           for await (const message of stream) {
             if (controller.signal.aborted) return;
@@ -203,7 +229,7 @@ export class ClaudeDriver implements Driver {
               const diagnostics = message.subtype === 'success' ? [message.result] : message.errors;
               const window = lastRequest && message.modelUsage?.[lastRequest.model]?.contextWindow;
               yield { type: 'end', step: ++step, reason: completed ? 'completed' : quotaRejected || diagnostics.some(quotaExhausted) ? 'quota-exhausted' : 'error',
-                ...(completed ? { finalAnswer: message.result } : {}), usage: tokenUsage(message),
+                ...(completed ? { finalAnswer: message.result } : {}), usage: runUsage(tokenUsage(message.modelUsage), saved),
                 ...(lastRequest ? { context: { tokens: lastRequest.tokens, ...(window ? { window } : {}) } } : {}) };
               return;
             }

@@ -465,6 +465,56 @@ test('Codex 没有用量通知时保留未知，明确零用量时保留零', as
   }
 });
 
+// Totals are the ones a real Codex 0.167.2 thread reported over two processes; see the baseline note in codex-driver.ts.
+const threadUsage = (turnId: string, total: [number, number, number], last: [number, number]) => notification('thread/tokenUsage/updated', { turnId, tokenUsage: {
+  total: { inputTokens: total[0], outputTokens: total[1], cachedInputTokens: total[2], cacheWriteInputTokens: 0 },
+  last: { inputTokens: last[0], outputTokens: last[1] }, modelContextWindow: 475000 } });
+
+for (const replay of ['resumeNotifications', 'notifications'] as const) test(`Codex 续跑时用量是本次运行的增量，不含续跑前的线程累计（恢复通知在 ${replay === 'notifications' ? '发出输入之后' : '发出输入之前'}到达）`, async t => {
+  const restored = threadUsage('turn-previous', [16008, 5, 12032], [16008, 5]);
+  const current = threadUsage('turn-scripted', [32040, 10, 27904], [16032, 5]);
+  const ctx = await fixture(t, replay === 'notifications' ? [restored, current, completed()] : [current, completed()],
+    replay === 'resumeNotifications' ? { resumeNotifications: [restored] } : {});
+  const session = await ctx.driver.start({ ...ctx.options, resumeSessionId: 'thread-scripted' });
+  t.after(() => session.cancel());
+  await session.send('续跑');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.deepEqual(end.type === 'end' && end.usage, { inputTokens: 16032, outputTokens: 5, cacheReadTokens: 15872, cacheWriteTokens: 0 });
+  assert.deepEqual(end.type === 'end' && end.context, { tokens: 16037, window: 475000 });
+});
+
+test('Codex 同一会话续跑两次，各次用量之和等于最后一次的线程累计', async t => {
+  const runs: { resume: boolean; restored?: [number, number, number]; total: [number, number, number] }[] = [
+    { resume: false, total: [100, 10, 40] },
+    { resume: true, restored: [100, 10, 40], total: [250, 25, 150] },
+    { resume: true, restored: [250, 25, 150], total: [400, 45, 290] },
+  ];
+  const sum = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+  for (const run of runs) {
+    const ctx = await fixture(t, [threadUsage('turn-scripted', run.total, [1, 1]), completed()],
+      run.restored ? { resumeNotifications: [threadUsage('turn-previous', run.restored, [1, 1])] } : {});
+    const session = await ctx.driver.start({ ...ctx.options, ...(run.resume ? { resumeSessionId: 'thread-scripted' } : {}) });
+    t.after(() => session.cancel());
+    await session.send('运行');
+    const end = (await collect(session.events)).at(-1)!;
+    assert.equal(end.type, 'end');
+    if (end.type !== 'end') return;
+    sum.inputTokens += end.usage.inputTokens!;
+    sum.outputTokens += end.usage.outputTokens!;
+    sum.cacheReadTokens += end.usage.cacheReadTokens!;
+  }
+  assert.deepEqual(sum, { inputTokens: 400, outputTokens: 45, cacheReadTokens: 290 });
+});
+
+test('Codex 续跑后只收到恢复的线程累计、没有本次用量通知时，用量记为缺失而不是零或累计值', async t => {
+  const ctx = await fixture(t, [completed()], { resumeNotifications: [threadUsage('turn-previous', [16008, 5, 12032], [16008, 5])] });
+  const session = await ctx.driver.start({ ...ctx.options, resumeSessionId: 'thread-scripted' });
+  t.after(() => session.cancel());
+  await session.send('续跑');
+  const end = (await collect(session.events)).at(-1)!;
+  assert.deepEqual(end.type === 'end' && { usage: end.usage, context: end.context }, { usage: { inputTokens: null, outputTokens: null }, context: undefined });
+});
+
 test('Codex 调度者续跑 thread 时换上本轮令牌，结束时报告最近一次请求的占用和窗口', async t => {
   const usage = (input: number, output: number) => notification('thread/tokenUsage/updated', { tokenUsage: {
     total: { inputTokens: input * 3, outputTokens: output * 3 }, last: { inputTokens: input, outputTokens: output }, modelContextWindow: 258400 } });

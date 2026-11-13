@@ -98,6 +98,11 @@ test('Codex 真实执行者：同端点结论/浏览器、无沙箱、默认主�
     const resumedMessages = await saveOutput(resumed);
     // Separates "history not sent" from "model failed to recall": the resumed request must carry the first turn's context.
     assert.ok(lastInput(resumedMessages) > lastInput(messages), '续跑请求必须带上先前对话');
+    // A resumed run records its own spend: with the first run's it adds up to the thread total (driver contract in driver.ts).
+    const threadTotal = resumedMessages.findLast((m: any) => m.method === 'thread/tokenUsage/updated').params.tokenUsage.total;
+    assert.ok(resumed.usage.inputTokens > 0 && resumed.usage.outputTokens > 0);
+    assert.deepEqual({ inputTokens: first.usage.inputTokens + resumed.usage.inputTokens, outputTokens: first.usage.outputTokens + resumed.usage.outputTokens },
+      { inputTokens: threadTotal.inputTokens, outputTokens: threadTotal.outputTokens }, '两次用量之和必须等于线程累计：续跑只记本次增量');
     assert.equal(resumed.endReason, 'completed', resumed.failure);
     assert.equal(resumed.sessionId, first.sessionId);
     assert.notEqual(resumed.sqlitePath, first.sqlitePath);
