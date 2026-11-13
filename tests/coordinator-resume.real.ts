@@ -26,8 +26,9 @@ function instructions(attempt: number, secret: string) {
     : '这是 Helm 续跑冒烟第二轮。不调用任何工具。只输出上一轮告诉你的测试编号本身，不输出其他内容。';
 }
 
+// sessionTotal reads the session's running total at the end of a round from that round's raw CLI messages.
 async function assertResumed(daemon: { call(name: string, params?: object): Promise<any>; events(): Promise<any[]>; params: object },
-  rounds: Round[], secret: string, ended: number) {
+  rounds: Round[], secret: string, ended: number, sessionTotal: (messages: any[]) => { inputTokens: number; outputTokens: number }) {
   const first = await until(daemon.events, values => values.filter(e => e.action === 'round-ended').length >= ended + 1, 240_000);
   assert.equal(first.filter(e => e.action === 'round-ended').at(-1).details.reason, 'completed');
   assert.ok(!JSON.stringify(first).includes(secret), '测试编号不能进入任务库');
@@ -45,6 +46,13 @@ async function assertResumed(daemon: { call(name: string, params?: object): Prom
   assert.equal(two.brief.coordinatorNotes, undefined);
   assert.deepEqual(two.brief.wakeEvents.map(e => e.action), ['work-stall-nudged']);
   assert.match(end.details.finalAnswer, new RegExp(secret), '续跑的会话必须记得上一轮的测试编号');
+  // Each round records its own spend, so the two add up to the session's total (driver contract in driver.ts).
+  const [fresh, resumed] = (await daemon.call('list-rounds', daemon.params)).rounds.slice(-2);
+  const total = sessionTotal((await daemon.call('get-round-output', { ...daemon.params, roundId: resumed.id }))
+    .filter((event: any) => event.type === 'output').map((event: any) => { try { return JSON.parse(event.text); } catch { return {}; } }));
+  for (const round of [fresh, resumed]) assert.ok(round.usage.inputTokens > 0 && round.usage.outputTokens > 0, JSON.stringify(round.usage));
+  assert.deepEqual({ inputTokens: fresh.usage.inputTokens + resumed.usage.inputTokens, outputTokens: fresh.usage.outputTokens + resumed.usage.outputTokens },
+    total, '两轮用量之和必须等于会话累计：续跑轮只记本轮增量');
 }
 
 test('真实 Claude 调度者第二轮续跑第一轮的会话，记得只在会话里出现过的测试编号', { skip: !enabled, timeout: 600_000 }, async t => {
@@ -57,7 +65,9 @@ test('真实 Claude 调度者第二轮续跑第一轮的会话，记得只在会
     return query({ ...args, prompt: `${instructions(attempt, secret)}\n\n启动简报：\n${args.prompt}` });
   } });
   const daemon = await fixture(t, base, 2);
-  await assertResumed(daemon, rounds, secret, 1);
+  await assertResumed(daemon, rounds, secret, 1, messages => Object.values<any>(messages.findLast(m => m.type === 'result').modelUsage).reduce((total, model) => ({
+    inputTokens: total.inputTokens + model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens,
+    outputTokens: total.outputTokens + model.outputTokens }), { inputTokens: 0, outputTokens: 0 }));
 });
 
 test('真实 Codex 调度者第二轮用 thread/resume 续跑第一轮的线程，记得只在会话里出现过的测试编号', { skip: !enabled, timeout: 600_000 }, async t => {
@@ -81,5 +91,8 @@ test('真实 Codex 调度者第二轮用 thread/resume 续跑第一轮的线程�
   };
   const daemon = await coordinatorFixture(t, driver, { rounds: 2, stagedAuth });
   await daemon.confirm();
-  await assertResumed(daemon, rounds, secret, 1);
+  await assertResumed(daemon, rounds, secret, 1, messages => {
+    const { inputTokens, outputTokens } = messages.findLast(m => m.method === 'thread/tokenUsage/updated').params.tokenUsage.total;
+    return { inputTokens, outputTokens };
+  });
 });

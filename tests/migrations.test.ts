@@ -353,3 +353,73 @@ test('旧只读卡片没有卡片副本的活动派单升级后可启动，中�
     }
   } finally { store.close(); }
 });
+
+test('Codex 用量迁移把同一会话各次运行的线程累计改写成相邻差值，别家驱动和无法还原的记录保持原值', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'helm-codex-usage-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, 'helm.db'));
+  const usage = (inputTokens: number | null, outputTokens: number | null, cache: object = {}) => JSON.stringify({ inputTokens, outputTokens, ...cache });
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    const delta = migrations.findIndex(sql => sql.includes('codex_usage'));
+    assert.ok(delta > 0);
+    for (const [index, sql] of migrations.slice(0, delta).entries()) db.exec(`${sql}\nPRAGMA user_version = ${index + 1};`);
+    db.exec(`
+      INSERT INTO projects (id, name, path, created_at) VALUES ('project', '旧项目', '/old/project', '2026-01-01');
+      INSERT INTO works (id, project_id, status, creation_key, created_at) VALUES ('work', 'project', 'executing', 'start', '2026-01-01');
+      INSERT INTO cards (id, work_id, key, content, needs_verification, status, created_at)
+        VALUES ('card', 'work', 'card', '旧卡片', 0, 'completed', '2026-01-01');
+    `);
+    const dispatch = db.prepare(`INSERT INTO dispatches (id, work_id, card_id, key, purpose, agent_id, agent_snapshot, content, status, created_at, started_at, output_path, session_id, usage)
+      VALUES (?, 'work', 'card', ?, 'execution', 'executor', ?, '旧派单', 'ended', ?, ?, '/old/steps', ?, ?)`);
+    const round = db.prepare(`INSERT INTO coordinator_rounds (id, work_id, status, session_id, started_at, event_ids, output_path, agent_snapshot, usage)
+      VALUES (?, 'work', 'ended', ?, ?, '[]', '/old/round', ?, ?)`);
+    const codex = '{"driver":"codex"}', claude = '{"driver":"claude-sdk"}';
+    // Inserted out of time order: the rewrite follows start time, not insertion.
+    dispatch.run('d3', 'd3', codex, '2026-01-03', '2026-01-03T01', 'thread-a', usage(400, 45, { cacheReadTokens: 290, cacheWriteTokens: 0 }));
+    dispatch.run('d1', 'd1', codex, '2026-01-01', '2026-01-01T01', 'thread-a', usage(100, 10, { cacheReadTokens: 40, cacheWriteTokens: 0 }));
+    dispatch.run('d2', 'd2', codex, '2026-01-02', '2026-01-02T01', 'thread-a', usage(250, 25, { cacheReadTokens: 150, cacheWriteTokens: 0 }));
+    dispatch.run('other-thread', 'other-thread', codex, '2026-01-02', '2026-01-02T02', 'thread-b', usage(70, 7));
+    dispatch.run('claude-1', 'claude-1', claude, '2026-01-01', '2026-01-01T01', 'claude-session', usage(100, 10));
+    dispatch.run('claude-2', 'claude-2', claude, '2026-01-02', '2026-01-02T01', 'claude-session', usage(250, 25));
+    // A run that reported nothing is skipped; the next one is measured from the last known total.
+    dispatch.run('gap-1', 'gap-1', codex, '2026-01-01', '2026-01-01T01', 'thread-gap', usage(100, 10));
+    dispatch.run('gap-2', 'gap-2', codex, '2026-01-02', '2026-01-02T01', 'thread-gap', usage(null, null));
+    dispatch.run('gap-3', 'gap-3', codex, '2026-01-03', null, 'thread-gap', usage(180, 30));
+    // A total below the previous one cannot be a continuation of it.
+    dispatch.run('drop-1', 'drop-1', codex, '2026-01-01', '2026-01-01T01', 'thread-drop', usage(500, 50));
+    dispatch.run('drop-2', 'drop-2', codex, '2026-01-02', '2026-01-02T01', 'thread-drop', usage(300, 60));
+    dispatch.run('no-session-1', 'no-session-1', codex, '2026-01-01', '2026-01-01T01', null, usage(100, 10));
+    dispatch.run('no-session-2', 'no-session-2', codex, '2026-01-02', '2026-01-02T01', null, usage(250, 25));
+    round.run('r2', 'thread-c', '2026-01-02', codex, usage(900, 70, { cacheReadTokens: 600 }));
+    round.run('r1', 'thread-c', '2026-01-01', codex, usage(300, 20));
+    round.run('r3', 'thread-c', '2026-01-03', codex, null);
+    round.run('claude-r1', 'claude-rounds', '2026-01-01', claude, usage(300, 20));
+    round.run('claude-r2', 'claude-rounds', '2026-01-02', claude, usage(900, 70));
+    round.run('legacy-r1', 'thread-legacy', '2026-01-01', null, usage(300, 20));
+    round.run('legacy-r2', 'thread-legacy', '2026-01-02', null, usage(900, 70));
+  } finally { db.close(); }
+  const store = new TaskStore(directory, new AgentCatalog(join(directory, 'agents')));
+  try {
+    const stored = (table: string) => Object.fromEntries(store.db.prepare(`SELECT id, usage FROM ${table}`).all()
+      .map(row => [row.id, row.usage === null ? null : JSON.parse(row.usage as string)]));
+    assert.deepEqual(stored('dispatches'), {
+      d1: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 40, cacheWriteTokens: 0 },
+      d2: { inputTokens: 150, outputTokens: 15, cacheReadTokens: 110, cacheWriteTokens: 0 },
+      d3: { inputTokens: 150, outputTokens: 20, cacheReadTokens: 140, cacheWriteTokens: 0 },
+      'other-thread': { inputTokens: 70, outputTokens: 7 },
+      'claude-1': { inputTokens: 100, outputTokens: 10 }, 'claude-2': { inputTokens: 250, outputTokens: 25 },
+      'gap-1': { inputTokens: 100, outputTokens: 10 }, 'gap-2': { inputTokens: null, outputTokens: null }, 'gap-3': { inputTokens: 80, outputTokens: 20 },
+      'drop-1': { inputTokens: 500, outputTokens: 50 }, 'drop-2': { inputTokens: 300, outputTokens: 60 },
+      'no-session-1': { inputTokens: 100, outputTokens: 10 }, 'no-session-2': { inputTokens: 250, outputTokens: 25 },
+    });
+    assert.deepEqual(stored('coordinator_rounds'), {
+      // The earlier run reported no cache count, so the later one's stays as recorded.
+      r1: { inputTokens: 300, outputTokens: 20 }, r2: { inputTokens: 600, outputTokens: 50, cacheReadTokens: 600 }, r3: null,
+      'claude-r1': { inputTokens: 300, outputTokens: 20 }, 'claude-r2': { inputTokens: 900, outputTokens: 70 },
+      'legacy-r1': { inputTokens: 300, outputTokens: 20 }, 'legacy-r2': { inputTokens: 900, outputTokens: 70 },
+    });
+    // The work now adds up to each session's last total: 400 + 70 + 350 + 180 + 800 + 350 dispatched, 900 + 1200 + 1200 scheduled.
+    assert.deepEqual(store.workUsage('work'), { inputTokens: 5450, outputTokens: 512, cacheReadTokens: 890, cacheWriteTokens: 0, incomplete: true });
+  } finally { store.close(); }
+});
