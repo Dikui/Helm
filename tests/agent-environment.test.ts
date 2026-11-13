@@ -76,12 +76,15 @@ for (const { role, purpose } of [{ role: 'coordinator', purpose: undefined }, { 
     });
     const config = { pathToClaudeCodeExecutable: '/fake/claude', query };
     const projectEnvironment = { PROJECT_RUNTIME_KEY: 'claude-project-env-shell-value-25476' };
+    let temporary: string;
     if (role === 'executor') {
       const daemon = await executorFixture(t, [], { executorDriver: new ClaudeExecutorDriver(config), purpose, projectEnvironment });
       assert.equal((await daemon.ended()).endReason, 'completed');
+      temporary = join(daemon.directory, 'data', 'tmp', daemon.dispatch.cardId);
     } else {
       const daemon = await coordinatorFixture(t, new ClaudeCoordinatorDriver(config), 1, { projectEnvironment });
       await until(daemon.events, events => events.some(event => event.action === 'round-ended' && event.details.finalAnswer === '环境探针完成'));
+      temporary = join(daemon.directory, 'data', 'tmp', daemon.work.id);
     }
     assert.ok(childEnv, '必须实际运行 Node 子进程探针');
     assert.equal(childEnv.PROJECT_RUNTIME_KEY, role === 'executor' ? projectEnvironment.PROJECT_RUNTIME_KEY : undefined);
@@ -89,9 +92,11 @@ for (const { role, purpose } of [{ role: 'coordinator', purpose: undefined }, { 
       assert.equal(childEnv[key], undefined, key);
     }
     assert.equal(childEnv.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
-    for (const key of ['PATH', 'HOME', 'USER', 'TMPDIR', 'LANG', 'LC_CTYPE', 'HTTPS_PROXY']) {
+    for (const key of ['PATH', 'HOME', 'USER', 'LANG', 'LC_CTYPE', 'HTTPS_PROXY']) {
       assert.equal(childEnv[key], process.env[key], key);
     }
+    // 临时数据目录由运行层分配：执行者按卡片，调度者按工作。
+    for (const key of ['TMPDIR', 'TMP', 'TEMP']) assert.equal(childEnv[key], temporary, key);
     assert.equal(childEnv.NO_PROXY, 'upper.test,lower.test,127.0.0.1,localhost');
     assert.equal(childEnv.no_proxy, childEnv.NO_PROXY);
     if (role === 'executor') {

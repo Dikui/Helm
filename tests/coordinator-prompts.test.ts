@@ -56,6 +56,14 @@ test('规则按是否需要项目代码选择运行位置，临时目录交付�
   assert.doesNotMatch(runtime, /readOnly/);
 });
 
+test('执行者把中间文件和临时数据放运行层分配的 $TMPDIR，不写卡片副本或其他位置', () => {
+  const runtime = readPrompt(defaultPromptDir, 'executor-runtime');
+  assert.match(runtime, /中间文件和临时数据.*\$TMPDIR/);
+  assert.match(runtime, /同卡返工和验收可复用，卡片结束后删除/);
+  assert.match(runtime, /不要写到卡片副本、主目录、项目目录或其他位置/);
+  assert.doesNotMatch(runtime, /系统临时目录/);
+});
+
 test('调度者运行约定在调度者目录工作，改代码交给卡片', () => {
   assert.match(roleRules('coordinator').runtime, /在调度者目录工作/);
   assert.match(roleRules('coordinator').runtime, /项目代码改动交给卡片执行/);

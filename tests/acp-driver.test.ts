@@ -218,7 +218,9 @@ for (const [script, reason] of [
 for (const loadGlobalConfig of [false, true]) test(`Grok 全局配置 ${loadGlobalConfig} 时保持认证、HTTP MCP、提示词、卡片沙箱与凭据禁读`, async t => {
   const ctx = await acpFixture(t);
   const processes: number[] = [];
-  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig }, onProcess: process => { processes.push(process.pid); } });
+  const temporary = join(ctx.home, 'tmp-card');
+  const session = await ctx.driver.start({ ...ctx.options, agent: { ...ctx.agent, loadGlobalConfig },
+    env: { ...ctx.options.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary }, onProcess: process => { processes.push(process.pid); } });
   t.after(() => session.cancel());
   await session.send('实现派单');
   const events = await collect(session.events);
@@ -236,6 +238,7 @@ for (const loadGlobalConfig of [false, true]) test(`Grok 全局配置 ${loadGlob
   assert.equal(spawn.env.GH_TOKEN, 'helm-push-disabled');
   assert.ok(spawn.env.GIT_CONFIG_PARAMETERS);
   assert.equal(spawn.env.GIT_CONFIG_COUNT, undefined);
+  for (const key of ['TMPDIR', 'TMP', 'TEMP']) assert.equal(spawn.env[key], temporary, key);
   assert.equal(spawn.cwd, ctx.cwd);
   assert.deepEqual(requests.map(r => r.method), ['initialize', 'authenticate', 'session/new', 'session/set_config_option', 'session/prompt']);
   assert.equal(requests[0].params.protocolVersion, 1);

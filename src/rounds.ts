@@ -12,6 +12,7 @@ import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { projectEnvironmentNames } from './project-environment.js';
 import { readPrompt } from './prompts.js';
 import { createCoordinatorDirectory } from './coordinator-directory.js';
+import { tempEnvironment } from './temp-directory.js';
 import { removeDriverState } from './driver-state.js';
 import { recordRoundOutput } from './outputs.js';
 
@@ -315,7 +316,7 @@ export class RoundScheduler {
       const session = await driver.start({
         agent,
         cwd,
-        env: agentEnvironment(agent),
+        env: { ...agentEnvironment(agent), ...tempEnvironment(this.store, workId) },
         dataDir: join(this.store.dataDir, 'rounds', id),
         mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
         ...(resume ? { resumeSessionId: resume.sessionId } : {}),

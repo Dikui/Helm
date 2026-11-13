@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { removeScratchDirectory } from './scratch.js';
+import { removeTempDirectory } from './temp-directory.js';
 import { projectPath } from './alignment.js';
 import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
 import { copyGitRecovery, dispatchGit, listDispatches, markOutdated, revokeDispatch, verificationCommit } from './dispatch.js';
@@ -14,6 +15,7 @@ function wakeAutoCompletion(store: TaskStore, actor: Actor, card: Card, event: H
 }
 
 export function removeCardCopy(store: TaskStore, card: Card) {
+  removeTempDirectory(store, card.id);
   if (card.workspace === 'scratch') { removeScratchDirectory(store, card.workId, card.id); return; }
   if (!card.workPath && !card.cardBranch) return;
   const project = projectPath(store, card.workId);
@@ -73,7 +75,7 @@ export function completeCard(store: TaskStore, actor: Actor, params: { workId: s
     if (card.needsVerification && !markOutdated(store, passed).some(item => !item.outdated)) {
       throw new RuleError('VERIFICATION_OUTDATED', '当前临时目录没有有效的通过验收票，须重新验收。');
     }
-    removeScratchDirectory(store, card.workId, card.id);
+    removeCardCopy(store, card);
     const checkedCommit = null;
     return store.transaction(() => {
       store.db.prepare("UPDATE cards SET status = 'completed' WHERE id = ?").run(card.id);

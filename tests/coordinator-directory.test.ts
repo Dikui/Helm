@@ -82,7 +82,9 @@ for (const outcome of ['completed', 'cancelled'] as const) test(`工作 ${outcom
     value => value.result.rounds.filter((round: any) => round.status === 'ended').length >= count);
   await ended(1);
   const cwd = join(daemon.directory, 'data', 'coordinator', work.id);
+  const temporary = join(daemon.directory, 'data', 'tmp', work.id);
   assert.equal(await readFile(join(cwd, 'notes.txt'), 'utf8'), '调度文件');
+  assert.ok(existsSync(temporary), '调度轮次使用工作的临时数据目录');
   if (outcome === 'completed') {
     const gate = (await daemon.call('list-pending')).result[0];
     assert.equal((await daemon.call('decide-gate', { ...params, gateId: gate.id, descriptionId: gate.description.id, decision: 'confirm' })).ok, true);
@@ -92,11 +94,15 @@ for (const outcome of ['completed', 'cancelled'] as const) test(`工作 ${outcom
   } else assert.equal((await daemon.call('cancel-work', params)).ok, true);
   assert.equal((await daemon.call('get-work', params)).result.status, outcome);
   assert.equal(existsSync(cwd), false);
+  assert.equal(existsSync(temporary), false);
   assert.deepEqual((await daemon.call('list-work-files', params)).result, []);
-  await mkdir(cwd, { recursive: true });
-  await writeFile(join(cwd, 'leftover.txt'), '清理中断的残留');
+  for (const path of [cwd, temporary]) {
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, 'leftover.txt'), '清理中断的残留');
+  }
   assert.equal((await daemon.call('delete-work', { ...params, confirm: true })).ok, true);
   assert.equal(existsSync(cwd), false);
+  assert.equal(existsSync(temporary), false);
 });
 
 test('启动对账保留活动工作的调度者目录，清理终态、孤儿与错误位置，重复对账不丢文件', async t => {

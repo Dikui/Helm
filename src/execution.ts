@@ -6,6 +6,7 @@ import { abortCardGit, activeDispatch, createDispatch, dispatchGit, getDispatch,
 import { cardDetails, refreshCardReadiness } from './graph.js';
 import { projectPath } from './alignment.js';
 import { agentEnvironment } from './agents.js';
+import { tempEnvironment } from './temp-directory.js';
 import { cleanupWorktreeProcesses, type ManagedProcess } from './processes.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { removeDriverState } from './driver-state.js';
@@ -266,7 +267,7 @@ export class ExecutionRunner {
         const starting = this.drivers[dispatch.agent.driver]!.start({
           dataDir: join(dispatch.outputPath, '..'),
           agent: dispatch.agent, cwd: workPath, env: { ...agentEnvironment(dispatch.agent, pushUrls), ...environment,
-            HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end) },
+            HELM_PORT_START: String(ports.start), HELM_PORT_END: String(ports.end), ...tempEnvironment(this.store, card.id) },
           projectEnvironmentNames: Object.keys(environment),
           mcpServers: { ...mcpServers, helm: { url: this.mcpUrl, headers: { Authorization: `Bearer ${token}` } } },
           ...(dispatch.resumeSessionId ? { resumeSessionId: dispatch.resumeSessionId } : {}),

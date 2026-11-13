@@ -14,6 +14,7 @@ import { reconcileScratchDirectories } from './scratch.js';
 import { projectEnvironment, protectDispatchEnvironment, redactDispatchText } from './project-environment.js';
 import { projectGitRoot } from './project-reads.js';
 import { reconcileCoordinatorDirectories } from './coordinator-directory.js';
+import { reconcileTempDirectories } from './temp-directory.js';
 import { removeDriverState, removeEndedDriverState } from './driver-state.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
@@ -161,6 +162,7 @@ export async function reconcileStartup(store: TaskStore) {
     await compressWorkOutputs(store, work.id);
   }
   reconcileCoordinatorDirectories(store);
+  reconcileTempDirectories(store);
   store.transaction(() => {
     store.db.prepare(`INSERT OR IGNORE INTO wake_queue (event_id, work_id)
       SELECT e.id, c.work_id FROM cards c JOIN works w ON w.id = c.work_id

@@ -158,7 +158,8 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
     notification('item/completed', { item: { id: 'answer', type: 'agentMessage', text: '已完成', phase: 'final_answer' } }),
     completed(),
   ]);
-  ctx.options.env = { ...agentEnvironment(ctx.options.agent!), ...ctx.options.env };
+  const temporary = join(ctx.directory, 'tmp-card');
+  ctx.options.env = { ...agentEnvironment(ctx.options.agent!), ...ctx.options.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary };
   const session = await ctx.driver.start(ctx.options);
   t.after(() => session.cancel());
   await session.send('实现派单');
@@ -191,6 +192,7 @@ test('Codex 执行者按会话配置沙箱、MCP、fast、skills、主目录并�
   assert.equal(env.CODEX_SQLITE_HOME, session.sqlitePath);
   assert.equal(env.NO_PROXY, 'example.test,internal.test,127.0.0.1,localhost');
   assert.equal(env.no_proxy, env.NO_PROXY);
+  for (const key of ['TMPDIR', 'TMP', 'TEMP']) assert.equal(env[key], temporary, key);
   assert.ok(events.filter(e => e.type === 'output').some(e => e.text.includes('initializeDurationMs')));
 });
 
