@@ -12,6 +12,7 @@ import { cancelCard, completeCard } from './completion.js';
 import type { UserOperations } from './user-operations.js';
 import { requestReview, reviewDetails } from './review.js';
 import { reviewReportSchema } from './review-report.js';
+import { setTempRoot, tempRoot } from './temp-directory.js';
 import { checkOutputUsage, deleteWork, deleteWorkOutputs, exportWorkOutputs, pendingOutputWarning } from './outputs.js';
 import { pendingAgents } from './availability.js';
 import { listWorks, readWork } from './work-reads.js';
@@ -349,6 +350,8 @@ export const operations: readonly Operation[] = [
       outputThresholdBytes: store.db.prepare('SELECT output_threshold_bytes FROM settings WHERE id = 1').get()!.output_threshold_bytes,
       outputTotalBytes: store.db.prepare('SELECT output_total_bytes FROM settings WHERE id = 1').get()!.output_total_bytes,
       outputThresholdExceeded: Boolean(store.db.prepare('SELECT output_threshold_exceeded FROM settings WHERE id = 1').get()!.output_threshold_exceeded),
+      tempRoot: store.db.prepare('SELECT temp_root FROM settings WHERE id = 1').get()!.temp_root ?? null,
+      tempDirectory: tempRoot(store),
       runningDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'running'`).get()!.count,
       queuedDispatches: store.db.prepare(`SELECT count(*) AS count FROM dispatches WHERE status = 'queued'`).get()!.count,
     }),
@@ -365,6 +368,11 @@ export const operations: readonly Operation[] = [
       checkOutputUsage(store);
       return { outputThresholdBytes: thresholdBytes };
     },
+  }),
+  operation({
+    name: 'set-temp-root', description: '设置临时数据目录的位置（绝对路径，在其下建 helm-tmp；null 或空恢复默认的 <数据目录>/tmp）；旧位置的临时数据随即删除，有运行中的派单或调度轮次时拒绝', callers: ['user'], keyed: false, mutates: true, transactional: false,
+    schema: z.object({ path: z.string().nullable() }).strict(),
+    execute: ({ store, actor }, { path }) => setTempRoot(store, actor, path),
   }),
   operation({
     name: 'get-prompts', description: '读取调度者和执行者的内置规则提示词', callers: ['user'], keyed: false, mutates: false,

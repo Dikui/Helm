@@ -7,7 +7,8 @@ import { SaveFeedback } from './SaveFeedback.js';
 import type { Settings } from '../../shared/types.js';
 import { useSettingsSave } from './useSettingsSave.js';
 
-type NumberField = { name: keyof RuntimeSettings; label: MessageKey; factor: number; min: number; max: number; unit?: MessageKey | 'GB' };
+type NumericSetting = { [K in keyof RuntimeSettings]: RuntimeSettings[K] extends number ? K : never }[keyof RuntimeSettings];
+type NumberField = { name: NumericSetting; label: MessageKey; factor: number; min: number; max: number; unit?: MessageKey | 'GB' };
 const fields = {
   concurrency: [{ name: 'concurrencyLimit', label: 'concurrencyLimit', factor: 1, min: 1, max: Number.MAX_SAFE_INTEGER }],
   dispatch: [
@@ -31,6 +32,7 @@ export function RuntimeSection() {
       <RuntimeForm title="dispatchWatchdog" fields={fields.dispatch} settings={data} operation="set-dispatch-watchdog" params={value => ({ wallTimeoutMs: value.dispatchWallTimeoutMs, idleTimeoutMs: value.dispatchIdleTimeoutMs })} />
       <RuntimeForm title="roundWatchdog" fields={fields.round} settings={data} operation="set-round-watchdog" params={value => ({ totalTimeoutMs: value.roundTotalTimeoutMs, idleTimeoutMs: value.roundIdleTimeoutMs })} />
       <RuntimeForm title="outputThreshold" hint="outputHint" fields={fields.output} settings={data} operation="set-output-threshold" params={value => ({ thresholdBytes: value.outputThresholdBytes })} />
+      <TempRootForm settings={data} reload={reload} />
     </>}
   </section>;
 }
@@ -62,6 +64,24 @@ function RuntimeForm({ title, hint, fields, settings, operation, params }: {
       disabled={save.pending} value={draft[field.name] ?? String(settings[field.name] / field.factor)} aria-invalid={errors.includes(field.name)} aria-describedby={errors.includes(field.name) ? `runtime-${field.name}-error` : undefined}
       onChange={event => { setDraft({ ...draft, [field.name]: event.target.value }); setErrors(errors.filter(name => name !== field.name)); save.clear(); }} />{field.unit && <span>{field.unit === 'GB' ? 'GB' : t(field.unit)}</span>}</span></div>
       {errors.includes(field.name) && <small className="settings-reason" id={`runtime-${field.name}-error`}>{t('invalidNumber')}</small>}</div>)}
+    <div className="row settings-group-save"><SaveFeedback {...save} /><span className="muted">{t('independentSave')}</span><button className="btn" disabled={save.pending}>{t('save')}</button></div>
+  </form>;
+}
+function TempRootForm({ settings, reload }: { settings: RuntimeSettings; reload: () => void }) {
+  const { t } = useI18n();
+  const { api } = useData();
+  const [draft, setDraft] = useState<string>();
+  const save = useSettingsSave();
+  const value = draft ?? settings.tempRoot ?? '';
+  async function submit(event: FormEvent) {
+    event.preventDefault(); save.clear();
+    await save.run(async () => { await api.call('set-temp-root', { path: value.trim() || null }); setDraft(undefined); reload(); });
+  }
+  return <form className="settings-box settings-runtime-group" aria-label={t('tempRoot')} onSubmit={submit} noValidate aria-busy={save.pending}><h3>{t('runtime')} · {t('tempRoot')}</h3><p className="muted">{t('tempRootHint')}</p>
+    <div className="settings-path"><label htmlFor="runtime-tempRoot">{t('tempRootLocation')}</label>
+      <input id="runtime-tempRoot" type="text" spellCheck={false} autoComplete="off" placeholder={t('tempRootDefault')} disabled={save.pending} value={value}
+        onChange={event => { setDraft(event.target.value); save.clear(); }} /></div>
+    <p className="settings-meta">{t('tempRootCurrent')}: <code>{settings.tempDirectory}</code></p>
     <div className="row settings-group-save"><SaveFeedback {...save} /><span className="muted">{t('independentSave')}</span><button className="btn" disabled={save.pending}>{t('save')}</button></div>
   </form>;
 }

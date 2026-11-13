@@ -381,6 +381,31 @@ test('运行设置校验后分别保存并发、派单和轮次看门狗及输�
   expect((screen.getByRole('spinbutton', { name: '输出提示阈值' }) as HTMLInputElement).value).toBe('0.5');
 });
 
+test('临时数据目录的位置可填写和清空，保存后显示当前目录；相对路径显示错误', async () => {
+  daemon = await uiFixture();
+  window.history.replaceState(null, '', '/settings/runtime');
+  render(<App baseUrl={daemon.url} />);
+  const form = await screen.findByRole('form', { name: '临时数据目录' });
+  const initial = (await daemon.call('get-settings')).result;
+  expect(initial.tempRoot).toBe(null);
+  expect(within(form).getByText(initial.tempDirectory)).toBeTruthy();
+  change('存放位置', 'relative/path');
+  fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+  await within(form).findByText('临时数据目录的位置必须是绝对路径。');
+  const location = await mkdtemp(join(tmpdir(), 'helm-ui-temp-root-'));
+  try {
+    change('存放位置', location);
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+    await within(form).findByText('已保存');
+    await within(form).findByText(join(location, 'helm-tmp'));
+    expect((await daemon.call('get-settings')).result).toMatchObject({ tempRoot: location, tempDirectory: join(location, 'helm-tmp') });
+    change('存放位置', '');
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+    await within(form).findByText(initial.tempDirectory);
+    expect((await daemon.call('get-settings')).result.tempRoot).toBe(null);
+  } finally { await rm(location, { recursive: true, force: true }); }
+});
+
 test('新建 Agent 使用独立路由，允许 id 为 new；离开未保存 Agent 时可继续编辑', async () => {
   daemon = await uiFixture();
   window.history.replaceState(null, '', '/settings/agents/claude-executor');

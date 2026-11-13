@@ -24,4 +24,5 @@ export interface Project { id: string; name: string; path: string; defaultCoordi
 export interface RuntimeSettings {
   concurrencyLimit: number; dispatchWallTimeoutMs: number; dispatchIdleTimeoutMs: number;
   roundTotalTimeoutMs: number; roundIdleTimeoutMs: number; outputThresholdBytes: number;
+  tempRoot: string | null; tempDirectory: string;
 }

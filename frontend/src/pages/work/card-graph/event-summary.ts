@@ -29,6 +29,7 @@ export const eventActionLabels: Record<string, MessageKey> = {
   'project-registered': 'eventProjectRegistered',
   'prompt-set': 'eventPromptSet',
   'round-watchdog-set': 'eventRoundWatchdogSet',
+  'temp-root-set': 'eventTempRootSet',
   'tool-install-failed': 'eventToolInstallFailed',
   'tool-installed': 'eventToolInstalled',
   'work-deleted': 'eventWorkDeleted',

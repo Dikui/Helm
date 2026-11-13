@@ -324,4 +324,7 @@ export const migrations: readonly string[] = [
   ALTER TABLE dispatches ADD COLUMN output_bytes INTEGER;
   ALTER TABLE coordinator_rounds ADD COLUMN output_bytes INTEGER;
   `,
+  `
+  ALTER TABLE settings ADD COLUMN temp_root TEXT;
+  `,
 ];

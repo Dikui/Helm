@@ -11,6 +11,7 @@ import { createCard, updateCard } from '../src/graph.js';
 import { cancelCard, completeCard } from '../src/completion.js';
 import { reconcileStartup } from '../src/reconcile.js';
 import { removeCoordinatorDirectory } from '../src/coordinator-directory.js';
+import { setTempRoot, tempPath } from '../src/temp-directory.js';
 import { TaskStore } from '../src/store.js';
 import { fixtureAgentDir } from './helmd-fixture.js';
 
@@ -109,4 +110,42 @@ test('启动对账保留活动卡片和活动工作的临时数据目录，删�
     for (const id of [completed.id, 'ended', endedWorkCard.id, 'orphan', 'linked', 'stray-file']) assert.equal(existsSync(join(root, id)), false, id);
     assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'outside');
   }
+});
+
+test('临时数据目录的位置可配置：在其下建 helm-tmp，旧位置的数据删除，空值恢复默认', async t => {
+  const ctx = fixture(t);
+  const card = createCard(ctx.store, actor, { workId: 'work', key: 'card', content: '调研', workspace: 'scratch' });
+  const defaultRoot = join(ctx.store.dataDir, 'tmp');
+  mkdirSync(join(defaultRoot, card.id), { recursive: true });
+  writeFileSync(join(defaultRoot, card.id, 'old'), 'x');
+  const location = join(ctx.directory, 'fast-disk');
+  mkdirSync(location);
+  writeFileSync(join(location, 'user-file'), '用户自己的文件');
+  assert.deepEqual(setTempRoot(ctx.store, actor, `${location}/`), { tempRoot: location, tempDirectory: join(location, 'helm-tmp') });
+  assert.equal(existsSync(defaultRoot), false, '旧位置的临时数据已删除');
+  await ctx.run(card.id);
+  assert.equal(ctx.starts[0]!.env.TMPDIR, join(location, 'helm-tmp', card.id));
+  // Reconciling the configured root only touches helm-tmp, never the user's files beside it.
+  await ctx.runner.close();
+  mkdirSync(join(location, 'helm-tmp', 'orphan'));
+  await reconcileStartup(ctx.store);
+  assert.equal(existsSync(join(location, 'helm-tmp', 'orphan')), false);
+  assert.equal(readFileSync(join(location, 'user-file'), 'utf8'), '用户自己的文件');
+  assert.equal(setTempRoot(ctx.store, actor, ' ').tempDirectory, defaultRoot);
+  assert.equal(tempPath(ctx.store, card.id), join(defaultRoot, card.id));
+  assert.equal(existsSync(join(location, 'helm-tmp')), false);
+  assert.equal(readFileSync(join(location, 'user-file'), 'utf8'), '用户自己的文件');
+  assert.equal(ctx.store.events({ actions: ['temp-root-set'] }).length, 2);
+});
+
+test('临时数据目录的位置拒绝相对路径、与当前目录嵌套的位置，以及有运行中的派单时修改', async t => {
+  const ctx = fixture(t);
+  assert.throws(() => setTempRoot(ctx.store, actor, 'relative/path'), { code: 'INVALID_TEMP_ROOT' });
+  assert.throws(() => setTempRoot(ctx.store, actor, join(ctx.store.dataDir, 'tmp')), { code: 'INVALID_TEMP_ROOT' });
+  assert.throws(() => setTempRoot(ctx.store, actor, join(ctx.store.dataDir, 'tmp', 'nested')), { code: 'INVALID_TEMP_ROOT' });
+  const card = createCard(ctx.store, actor, { workId: 'work', key: 'card', content: '调研', workspace: 'scratch' });
+  const dispatch = await createDispatch(ctx.store, actor, { workId: 'work', cardId: card.id, key: 'running', agentId: 'claude-executor', purpose: 'execution' });
+  ctx.store.db.prepare("UPDATE dispatches SET status = 'running' WHERE id = ?").run(dispatch.id);
+  assert.throws(() => setTempRoot(ctx.store, actor, join(ctx.directory, 'elsewhere')), { code: 'TEMP_ROOT_IN_USE' });
+  assert.equal(ctx.store.events({ actions: ['temp-root-set'] }).length, 0);
 });
