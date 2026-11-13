@@ -10,7 +10,7 @@ export const runtimeEnvironmentNames = [
     ['USER', 'LOGNAME'], // User identity expected by shells and developer tools.
     ['SHELL'], // Shell used by the CLI's Bash tool.
     ['LANG', 'LANGUAGE', 'LC_ALL', 'LC_COLLATE', 'LC_CTYPE', 'LC_MESSAGES', 'LC_MONETARY', 'LC_NUMERIC', 'LC_TIME'], // Locale and text encoding.
-    ['TMPDIR', 'TMP', 'TEMP'], // Host-selected temporary storage, including macOS sandbox paths.
+    ['TMPDIR', 'TMP', 'TEMP'], // Host temporary storage for probes; dispatches and rounds override it (temp-directory.ts).
     ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'], // Network routing and local MCP bypass.
 ].flat();
 
