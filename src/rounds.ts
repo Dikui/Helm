@@ -18,6 +18,7 @@ import { recordRoundOutput } from './outputs.js';
 
 export interface StartupBrief {
   projectPath: string;
+  originalProjectPath: string;
   projectInstructionPaths: string[];
   projectEnvironmentNames: string[];
   work: Work;
@@ -45,7 +46,8 @@ function executingRulesHash(rules: string | undefined) {
 export function startupBrief(store: TaskStore, workId: string, wakeIds: number[], resumedRoundId?: string, phaseRules?: string): StartupBrief {
   const withdrawn = new Set(store.db.prepare('SELECT id FROM messages WHERE work_id = ? AND withdrawn_at IS NOT NULL').all(workId).map(row => String(row.id)));
   const work = store.work(workId);
-  const codePath = work.workPath ?? projectPath(store, workId);
+  const originalProjectPath = projectPath(store, workId);
+  const codePath = work.workPath ?? originalProjectPath;
   const versions = store.descriptions(workId);
   const description = versions.at(-1);
   const lastStart = store.db.prepare(`SELECT MAX(id) AS id FROM events WHERE work_id = ? AND action = 'round-started'`).get(workId)!.id;
@@ -60,6 +62,7 @@ export function startupBrief(store: TaskStore, workId: string, wakeIds: number[]
   const rulesChanged = rules !== undefined && previousRules !== executingRulesHash(rules);
   return {
     projectPath: codePath,
+    originalProjectPath,
     projectInstructionPaths: ['AGENTS.md', 'CLAUDE.md'].map(name => join(codePath, name))
       .filter(path => statSync(path, { throwIfNoEntry: false })?.isFile()),
     projectEnvironmentNames: projectEnvironmentNames(store, work.projectId),

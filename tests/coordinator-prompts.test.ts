@@ -5,9 +5,10 @@ import { defaultPromptDir, readPrompt, roleRules } from '../src/prompts.js';
 test('默认调度者规则缩减固定输入并保留跨轮与派单约定', () => {
   const rules = roleRules('coordinator');
   const executing = readPrompt(defaultPromptDir, 'coordinator-executing');
-  assert.ok(Buffer.byteLength(rules.role) <= 6_650, '角色规则预算 6650 字节（含四部分工作说明）');
+  assert.ok(Buffer.byteLength(rules.role) <= 7_000, '角色规则预算 7000 字节（含四部分工作说明及手动合入指引）');
   assert.ok(Buffer.byteLength(executing) <= 11_550, '执行阶段规则预算 11550 字节（含先诊断、按证据停卡、交付核对）');
-  for (const convention of ['helm MCP', 'resumed', 'phaseRules', 'write-coordinator-notes', 'send-message', 'projectPath', 'projectInstructionPaths', '新会话先读'])
+  // Issue #31: small regression for the original-project path used in manual merge guidance.
+  for (const convention of ['helm MCP', 'resumed', 'phaseRules', 'write-coordinator-notes', 'send-message', 'projectPath', 'originalProjectPath', 'projectInstructionPaths', '新会话先读'])
     assert.ok(rules.role.includes(convention), `角色规则保留 ${convention}`);
   for (const convention of ['submit-conclusion', 'complete-card', 'request-review', 'outdated', 'autoFlow'])
     assert.ok(executing.includes(convention), `执行阶段规则保留 ${convention}`);
