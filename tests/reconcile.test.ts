@@ -360,7 +360,7 @@ for (const interruptedAt of ['post-commit', 'post-commit-formatted', 'pre-push']
 
 // #33, medium/spec. Substitute only the Git executable boundary to stop at the
 // unchecked-out branch's atomic update; all repository operations remain real.
-for (const interruptedAt of ['before', 'after']) test(`未检出基准在更新 ref ${interruptedAt} 中断，重启只交付一个压缩提交`, async t => {
+for (const interruptedAt of ['before', 'after', 'after-side-merge']) test(`未检出基准在更新 ref ${interruptedAt} 中断，重启只交付一个压缩提交`, async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
@@ -381,7 +381,7 @@ const run = () => {
   const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
-if (!targeted || ${JSON.stringify(interruptedAt)} === 'after') run();
+if (!targeted || ${JSON.stringify(interruptedAt)} !== 'before') run();
 if (targeted) {
   process.chdir(${JSON.stringify(daemon.work.workPath)});
   writeFileSync(${JSON.stringify(marker)}, 'reached');
@@ -397,9 +397,10 @@ if (targeted) {
   await merging;
   await rm(wrapper);
   // A later local base commit must not hide a squash whose result was not saved.
-  if (interruptedAt === 'after') {
+  if (interruptedAt !== 'before') {
     const tree = git(daemon.repo, 'rev-parse', 'main^{tree}');
-    const later = git(daemon.repo, ...identity, 'commit-tree', tree, '-p', interruptedTip, '-m', 'later base commit');
+    const parents = interruptedAt === 'after-side-merge' ? ['-p', baseline, '-p', interruptedTip] : ['-p', interruptedTip];
+    const later = git(daemon.repo, ...identity, 'commit-tree', tree, ...parents, '-m', 'later base commit');
     git(daemon.repo, 'update-ref', 'refs/heads/main', later, interruptedTip);
   }
   const expectedCount = interruptedAt === 'before' ? '1' : '2';

@@ -33,7 +33,7 @@ async function interruptedSquash(store: TaskStore, workId: string, project: stri
   for (const event of events.filter(event => event.id > withdrawn && event.action === 'base-merge-started').reverse()) {
     const intent = event.details as { baseBranch: string; baseCommit: string; workCommit: string; mergeTree: string };
     if (intent.baseBranch !== baseBranch || intent.workCommit !== workCommit) continue;
-    const commits = await git(project, 'log', '--first-parent', '--format=%H%x00%P%x00%T', `${intent.baseCommit}..${baseCommit}`, '--');
+    const commits = await git(project, 'log', '--format=%H%x00%P%x00%T', `${intent.baseCommit}..${baseCommit}`, '--');
     for (const line of commits.trim().split('\n')) {
       const [commit, parent, tree] = line.split('\0');
       if (parent !== intent.baseCommit || !commit) continue;
