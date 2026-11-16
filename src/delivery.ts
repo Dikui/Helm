@@ -3,11 +3,12 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { projectPath } from './alignment.js';
-import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
+import { branchExists, branchIsContained, branchWasSquashed, deleteBranch, workHistoryRef } from './branch-cleanup.js';
 import { RuleError, TaskStore, type Actor } from './store.js';
 import { compressWorkOutputs } from './outputs.js';
 import type { ConflictResolution } from './conflict-resolution.js';
 import { removeCoordinatorDirectory } from './coordinator-directory.js';
+import { readWork } from './work-reads.js';
 
 const runtime = { type: 'runtime', id: 'helmd' } as const;
 const exec = promisify(execFile);
@@ -24,6 +25,27 @@ export interface MergeResult {
   baseBranch: string | null; workBranch: string; workCommit?: string; commit?: string; conflictFiles?: string[]; reason?: string;
 }
 
+// Git may have committed before the daemon could record the result. Match the
+// single-parent commit against a durable intent, even if the base advanced later.
+async function interruptedSquash(store: TaskStore, workId: string, project: string, baseBranch: string, baseCommit: string, workCommit: string) {
+  const events = store.events({ workId, actions: ['base-merge-started', 'acceptance-withdrawn'] });
+  const withdrawn = events.findLast(event => event.action === 'acceptance-withdrawn')?.id ?? 0;
+  for (const event of events.filter(event => event.id > withdrawn && event.action === 'base-merge-started').reverse()) {
+    const intent = event.details as { baseBranch: string; baseCommit: string; workCommit: string; mergeTree: string };
+    if (intent.baseBranch !== baseBranch || intent.workCommit !== workCommit) continue;
+    const commits = await git(project, 'log', '--first-parent', '--format=%H%x00%P%x00%T', `${intent.baseCommit}..${baseCommit}`, '--');
+    for (const line of commits.trim().split('\n')) {
+      const [commit, parent, tree] = line.split('\0');
+      if (parent !== intent.baseCommit || !commit) continue;
+      if (tree === intent.mergeTree) return commit;
+      // Project pre-commit hooks may format the staged tree. The work trailer
+      // still identifies the commit that was made for this durable intent.
+      const message = await git(project, 'show', '-s', '--format=%B', commit);
+      if (message.split('\n').includes(`Helm-Work: ${workId}`)) return commit;
+    }
+  }
+}
+
 async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeResult> {
   const work = store.work(workId);
   const project = projectPath(store, workId);
@@ -35,6 +57,8 @@ async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeRes
     const baseCommit = (await git(project, 'rev-parse', '--verify', `${baseBranch}^{commit}`)).trim();
     const workCommit = (await git(project, 'rev-parse', '--verify', `refs/heads/${work.workBranch}^{commit}`)).trim();
     result.workCommit = workCommit;
+    const recovered = await interruptedSquash(store, workId, project, baseBranch, baseCommit, workCommit);
+    if (recovered) return { ...result, status: 'already-contained', commit: recovered };
     let tree: string;
     try {
       tree = (await git(project, 'merge-tree', '--write-tree', '--name-only', '-z', baseCommit, workCommit)).split('\0')[0]!;
@@ -53,24 +77,36 @@ async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeRes
     try { checkedOut = (await git(project, 'symbolic-ref', '-q', 'HEAD')).trim(); }
     catch (error) { if ((error as { code?: number }).code !== 1) throw error; }
     const identity = ['-c', 'user.name=Helm', '-c', 'user.email=helm@localhost', '-c', 'commit.gpgsign=false'];
+    const message = [readWork(store, workId).title || `工作 ${workId}`, `Helm-Work: ${workId}`];
+    // Both delivery paths must leave an intent before updating the target ref.
+    const recordIntent = () => store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-started',
+      { baseBranch, baseCommit, workCommit, mergeTree: tree }, { workId }));
     let commit: string;
     if (checkedOut === baseBranch) {
       const mergeHead = resolve(project, (await git(project, 'rev-parse', '--git-path', 'MERGE_HEAD')).trim());
       const alreadyMerging = existsSync(mergeHead);
       if (alreadyMerging) throw new Error('项目目录已有未结束的合并。');
-      // This durable intent distinguishes our interrupted merge from a user's merge.
-      store.transaction(() => store.appendEvent(runtime, { type: 'work', id: workId }, 'base-merge-started',
-        { baseBranch, baseCommit, workCommit, mergeTree: tree }, { workId }));
+      // Never include the user's staged changes in the work's squash commit.
+      await git(project, 'diff', '--cached', '--quiet');
+      recordIntent();
       try {
-        await git(project, ...identity, '-c', 'merge.autoStash=false', 'merge', '--no-ff', '--commit', '--no-edit', workCommit);
+        await git(project, ...identity, '-c', 'merge.autoStash=false', 'merge', '--squash', '--no-commit', workCommit);
+        await git(project, ...identity, 'commit', '--allow-empty', '-m', message[0]!, '-m', message[1]!);
       } catch (error) {
         // Only abort a merge started here; an existing user merge belongs to the user.
         if (!alreadyMerging && existsSync(mergeHead) && readFileSync(mergeHead, 'utf8').trim() === workCommit) await git(project, 'merge', '--abort');
+        else if ((await git(project, 'rev-parse', 'HEAD')).trim() === baseCommit
+          && !(await git(project, 'ls-files', '--unmerged')).trim() && (await git(project, 'write-tree')).trim() === tree) {
+          // Squash writes no MERGE_HEAD. Restore only our exact index, keeping
+          // unrelated unstaged edits intact when a project commit hook fails.
+          await git(project, 'reset', '--merge', baseCommit);
+        }
         throw error;
       }
       commit = (await git(project, 'rev-parse', baseBranch)).trim();
     } else {
-      commit = (await git(project, ...identity, 'commit-tree', tree, '-p', baseCommit, '-p', workCommit, '-m', `Merge ${work.workBranch}`)).trim();
+      commit = (await git(project, ...identity, 'commit-tree', tree, '-p', baseCommit, '-m', message[0]!, '-m', message[1]!)).trim();
+      recordIntent();
       await git(project, 'update-ref', baseBranch, commit, baseCommit);
     }
     return { ...result, status: 'merged', commit };
@@ -120,8 +156,13 @@ export async function cleanupReviewedCopy(store: TaskStore, workId: string) {
     if (work.workPath && existsSync(work.workPath)) await git(project, 'worktree', 'remove', '--force', work.workPath);
     const { merge, completedWithoutMerge } = deliveryDetails(store, workId);
     if (!completedWithoutMerge && merge && ['merged', 'already-contained'].includes(merge.status)
+      && merge.workCommit) {
+      // Keep every internal execution/card commit reachable after branch cleanup.
+      await git(project, 'update-ref', workHistoryRef(workId), merge.workCommit);
+    }
+    if (!completedWithoutMerge && merge && ['merged', 'already-contained'].includes(merge.status)
       && work.workBranch && branchExists(project, work.workBranch)) {
-      if (branchIsContained(project, work.workBranch, work.baseRef)) deleteBranch(project, work.workBranch);
+      if (branchWasSquashed(project, work.workBranch, work.baseRef, merge) || branchIsContained(project, work.workBranch, work.baseRef)) deleteBranch(project, work.workBranch);
       else reason = `工作分支 ${work.workBranch} 尚未合入基准分支 ${work.baseRef}，已保留。`;
     }
   } catch (error) { reason = failureReason(error); }

@@ -534,7 +534,8 @@ test('项目目录不在时，会话和待办仍可读，审核说明 diff 读�
   } finally { await rename(`${daemon.repo}-moved`, daemon.repo); }
 });
 
-for (const checkedOut of [true, false]) test(`审核接受后分别合入和推送基准分支（项目目录${checkedOut ? '已' : '未'}检出基准分支）`, async t => {
+// #33, medium/spec: a complete work contributes one commit; internal history stays readable.
+for (const checkedOut of [true, false]) test(`工作压缩为一个提交后可单独推送（项目目录${checkedOut ? '已' : '未'}检出基准分支）`, async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
@@ -542,7 +543,21 @@ for (const checkedOut of [true, false]) test(`审核接受后分别合入和推�
   await writeFile(join(work.workPath, 'result.txt'), 'reviewed result\n');
   git(work.workPath, 'add', 'result.txt');
   git(work.workPath, ...identity, 'commit', '-m', 'work result');
+  git(work.workPath, 'checkout', '-b', 'card-history');
+  await writeFile(join(work.workPath, 'second.txt'), 'second card\n');
+  git(work.workPath, 'add', 'second.txt');
+  git(work.workPath, ...identity, 'commit', '-m', 'Helm dispatch completed');
+  await writeFile(join(work.workPath, 'result.txt'), 'reviewed result after rework\n');
+  git(work.workPath, 'add', 'result.txt');
+  git(work.workPath, ...identity, 'commit', '-m', 'Helm dispatch rework completed');
+  git(work.workPath, 'checkout', work.workBranch);
+  git(work.workPath, ...identity, 'merge', '--no-ff', '--no-edit', 'card-history');
+  git(work.workPath, 'branch', '-D', 'card-history');
   const workTip = git(daemon.repo, 'rev-parse', work.workBranch);
+  await writeFile(join(daemon.repo, 'base-only.txt'), 'existing base change\n');
+  git(daemon.repo, 'add', 'base-only.txt');
+  git(daemon.repo, ...identity, 'commit', '-m', 'base change');
+  const baseTip = git(daemon.repo, 'rev-parse', 'main');
   if (checkedOut) git(daemon.repo, 'config', 'branch.main.mergeOptions', '--no-commit');
   if (!checkedOut) git(daemon.repo, 'checkout', '-b', 'user-branch');
   await writeFile(join(daemon.repo, 'local.txt'), '用户未提交的文件\n');
@@ -554,16 +569,23 @@ for (const checkedOut of [true, false]) test(`审核接受后分别合入和推�
   ok(await daemon.call('merge-work', { workId: work.id }));
   assert.equal((await daemon.getWork()).status, 'completed');
   assert.equal(git(daemon.repo, 'branch', '--list', work.workBranch), '');
-  assert.equal((await daemon.call('read-work-file', { workId: work.id, path: 'result.txt' })).result.content, 'reviewed result\n');
+  git(daemon.repo, 'reflog', 'expire', '--expire=now', '--all');
+  git(daemon.repo, 'gc', '--prune=now');
+  assert.equal((await daemon.call('read-work-file', { workId: work.id, path: 'result.txt' })).result.content, 'reviewed result after rework\n');
   assert.ok((await daemon.call('list-work-files', { workId: work.id })).result.includes('result.txt'));
   const completedReview = (await daemon.conversation()).find(item => item.id === gate.id).review;
   assert.equal(completedReview.workCommit, workTip);
   assert.match(completedReview.diff, /\+reviewed result/);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
   const merge = git(daemon.repo, 'rev-parse', 'main');
-  assert.equal(git(daemon.repo, 'rev-parse', `${merge}^1`), daemon.baseline);
-  assert.equal(git(daemon.repo, 'rev-parse', `${merge}^2`), workTip);
-  assert.equal(git(daemon.repo, 'show', 'main:result.txt'), 'reviewed result');
+  assert.equal(git(daemon.repo, 'rev-parse', `${merge}^1`), baseTip);
+  assert.equal(git(daemon.repo, 'rev-list', '--count', `${baseTip}..main`), '1');
+  assert.equal(git(daemon.repo, 'show', '-s', '--format=%P', merge), baseTip);
+  assert.equal(git(daemon.repo, 'show', '-s', '--format=%s', merge), work.title);
+  assert.ok(git(daemon.repo, 'show', '-s', '--format=%b', merge).includes(work.id));
+  assert.equal(git(daemon.repo, 'show', 'main:result.txt'), 'reviewed result after rework');
+  assert.equal(git(daemon.repo, 'show', 'main:second.txt'), 'second card');
+  assert.equal(git(daemon.repo, 'show', 'main:base-only.txt'), 'existing base change');
   code('ACCEPTANCE_LOCKED')(await daemon.call('withdraw-acceptance', { workId: work.id }));
   ok(await daemon.call('merge-work', { workId: work.id }));
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), merge);
@@ -572,7 +594,7 @@ for (const checkedOut of [true, false]) test(`审核接受后分别合入和推�
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), merge);
   assert.equal(git(daemon.repo, 'branch', '--show-current'), checkedOut ? 'main' : 'user-branch');
   assert.equal(git(daemon.repo, 'status', '--porcelain'), before);
-  if (!checkedOut) assert.equal(git(daemon.repo, 'rev-parse', 'HEAD'), daemon.baseline);
+  if (!checkedOut) assert.equal(git(daemon.repo, 'rev-parse', 'HEAD'), baseTip);
   assert.equal(existsSync(work.workPath), false);
   assert.ok(!git(daemon.repo, 'worktree', 'list', '--porcelain').includes(work.workPath));
   assert.equal(git(daemon.repo, 'branch', '--list', work.workBranch), '');
@@ -612,6 +634,7 @@ test('基准已包含工作分支时直接完成，不要求推送', async t => 
   assert.equal((await daemon.getWork()).status, 'completed');
 });
 
+// #33, medium/spec: project commit hooks keep delivery serialization observable.
 for (const conflict of [false, true]) test(`同项目合入串行，第二项基于第一项的新基准${conflict ? '报告冲突' : '合入'}`, async t => {
   const daemon = await fixture(t, [[review()], [
     { type: 'tool', name: 'draft-work-description', arguments: ctx => ({ workId: workIdOf(ctx), key: 'draft', requirements: '第二项工作', boundary: '本机', criteria: '独立合入', deliverables: '交付物及查看入口' }), check: ok },
@@ -636,7 +659,7 @@ for (const conflict of [false, true]) test(`同项目合入串行，第二项基
   const block = join(daemon.directory, 'block');
   const marker = join(daemon.directory, 'hook-entered');
   await writeFile(block, 'block');
-  await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-merge-commit'), `#!/bin/sh\necho reached > '${marker}'\nwhile [ -f '${block}' ]; do sleep 0.05; done\n`, { mode: 0o755 });
+  await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\necho reached > '${marker}'\nwhile [ -f '${block}' ]; do sleep 0.05; done\n`, { mode: 0o755 });
   const firstMerge = daemon.call('merge-work', { workId: works[0].id });
   await until(async () => existsSync(marker), Boolean);
   const secondMerge = daemon.call('merge-work', { workId: works[1].id });
@@ -655,7 +678,8 @@ for (const conflict of [false, true]) test(`同项目合入串行，第二项基
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), daemon.baseline);
 });
 
-for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 保留阶段与工作分支，失败可重试`, async t => {
+// #33, medium/spec: failures retain accepted work and do not consume staged user changes.
+for (const problem of ['conflict', 'dirty-project', 'staged-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 保留阶段与工作分支，失败可重试`, async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
@@ -678,7 +702,11 @@ for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as con
     git(daemon.repo, ...identity, 'commit', '-m', 'user changes');
   }
   if (problem === 'dirty-project') await writeFile(join(daemon.repo, file), 'uncommitted user changes\n');
-  if (problem === 'merge-hook') await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-merge-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  if (problem === 'staged-project') {
+    await writeFile(join(daemon.repo, 'staged.txt'), 'staged user changes\n');
+    git(daemon.repo, 'add', 'staged.txt');
+  }
+  if (problem === 'merge-hook') await writeFile(join(daemon.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho work-commit-rejected >&2\nexit 1\n', { mode: 0o755 });
   if (problem === 'push') await writeFile(join(daemon.remote, 'hooks', 'pre-receive'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const baseBefore = git(daemon.repo, 'rev-parse', 'main');
   const statusBefore = git(daemon.repo, 'status', '--porcelain');
@@ -707,15 +735,48 @@ for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as con
     assert.match((await daemon.getWork()).delivery.push.reason, /declined/);
     await rm(join(daemon.remote, 'hooks', 'pre-receive'));
   } else {
-    assert.match(merge.reason, problem === 'dirty-project' ? /overwritten/ : /Not committing merge/);
+    assert.match(merge.reason, problem === 'dirty-project' ? /overwritten/ : problem === 'staged-project' ? /diff --cached --quiet/ : /work-commit-rejected/);
     if (problem === 'dirty-project') git(daemon.repo, 'restore', file);
-    else await rm(join(daemon.repo, '.git', 'hooks', 'pre-merge-commit'));
+    else if (problem === 'staged-project') git(daemon.repo, 'restore', '--staged', 'staged.txt');
+    else await rm(join(daemon.repo, '.git', 'hooks', 'pre-commit'));
     ok(await daemon.call('merge-work', { workId: work.id }));
     assert.equal((await daemon.getWork()).status, 'completed');
   }
   ok(await daemon.call('push-work', { workId: work.id }));
   assert.equal((await daemon.getWork()).status, 'completed');
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), git(daemon.repo, 'rev-parse', 'main'));
+});
+
+// #33, medium/spec: deleting a work frees its archived internal history, while
+// branches with undelivered commits remain available to the user.
+for (const residue of ['delivered', 'new-work-commit', 'base-reset']) test(`删除压缩合入的工作只清理已交付分支（${residue}）`, async t => {
+  const daemon = await fixture(t, [[review()]]);
+  const gate = await daemon.pendingReview();
+  await daemon.roundsEnded(2);
+  const work = await daemon.getWork();
+  await writeFile(join(work.workPath, 'result.txt'), 'work result\n');
+  git(work.workPath, 'add', 'result.txt');
+  git(work.workPath, ...identity, 'commit', '-m', 'internal execution');
+  const internal = git(work.workPath, 'rev-parse', 'HEAD');
+  ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
+  ok(await daemon.call('merge-work', { workId: work.id }));
+  git(daemon.repo, 'branch', work.workBranch, internal);
+  if (residue === 'new-work-commit') {
+    const tree = git(daemon.repo, 'rev-parse', `${internal}^{tree}`);
+    const extra = git(daemon.repo, ...identity, 'commit-tree', tree, '-p', internal, '-m', 'undelivered');
+    git(daemon.repo, 'update-ref', `refs/heads/${work.workBranch}`, extra, internal);
+  }
+  if (residue === 'base-reset') git(daemon.repo, 'reset', '--hard', daemon.baseline);
+  const result = await daemon.call('delete-work', { workId: work.id, confirm: true });
+  ok(result);
+  assert.deepEqual(result.result.keptBranches.map((item: any) => item.branch), residue === 'delivered' ? [] : [work.workBranch]);
+  assert.equal(git(daemon.repo, 'branch', '--list', work.workBranch) !== '', residue !== 'delivered');
+  if (residue === 'delivered') {
+    git(daemon.repo, 'reflog', 'expire', '--expire=now', '--all');
+    git(daemon.repo, 'gc', '--prune=now');
+    assert.throws(() => git(daemon.repo, 'cat-file', '-e', internal));
+    assert.equal(git(daemon.repo, 'show', 'main:result.txt'), 'work result');
+  }
 });
 
 test('审核附上真实 diff、整体验收结论与未声明派单数，接受时停止当前轮次且不再投递积压事件', async t => {
@@ -933,6 +994,7 @@ test('无远端的工作合入即完成并压缩输出，暂停原因清空', as
   assert.deepEqual(preview.commits, []);
 });
 
+// #33, medium/spec: preview includes the squash and other local commits, without internal history.
 test('推送预览包含基准分支上本工作之外的本地提交，并遵循远端跟踪分支', async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
@@ -947,16 +1009,17 @@ test('推送预览包含基准分支上本工作之外的本地提交，并遵�
   await writeFile(join(work.workPath, 'result.txt'), 'work result\n');
   git(work.workPath, 'add', 'result.txt');
   git(work.workPath, ...identity, 'commit', '-m', 'this work result');
-  const workHash = git(work.workPath, 'rev-parse', '--short', 'HEAD');
   ok(await daemon.call('decide-gate', { workId: work.id, gateId: gate.id, decision: 'accept' }));
   ok(await daemon.call('merge-work', { workId: work.id }));
+  const workHash = git(daemon.repo, 'rev-parse', '--short', 'main');
   const before = (await daemon.events()).length;
   const preview = (await daemon.call('get-work-push-preview', { workId: work.id })).result;
   assert.equal(preview.trackingBranch, 'refs/remotes/origin/published');
   assert.equal(preview.remoteBranch, 'refs/heads/published');
   assert.equal(preview.newBranch, false);
   assert.ok(preview.commits.some((commit: any) => commit.hash === otherHash && commit.subject === 'unrelated local change'));
-  assert.ok(preview.commits.some((commit: any) => commit.hash === workHash && commit.subject === 'this work result'));
+  assert.ok(preview.commits.some((commit: any) => commit.hash === workHash && commit.subject === work.title));
+  assert.equal(preview.commits.length, 2);
   assert.ok(!preview.commits.some((commit: any) => commit.subject === 'baseline'));
   assert.equal((await daemon.events()).length, before);
   ok(await daemon.call('push-work', { workId: work.id }));

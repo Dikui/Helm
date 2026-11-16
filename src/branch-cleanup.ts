@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { RuleError } from './store.js';
 
+// Squash delivery removes branch ancestry; retain the internal commits for historical artifacts.
+export function workHistoryRef(workId: string) { return `refs/helm/works/${workId}`; }
+
 function git(project: string, ...args: string[]) {
   return execFileSync('git', ['-C', project, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
@@ -23,6 +26,20 @@ export function branchIsContained(project: string, branch: string, baseRef: stri
   const base = baseRef.startsWith('refs/heads/') ? baseRef : `refs/heads/${baseRef}`;
   try { git(project, 'merge-base', '--is-ancestor', `refs/heads/${branch}`, base); return true; }
   catch (error) {
+    if ((error as { status?: number }).status === 1) return false;
+    throw gitError(error);
+  }
+}
+
+// A squash contains the delivered changes without making internal commits its ancestors.
+export function branchWasSquashed(project: string, branch: string, baseRef: string | null, delivery: { workCommit?: string; commit?: string }) {
+  if (!baseRef || !delivery.workCommit || !delivery.commit) return false;
+  const base = baseRef.startsWith('refs/heads/') ? baseRef : `refs/heads/${baseRef}`;
+  try {
+    git(project, 'merge-base', '--is-ancestor', delivery.commit, base);
+    git(project, 'merge-base', '--is-ancestor', `refs/heads/${branch}`, delivery.workCommit);
+    return true;
+  } catch (error) {
     if ((error as { status?: number }).status === 1) return false;
     throw gitError(error);
   }
