@@ -78,7 +78,11 @@ async function mergeIntoBase(store: TaskStore, workId: string): Promise<MergeRes
     let reason = failureReason(error);
     if (reason.includes('index.lock')) {
       let lockPath: string;
-      try { lockPath = resolve(project, (await git(project, 'rev-parse', '--git-path', 'index.lock')).trim()); }
+      try {
+        lockPath = resolve(project, (await git(project, 'rev-parse', '--git-path', 'index.lock')).trim());
+        // A branch named "index" also has an index.lock, under refs/heads instead.
+        if (!reason.includes(lockPath)) return { ...result, reason };
+      }
       catch { lockPath = '无法解析，请在实际操作目录运行 git rev-parse --git-path index.lock 核实。'; }
       reason += `\n\n实际操作目录：${project}\n索引锁路径：${lockPath}\n`
         + '先确认相关 Git 操作已结束；只有确认锁是残留后才能手动清理，再重试合入。'
