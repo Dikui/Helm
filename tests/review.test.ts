@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { FakeDriver, type FakeContext, type FakeScript, type FakeStep } from '../src/driver.js';
@@ -11,7 +11,8 @@ import type { StartupBrief } from '../src/rounds.js';
 import { existingWorkCopy, startTestHelmd as startHelmd } from './helmd-fixture.js';
 import { TaskStore } from '../src/store.js';
 import { AgentCatalog } from '../src/agents.js';
-import { pushReviewedWork } from '../src/delivery.js';
+import { deliveryDetails, mergeReviewedWork, pushReviewedWork } from '../src/delivery.js';
+import { ensureWorkCopy } from '../src/alignment.js';
 import { reviewReport } from './fixtures/review-report.js';
 import { decideReview } from '../src/review.js';
 import { reconcileStartup } from '../src/reconcile.js';
@@ -680,6 +681,80 @@ for (const conflict of [false, true]) test(`同项目合入串行，第二项基
 
 // #33, medium/spec: failures retain accepted work and do not consume staged user changes.
 for (const problem of ['conflict', 'dirty-project', 'staged-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 保留阶段与工作分支，失败可重试`, async t => {
+// Issue #31: medium regression. Real Git submodule, synthetic project and accepted review.
+for (const lockKind of ['index', 'ref'] as const) test(lockKind === 'index'
+  ? '子模块索引锁阻止合入时保留待合入状态，指明恢复步骤后可重试完成'
+  : '子模块同名分支的引用锁失败不误报索引锁，清理测试锁后可重试完成', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'helm-submodule-merge-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'source');
+  const parent = join(directory, 'parent project');
+  const project = join(parent, 'module project');
+  for (const path of [source, parent]) execFileSync('git', ['init', '-b', 'main', path], { stdio: 'ignore' });
+  await writeFile(join(source, 'result.txt'), 'baseline\n');
+  git(source, 'add', 'result.txt');
+  git(source, ...identity, 'commit', '-m', 'baseline');
+  git(parent, '-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'module project');
+  git(parent, ...identity, 'commit', '-am', 'submodule');
+  const baseBranch = lockKind === 'index' ? 'main' : 'index';
+  if (lockKind === 'ref') git(project, 'branch', baseBranch);
+  const store = new TaskStore(join(directory, 'data'), new AgentCatalog(join(directory, 'agents')));
+  t.after(() => store.close());
+  store.db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('project', '项目', ?, '2026-11-16')").run(project);
+  store.db.prepare(`INSERT INTO works (id, project_id, status, creation_key, created_at, base_ref)
+    VALUES ('work', 'project', 'accepted', 'work', '2026-11-16', ?)`).run(baseBranch);
+  const work = store.transaction(() => ensureWorkCopy(store, 'work'));
+  const event = store.transaction(() => store.appendEvent({ type: 'user', id: 'user' }, { type: 'gate', id: 'review' },
+    'gate-decided', { decision: 'accept' }, { workId: 'work' }));
+  store.db.prepare(`INSERT INTO gates (id, work_id, kind, status, question, created_at, sequence, decision)
+    VALUES ('review', 'work', 'review', 'decided', '审核', ?, ?, 'accept')`).run(event.time, event.id);
+  await writeFile(join(work.workPath!, 'result.txt'), 'work result\n');
+  git(work.workPath!, 'add', 'result.txt');
+  git(work.workPath!, ...identity, 'commit', '-m', 'work result');
+  const base = git(project, 'rev-parse', baseBranch);
+  const parentTip = git(parent, 'rev-parse', 'HEAD');
+  const tip = git(project, 'rev-parse', work.workBranch!);
+  const lockName = lockKind === 'index' ? 'index.lock' : 'refs/heads/index.lock';
+  const lock = resolve(project, git(project, 'rev-parse', '--git-path', lockName));
+  assert.equal(lock, join(parent, '.git', 'modules', 'module project', lockName));
+  await writeFile(lock, 'test-created lock');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await mergeReviewedWork(store, 'work');
+    const merge = deliveryDetails(store, 'work').merge!;
+    assert.equal(merge.status, 'failed');
+    assert.equal(store.work('work').status, 'accepted');
+    assert.equal(store.gates('work').find(gate => gate.id === 'review')!.decision, 'accept');
+    assert.equal(git(project, 'rev-parse', baseBranch), base);
+    assert.equal(git(parent, 'rev-parse', 'HEAD'), parentTip);
+    assert.equal(git(project, 'rev-parse', work.workBranch!), tip);
+    assert.ok(existsSync(work.workPath!));
+    assert.equal(await readFile(lock, 'utf8'), 'test-created lock');
+    assert.match(merge.reason!, /Unable to create .*index\.lock.*File exists/);
+    if (lockKind === 'index') {
+      assert.match(merge.reason!, /fatal: Unable to write index/);
+      assert.ok(merge.reason!.includes(`实际操作目录：${project}`), merge.reason);
+      assert.ok(merge.reason!.includes(`索引锁路径：${lock}`), merge.reason);
+      assert.match(merge.reason!, /确认.*Git.*操作.*结束/);
+      assert.match(merge.reason!, /确认.*残留.*清理.*重试/);
+      assert.match(merge.reason!, /不能仅凭.*年龄/);
+    } else {
+      assert.match(merge.reason!, /cannot lock ref 'refs\/heads\/index'/);
+      assert.doesNotMatch(merge.reason!, /实际操作目录|索引锁路径|确认.*残留/);
+    }
+  }
+  await rm(lock);
+  await mergeReviewedWork(store, 'work');
+  assert.equal(store.work('work').status, 'completed');
+  assert.equal(deliveryDetails(store, 'work').merge!.status, 'merged');
+  assert.equal(git(project, 'rev-parse', `${baseBranch}^1`), base);
+  assert.equal(git(project, 'rev-parse', `${baseBranch}^2`), tip);
+  assert.equal(git(project, 'show', `${baseBranch}:result.txt`), 'work result');
+  assert.equal(git(parent, 'rev-parse', 'HEAD'), parentTip);
+  assert.equal(existsSync(work.workPath!), false);
+  assert.equal(git(project, 'branch', '--list', work.workBranch!), '');
+});
+
+for (const problem of ['conflict', 'dirty-project', 'merge-hook', 'push'] as const) test(`审核接受后 ${problem} 保留阶段与工作分支，失败可重试`, async t => {
   const daemon = await fixture(t, [[review()]]);
   const gate = await daemon.pendingReview();
   await daemon.roundsEnded(2);
