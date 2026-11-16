@@ -8,7 +8,8 @@ import { createGzip, gunzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { RuleError, type Actor, type TaskStore } from './store.js';
 import { projectPath } from './alignment.js';
-import { branchExists, branchIsContained, deleteBranch } from './branch-cleanup.js';
+import { branchExists, branchIsContained, branchWasSquashed, deleteBranch, workHistoryRef } from './branch-cleanup.js';
+import { projectGitRoot } from './project-reads.js';
 import { removeCoordinatorDirectory } from './coordinator-directory.js';
 import { readWork } from './work-reads.js';
 import { attachmentDirectory } from './attachments.js';
@@ -234,7 +235,8 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
         OR EXISTS (SELECT 1 FROM messages m WHERE m.gate_id = g.id AND m.work_id != g.work_id))`).get(workId)) {
       throw new RuleError('SHARED_GATE_IN_USE', '这项工作的初始化 git 关卡仍被其他工作引用，请先删除引用它的工作。');
     }
-    const title = readWork(store, workId).title;
+    const { title, delivery } = readWork(store, workId);
+    const merge = delivery.merge && ['merged', 'already-contained'].includes(delivery.merge.status) ? delivery.merge : undefined;
     for (const row of store.db.prepare('SELECT id FROM dispatches WHERE work_id = ?').all(workId)) {
       await rm(join(store.dataDir, 'dispatches', String(row.id)), { recursive: true, force: true });
     }
@@ -257,13 +259,14 @@ export function deleteWork(store: TaskStore, actor: Actor, workId: string, confi
     for (const branch of branches) {
       try {
         if (!branchExists(project, branch)) continue;
-        if (branchIsContained(project, branch, work.baseRef)) deleteBranch(project, branch);
+        if ((merge && branchWasSquashed(project, branch, work.baseRef, merge)) || branchIsContained(project, branch, work.baseRef)) deleteBranch(project, branch);
         else keptBranches.push({ branch, reason: `尚未合入基准分支 ${work.baseRef}` });
       } catch (error) {
         const failure = error as { stderr?: string; message?: string };
         keptBranches.push({ branch, reason: String(failure.stderr || failure.message || error).trim() });
       }
     }
+    if (projectGitRoot(project)) await exec('git', ['-C', project, 'update-ref', '-d', workHistoryRef(workId)]);
     store.transaction(() => {
       const remove = (sql: string) => store.db.prepare(sql).run(workId);
       remove('DELETE FROM wake_queue WHERE work_id = ?');

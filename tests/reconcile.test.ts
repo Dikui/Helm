@@ -285,13 +285,14 @@ run(args);
   assert.equal(existsSync(join(daemon.dataDir, 'worktrees', daemon.work.id, dispatch.cardId)), false);
 });
 
+// #33, medium/spec: interrupted squash staging rolls back before retry.
 test('合入中崩溃，重启恢复合入并完成，不自动推送', async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
   const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
-  const hook = await blockingHook(daemon, 'pre-merge-commit');
+  const hook = await blockingHook(daemon, 'pre-commit');
   await writeFile(join(daemon.repo, 'baseline.txt'), 'unrelated user edit\n');
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   const accepting = daemon.call('merge-work', daemon.scope).catch(error => error);
@@ -300,7 +301,7 @@ test('合入中崩溃，重启恢复合入并完成，不自动推送', async t 
   await accepting;
   // The old git subprocess is still blocked; recovery must stop it before abort.
   // Disable this hook for the retry while leaving the running hook blocked.
-  await rm(join(daemon.directory, 'hooks', 'pre-merge-commit'));
+  await rm(join(daemon.directory, 'hooks', 'pre-commit'));
   await daemon.start();
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   await daemon.call('push-work', daemon.scope);
@@ -316,39 +317,109 @@ test('合入中崩溃，重启恢复合入并完成，不自动推送', async t 
   assert.equal(existsSync(daemon.work.workPath), false);
 });
 
-for (const interruptedAt of ['post-merge', 'pre-push']) test(`独立合入或推送在 ${interruptedAt} 中断，重启跳过已有合并，重复启动不重复记结果`, async t => {
+// #33, medium/spec: recovery must recognize a squash without work-branch ancestry.
+for (const interruptedAt of ['post-commit', 'post-commit-formatted', 'pre-push']) test(`独立合入或推送在 ${interruptedAt} 中断，重启跳过已有合并，重复启动不重复记结果`, async t => {
   const daemon = await fixture(t, 'settled');
   const { card, read } = await daemon.create();
   await until(read, value => value.status === 'ended');
   await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
   const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
   const baseline = git(daemon.remote, 'rev-parse', 'main');
-  const hook = await blockingHook(daemon, interruptedAt);
+  const postCommit = interruptedAt !== 'pre-push';
+  const hookName = postCommit ? 'post-commit' : 'pre-push';
+  const hook = await blockingHook(daemon, hookName);
+  if (interruptedAt === 'post-commit-formatted') {
+    await writeFile(join(daemon.directory, 'hooks', 'pre-commit'), '#!/bin/sh\necho formatted > formatted.txt\ngit add formatted.txt\n', { mode: 0o755 });
+  }
   await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
   if (interruptedAt === 'pre-push') await daemon.call('merge-work', daemon.scope);
-  const accepting = daemon.call(interruptedAt === 'post-merge' ? 'merge-work' : 'push-work', daemon.scope).catch(error => error);
+  const accepting = daemon.call(postCommit ? 'merge-work' : 'push-work', daemon.scope).catch(error => error);
   await hook.wait();
   const merged = git(daemon.repo, 'rev-parse', 'main');
   assert.notEqual(merged, baseline);
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
   await daemon.stop();
   await accepting;
-  await rm(join(daemon.directory, 'hooks', interruptedAt));
+  await rm(join(daemon.directory, 'hooks', hookName));
+  if (interruptedAt === 'post-commit-formatted') await rm(join(daemon.directory, 'hooks', 'pre-commit'));
   await daemon.start();
   assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
   assert.equal((await daemon.events()).filter(event => event.action === 'base-push-result').length, 0);
   await daemon.call('push-work', daemon.scope);
   assert.equal(git(daemon.repo, 'rev-parse', 'main'), merged);
+  assert.equal(git(daemon.repo, 'rev-list', '--count', `${baseline}..main`), '1');
   assert.equal(git(daemon.remote, 'rev-parse', 'main'), merged);
   const events = await daemon.events();
   assert.equal(events.filter(event => event.action === 'base-merge-result').length, 1);
-  assert.equal(events.find(event => event.action === 'base-merge-result').details.status, interruptedAt === 'post-merge' ? 'already-contained' : 'merged');
+  assert.equal(events.find(event => event.action === 'base-merge-result').details.status, postCommit ? 'already-contained' : 'merged');
   assert.equal(events.filter(event => event.action === 'base-push-result').length, 1);
   await daemon.restart();
   assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
 });
 
+// #33, medium/spec. Substitute only the Git executable boundary to stop at the
+// unchecked-out branch's atomic update; all repository operations remain real.
+for (const interruptedAt of ['before', 'after', 'after-side-merge']) test(`未检出基准在更新 ref ${interruptedAt} 中断，重启只交付一个压缩提交`, async t => {
+  const daemon = await fixture(t, 'settled');
+  const { card, read } = await daemon.create();
+  await until(read, value => value.status === 'ended');
+  await daemon.tool('complete-card', { ...daemon.scope, cardId: card.id });
+  const gate = await daemon.tool('request-review', { ...daemon.scope, key: 'review', ...reviewReport('检查成果') });
+  const baseline = git(daemon.repo, 'rev-parse', 'main');
+  const workTip = git(daemon.repo, 'rev-parse', daemon.work.workBranch);
+  git(daemon.repo, 'checkout', '-b', 'user-branch');
+  const marker = join(daemon.directory, 'ref-entered');
+  const wrapper = join(daemon.processTools, 'git');
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  await writeFile(wrapper, `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+const targeted = args.includes('update-ref') && args.includes('refs/heads/main');
+const run = () => {
+  const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+};
+if (!targeted || ${JSON.stringify(interruptedAt)} !== 'before') run();
+if (targeted) {
+  process.chdir(${JSON.stringify(daemon.work.workPath)});
+  writeFileSync(${JSON.stringify(marker)}, 'reached');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+}
+`, { mode: 0o755 });
+  await daemon.call('decide-gate', { ...daemon.scope, gateId: gate.id, decision: 'accept' });
+  const merging = daemon.call('merge-work', daemon.scope).catch(error => error);
+  await until(async () => existsSync(marker), Boolean);
+  const interruptedTip = git(daemon.repo, 'rev-parse', 'main');
+  assert.equal(interruptedTip === baseline, interruptedAt === 'before');
+  await daemon.stop();
+  await merging;
+  await rm(wrapper);
+  // A later local base commit must not hide a squash whose result was not saved.
+  if (interruptedAt !== 'before') {
+    const tree = git(daemon.repo, 'rev-parse', 'main^{tree}');
+    const parents = interruptedAt === 'after-side-merge' ? ['-p', baseline, '-p', interruptedTip] : ['-p', interruptedTip];
+    const later = git(daemon.repo, ...identity, 'commit-tree', tree, ...parents, '-m', 'later base commit');
+    git(daemon.repo, 'update-ref', 'refs/heads/main', later, interruptedTip);
+  }
+  const expectedCount = interruptedAt === 'before' ? '1' : '2';
+  await daemon.start();
+  assert.equal((await daemon.call('get-work', daemon.scope)).status, 'completed');
+  const completedTip = git(daemon.repo, 'rev-parse', 'main');
+  assert.equal(git(daemon.repo, 'rev-list', '--count', `${baseline}..main`), expectedCount);
+  assert.equal(git(daemon.repo, 'rev-parse', 'HEAD'), baseline);
+  assert.equal(git(daemon.remote, 'rev-parse', 'main'), baseline);
+  assert.equal(existsSync(daemon.work.workPath), false);
+  assert.equal(git(daemon.repo, 'branch', '--list', daemon.work.workBranch), '');
+  assert.equal(git(daemon.repo, 'show', `${workTip}:baseline.txt`), 'baseline');
+  await daemon.call('merge-work', daemon.scope);
+  await daemon.restart();
+  assert.equal(git(daemon.repo, 'rev-parse', 'main'), completedTip);
+  assert.equal((await daemon.events()).filter(event => event.action === 'work-completed').length, 1);
+});
+
+// #33, medium/spec: squash delivery retains project queue order after restart.
 test('重启先恢复正在合入的工作，再按请求顺序恢复队列，不按工作创建顺序合入', async t => {
   const daemon = await fixture(t, 'delivery');
   const second = (await daemon.call('send-message', { projectId: daemon.work.projectId, key: 'second', body: '第二项工作' })).work;
@@ -364,14 +435,14 @@ test('重启先恢复正在合入的工作，再按请求顺序恢复队列，�
     git(work.workPath, ...identity, 'commit', '-m', `work ${index}`);
     await daemon.call('decide-gate', { workId: work.id, gateId: pending.find(gate => gate.workId === work.id).id, decision: 'accept' });
   }
-  const hook = await blockingHook(daemon, 'pre-merge-commit');
+  const hook = await blockingHook(daemon, 'pre-commit');
   const active = daemon.call('merge-work', { workId: second.id }).catch(error => error);
   await hook.wait();
   const queued = daemon.call('merge-work', daemon.scope).catch(error => error);
   await until(async () => (await daemon.call('get-work', daemon.scope)).status, status => status === 'merge-queued');
   await daemon.stop();
   await Promise.all([active, queued]);
-  await rm(join(daemon.directory, 'hooks', 'pre-merge-commit'));
+  await rm(join(daemon.directory, 'hooks', 'pre-commit'));
   await daemon.start();
   const firstAfter = await daemon.call('get-work', daemon.scope);
   const secondAfter = await daemon.call('get-work', { workId: second.id });
@@ -467,6 +538,7 @@ test('用户自己发起、同样指向工作分支的合并在重启时保留',
   assert.equal((await daemon.events()).some(event => event.action === 'base-merge-aborted'), false);
 });
 
+// #33, medium/spec: original internal tips can be cleaned without squash ancestry.
 for (const copyMissing of [false, true]) test(`合入后重启补删残留的工作及卡片分支，副本目录${copyMissing ? '已丢失' : '仍存在'}`, async t => {
   const daemon = await fixture(t, 'settled');
   const { card, dispatch, read } = await daemon.create();
@@ -481,7 +553,8 @@ for (const copyMissing of [false, true]) test(`合入后重启补删残留的工
   // Recreate the external resources left by a crash before worktree removal.
   git(daemon.repo, 'branch', cardBranch, ended.endCommit);
   git(daemon.repo, 'worktree', 'add', cardPath, cardBranch);
-  git(daemon.repo, 'branch', daemon.work.workBranch, 'main');
+  const mergedWork = await daemon.call('get-work', daemon.scope);
+  git(daemon.repo, 'branch', daemon.work.workBranch, mergedWork.delivery.merge.workCommit);
   git(daemon.repo, 'worktree', 'add', daemon.work.workPath, daemon.work.workBranch);
   if (copyMissing) {
     await rm(cardPath, { recursive: true, force: true });
