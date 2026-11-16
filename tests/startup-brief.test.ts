@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -37,7 +37,28 @@ function fixture(t: TestContext) {
       store.appendEvent({ type: 'dispatch', id: 'd1' }, { type: 'dispatch', id: 'd1' }, stepActions[index % stepActions.length]!, { index }, { workId: 'work' });
     }
   });
-  return { store, append, message, steps };
+  return { store, project, directory, append, message, steps };
+}
+
+// Issue #31: small regression. Project paths come from the task store, including nested projects.
+for (const copy of [false, true]) for (const resumed of [false, true]) {
+  test(`${resumed ? '续跑' : '新会话'}简报在${copy ? '有' : '无'}工作副本时独立提供原项目路径`, t => {
+    const ctx = fixture(t);
+    const project = join(ctx.project, 'module project');
+    mkdirSync(project);
+    ctx.store.db.prepare("UPDATE projects SET path = ? WHERE id = 'project'").run(project);
+    const codePath = copy ? join(ctx.directory, 'work copy') : project;
+    if (copy) {
+      mkdirSync(codePath);
+      ctx.store.db.prepare("UPDATE works SET work_path = ? WHERE id = 'work'").run(codePath);
+    }
+    writeFileSync(join(codePath, 'AGENTS.md'), '项目说明\n');
+    const brief = startupBrief(ctx.store, 'work', [], resumed ? 'r1' : undefined);
+    assert.equal(brief.projectPath, codePath);
+    assert.deepEqual(brief.projectInstructionPaths, [join(codePath, 'AGENTS.md')]);
+    assert.ok('originalProjectPath' in brief, '简报必须包含原项目目录');
+    assert.equal(brief.originalProjectPath, project);
+  });
 }
 
 // Rows fetched by statements that read the events table, counted where they leave SQLite.
